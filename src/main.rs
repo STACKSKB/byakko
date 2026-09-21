@@ -2,6 +2,54 @@ use std::process::ExitCode;
 
 fn run() -> byakko::device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.len() == 2 && args[0] == "restore-keymaps" {
+        let saved: byakko::device::Snapshot =
+            serde_json::from_reader(std::fs::File::open(&args[1])?)?;
+        let current = byakko::device::snapshot()?;
+        let restored = byakko::device::apply_keymaps(
+            &current,
+            &saved.base,
+            &saved.function,
+            std::path::Path::new("backups"),
+        )?;
+        if restored != saved {
+            return Err("Backup restoration mismatch".into());
+        }
+        println!("Both keymaps restored and verified against backup.");
+        return Ok(());
+    }
+    if args.as_slice() == ["verify-bindings-roundtrip"] {
+        let original = byakko::device::snapshot()?;
+        if byakko::device::read_macro(49)?.iter().any(|b| *b != 0)
+            || original
+                .base
+                .iter()
+                .chain(&original.function)
+                .any(|b| b[0] == 9 && b[2] == 49)
+        {
+            return Err("Test requires empty, unbound macro49; no writes sent".into());
+        }
+        let backup_dir = std::path::Path::new("Research/captures/backups");
+        for mode in 0..3 {
+            let mut base = original.base.clone();
+            base[91] = [9, mode, 49, 0];
+            let changed =
+                byakko::device::apply_keymaps(&original, &base, &original.function, backup_dir)?;
+            let restored = byakko::device::apply_keymaps(
+                &changed,
+                &original.base,
+                &original.function,
+                backup_dir,
+            )?;
+            if restored != original {
+                return Err("Binding restoration mismatch".into());
+            }
+        }
+        println!(
+            "All three base-layer macro binding modes passed complete readback and restoration. Fn writes and physical playback remain unverified."
+        );
+        return Ok(());
+    }
     if args.as_slice() == ["verify-picture-roundtrip"] {
         let before = byakko::device::read_picture()?;
         let maps = byakko::device::snapshot()?;
@@ -229,7 +277,7 @@ fn run() -> byakko::device::Result<()> {
     if args.as_slice() != ["devices"] {
         return Err("Usage: byakko [gui|devices|descriptor|inspect|export PATH|export-macro SLOT PATH|verify-keymap-roundtrip|verify-macro-roundtrip]".into());
     }
-    let api = hidapi::HidApi::new()?;
+    let api = byakko::hid::HidApi::new()?;
     let mut count = 0;
     for device in api
         .device_list()

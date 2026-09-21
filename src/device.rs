@@ -1,4 +1,4 @@
-use hidapi::{HidApi, HidDevice};
+use crate::hid::{HidApi, HidDevice};
 use serde::{Deserialize, Serialize};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -582,6 +582,20 @@ pub fn apply_keymaps(
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
         return Err("Cannot modify reserved padding slots".into());
     }
+    let fn_changed = expected.function != function;
+    if fn_changed {
+        return Err("Fn writes remain under investigation: both traced setter paths failed live verification. No writes sent.".into());
+    }
+    let fn_reports = if fn_changed {
+        crate::protocol::full_matrix_reports(true, 0, function)?
+    } else {
+        Vec::new()
+    };
+    let fn_restore = if fn_changed {
+        crate::protocol::full_matrix_reports(true, 0, &expected.function)?
+    } else {
+        Vec::new()
+    };
     let current = snapshot_unlocked()?;
     if &current != expected {
         return Err(
@@ -612,8 +626,23 @@ pub fn apply_keymaps(
     serde_json::to_writer_pretty(&mut backup, &current)?;
     backup.sync_all()?;
     let (_, device) = open_unique()?;
+    let write_fn_pages = |reports: &[[u8; 64]]| -> Result<()> {
+        for report in reports {
+            let mut host = [0u8; 65];
+            host[1..].copy_from_slice(report);
+            device.send_feature_report(&host)?;
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        Ok(())
+    };
     let result = (|| -> Result<Snapshot> {
+        // Firmware 0100 aliases the vendor's simple Fn command to the base
+        // map. Use the distinct full Fn matrix operation instead.
+        write_fn_pages(&fn_reports)?;
         for &(is_fn, slot, _, new) in &changes {
+            if is_fn {
+                continue;
+            }
             write_binding(
                 &device,
                 is_fn,
@@ -628,6 +657,16 @@ pub fn apply_keymaps(
             || actual.firmware != current.firmware
             || actual.profile != current.profile
         {
+            let mismatch_path = backup_dir.join(format!("keymaps-mismatch-{stamp}.json"));
+            let mut mismatch = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(mismatch_path)?;
+            serde_json::to_writer_pretty(
+                &mut mismatch,
+                &serde_json::json!({"actual":actual,"desired_base":base,"desired_function":function}),
+            )?;
+            mismatch.sync_all()?;
             return Err("Readback does not match the complete intended keymaps".into());
         }
         Ok(actual)
@@ -636,14 +675,24 @@ pub fn apply_keymaps(
         Ok(actual) => Ok(actual),
         Err(error) => {
             let rollback = (|| -> Result<()> {
-                for &(is_fn, slot, old, _) in &changes {
-                    write_binding(
-                        &device,
-                        is_fn,
-                        if is_fn { 0 } else { current.profile },
-                        slot,
-                        old,
-                    )?;
+                let observed = snapshot_unlocked().ok();
+                if fn_changed
+                    && observed
+                        .as_ref()
+                        .is_none_or(|s| s.function != current.function)
+                {
+                    write_fn_pages(&fn_restore)?;
+                }
+                // Inspect both maps after a failed operation, not just the
+                // requested changes: a misrouted command may alter other slots.
+                let observed = snapshot_unlocked().ok();
+                for slot in 0..126 {
+                    if observed
+                        .as_ref()
+                        .is_none_or(|s| s.base[slot] != current.base[slot])
+                    {
+                        write_binding(&device, false, current.profile, slot, current.base[slot])?;
+                    }
                 }
                 if snapshot_unlocked()? != current {
                     return Err("restored data could not be verified".into());

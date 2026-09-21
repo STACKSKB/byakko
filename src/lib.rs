@@ -3,6 +3,7 @@ pub mod actions;
 pub mod app;
 pub mod board;
 pub mod device;
+pub mod hid;
 pub mod layout;
 pub mod lighting;
 #[cfg(feature = "gui")]

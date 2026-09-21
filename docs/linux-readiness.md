@@ -1,5 +1,9 @@
 # Linux build and release readiness
 
+## Update after native-adapter migration
+
+The audit below records the earlier HIDAPI dependency graph. That dependency was subsequently removed from both manifest and lockfile because of the build-script license discrepancy. The product now uses original `src/hid/windows.rs` and `src/hid/linux.rs` adapters with `windows-sys` and `libc`. A Rust Linux target was installed and both the core and full GUI passed `cargo check --target x86_64-unknown-linux-gnu --offline`. These checks do not link or execute a Linux program. Elevated WSL enumeration found only `docker-desktop`, not a general Linux development distro. The permission example and runtime test gates below still apply; dependency graph counts must be regenerated for release.
+
 Audit date: 2026-09-22. This is a static review of `Cargo.toml`, `Cargo.lock`, target-specific `cargo tree --locked --offline`, `cargo metadata --locked --offline`, local registry manifests and build scripts, and the Windows device evidence in `docs/live-evidence.md`. No Linux build or runtime test was performed. This host has only the Windows Rust target installed; no usable Linux distro is available here, and WSL enumeration was denied.
 
 ## Build and runtime requirements

@@ -64,3 +64,17 @@ The original ripple setting was backed up, brightness changed from 4 to 3 with c
 ## Per-key color storage verification
 
 Command `8c` returned six raw pages twice with identical results: 128 RGB triples, seven red and the rest black. Command `14` changed only Pause's matrix slot 91 to `(8,16,24)`, verified against all 128 colors, then restored its original color. All colors, both keymaps, and the full global lighting response matched the pre-test values afterward. Backups were flushed before writes. This validates current-picture color storage, not visual display or the three picture-selection options.
+
+## Fn write investigation and recovery
+
+The vendor-traced simple Fn command `15`, index 0, slot 91 did not change the Fn map as intended. It affected the base slot, and the first rollback was rejected by whole-map verification. A fresh snapshot showed only base Pause cleared. An explicit backup restoration using the verified base command `13` restored both complete maps exactly.
+
+The separate full Fn command `10` also failed intended-map verification. Improved rollback inspected both maps and restored all observed differences, then verified both originals. Fn writes are therefore blocked in the backend and read-only in the GUI pending stronger evidence; the source's UI index is indeed zero, so changing it speculatively is not justified. See `Research/protocol-fn-correction.md`.
+
+An isolated base-only test subsequently passed all three macro binding modes (`09 00 31 00`, `09 01 31 00`, `09 02 31 00`) at Pause, restoring the original maps after each mode. Slot 49 was empty and unbound before the test; no playback was triggered.
+
+## Original operating-system HID adapters
+
+HIDAPI was removed from the manifest and resolved lockfile after its build-script licensing discrepancy was found. The original Windows adapter enumerated the same seven collections and selected `FFFF:0002`. It successfully performed the explicit keymap recovery, the complete long/short/empty macro test and all three base macro-binding tests. Windows raw descriptor retrieval now reports unsupported rather than reconstructing a descriptor.
+
+The original Linux hidraw adapter and full GUI pass `cargo check --target x86_64-unknown-linux-gnu --offline`; this is a cross-target type check, not Linux linking, execution or hardware validation. An OS-held file lock serializes Byakko transactions across processes; a test verifies exclusion and release on handle drop. The OEM helper does not participate in that lock and still must be closed.
