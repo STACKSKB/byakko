@@ -108,10 +108,11 @@ Most animated modes expose value and speed ranges 0–4. The catalog's direction
 - Music follow 3 and 2: upright/separate/intersect.
 
 RGB and dazzle flags are present on the catalog entries that support them; `LightNeon` and
-`LightUserPicture` do not advertise RGB in the layout entry. The shared `PB` encoder supports the
-same extended mode family with `FEA_CMD_SET_LEDPARAM = 4`, a 64-byte report, type in byte 1,
+`LightUserPicture` do not advertise RGB in the layout entry. The selected `PB` encoder on Nia87's
+`Pft → CHe → PB` path uses `FEA_CMD_SET_LEDPARAM = 7`, a 64-byte report, type in byte 1,
 speed transformed from the common maximum of 4 in byte 2, value in byte 3, option/dazzle in byte
-4, and RGB bytes 5–7 (offset 7,743,227). The inherited `CHe` path also exposes
+4, and RGB bytes 5–7 (offset 7,743,227). The older shared ancestor's command 4 does not apply
+to this path; see `docs/lighting-protocol.md`. The inherited `CHe` path also exposes
 `setLightPicSimple`: it sends command 20 with the selected profile, a default-matrix key index,
 and RGB in report bytes 8–10 (offset 9,980,678). This is explicit per-key color support, separate
 from the global effect command. Confidence: high for the catalog, ranges/options, command IDs,

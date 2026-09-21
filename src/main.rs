@@ -2,6 +2,35 @@ use std::process::ExitCode;
 
 fn run() -> byakko::device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.len() == 2 && args[0] == "restore-macro" {
+        #[derive(serde::Deserialize)]
+        struct Backup {
+            slot: u8,
+            bytes: Vec<u8>,
+        }
+        let backup: Backup = serde_json::from_reader(std::fs::File::open(&args[1])?)?;
+        let value = byakko::macros::decode(&backup.bytes)?;
+        let current = byakko::device::read_macro(backup.slot)?;
+        byakko::device::apply_macro(
+            backup.slot,
+            &current,
+            &value,
+            std::path::Path::new("backups"),
+        )?;
+        println!("Macro {} restored from backup and verified.", backup.slot);
+        return Ok(());
+    }
+    if args.as_slice() == ["inspect-lighting"] {
+        let lighting = byakko::device::read_lighting()?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "raw": lighting.raw(), "setting": lighting.recognized_setting(),
+                "effect_id": lighting.effect_id(), "repeated_reads_matched": true
+            }))?
+        );
+        return Ok(());
+    }
     if args.as_slice() == ["verify-macro-roundtrip"] {
         use byakko::macros::{Macro, MacroEvent};
         let maps = byakko::device::snapshot()?;
@@ -32,12 +61,22 @@ fn run() -> byakko::device::Result<()> {
                 },
             ],
         };
-        let written = byakko::device::apply_macro(
-            49,
-            &bytes,
-            &value,
-            std::path::Path::new("Research/captures/backups"),
-        )?;
+        let mut long_value = value.clone();
+        long_value.events = (0..60)
+            .map(|i| MacroEvent::Key {
+                usage: 0x73,
+                down: i % 2 == 0,
+                delay_ms: if i % 3 == 0 { 0 } else { 300 },
+            })
+            .collect();
+        let backup_dir = std::path::Path::new("Research/captures/backups");
+        let exercise = (|| -> byakko::device::Result<()> {
+            let long_bytes = byakko::device::apply_macro(49, &bytes, &long_value, backup_dir)?;
+            byakko::device::apply_macro(49, &long_bytes, &value, backup_dir)?;
+            Ok(())
+        })();
+        // Attempt restoration even when an intermediate validation fails.
+        let written = byakko::device::read_macro(49)?;
         byakko::device::apply_macro(
             49,
             &written,
@@ -47,11 +86,12 @@ fn run() -> byakko::device::Result<()> {
             },
             std::path::Path::new("Research/captures/backups"),
         )?;
+        exercise?;
         if byakko::device::snapshot()? != maps {
             return Err("Keymaps changed during macro test".into());
         }
         println!(
-            "Unbound macro49 F24 press/release stored and read back exactly, then empty original restored. Keymaps unchanged; no playback triggered."
+            "Unbound macro49: five-page macro, short replacement and empty restoration verified byte-for-byte. Zero/long delays preserved. Keymaps unchanged; no playback triggered."
         );
         return Ok(());
     }
@@ -131,7 +171,7 @@ fn run() -> byakko::device::Result<()> {
         return Ok(());
     }
     if args.as_slice() != ["devices"] {
-        return Err("Usage: byakko devices (enumeration only; no configuration commands)".into());
+        return Err("Usage: byakko [gui|devices|descriptor|inspect|export PATH|export-macro SLOT PATH|verify-keymap-roundtrip|verify-macro-roundtrip]".into());
     }
     let api = hidapi::HidApi::new()?;
     let mut count = 0;

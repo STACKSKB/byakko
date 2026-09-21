@@ -154,6 +154,34 @@ pub fn snapshot() -> Result<Snapshot> {
     })
 }
 
+/// Read global lighting state twice with an identity barrier before each read.
+/// This only sends GET commands (0x80 and 0x87). A matching opcode echo and
+/// identical replies are required before returning the raw-preserving decode.
+pub fn read_lighting() -> Result<crate::lighting::Lighting> {
+    let (_, device) = open_unique()?;
+    let mut first = None;
+    for _ in 0..2 {
+        let barrier = read_payload(&device, 0x80, 0, 0)?;
+        if barrier[0] != 0x80 {
+            return Err("Lighting read identity barrier failed; close other configurators".into());
+        }
+        let response = read_payload(&device, crate::lighting::LED_READ_COMMAND, 0, 0)?;
+        if response[0] != crate::lighting::LED_READ_COMMAND {
+            return Err("Lighting read returned an unrelated or stale opcode".into());
+        }
+        if let Some(previous) = first {
+            if previous != response {
+                return Err("Lighting changed between repeated reads".into());
+            }
+        } else {
+            first = Some(response);
+        }
+    }
+    Ok(crate::lighting::Lighting::decode(
+        &first.expect("two reads were requested"),
+    )?)
+}
+
 pub fn read_macro(slot: u8) -> Result<Vec<u8>> {
     let (_, device) = open_unique()?;
     let mut copies = Vec::new();

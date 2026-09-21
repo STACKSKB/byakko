@@ -12,6 +12,7 @@ use crate::{
     actions, board,
     device::{self, Snapshot},
     layout::{self, FN_PLACEHOLDER_USAGE, PhysicalKey},
+    macro_ui::MacroEditor,
 };
 
 const INK: Color32 = Color32::from_rgb(33, 42, 46);
@@ -26,6 +27,12 @@ const SELECTED: Color32 = Color32::from_rgb(250, 225, 192);
 enum Layer {
     Base,
     Function,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WorkbenchTab {
+    Keys,
+    Macros,
 }
 
 impl Layer {
@@ -49,6 +56,8 @@ struct Workbench {
     function: Vec<[u8; 4]>,
     selected: Option<u8>,
     layer: Layer,
+    tab: WorkbenchTab,
+    macro_editor: MacroEditor,
     search: String,
     modifiers: [bool; 4],
     raw_editor: String,
@@ -71,6 +80,8 @@ impl Workbench {
             function: Vec::new(),
             selected: None,
             layer: Layer::Base,
+            tab: WorkbenchTab::Keys,
+            macro_editor: MacroEditor::new(),
             search: String::new(),
             modifiers: [false; 4],
             raw_editor: String::new(),
@@ -89,7 +100,7 @@ impl Workbench {
     }
 
     fn start_read(&mut self, ctx: &egui::Context) {
-        if self.busy || self.dirty_count() > 0 {
+        if self.device_busy() || self.dirty_count() > 0 {
             return;
         }
         self.busy = true;
@@ -108,7 +119,7 @@ impl Workbench {
         let Some(expected) = self.observed.clone() else {
             return;
         };
-        if self.busy || self.dirty_count() == 0 {
+        if self.device_busy() || self.dirty_count() == 0 {
             return;
         }
         let base = self.base.clone();
@@ -187,6 +198,9 @@ impl Workbench {
     }
 
     fn current_label(&self, layer: Layer, usage: u8) -> String {
+        if usage == FN_PLACEHOLDER_USAGE {
+            return "Fn (protected)".into();
+        }
         match self.binding(layer, usage) {
             Some([0, 0, 0, 0]) => "Disabled".into(),
             Some([0, 0, key_usage, 0])
@@ -210,6 +224,14 @@ impl Workbench {
                     modifier_label(second),
                     layout::usage_label(key_usage)
                 )
+            }
+            Some([9, mode @ 0..=2, index @ 0..=49, 0]) => {
+                let play = match mode {
+                    0 => "count",
+                    1 => "toggle",
+                    _ => "hold",
+                };
+                format!("Macro {index} · {play}")
             }
             Some(bytes) => actions::presets()
                 .into_iter()
@@ -235,6 +257,10 @@ impl Workbench {
                 .zip(&observed.function)
                 .filter(|(a, b)| a != b)
                 .count()
+    }
+
+    fn device_busy(&self) -> bool {
+        self.busy || self.macro_editor.busy()
     }
 
     fn changed(&self, layer: Layer, usage: u8) -> bool {
@@ -277,7 +303,7 @@ impl Workbench {
         let Some(slot) = self.slot(usage) else {
             return;
         };
-        if self.busy {
+        if self.device_busy() {
             return;
         }
         self.draft_mut(self.layer)[slot] = bytes;
@@ -305,7 +331,7 @@ impl Workbench {
     }
 
     fn revert(&mut self) {
-        if self.busy {
+        if self.device_busy() {
             return;
         }
         if let Some(snapshot) = &self.observed {
@@ -322,13 +348,13 @@ impl Workbench {
             ui.label(egui::RichText::new("BYAKKO").size(24.0).strong().color(INK));
             ui.separator();
             ui.label(
-                egui::RichText::new("NIA87 / KEYMAP WORKBENCH")
+                egui::RichText::new("NIA87 / CONFIGURATION WORKBENCH")
                     .size(13.0)
                     .strong()
                     .color(MUTED),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let can_read = !self.busy && self.dirty_count() == 0;
+                let can_read = !self.device_busy() && self.dirty_count() == 0;
                 if ui
                     .add_enabled(can_read, egui::Button::new("RECONNECT / READ"))
                     .clicked()
@@ -347,17 +373,45 @@ impl Workbench {
         ui.separator();
     }
 
+    fn tab_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("WORKSPACE")
+                    .small()
+                    .strong()
+                    .color(MUTED),
+            );
+            let can_switch = !self.device_busy();
+            for (tab, label) in [
+                (WorkbenchTab::Keys, "KEYS"),
+                (WorkbenchTab::Macros, "MACROS"),
+            ] {
+                ui.add_enabled_ui(can_switch, |ui| {
+                    if ui.selectable_label(self.tab == tab, label).clicked() {
+                        self.tab = tab;
+                    }
+                });
+            }
+            if self.device_busy() {
+                ui.spinner();
+                ui.label("Device operation in progress");
+            }
+        });
+    }
+
     fn layer_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("LAYER").small().strong().color(MUTED));
             for layer in [Layer::Base, Layer::Function] {
-                if ui
-                    .selectable_label(self.layer == layer, layer.name())
-                    .clicked()
-                {
-                    self.layer = layer;
-                    self.sync_editor();
-                }
+                ui.add_enabled_ui(!self.device_busy(), |ui| {
+                    if ui
+                        .selectable_label(self.layer == layer, layer.name())
+                        .clicked()
+                    {
+                        self.layer = layer;
+                        self.sync_editor();
+                    }
+                });
             }
             ui.separator();
             ui.label(
@@ -369,9 +423,6 @@ impl Workbench {
                     },
                 ),
             );
-            if self.busy {
-                ui.spinner();
-            }
         });
     }
 
@@ -382,7 +433,7 @@ impl Workbench {
                 .strong()
                 .color(MUTED),
         );
-        let unit = (ui.available_width() / 18.5).clamp(27.0, 50.0);
+        let unit = (ui.available_width() / 18.5).clamp(24.0, 50.0);
         let gap = 2.0;
         let height = 6.5 * unit;
         let (canvas, _) = ui.allocate_exact_size(Vec2::new(18.5 * unit, height), Sense::hover());
@@ -466,7 +517,9 @@ impl Workbench {
                 );
             }
         }
-        if let Some(usage) = clicked {
+        if !self.device_busy()
+            && let Some(usage) = clicked
+        {
             self.select(Some(usage));
         }
     }
@@ -516,9 +569,12 @@ impl Workbench {
                 ui.label("Modifiers");
                 let count = self.modifiers.iter().filter(|on| **on).count();
                 for (index, label) in ["Ctrl", "Shift", "Alt", "Win"].iter().enumerate() {
-                    ui.add_enabled_ui(!self.busy && (self.modifiers[index] || count < 2), |ui| {
-                        ui.checkbox(&mut self.modifiers[index], *label);
-                    });
+                    ui.add_enabled_ui(
+                        !self.device_busy() && (self.modifiers[index] || count < 2),
+                        |ui| {
+                            ui.checkbox(&mut self.modifiers[index], *label);
+                        },
+                    );
                 }
             });
             ui.label(
@@ -545,7 +601,7 @@ impl Workbench {
             egui::ScrollArea::vertical()
                 .max_height(130.0)
                 .show(ui, |ui| {
-                    ui.add_enabled_ui(!self.busy && self.observed.is_some(), |ui| {
+                    ui.add_enabled_ui(!self.device_busy() && self.observed.is_some(), |ui| {
                         for (label, usage) in options {
                             if ui
                                 .selectable_label(false, format!("{}   {:02X}", label, usage))
@@ -563,7 +619,7 @@ impl Workbench {
                     .strong()
                     .color(MUTED),
             );
-            ui.add_enabled_ui(!self.busy && self.observed.is_some(), |ui| {
+            ui.add_enabled_ui(!self.device_busy() && self.observed.is_some(), |ui| {
                 if ui.button("DISABLE KEY").clicked() {
                     self.set_binding([0, 0, 0, 0]);
                 }
@@ -587,7 +643,7 @@ impl Workbench {
                 let parsed = parse_bytes(&self.raw_editor);
                 if ui
                     .add_enabled(
-                        !self.busy && parsed.is_some(),
+                        !self.device_busy() && parsed.is_some(),
                         egui::Button::new("STAGE RAW BINDING"),
                     )
                     .clicked()
@@ -655,7 +711,8 @@ impl Workbench {
     fn footer(&mut self, ui: &mut egui::Ui) {
         ui.separator();
         ui.horizontal(|ui| {
-            let can_apply = self.observed.is_some() && !self.busy && self.dirty_count() > 0;
+            let can_apply =
+                self.observed.is_some() && !self.device_busy() && self.dirty_count() > 0;
             if ui
                 .add_enabled(can_apply, egui::Button::new("APPLY TO KEYBOARD  Ctrl+S"))
                 .clicked()
@@ -664,7 +721,7 @@ impl Workbench {
             }
             if ui
                 .add_enabled(
-                    !self.busy && self.dirty_count() > 0,
+                    !self.device_busy() && self.dirty_count() > 0,
                     egui::Button::new("REVERT DRAFT"),
                 )
                 .clicked()
@@ -678,6 +735,95 @@ impl Workbench {
             }));
         });
     }
+
+    fn keys_page(&mut self, ui: &mut egui::Ui) {
+        let board_width = (ui.available_width() - 320.0).max(500.0);
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(board_width);
+                self.keyboard(ui);
+                ui.add_space(12.0);
+                self.changes(ui);
+                ui.add_space(10.0);
+                ui.collapsing("Keyboard input test", |ui| {
+                    ui.label("Click here and type to check host input after applying a binding.");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.test_input)
+                            .hint_text("Type here…")
+                            .desired_rows(2),
+                    );
+                });
+            });
+            ui.add_space(16.0);
+            self.inspector(ui);
+        });
+        ui.add_space(12.0);
+        self.footer(ui);
+    }
+
+    fn selected_key_context(&self, ui: &mut egui::Ui) {
+        ui.label(
+            egui::RichText::new("BINDING TARGET")
+                .small()
+                .strong()
+                .color(MUTED),
+        );
+        ui.separator();
+        let Some(usage) = self.selected else {
+            ui.label("Choose a physical key at left before binding a saved macro.");
+            return;
+        };
+        let key = self
+            .keys
+            .iter()
+            .find(|key| key.usage == usage)
+            .map_or("Key", |key| key.label);
+        ui.label(egui::RichText::new(key).size(20.0).strong().color(INK));
+        if let Some(slot) = self.slot(usage) {
+            ui.label(format!("{} layer · matrix slot {slot}", self.layer.name()));
+            ui.label(format!(
+                "Current binding: {}",
+                self.current_label(self.layer, usage)
+            ));
+            if let Some(bytes) = self.binding(self.layer, usage) {
+                ui.monospace(format_bytes(bytes));
+            }
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(
+                    "Save a macro below, then bind it here. The keymap change stays staged until Apply to keyboard.",
+                )
+                .small()
+                .color(MUTED),
+            );
+        } else {
+            ui.label("This key has no writable matrix slot.");
+        }
+    }
+
+    fn macros_page(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.columns(2, |columns| {
+                self.keyboard(&mut columns[0]);
+                self.selected_key_context(&mut columns[1]);
+            });
+            ui.add_space(12.0);
+            let blocked = self.busy;
+            if let Some(binding) = self.macro_editor.ui(ui, blocked) {
+                if self.selected.and_then(|usage| self.slot(usage)).is_some() {
+                    self.set_binding(binding);
+                } else {
+                    self.error = true;
+                    self.status =
+                        "Choose a writable physical key above before binding the macro.".into();
+                }
+            }
+            ui.add_space(12.0);
+            self.changes(ui);
+            ui.add_space(10.0);
+            self.footer(ui);
+        });
+    }
 }
 
 impl eframe::App for Workbench {
@@ -685,10 +831,10 @@ impl eframe::App for Workbench {
         self.poll_worker();
         let ctrl_s = ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::S));
         let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-        if ctrl_s {
+        if ctrl_s && self.tab == WorkbenchTab::Keys {
             self.start_apply(ui.ctx());
         }
-        if escape {
+        if escape && self.tab == WorkbenchTab::Keys && !self.device_busy() {
             self.select(None);
         }
         ui.ctx().set_visuals(egui::Visuals::light());
@@ -697,34 +843,15 @@ impl eframe::App for Workbench {
             .inner_margin(egui::Margin::same(16))
             .show(ui, |ui| {
                 self.header(ui);
+                self.tab_bar(ui);
                 self.layer_bar(ui);
                 ui.add_space(12.0);
-                let board_width = (ui.available_width() - 320.0).max(500.0);
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.set_width(board_width);
-                        self.keyboard(ui);
-                        ui.add_space(12.0);
-                        self.changes(ui);
-                        ui.add_space(10.0);
-                        ui.collapsing("Keyboard input test", |ui| {
-                            ui.label(
-                                "Click here and type to check host input after applying a binding.",
-                            );
-                            ui.add(
-                                egui::TextEdit::multiline(&mut self.test_input)
-                                    .hint_text("Type here…")
-                                    .desired_rows(2),
-                            );
-                        });
-                    });
-                    ui.add_space(16.0);
-                    self.inspector(ui);
-                });
-                ui.add_space(12.0);
-                self.footer(ui);
+                match self.tab {
+                    WorkbenchTab::Keys => self.keys_page(ui),
+                    WorkbenchTab::Macros => self.macros_page(ui),
+                }
             });
-        if self.busy {
+        if self.device_busy() {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
     }
