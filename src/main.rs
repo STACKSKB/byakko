@@ -2,6 +2,62 @@ use std::process::ExitCode;
 
 fn run() -> byakko::device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.as_slice() == ["verify-picture-roundtrip"] {
+        let before = byakko::device::read_picture()?;
+        let maps = byakko::device::snapshot()?;
+        let lighting = byakko::device::read_lighting()?;
+        let mut changed = before.clone();
+        changed[91] = if before[91] == [8, 16, 24] {
+            [24, 16, 8]
+        } else {
+            [8, 16, 24]
+        };
+        let backups = std::path::Path::new("Research/captures/backups");
+        let written = byakko::device::apply_picture(&before, &changed, backups)?;
+        let restored = byakko::device::apply_picture(&written, &before, backups)?;
+        if restored != before
+            || byakko::device::snapshot()? != maps
+            || byakko::device::read_lighting()? != lighting
+        {
+            return Err("Picture test changed other state".into());
+        }
+        println!(
+            "Pause color changed and restored; all128 colors, both keymaps and global lighting verified unchanged afterward. Visible picture untested."
+        );
+        return Ok(());
+    }
+    if args.len() == 2 && args[0] == "export-picture" {
+        let colors = byakko::device::read_picture()?;
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&args[1])?;
+        serde_json::to_writer_pretty(file, &colors)?;
+        println!("Saved 128 RGB triples; repeated reads matched.");
+        return Ok(());
+    }
+    if args.as_slice() == ["verify-lighting-roundtrip"] {
+        let original = byakko::device::read_lighting()?;
+        let original_setting = original
+            .recognized_setting()
+            .ok_or("Unrecognized lighting; no writes sent")?;
+        if original.effect_id() != 5 || original_setting.value != Some(4) {
+            return Err("Expected captured ripple/brightness4 fixture; no writes sent".into());
+        }
+        let maps = byakko::device::snapshot()?;
+        let mut changed = original_setting.clone();
+        changed.value = Some(3);
+        let backup_dir = std::path::Path::new("Research/captures/backups");
+        let written = byakko::device::apply_lighting(&original, &changed, backup_dir)?;
+        let restored = byakko::device::apply_lighting(&written, &original_setting, backup_dir)?;
+        if restored.raw()[1..8] != original.raw()[1..8] || byakko::device::snapshot()? != maps {
+            return Err("Lighting restore or keymap comparison failed".into());
+        }
+        println!(
+            "Ripple brightness4 ->3 ->4 verified by repeated readback; original lighting fields restored and keymaps unchanged. Visible output untested."
+        );
+        return Ok(());
+    }
     if args.len() == 2 && args[0] == "restore-macro" {
         #[derive(serde::Deserialize)]
         struct Backup {

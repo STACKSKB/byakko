@@ -6,6 +6,10 @@ pub mod device;
 pub mod layout;
 pub mod lighting;
 #[cfg(feature = "gui")]
+pub mod lighting_ui;
+#[cfg(feature = "gui")]
 pub mod macro_ui;
 pub mod macros;
+#[cfg(feature = "gui")]
+pub mod picture_ui;
 pub mod protocol;

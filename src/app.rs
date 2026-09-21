@@ -33,6 +33,8 @@ enum Layer {
 enum WorkbenchTab {
     Keys,
     Macros,
+    Lighting,
+    Picture,
 }
 
 impl Layer {
@@ -58,6 +60,8 @@ struct Workbench {
     layer: Layer,
     tab: WorkbenchTab,
     macro_editor: MacroEditor,
+    lighting_editor: crate::lighting_ui::LightingEditor,
+    picture_editor: crate::picture_ui::PictureEditor,
     search: String,
     modifiers: [bool; 4],
     raw_editor: String,
@@ -82,6 +86,8 @@ impl Workbench {
             layer: Layer::Base,
             tab: WorkbenchTab::Keys,
             macro_editor: MacroEditor::new(),
+            lighting_editor: crate::lighting_ui::LightingEditor::new(),
+            picture_editor: crate::picture_ui::PictureEditor::new(),
             search: String::new(),
             modifiers: [false; 4],
             raw_editor: String::new(),
@@ -260,7 +266,10 @@ impl Workbench {
     }
 
     fn device_busy(&self) -> bool {
-        self.busy || self.macro_editor.busy()
+        self.busy
+            || self.macro_editor.busy()
+            || self.lighting_editor.busy()
+            || self.picture_editor.busy()
     }
 
     fn changed(&self, layer: Layer, usage: u8) -> bool {
@@ -385,6 +394,8 @@ impl Workbench {
             for (tab, label) in [
                 (WorkbenchTab::Keys, "KEYS"),
                 (WorkbenchTab::Macros, "MACROS"),
+                (WorkbenchTab::Lighting, "LIGHTING"),
+                (WorkbenchTab::Picture, "PER-KEY COLOR"),
             ] {
                 ui.add_enabled_ui(can_switch, |ui| {
                     if ui.selectable_label(self.tab == tab, label).clicked() {
@@ -849,6 +860,18 @@ impl eframe::App for Workbench {
                 match self.tab {
                     WorkbenchTab::Keys => self.keys_page(ui),
                     WorkbenchTab::Macros => self.macros_page(ui),
+                    WorkbenchTab::Lighting => {
+                        let blocked = self.busy || self.macro_editor.busy();
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            self.lighting_editor.ui(ui, blocked);
+                        });
+                    }
+                    WorkbenchTab::Picture => {
+                        let blocked =
+                            self.busy || self.macro_editor.busy() || self.lighting_editor.busy();
+                        egui::ScrollArea::vertical()
+                            .show(ui, |ui| self.picture_editor.ui(ui, blocked));
+                    }
                 }
             });
         if self.device_busy() {

@@ -69,8 +69,8 @@ The logical macro buffer is 256 bytes. Bytes 0–1 hold `repeatCount` as little-
 variable-length event stream begins at byte 2. The encoder emits 56-byte payloads in 64-byte
 feature reports and can write up to five chunks. Each set request has an eight-byte header:
 command 22, macro index, chunk number, payload length 56, final-chunk flag, then three zero bytes;
-the remaining 56 bytes carry the corresponding slice of the logical buffer. The reader requests
-four 64-byte chunks with command 150 and the macro index/chunk number in the first two fields,
+the remaining 56 bytes carry the corresponding slice of the logical buffer. The traced Nia87 reader requests
+four 64-byte chunks with command 139 (`0x8b`), slot in byte 1 and page in byte 2,
 then concatenates the returned payloads (offsets 9,980,678 and 13,735,344). The length guard marks
 a macro full once the encoded cursor reaches 248 bytes (offset 13,743,000). Treat 248 bytes as the
 safe encoded limit unless device testing proves the final padding behavior otherwise. Confidence:
