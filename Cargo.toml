@@ -1,5 +1,6 @@
 [package]
 name = "byakko"
+default-run = "byakko"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -8,6 +9,12 @@ description = "Native Nia87 configuration research tools"
 [features]
 default = ["gui"]
 gui = ["dep:eframe"]
+research-tools = []
+
+[[bin]]
+name = "rpc_capture"
+path = "src/bin/rpc_capture.rs"
+required-features = ["research-tools"]
 
 [dependencies]
 hidapi = { version = "=2.6.7", default-features = false }

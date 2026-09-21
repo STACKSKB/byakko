@@ -4,17 +4,18 @@ A native, USB-first Menel Nia87 configurator under investigation. The intended a
 
 ## Current status
 
-Only the read-only HID enumeration command is implemented. There is no configurator GUI or configuration read/write support yet. See [PLAN.md](PLAN.md) for milestones, plug-and-play layout requirements, evidence and licensing boundaries.
+A native keymap workbench is implemented, with automatic Nia87 TKL layout, base/Fn editing, staged changes, automatic backups and complete readback verification. Media, pointer and modifier combinations are available. Macro storage has passed a reversible live-device test; its editor and lighting support are in progress. This is a development build, not yet feature complete. See [docs/live-evidence.md](docs/live-evidence.md) for the exact verification limits.
 
 ```console
 cargo run --locked -- devices
+cargo run --locked -- gui
 ```
 
-This lists collections matching candidate VID/PIDs from the supplied vendor package. It does not open an input stream, capture typing, send feature reports, change settings or flash firmware. A candidate match does not establish the model uniquely.
+The `devices` command only enumerates. `descriptor`, `inspect`, and `export <new-file.json>` inspect the configuration interface and keymaps. The GUI reads automatically, stages edits locally, and writes only on explicit Apply. A candidate USB match alone does not establish the model uniquely. Close the official configurator/helper before connecting to avoid competing transactions.
 
-Validated on the attached Windows keyboard: `3151:4015`, configuration collection on interface 2, usage `FFFF:0002`. The Windows build and Clippy checks pass. Linux and macOS execution have not been tested; Linux hidraw permissions will need configuration for later device access.
+Validated on the attached Windows keyboard: `3151:4015`, configuration collection on interface 2, usage `FFFF:0002`, raw firmware version `0100`. A Pause-to-F24 remap and an unbound macro storage test were both read back and restored. Windows builds, protocol tests and Clippy pass. Physical output and power-cycle persistence remain untested while the user is AFK. Linux and macOS execution have not been tested; Linux hidraw access needs suitable permissions.
 
-The target product will include a verified Nia87 TKL profile so no repeated layout setup is necessary. 2.4 GHz configuration is deferred until USB works and receiver capability is measured.
+The built-in Nia87 slot profile comes from our observed default map, independently checked against the supplied vendor fixture. It does not depend on current key assignments or require repeated layout setup. 2.4 GHz configuration is deferred until USB works and receiver capability is measured.
 
 ## Research and provenance
 
