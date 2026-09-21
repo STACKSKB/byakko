@@ -1,0 +1,6 @@
+# Private vendor fixtures and extracted research material are not source artifacts.
+/References/
+/Research/extracted/
+/Research/captures/
+/Research/firmware-dumps/
+/target/
