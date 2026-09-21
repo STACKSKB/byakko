@@ -17,13 +17,12 @@ path = "src/bin/rpc_capture.rs"
 required-features = ["research-tools"]
 
 [dependencies]
-hidapi = { version = "=2.6.7", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 eframe = { version = "=0.36.2", optional = true, default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "accesskit"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-hidapi = { version = "=2.6.7", default-features = false, features = ["linux-native-basic-udev"] }
+libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-hidapi = { version = "=2.6.7", default-features = false, features = ["windows-native"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_HumanInterfaceDevice", "Win32_Storage_FileSystem", "Win32_Security"] }

@@ -306,6 +306,11 @@ impl Workbench {
     }
 
     fn set_binding(&mut self, bytes: [u8; 4]) {
+        if self.layer == Layer::Function {
+            self.error = true;
+            self.status = "Fn is read-only while its write protocol is being verified.".into();
+            return;
+        }
         let Some(usage) = self.selected else {
             return;
         };
@@ -425,6 +430,9 @@ impl Workbench {
                 });
             }
             ui.separator();
+            if self.layer == Layer::Function {
+                ui.colored_label(ACCENT, "READ-ONLY · Fn writes under investigation");
+            }
             ui.label(
                 egui::RichText::new(format!("{} staged slot(s)", self.dirty_count())).color(
                     if self.dirty_count() > 0 {
