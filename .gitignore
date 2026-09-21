@@ -1,0 +1,24 @@
+# Private vendor fixtures and extracted research material are not source artifacts.
+/References/
+/Research/extracted/
+/Research/captures/
+/Research/firmware-dumps/
+/target/
+/web/pkg/
+/web/dist/
+/web/node_modules/
+/backups/
+__pycache__/
+*.pyc
+
+# Local task logs, deployment evidence and private device observations.
+/plan.md
+/docs/linux-to-windows.md
+/Research/webhid-*
+/Research/cleanup-audit/
+/Research/refactor-metrics/
+/Research/brightness-investigation.md
+/Research/linux-macro-save-failure.md
+/Research/macro-workflow-review.md
+/Research/session-transaction-audit.md
+/Research/deferred-accessibility.patch
