@@ -9,6 +9,7 @@ const BUFFER_LEN: usize = 256;
 const SAFE_END: usize = 248;
 const REPORT_LEN: usize = 64;
 const PAGE_DATA_LEN: usize = 56;
+const WRITE_PAGES: usize = 5;
 const MAX_SLOT: u8 = 49;
 
 fn set_bit7_checksum(report: &mut [u8; REPORT_LEN]) {
@@ -213,39 +214,21 @@ pub fn read_request(slot: u8, page: u8) -> Result<[u8; REPORT_LEN], String> {
     Ok(report)
 }
 
-/// Frame a complete logical buffer into 56-byte simple-macro write pages.
+/// Replace the complete logical buffer with five zero-padded write pages.
 pub fn write_reports(slot: u8, data: &[u8]) -> Result<Vec<[u8; REPORT_LEN]>, String> {
     check_slot(slot)?;
-    let macro_data = decode(data)?;
+    decode(data)?;
 
-    // Count zero-valued long-delay tails too; the final nonzero byte can be
-    // before a page boundary even when the encoded event crosses it.
-    let used_end = 2 + macro_data
-        .events
-        .iter()
-        .map(|event| match event {
-            MacroEvent::Key { delay_ms, .. } | MacroEvent::MouseButton { delay_ms, .. } => {
-                if (1..=127).contains(delay_ms) { 2 } else { 4 }
-            }
-            MacroEvent::Move { delay_ms, .. } => {
-                if (1..=127).contains(delay_ms) {
-                    4
-                } else {
-                    6
-                }
-            }
-        })
-        .sum::<usize>();
-    // One all-zero page is needed to clear an existing macro in a slot.
-    let page_count = used_end.div_ceil(PAGE_DATA_LEN).max(1);
-    let mut reports = Vec::with_capacity(page_count);
-    for page in 0..page_count {
+    // The device retains untouched pages from an earlier longer macro. Send
+    // every page, including zero-filled trailing pages, to replace all 256 bytes.
+    let mut reports = Vec::with_capacity(WRITE_PAGES);
+    for page in 0..WRITE_PAGES {
         let mut report = [0u8; REPORT_LEN];
         report[0] = 0x16;
         report[1] = slot;
         report[2] = page as u8;
         report[3] = PAGE_DATA_LEN as u8;
-        report[4] = u8::from(page + 1 == page_count);
+        report[4] = u8::from(page + 1 == WRITE_PAGES);
         set_bit7_checksum(&mut report);
         let start = page * PAGE_DATA_LEN;
         let end = (start + PAGE_DATA_LEN).min(BUFFER_LEN);
@@ -373,14 +356,20 @@ mod tests {
                 28
             ],
         })
-        .unwrap(); // 58 bytes used, so two pages
+        .unwrap(); // 58 bytes used; remaining pages must still be cleared.
         let reports = write_reports(49, &data).unwrap();
-        assert_eq!(reports.len(), 2);
+        assert_eq!(reports.len(), 5);
         assert_eq!(&reports[0][..8], &[0x16, 49, 0, 56, 0, 0, 0, 0x80]);
-        assert_eq!(&reports[1][..8], &[0x16, 49, 1, 56, 1, 0, 0, 0x7e]);
+        assert_eq!(&reports[1][..8], &[0x16, 49, 1, 56, 0, 0, 0, 0x7f]);
+        assert_eq!(&reports[4][..8], &[0x16, 49, 4, 56, 1, 0, 0, 0x7b]);
         assert_eq!(&reports[0][8..64], &data[..56]);
         assert_eq!(&reports[1][8..10], &data[56..58]);
         assert!(reports[1][10..].iter().all(|byte| *byte == 0));
+        assert!(
+            reports[2..]
+                .iter()
+                .all(|report| report[8..].iter().all(|byte| *byte == 0))
+        );
         let read = read_request(49, 3).unwrap();
         assert_eq!(&read[..8], &[0x8b, 49, 3, 0, 0, 0, 0, 0x40]);
     }
@@ -392,7 +381,15 @@ mod tests {
             events: vec![],
         })
         .unwrap();
-        assert_eq!(write_reports(0, &empty).unwrap().len(), 1);
+        let clear = write_reports(0, &empty).unwrap();
+        assert_eq!(clear.len(), 5);
+        assert!(
+            clear
+                .iter()
+                .all(|report| report[8..].iter().all(|byte| *byte == 0))
+        );
+        assert!(clear[..4].iter().all(|report| report[4] == 0));
+        assert_eq!(&clear[4][..8], &[0x16, 0, 4, 56, 1, 0, 0, 0xac]);
         assert!(read_request(50, 0).is_err());
         assert!(read_request(0, 4).is_err());
         assert!(write_reports(0, &empty[..255]).is_err());
@@ -446,7 +443,44 @@ mod tests {
         assert_eq!(data[54], 5);
         assert_eq!(&data[55..58], &[0, 0, 0]);
         let reports = write_reports(0, &data).unwrap();
-        assert_eq!(reports.len(), 2);
-        assert_eq!(reports[1][4], 1);
+        assert_eq!(reports.len(), 5);
+        assert_eq!(reports[1][4], 0);
+        assert_eq!(reports[4][4], 1);
+    }
+
+    #[test]
+    fn shorter_macro_replaces_all_pages_of_longer_macro() {
+        let long = encode(&Macro {
+            repeat_count: 1,
+            events: vec![
+                MacroEvent::Key {
+                    usage: 4,
+                    down: true,
+                    delay_ms: 1
+                };
+                120
+            ],
+        })
+        .unwrap(); // 242 encoded bytes, reaching page 4.
+        let short = encode(&Macro {
+            repeat_count: 2,
+            events: vec![MacroEvent::Key {
+                usage: 5,
+                down: false,
+                delay_ms: 50,
+            }],
+        })
+        .unwrap();
+        let mut storage = [0u8; BUFFER_LEN];
+        for data in [&long, &short] {
+            let reports = write_reports(49, data).unwrap();
+            assert_eq!(reports.len(), WRITE_PAGES);
+            for (page, report) in reports.iter().enumerate() {
+                let start = page * PAGE_DATA_LEN;
+                let len = (BUFFER_LEN - start).min(PAGE_DATA_LEN);
+                storage[start..start + len].copy_from_slice(&report[8..8 + len]);
+            }
+        }
+        assert_eq!(storage.as_slice(), short.as_slice());
     }
 }

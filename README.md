@@ -4,7 +4,7 @@ A native, USB-first Menel Nia87 configurator under investigation. The intended a
 
 ## Current status
 
-A native keymap workbench is implemented, with automatic Nia87 TKL layout, base/Fn editing, staged changes, automatic backups and complete readback verification. Media, pointer and modifier combinations are available. Macro storage has passed a reversible live-device test; its editor and lighting support are in progress. This is a development build, not yet feature complete. See [docs/live-evidence.md](docs/live-evidence.md) for the exact verification limits.
+A native keymap workbench is implemented, with automatic Nia87 TKL layout, base/Fn editing, staged changes, automatic backups and complete readback verification. Media, pointer and modifier combinations are available. The native macro editor supports event editing, saved-slot bindings and JSON import/export. Long macro storage, shorter replacement and empty restoration passed live readback checks. Lighting reads work; lighting controls remain in progress. This is a development build, not yet feature complete. See [docs/live-evidence.md](docs/live-evidence.md) for the exact verification limits.
 
 ```console
 cargo run --locked -- devices

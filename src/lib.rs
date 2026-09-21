@@ -4,5 +4,8 @@ pub mod app;
 pub mod board;
 pub mod device;
 pub mod layout;
+pub mod lighting;
+#[cfg(feature = "gui")]
+pub mod macro_ui;
 pub mod macros;
 pub mod protocol;

@@ -46,3 +46,13 @@ Using the Nia87-specific single-key command (`13`), the native test changed Paus
 The inherited Nia87 macro read command is `8b`, not the separate shared `96` implementation. Slot 49 was read twice using four raw 64-byte pages, with an intervening version read to reject stale identity responses. All 256 bytes were zero, and no key in either layer referenced slot 49.
 
 The native writer stored repeat count 1, F24 down with 50 ms delay, and F24 up with 50 ms delay using command `16` and BIT7 framing. A repeated full read matched the encoded 256 bytes exactly. A second transaction restored the all-zero original macro. Complete keymap reads after the test matched the original base/Fn maps. No key was bound to the macro and no playback was triggered. This validates short macro storage and restoration only; multi-page truncation, playback timing, modes and mouse movement need further checks.
+
+## Extended macro storage verification
+
+A 242-byte stream (60 alternating F24 events, including zero and 300 ms delays) stored successfully across five pages. Replacing it with a short macro exposed stale bytes in later pages; the original variable-page writer could not clear these. Readback rejected the mismatch and verified rollback. The corrected writer sends all five pages on every replacement, with only page 4 marked final. The original empty slot was restored from its saved backup and verified.
+
+A fresh complete test then passed: long macro, short replacement, and empty restoration all matched every one of the 256 bytes. Both full keymaps matched their pre-test snapshots. Slot 49 remained unbound throughout; no playback was triggered. Regression tests simulate storage replacement to cover stale-page clearing.
+
+## Lighting read result
+
+Two reads using command `87`, each preceded by a verified `80` barrier, returned identical 64-byte data: `87 05 04 04 07 08 08 08` followed by zeros. The codec interprets effect 5 (ripple), brightness 4, speed 0, normal color, RGB `(8,8,8)`. This establishes stable read framing. No lighting write or visual effect validation has yet occurred; BIT8 write framing remains a static inference.
