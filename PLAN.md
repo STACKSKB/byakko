@@ -1,8 +1,10 @@
 # Byakko: plug-and-play Menel Nia87 native configurator
 
-Research date: 2026-09-21. Updated scope: USB configuration using stock firmware only; 2.4 GHz is a later compatibility target. A native enumeration-only CLI has been built and tested against the connected keyboard. No vendor configuration commands, installer execution, or flashing performed.
+Research date: 2026-09-21; updated 2026-09-22. Scope: USB configuration using stock firmware only; 2.4 GHz is a later compatibility target. Native keymap and short macro storage have passed reversible write/readback checks on the connected keyboard. See `docs/live-evidence.md` for evidence and remaining verification limits. No firmware flashing is in scope.
 
 ## Direction
+
+Use an original dense, keyboard-friendly native workbench. The user's references are McMaster-Carr, FL Studio, and Vim; do not copy the official GUI or Sharkfin UX. See `docs/design-direction.md` for interaction and review criteria.
 
 Build a Linux-first, cross-platform native configurator that speaks directly to the stock keyboard over HID. Recognize the Nia87 and show its correct 87-key TKL layout automatically on every connection, including the first launch on a new computer. Replacement firmware, bootloader access, firmware dumping, and flashing are outside the current scope.
 
