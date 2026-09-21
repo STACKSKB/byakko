@@ -55,4 +55,12 @@ A fresh complete test then passed: long macro, short replacement, and empty rest
 
 ## Lighting read result
 
-Two reads using command `87`, each preceded by a verified `80` barrier, returned identical 64-byte data: `87 05 04 04 07 08 08 08` followed by zeros. The codec interprets effect 5 (ripple), brightness 4, speed 0, normal color, RGB `(8,8,8)`. This establishes stable read framing. No lighting write or visual effect validation has yet occurred; BIT8 write framing remains a static inference.
+Two reads using command `87`, each preceded by a verified `80` barrier, returned identical 64-byte data: `87 05 04 04 07 08 08 08` followed by zeros. The codec interprets effect 5 (ripple), brightness 4, speed 0, normal color, RGB `(8,8,8)`. This establishes stable read framing. At this first-read milestone, writes were still unverified; later write evidence follows below. Visual effects remain unverified.
+
+## Global lighting write verification
+
+The original ripple setting was backed up, brightness changed from 4 to 3 with command `07` and the byte-8 complement checksum, then restored to 4. Both transactions passed repeated full reads, including unchanged reserved response bytes. Final setting bytes and both keymaps matched their originals. This confirms BIT8 framing and brightness storage on the attached firmware; visual output and other effect families remain unverified.
+
+## Per-key color storage verification
+
+Command `8c` returned six raw pages twice with identical results: 128 RGB triples, seven red and the rest black. Command `14` changed only Pause's matrix slot 91 to `(8,16,24)`, verified against all 128 colors, then restored its original color. All colors, both keymaps, and the full global lighting response matched the pre-test values afterward. Backups were flushed before writes. This validates current-picture color storage, not visual display or the three picture-selection options.

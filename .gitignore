@@ -5,3 +5,5 @@
 /Research/firmware-dumps/
 /target/
 /backups/
+__pycache__/
+*.pyc

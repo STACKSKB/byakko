@@ -3,6 +3,25 @@ use serde::{Deserialize, Serialize};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+// OS-held lock survives neither crashes nor process exit. The empty lock file
+// stays on disk; existence alone never means that a transaction is active.
+fn transaction_lock() -> Result<std::fs::File> {
+    let path = std::env::temp_dir().join("byakko-nia87-configuration.lock");
+    lock_file(&path)
+}
+
+fn lock_file(path: &std::path::Path) -> Result<std::fs::File> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.try_lock()
+        .map_err(|_| "Another Byakko transaction is active; retry after it finishes")?;
+    Ok(file)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Candidate {
     pub path: String,
@@ -66,6 +85,7 @@ pub fn descriptor() -> Result<serde_json::Value> {
 /// Two read-only requests verified against the Nia87-specific vendor call chain.
 /// Sending a feature report selects the read operation; it does not mutate settings.
 pub fn inspect() -> Result<serde_json::Value> {
+    let _lock = transaction_lock()?;
     let (candidate, device) = open_unique()?;
     let mut replies = Vec::new();
     for opcode in [0x80u8, 0x85] {
@@ -134,6 +154,11 @@ fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>
 }
 
 pub fn snapshot() -> Result<Snapshot> {
+    let _lock = transaction_lock()?;
+    snapshot_unlocked()
+}
+
+fn snapshot_unlocked() -> Result<Snapshot> {
     let (_, device) = open_unique()?;
     let v = read_payload(&device, 0x80, 0, 0)?;
     let p = read_payload(&device, 0x85, 0, 0)?;
@@ -158,14 +183,19 @@ pub fn snapshot() -> Result<Snapshot> {
 /// This only sends GET commands (0x80 and 0x87). A matching opcode echo and
 /// identical replies are required before returning the raw-preserving decode.
 pub fn read_lighting() -> Result<crate::lighting::Lighting> {
+    let _lock = transaction_lock()?;
     let (_, device) = open_unique()?;
+    read_lighting_on_device(&device)
+}
+
+fn read_lighting_on_device(device: &HidDevice) -> Result<crate::lighting::Lighting> {
     let mut first = None;
     for _ in 0..2 {
-        let barrier = read_payload(&device, 0x80, 0, 0)?;
+        let barrier = read_payload(device, 0x80, 0, 0)?;
         if barrier[0] != 0x80 {
             return Err("Lighting read identity barrier failed; close other configurators".into());
         }
-        let response = read_payload(&device, crate::lighting::LED_READ_COMMAND, 0, 0)?;
+        let response = read_payload(device, crate::lighting::LED_READ_COMMAND, 0, 0)?;
         if response[0] != crate::lighting::LED_READ_COMMAND {
             return Err("Lighting read returned an unrelated or stale opcode".into());
         }
@@ -182,7 +212,130 @@ pub fn read_lighting() -> Result<crate::lighting::Lighting> {
     )?)
 }
 
+/// Rebuild only the global setting bytes exposed by PB's LED writer. The
+/// unknown response tail remains in the backup, but is not sent as an
+/// undocumented command payload during restoration.
+fn lighting_restore_report(original: &crate::lighting::Lighting) -> [u8; 64] {
+    let mut report = [0u8; 64];
+    report[0] = crate::lighting::LED_WRITE_COMMAND;
+    report[1..8].copy_from_slice(&original.raw()[1..8]);
+    let sum = report[..8]
+        .iter()
+        .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
+    report[8] = 0xffu8.wrapping_sub(sum);
+    report
+}
+
+fn write_lighting_report(device: &HidDevice, report: &[u8; 64]) -> Result<()> {
+    let mut host = [0u8; 65];
+    host[1..].copy_from_slice(report);
+    device.send_feature_report(&host)?;
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    Ok(())
+}
+
+fn lighting_matches_report(
+    actual: &crate::lighting::Lighting,
+    report: &[u8; 64],
+    original: &crate::lighting::Lighting,
+) -> bool {
+    actual.raw()[1..8] == report[1..8] && actual.raw()[9..] == original.raw()[9..]
+}
+
+/// Stage-safe global lighting apply with a durable raw backup and restoration
+/// attempt. The target and restore use the statically traced PB BIT8 format;
+/// callers should treat its checksum as unverified until a live readback does.
+pub fn apply_lighting(
+    expected: &crate::lighting::Lighting,
+    setting: &crate::lighting::LightingSetting,
+    backup_dir: &std::path::Path,
+) -> Result<crate::lighting::Lighting> {
+    let _lock = transaction_lock()?;
+    if expected.raw()[0] != crate::lighting::LED_READ_COMMAND
+        || expected.recognized_setting().is_none()
+    {
+        return Err("Lighting baseline is not a recognized Nia87 LED response".into());
+    }
+    let target = crate::lighting::write_report(setting)?;
+    let (_, device) = open_unique()?;
+    let version = read_payload(&device, 0x80, 0, 0)?;
+    let profile = read_payload(&device, 0x85, 0, 0)?;
+    if version[0] != 0x80 || profile[0] != 0x85 {
+        return Err("Identity response mismatch; no lighting write sent".into());
+    }
+    if u16::from_le_bytes([version[1], version[2]]) != 0x0100 || profile[1] != 0 {
+        return Err(
+            "Firmware/profile differs from validated Nia87 0x0100/profile 0; no write sent".into(),
+        );
+    }
+    let current = read_lighting_on_device(&device)?;
+    if &current != expected {
+        return Err("Lighting changed since load; reload before applying. No write sent".into());
+    }
+    if lighting_matches_report(&current, &target, expected) {
+        return Ok(current);
+    }
+
+    std::fs::create_dir_all(backup_dir)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let path = backup_dir.join(format!("lighting-before-{stamp}.json"));
+    let mut backup = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    serde_json::to_writer_pretty(
+        &mut backup,
+        &serde_json::json!({
+            "format_version": 1,
+            "firmware": 0x0100,
+            "profile": 0,
+            "before": current,
+            "target_report": target.as_slice(),
+        }),
+    )?;
+    backup.sync_all()?;
+
+    let result = (|| -> Result<crate::lighting::Lighting> {
+        write_lighting_report(&device, &target)?;
+        let actual = read_lighting_on_device(&device)?;
+        if !lighting_matches_report(&actual, &target, expected) {
+            return Err("Lighting readback differs in setting or reserved response bytes".into());
+        }
+        Ok(actual)
+    })();
+    match result {
+        Ok(actual) => Ok(actual),
+        Err(error) => {
+            let restore = (|| -> Result<()> {
+                let report = lighting_restore_report(expected);
+                write_lighting_report(&device, &report)?;
+                let actual = read_lighting_on_device(&device)?;
+                if !lighting_matches_report(&actual, &report, expected) {
+                    return Err("Lighting restoration could not be verified".into());
+                }
+                Ok(())
+            })();
+            Err(format!(
+                "Lighting apply failed: {error}. Restore result: {}. Backup: {}",
+                match restore {
+                    Ok(()) => "original setting and reserved response bytes verified".to_owned(),
+                    Err(error) => format!("FAILED: {error}"),
+                },
+                path.display()
+            )
+            .into())
+        }
+    }
+}
+
 pub fn read_macro(slot: u8) -> Result<Vec<u8>> {
+    let _lock = transaction_lock()?;
+    read_macro_unlocked(slot)
+}
+
+fn read_macro_unlocked(slot: u8) -> Result<Vec<u8>> {
     let (_, device) = open_unique()?;
     let mut copies = Vec::new();
     for _ in 0..2 {
@@ -207,6 +360,119 @@ pub fn read_macro(slot: u8) -> Result<Vec<u8>> {
     Ok(copies.remove(0))
 }
 
+/// Read the current custom lighting picture as 128 matrix-indexed RGB values.
+pub fn read_picture() -> Result<Vec<[u8; 3]>> {
+    let _lock = transaction_lock()?;
+    read_picture_unlocked()
+}
+
+fn read_picture_unlocked() -> Result<Vec<[u8; 3]>> {
+    let (_, device) = open_unique()?;
+    let mut previous = None;
+    for _ in 0..2 {
+        let mut pages = Vec::new();
+        for page in 0..6 {
+            let barrier = read_payload(&device, 0x80, 0, 0)?;
+            if barrier[0] != 0x80 {
+                return Err("Picture identity barrier failed".into());
+            }
+            let bytes = read_payload(&device, 0x8c, 0, page)?;
+            if bytes == barrier {
+                return Err("Picture read returned stale identity".into());
+            }
+            pages.push(bytes);
+        }
+        let colors = crate::lighting::user_picture_from_pages(&pages)?;
+        if let Some(ref first) = previous
+            && first != &colors
+        {
+            return Err("Picture changed between repeated reads".into());
+        }
+        previous = Some(colors);
+    }
+    Ok(previous.expect("two reads"))
+}
+
+/// Replace custom picture colors, preserving every unedited matrix slot.
+pub fn apply_picture(
+    expected: &[[u8; 3]],
+    desired: &[[u8; 3]],
+    backup_dir: &std::path::Path,
+) -> Result<Vec<[u8; 3]>> {
+    let _lock = transaction_lock()?;
+    if expected.len() != 128 || desired.len() != 128 || expected[126..] != desired[126..] {
+        return Err("Invalid picture size or reserved-slot modification".into());
+    }
+    let identity = snapshot_unlocked()?;
+    if identity.firmware != 0x0100 || identity.profile != 0 {
+        return Err("Unverified firmware/profile; no picture writes sent".into());
+    }
+    if read_picture_unlocked()? != expected {
+        return Err("Picture changed since load; no writes sent".into());
+    }
+    let changes: Vec<_> = (0..126).filter(|&i| expected[i] != desired[i]).collect();
+    if changes.is_empty() {
+        return Ok(expected.to_vec());
+    }
+    std::fs::create_dir_all(backup_dir)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let path = backup_dir.join(format!("picture-before-{stamp}.json"));
+    let mut backup = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    serde_json::to_writer_pretty(
+        &mut backup,
+        &serde_json::json!({"format_version":1,"colors":expected}),
+    )?;
+    backup.sync_all()?;
+    let (_, device) = open_unique()?;
+    let write = |colors: &[[u8; 3]]| -> Result<()> {
+        for &slot in &changes {
+            let mut host = [0u8; 65];
+            host[1..].copy_from_slice(&crate::lighting::per_key_color_report(
+                0,
+                slot as u8,
+                colors[slot],
+            )?);
+            device.send_feature_report(&host)?;
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        Ok(())
+    };
+    let result = (|| -> Result<Vec<[u8; 3]>> {
+        write(desired)?;
+        let actual = read_picture_unlocked()?;
+        if actual != desired {
+            return Err("Picture readback mismatch".into());
+        }
+        Ok(actual)
+    })();
+    match result {
+        Ok(actual) => Ok(actual),
+        Err(error) => {
+            let restore = (|| -> Result<()> {
+                write(expected)?;
+                if read_picture_unlocked()? != expected {
+                    return Err("Picture restoration mismatch".into());
+                }
+                Ok(())
+            })();
+            Err(format!(
+                "Picture apply failed: {error}; restore: {}; backup {}",
+                match restore {
+                    Ok(()) => "verified".into(),
+                    Err(e) => e.to_string(),
+                },
+                path.display()
+            )
+            .into())
+        }
+    }
+}
+
 fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
     for report in crate::macros::write_reports(slot, bytes)? {
         let mut host = [0u8; 65];
@@ -224,9 +490,10 @@ pub fn apply_macro(
     new_macro: &crate::macros::Macro,
     backup_dir: &std::path::Path,
 ) -> Result<Vec<u8>> {
+    let _lock = transaction_lock()?;
     let target = crate::macros::encode(new_macro)?;
     crate::macros::decode(expected)?; // Refuse to overwrite an unrecognized store we cannot restore.
-    if read_macro(slot)? != expected {
+    if read_macro_unlocked(slot)? != expected {
         return Err("Macro changed since load; reload before applying".into());
     }
     if target == expected {
@@ -249,7 +516,7 @@ pub fn apply_macro(
     let (_, device) = open_unique()?;
     let result = (|| -> Result<Vec<u8>> {
         write_macro_bytes(&device, slot, &target)?;
-        let actual = read_macro(slot)?;
+        let actual = read_macro_unlocked(slot)?;
         if actual != target {
             return Err("Macro readback mismatch".into());
         }
@@ -260,7 +527,7 @@ pub fn apply_macro(
         Err(error) => {
             let rollback = (|| -> Result<()> {
                 write_macro_bytes(&device, slot, expected)?;
-                if read_macro(slot)? != expected {
+                if read_macro_unlocked(slot)? != expected {
                     return Err("macro restoration mismatch".into());
                 }
                 Ok(())
@@ -303,6 +570,7 @@ pub fn apply_keymaps(
     function: &[[u8; 4]],
     backup_dir: &std::path::Path,
 ) -> Result<Snapshot> {
+    let _lock = transaction_lock()?;
     if expected.format_version != 1
         || expected.base.len() != 128
         || expected.function.len() != 128
@@ -314,7 +582,7 @@ pub fn apply_keymaps(
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
         return Err("Cannot modify reserved padding slots".into());
     }
-    let current = snapshot()?;
+    let current = snapshot_unlocked()?;
     if &current != expected {
         return Err(
             "Keyboard changed since it was loaded. Reload before applying; no writes sent.".into(),
@@ -354,7 +622,7 @@ pub fn apply_keymaps(
                 new,
             )?;
         }
-        let actual = snapshot()?;
+        let actual = snapshot_unlocked()?;
         if actual.base != base
             || actual.function != function
             || actual.firmware != current.firmware
@@ -377,7 +645,7 @@ pub fn apply_keymaps(
                         old,
                     )?;
                 }
-                if snapshot()? != current {
+                if snapshot_unlocked()? != current {
                     return Err("restored data could not be verified".into());
                 }
                 Ok(())
@@ -392,5 +660,41 @@ pub fn apply_keymaps(
             )
             .into())
         }
+    }
+}
+
+#[cfg(test)]
+mod lighting_tests {
+    #[test]
+    fn operating_system_lock_excludes_second_handle_and_releases_on_drop() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path =
+            std::env::temp_dir().join(format!("byakko-lock-test-{}-{stamp}", std::process::id()));
+        let first = super::lock_file(&path).unwrap();
+        assert!(super::lock_file(&path).is_err());
+        drop(first);
+        assert!(super::lock_file(&path).is_ok());
+        // Retain the empty test artifact in accordance with the no-deletion rule.
+    }
+    use super::*;
+
+    #[test]
+    fn restore_report_recreates_known_fields_without_sending_opaque_tail() {
+        let mut response = [0u8; 64];
+        response[0] = crate::lighting::LED_READ_COMMAND;
+        response[1..8].copy_from_slice(&[5, 2, 4, 7, 12, 34, 56]);
+        response[9] = 0xa5;
+        let original = crate::lighting::Lighting::decode(&response).unwrap();
+        let report = lighting_restore_report(&original);
+        assert_eq!(&report[..9], &[7, 5, 2, 4, 7, 12, 34, 56, 0x80]);
+        assert!(report[9..].iter().all(|byte| *byte == 0));
+        assert!(lighting_matches_report(&original, &report, &original));
+        let mut changed = response;
+        changed[9] = 0;
+        let changed = crate::lighting::Lighting::decode(&changed).unwrap();
+        assert!(!lighting_matches_report(&changed, &report, &original));
     }
 }
