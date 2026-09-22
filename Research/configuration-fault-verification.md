@@ -114,3 +114,18 @@ and require another read before applying. Device-free worker-message tests cover
 these cases and accepted matching results. The transport layer still performs
 the full reserved-byte/readback checks; these UI checks neither establish USB
 recovery nor identify the cause of the earlier hardware failure.
+## Recovery coverage audit after state separation
+
+A read-only review found no concrete report-lifetime, slot-index, or handle-drop
+error explaining the recorded collateral changes. It did find a coverage limit:
+archive recovery restores only planned macro slots, picture colors, settings,
+and lighting. Unlike keymap recovery, these sections do not select repairs from
+observed differences. Thus an unexpected change to an unplanned macro 0 or
+picture 9 survives that recovery pass. Full final comparison detects the
+mismatch and reports recovery as unverified; it must not be treated as success.
+
+This is not a root-cause finding. Expanding recovery writes without reliable
+observations would also enlarge the failure surface. The next hardware audit
+must capture getter replies alongside the bounded setter trace, distinguishing
+an unstable read from persistent collateral state before changing recovery
+policy. No device reads, setters, or fault injection were performed for this audit.
