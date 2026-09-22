@@ -26,5 +26,9 @@ tests rejection of copyleft-only/unknown expressions and the asset exception.
 The sole font exception is scoped to `epaint_default_fonts`: its Rust code has
 a permissive choice, while its bundled fonts retain OFL-1.1 and Ubuntu-font-1.0
 obligations. This checker does not produce the notices needed to distribute
-those fonts or other dependencies. It supplements, and does not replace, the
+those fonts or other dependencies. The supplied font notices and embedded
+copyright attributions are now collected in
+`packaging/notices/epaint_default_fonts-0.36.2`, with source hashes. Release
+packaging still needs to include them and collect the other dependency notices.
+The checker supplements, and does not replace, the
 source-header audit that identified the historical HIDAPI discrepancy.
