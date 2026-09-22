@@ -85,8 +85,9 @@ impl LightingEditor {
         );
         let (tx, ctx, backups) = (self.tx.clone(), ctx.clone(), self.backup_dir.clone());
         std::thread::spawn(move || {
-            let result =
-                crate::screen_stream::run(&expected, &backups, &stop).map_err(|e| e.to_string());
+            let result = run_host_worker(|| {
+                crate::screen_stream::run(&expected, &backups, &stop).map_err(|e| e.to_string())
+            });
             let _ = tx.send(WorkerResult::StreamStopped(result));
             ctx.request_repaint();
         });
@@ -108,8 +109,10 @@ impl LightingEditor {
         self.set_status("Starting system playback lighting. Stop restores the previous effect.");
         let (tx, ctx, backups) = (self.tx.clone(), ctx.clone(), self.backup_dir.clone());
         std::thread::spawn(move || {
-            let result = crate::audio_stream::run(&expected, &desired, &backups, &stop)
-                .map_err(|e| e.to_string());
+            let result = run_host_worker(|| {
+                crate::audio_stream::run(&expected, &desired, &backups, &stop)
+                    .map_err(|e| e.to_string())
+            });
             let _ = tx.send(WorkerResult::StreamStopped(result));
             ctx.request_repaint();
         });
@@ -441,6 +444,97 @@ impl Drop for LightingEditor {
         if let Some(stop) = &self.stream_stop {
             stop.store(true, Ordering::Relaxed);
         }
+    }
+}
+
+fn run_host_worker(
+    operation: impl FnOnce() -> Result<Lighting, String>,
+) -> Result<Lighting, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation))
+        .unwrap_or_else(|_| Err("Host-lighting worker failed unexpectedly. Re-read the keyboard before further changes; restoration is unverified.".into()))
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn closing_frame(editor: &mut LightingEditor) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |ui| {
+            editor.handle_close(ui.ctx());
+            editor.poll_worker();
+            editor.handle_close(ui.ctx());
+        });
+        // This headless event test has no renderer to consume font textures.
+        output.textures_delta.clear();
+        output
+    }
+
+    fn streaming() -> LightingEditor {
+        let mut editor = LightingEditor::new();
+        editor.busy = true;
+        editor.stream_stop = Some(Arc::new(AtomicBool::new(false)));
+        editor
+    }
+
+    #[test]
+    fn window_close_waits_for_worker_and_keeps_restoration_error_visible() {
+        let mut editor = streaming();
+        let stop = editor.stream_stop.as_ref().unwrap().clone();
+        editor
+            .tx
+            .send(WorkerResult::StreamStopped(Err("restore failed".into())))
+            .unwrap();
+        let output = closing_frame(&mut editor);
+        let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(stop.load(Ordering::Relaxed));
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!commands.contains(&egui::ViewportCommand::Close));
+        assert!(editor.error);
+        assert!(!editor.busy);
+        assert_eq!(editor.status, "restore failed");
+    }
+
+    #[test]
+    fn window_closes_only_after_successful_restoration_message() {
+        let mut editor = streaming();
+        let output = closing_frame(&mut editor);
+        assert!(
+            !output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Close)
+        );
+        let mut raw = [0; 64];
+        raw[..8].copy_from_slice(&[0x87, 5, 4, 4, 7, 8, 8, 8]);
+        editor
+            .tx
+            .send(WorkerResult::StreamStopped(Ok(
+                Lighting::decode(&raw).unwrap()
+            )))
+            .unwrap();
+        let output = closing_frame(&mut editor);
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Close)
+        );
+        assert!(!editor.busy);
+    }
+
+    #[test]
+    fn panic_becomes_a_completion_error_instead_of_sticking_busy() {
+        assert!(
+            run_host_worker(|| panic!("simulated capture panic"))
+                .unwrap_err()
+                .contains("restoration is unverified")
+        );
     }
 }
 
