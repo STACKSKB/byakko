@@ -73,6 +73,15 @@ cover zero-change and one-change unreadable maps, unexpected observed changes,
 and invalid/reserved data. No fault injection or device setters were run for
 this change; the hardware recovery acceptance gate remains open.
 
+The subsequent complexity review found the same broad fallback still present
+in standalone `apply_keymaps`, separate from archive restoration. That path now
+uses the same pure slot-selection function. Its ordered layer loop still reads
+both maps before restoring Fn, reads both again before restoring base, and
+requires a complete final snapshot equal to the original. A failed intermediate
+read limits writes to that layer's planned changes; it does not establish that
+unrelated slots are correct. Final verification remains mandatory. The four
+device-free planner tests pass; this change has not been fault-injected on hardware.
+
 ## Research setter trace
 
 Fault-mode runs now reserve a new JSON trace file before writing and collect
