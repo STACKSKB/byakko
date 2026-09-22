@@ -25,6 +25,8 @@ pub mod macro_labels;
 #[cfg(any(feature = "gui", test))]
 pub(crate) mod macro_recorder;
 #[cfg(feature = "gui")]
+pub(crate) mod macro_state;
+#[cfg(feature = "gui")]
 pub mod macro_ui;
 pub mod macros;
 #[cfg(feature = "gui")]

@@ -11,6 +11,7 @@ use crate::{
     device, layout,
     macro_file::{self, MacroFile},
     macro_recorder::Recorder,
+    macro_state::MacroState,
     macros::{self, Macro, MacroEvent},
 };
 
@@ -42,17 +43,17 @@ mod lifecycle_tests {
         let mut first = MacroEditor::new();
         first.load_local_labels(directory.clone());
         first.names[49] = "Editor shortcuts".into();
-        let draft = first.draft.clone();
+        let draft = first.state.draft().clone();
         first.save_labels();
         assert!(!first.labels_error);
         assert_eq!(first.names, first.saved_names);
-        assert_eq!(first.draft, draft);
-        assert!(first.loaded.is_none() && first.observed.is_none());
+        assert_eq!(first.state.draft(), &draft);
+        assert!(!first.state.loaded());
         let mut second = MacroEditor::new();
         second.load_local_labels(directory);
         assert_eq!(second.names[49], "Editor shortcuts");
         assert_eq!(second.names, second.saved_names);
-        assert!(second.loaded.is_none() && second.observed.is_none());
+        assert!(!second.state.loaded());
         let saved = second.saved_names.clone();
         second.names[0] = "a".repeat(257);
         second.save_labels();
@@ -63,19 +64,19 @@ mod lifecycle_tests {
 
     fn pending() -> MacroEditor {
         let mut editor = MacroEditor::new();
-        editor.loaded = Some(Macro {
+        editor.state.seed_verified(Macro {
             repeat_count: 1,
             events: Vec::new(),
         });
-        editor.draft.repeat_count = 2;
-        editor.busy = true;
+        editor.state.draft_mut().repeat_count = 2;
+        editor.state.begin_apply().unwrap();
         editor
     }
 
     #[test]
     fn same_frame_close_and_apply_error_preserve_draft_and_error() {
         let mut editor = pending();
-        let draft = editor.draft.clone();
+        let draft = editor.state.draft().clone();
         editor
             .tx
             .send(WorkerResult::Applied {
@@ -101,10 +102,10 @@ mod lifecycle_tests {
                 .commands
                 .contains(&egui::ViewportCommand::CancelClose)
         );
-        assert!(!editor.busy);
-        assert!(!editor.trusted);
+        assert!(!editor.busy());
+        assert!(!editor.state.trusted());
         assert!(editor.error && editor.status.contains("readback failed"));
-        assert_eq!(editor.draft, draft);
+        assert_eq!(editor.state.draft(), &draft);
         assert!(editor.dirty());
     }
 
@@ -119,17 +120,18 @@ mod lifecycle_tests {
             })
             .unwrap();
         editor.poll_worker();
-        assert!(!editor.trusted);
+        assert!(!editor.state.trusted());
         assert!(editor.error && editor.dirty());
+        editor.state.begin_apply().unwrap();
         editor
             .tx
             .send(WorkerResult::Applied {
                 slot: 0,
-                result: macros::encode(&editor.draft),
+                result: macros::encode(editor.state.draft()),
             })
             .unwrap();
         editor.poll_worker();
-        assert!(editor.trusted);
+        assert!(editor.state.trusted());
         assert!(!editor.error && !editor.dirty());
     }
 
@@ -210,10 +212,7 @@ struct Recording {
 }
 
 pub struct MacroEditor {
-    slot: u8,
-    draft: Macro,
-    loaded: Option<Macro>,
-    observed: Option<Vec<u8>>,
+    state: MacroState,
     names: Vec<String>,
     play_modes: Vec<u8>,
     io_path: String,
@@ -224,9 +223,7 @@ pub struct MacroEditor {
     labels_error: bool,
     status: String,
     error: bool,
-    busy: bool,
     recording: Option<Recording>,
-    trusted: bool,
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
 }
@@ -235,13 +232,7 @@ impl MacroEditor {
     pub fn new_with_backup_dir(backup_dir: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
-            slot: 0,
-            draft: Macro {
-                repeat_count: 1,
-                events: Vec::new(),
-            },
-            loaded: None,
-            observed: None,
+            state: MacroState::new(),
             names: (0..50).map(|slot| format!("Macro {}", slot + 1)).collect(),
             play_modes: vec![0; 50],
             io_path: String::new(),
@@ -252,9 +243,7 @@ impl MacroEditor {
             labels_error: false,
             status: "Choose a slot, then load it from the keyboard.".into(),
             error: false,
-            busy: false,
             recording: None,
-            trusted: false,
             tx,
             rx,
         }
@@ -266,7 +255,7 @@ impl MacroEditor {
     }
 
     pub fn busy(&self) -> bool {
-        self.busy || self.recording.is_some()
+        self.state.busy() || self.recording.is_some()
     }
 
     /// Labels are local slot preferences, not data read from a keyboard.
@@ -307,34 +296,21 @@ impl MacroEditor {
     }
 
     pub fn handle_close(&self, ctx: &egui::Context) {
-        if self.busy && ctx.input(|input| input.viewport().close_requested()) {
+        if self.state.busy() && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
     }
 
     fn dirty(&self) -> bool {
-        self.loaded
-            .as_ref()
-            .is_some_and(|loaded| *loaded != self.draft)
+        self.state.dirty()
     }
 
     fn switch_slot(&mut self, next: u8) {
-        if next == self.slot {
-            return;
+        match self.state.switch_slot(next) {
+            Ok(true) => self.set_status(format!("Slot {next} selected. Load it before editing.")),
+            Ok(false) => {}
+            Err(error) => self.set_error(error),
         }
-        if self.dirty() {
-            self.set_error("Save or revert this draft before changing slots.");
-            return;
-        }
-        self.slot = next;
-        self.loaded = None;
-        self.observed = None;
-        self.trusted = false;
-        self.draft = Macro {
-            repeat_count: 1,
-            events: Vec::new(),
-        };
-        self.set_status(format!("Slot {next} selected. Load it before editing."));
     }
 
     fn set_status(&mut self, message: impl Into<String>) {
@@ -348,13 +324,14 @@ impl MacroEditor {
     }
 
     fn load(&mut self, ctx: &egui::Context) {
-        if self.busy() || self.dirty() {
+        if self.recording.is_some() {
             return;
         }
-        let slot = self.slot;
+        let Ok(slot) = self.state.begin_read() else {
+            return;
+        };
         let tx = self.tx.clone();
         let ctx = ctx.clone();
-        self.busy = true;
         self.set_status(format!("Reading macro slot {slot}…"));
         std::thread::spawn(move || {
             let result =
@@ -368,107 +345,78 @@ impl MacroEditor {
         if self.busy() || !self.dirty() {
             return;
         }
-        let Some(expected) = self.observed.clone() else {
-            self.set_error("Load this macro slot before applying changes.");
-            return;
+        let request = match self.state.begin_apply() {
+            Ok(request) => request,
+            Err(error) => {
+                self.set_error(error);
+                return;
+            }
         };
-        if let Err(error) = macros::encode(&self.draft) {
-            self.set_error(error);
-            return;
-        }
-        let slot = self.slot;
-        let draft = self.draft.clone();
         let backup_dir = self.backup_dir.clone();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
-        self.busy = true;
-        self.set_status(format!("Backing up, writing, and verifying slot {slot}…"));
+        self.set_status(format!(
+            "Backing up, writing, and verifying slot {}…",
+            request.slot
+        ));
         std::thread::spawn(move || {
             let result = macro_worker(|| {
-                device::apply_macro(slot, &expected, &draft, &backup_dir)
+                device::apply_macro(request.slot, &request.expected, &request.draft, &backup_dir)
                     .map_err(|error| error.to_string())
             });
-            let _ = tx.send(WorkerResult::Applied { slot, result });
+            let _ = tx.send(WorkerResult::Applied {
+                slot: request.slot,
+                result,
+            });
             ctx.request_repaint();
         });
     }
 
     fn poll_worker(&mut self) {
         while let Ok(message) = self.rx.try_recv() {
-            self.busy = false;
             match message {
-                WorkerResult::Loaded { slot, result } if slot == self.slot => {
-                    match result {
-                        Ok(bytes) => match macros::decode(&bytes) {
-                            Ok(value) => {
-                                self.loaded = Some(value.clone());
-                                self.draft = value;
-                                self.observed = Some(bytes);
-                                self.trusted = true;
-                                self.set_status(format!("Slot {slot} loaded. Edit events or bind it to the selected key."));
-                            }
-                            Err(error) => {
-                                self.trusted = false;
-                                self.set_error(format!("Slot {slot} could not be decoded: {error}"))
-                            }
-                        },
-                        Err(error) => {
-                            self.trusted = false;
-                            self.set_error(format!("Slot {slot} read failed: {error}"));
-                        }
+                WorkerResult::Loaded { slot, result } => {
+                    match self.state.complete_read(slot, result) {
+                        Ok(()) => self.set_status(format!(
+                            "Slot {slot} loaded. Edit events or bind it to the selected key."
+                        )),
+                        Err(error) => self.set_error(error),
                     }
                 }
-                WorkerResult::Applied { slot, result } if slot == self.slot => match result {
-                    Ok(bytes) => {
-                        if macros::encode(&self.draft).as_ref() != Ok(&bytes) {
-                            self.trusted = false;
-                            self.set_error("Macro worker returned unexpected bytes; device state is unverified. Draft retained.");
-                            continue;
-                        }
-                        self.observed = Some(bytes);
-                        self.loaded = Some(self.draft.clone());
-                        self.trusted = true;
-                        self.set_status(format!(
+                WorkerResult::Applied { slot, result } => {
+                    match self.state.complete_apply(slot, result) {
+                        Ok(()) => self.set_status(format!(
                             "Slot {slot} saved and read back. Backup in {}",
                             self.backup_dir.display()
-                        ));
+                        )),
+                        Err(error) => self.set_error(error),
                     }
-                    Err(error) => {
-                        self.trusted = false;
-                        self.set_error(format!("Slot {slot} apply failed: {error}"));
-                    }
-                },
-                _ => {
-                    self.trusted = false;
-                    self.set_error("A macro operation returned for another slot; draft preserved.")
                 }
             }
         }
     }
 
     fn revert(&mut self) {
-        if let Some(value) = self.loaded.clone() {
-            self.draft = value;
+        if self.state.revert() {
             self.set_status("Draft reverted to the last loaded or verified macro.");
         }
     }
-
     fn export_json(&mut self) {
         let path = self.io_path.trim();
         if path.is_empty() {
             self.set_error("Enter an export file path first.");
             return;
         }
-        if let Err(error) = macros::encode(&self.draft) {
+        if let Err(error) = macros::encode(self.state.draft()) {
             self.set_error(error);
             return;
         }
         let file = MacroFile {
             format_version: 1,
-            slot: self.slot,
-            name: self.names[self.slot as usize].clone(),
-            play_mode: self.play_modes[self.slot as usize],
-            macro_data: self.draft.clone(),
+            slot: self.state.slot(),
+            name: self.names[self.state.slot() as usize].clone(),
+            play_mode: self.play_modes[self.state.slot() as usize],
+            macro_data: self.state.draft().clone(),
         };
         let result = macro_file::save_new(std::path::Path::new(path), &file);
         match result {
@@ -483,25 +431,22 @@ impl MacroEditor {
             self.set_error("Enter an import file path first.");
             return;
         }
-        if self.loaded.is_none() {
-            self.set_error(
-                "Load this slot before importing, so its current bytes are backed up before apply.",
-            );
-            return;
-        }
-        if self.dirty() {
-            self.set_error("Save or revert the current draft before importing another file.");
+        if let Err(error) = self.state.can_import() {
+            self.set_error(error);
             return;
         }
         let result = macro_file::load(std::path::Path::new(path));
         match result {
             Ok(file) => {
-                self.draft = file.macro_data;
-                self.names[self.slot as usize] = file.name;
-                self.play_modes[self.slot as usize] = file.play_mode;
+                if let Err(error) = self.state.import_draft(file.macro_data) {
+                    self.set_error(error);
+                    return;
+                }
+                self.names[self.state.slot() as usize] = file.name;
+                self.play_modes[self.state.slot() as usize] = file.play_mode;
                 self.set_status(format!(
                     "Imported draft from {path} into slot {}. Review it before applying.",
-                    self.slot
+                    self.state.slot()
                 ));
             }
             Err(error) => self.set_error(format!("Import failed: {error}")),
@@ -509,11 +454,11 @@ impl MacroEditor {
     }
 
     fn start_recording(&mut self, ctx: &egui::Context) -> bool {
-        if self.busy() || self.loaded.is_none() {
+        if self.busy() || !self.state.loaded() {
             self.set_error("Load a slot and finish other work before recording.");
             return false;
         }
-        if let Err(error) = macros::encode(&self.draft) {
+        if let Err(error) = macros::encode(self.state.draft()) {
             self.set_error(format!("Cannot append recording to this draft: {error}"));
             return false;
         }
@@ -541,7 +486,7 @@ impl MacroEditor {
             return;
         };
         let now = ctx.input(|input| input.time);
-        let outcome = recording.core.stop(&mut self.draft, now);
+        let outcome = recording.core.stop(self.state.draft_mut(), now);
         let suffix = if outcome == crate::macro_recorder::StopOutcome::PauseTooLong {
             " A pause exceeded 65,535 ms; final release delay was set to zero."
         } else {
@@ -563,7 +508,7 @@ impl MacroEditor {
     ) -> Result<(), String> {
         recording
             .core
-            .transition(&mut self.draft, usage, down, now)
+            .transition(self.state.draft_mut(), usage, down, now)
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
@@ -737,10 +682,10 @@ impl MacroEditor {
                             ui.label(RichText::new(label).small().strong().color(MUTED));
                         }
                         ui.end_row();
-                        let count = self.draft.events.len();
+                        let count = self.state.draft().events.len();
                         for index in 0..count {
                             ui.label(format!("{:02}", index + 1));
-                            let event = &mut self.draft.events[index];
+                            let event = &mut self.state.draft_mut().events[index];
                             let mut kind = EventKind::of(event);
                             egui::ComboBox::from_id_salt(("macro_kind", index))
                                 .selected_text(kind.label())
@@ -825,10 +770,10 @@ impl MacroEditor {
                     });
             });
         match action {
-            Some(RowAction::Up(index)) => self.draft.events.swap(index, index - 1),
-            Some(RowAction::Down(index)) => self.draft.events.swap(index, index + 1),
+            Some(RowAction::Up(index)) => self.state.draft_mut().events.swap(index, index - 1),
+            Some(RowAction::Down(index)) => self.state.draft_mut().events.swap(index, index + 1),
             Some(RowAction::Remove(index)) => {
-                self.draft.events.remove(index);
+                self.state.draft_mut().events.remove(index);
             }
             None => {}
         }
@@ -858,7 +803,7 @@ impl MacroEditor {
 
             ui.horizontal(|ui| {
                 ui.label(RichText::new("SLOT").small().strong().color(MUTED));
-                let mut candidate = self.slot;
+                let mut candidate = self.state.slot();
                 let changed = ui.add_enabled(can_work, egui::DragValue::new(&mut candidate).range(0..=49).speed(1)).changed();
                 if changed {
                     self.switch_slot(candidate);
@@ -867,14 +812,14 @@ impl MacroEditor {
                 if ui.add_enabled(load_enabled, egui::Button::new("LOAD SELECTED · Ctrl+L")).clicked() {
                     self.load(ui.ctx());
                 }
-                if self.busy {
+                if self.state.busy() {
                     ui.spinner();
                 }
-                ui.label(if self.loaded.is_some() { "Loaded" } else { "Not loaded" });
+                ui.label(if self.state.loaded() { "Loaded" } else { "Not loaded" });
             });
             ui.horizontal(|ui| {
                 ui.label("Name");
-                ui.add_enabled(can_work, egui::TextEdit::singleline(&mut self.names[self.slot as usize]).desired_width(220.0));
+                ui.add_enabled(can_work, egui::TextEdit::singleline(&mut self.names[self.state.slot() as usize]).desired_width(220.0));
                 ui.label(RichText::new("Local label").small().color(MUTED));
                 if ui.add_enabled(can_work && self.labels_dir.is_some() && self.names != self.saved_names,
                     egui::Button::new("SAVE LABELS")).clicked() {
@@ -892,43 +837,43 @@ impl MacroEditor {
                 ui.label("Play mode");
                 ui.add_enabled_ui(can_work, |ui| {
                     egui::ComboBox::from_id_salt("macro_play_mode")
-                        .selected_text(mode_name(self.play_modes[self.slot as usize]))
+                        .selected_text(mode_name(self.play_modes[self.state.slot() as usize]))
                         .show_ui(ui, |ui| {
                             for mode in 0..=2 {
-                                ui.selectable_value(&mut self.play_modes[self.slot as usize], mode, mode_name(mode));
+                                ui.selectable_value(&mut self.play_modes[self.state.slot() as usize], mode, mode_name(mode));
                             }
                         });
                 });
                 ui.label("Repeat count");
-                ui.add_enabled(can_work && self.loaded.is_some(), egui::DragValue::new(&mut self.draft.repeat_count).range(0..=u16::MAX));
+                ui.add_enabled(can_work && self.state.loaded(), egui::DragValue::new(&mut self.state.draft_mut().repeat_count).range(0..=u16::MAX));
             });
             ui.add_space(8.0);
 
             ui.label(RichText::new("EVENT STREAM").small().strong().color(MUTED));
-            ui.add_enabled_ui(can_work && self.loaded.is_some(), |ui| {
+            ui.add_enabled_ui(can_work && self.state.loaded(), |ui| {
                 self.event_grid(ui);
                 ui.horizontal(|ui| {
                     if ui.button("+ KEY PAIR").clicked() {
-                        self.draft.events.extend([
+                        self.state.draft_mut().events.extend([
                             MacroEvent::Key { usage: 4, down: true, delay_ms: 50 },
                             MacroEvent::Key { usage: 4, down: false, delay_ms: 0 },
                         ]);
                     }
                     if ui.button("+ MOUSE PAIR").clicked() {
-                        self.draft.events.extend([
+                        self.state.draft_mut().events.extend([
                             MacroEvent::MouseButton { button: 240, down: true, delay_ms: 50 },
                             MacroEvent::MouseButton { button: 240, down: false, delay_ms: 0 },
                         ]);
                     }
                     if ui.button("+ MOVE").clicked() {
-                        self.draft.events.push(EventKind::Move.default_event());
+                        self.state.draft_mut().events.push(EventKind::Move.default_event());
                     }
                 });
             });
-            let encoded = macros::encode(&self.draft);
-            let encoded_size = encoded_size(&self.draft);
+            let encoded = macros::encode(self.state.draft());
+            let encoded_size = encoded_size(self.state.draft());
             match &encoded {
-                Ok(_) => ui.label(RichText::new(format!("{} event(s) · {encoded_size}/248 encoded bytes", self.draft.events.len())).color(MUTED)),
+                Ok(_) => ui.label(RichText::new(format!("{} event(s) · {encoded_size}/248 encoded bytes", self.state.draft().events.len())).color(MUTED)),
                 Err(error) => ui.label(RichText::new(format!("{encoded_size}/248 encoded bytes · Cannot save: {error}")).color(ACCENT)),
             };
             ui.add_space(8.0);
@@ -940,12 +885,12 @@ impl MacroEditor {
                         self.stop_recording(ui.ctx(), "Recording stopped; held keys were released in the draft.", false);
                     }
                 } else {
-                    let label = if self.draft.events.is_empty() {
+                    let label = if self.state.draft().events.is_empty() {
                         "START INTO EMPTY DRAFT"
                     } else {
                         "APPEND RECORDING"
                     };
-                    if ui.add_enabled(can_work && self.loaded.is_some() && encoded.is_ok(), egui::Button::new(label)).clicked() {
+                    if ui.add_enabled(can_work && self.state.loaded() && encoded.is_ok(), egui::Button::new(label)).clicked() {
                         just_started = self.start_recording(ui.ctx());
                     }
                 }
@@ -973,10 +918,10 @@ impl MacroEditor {
                 if ui.add_enabled(can_work && self.dirty(), egui::Button::new("REVERT DRAFT")).clicked() {
                     self.revert();
                 }
-                let clean = self.trusted && self.observed.is_some() && self.loaded.is_some() && !self.dirty();
+                let clean = self.state.trusted() && !self.dirty();
                 if ui.add_enabled(can_work && clean, egui::Button::new("BIND SELECTED KEY")).clicked() {
-                    binding = Some([9, self.play_modes[self.slot as usize], self.slot, 0]);
-                    self.set_status(format!("Macro slot {} selected for the current key. Apply the keymap to persist its binding.", self.slot));
+                    binding = Some([9, self.play_modes[self.state.slot() as usize], self.state.slot(), 0]);
+                    self.set_status(format!("Macro slot {} selected for the current key. Apply the keymap to persist its binding.", self.state.slot()));
                 }
             });
             ui.label(RichText::new(format!("Verified writes create a before-image in {}", self.backup_dir.display())).small().color(MUTED));
@@ -985,10 +930,10 @@ impl MacroEditor {
             ui.label(RichText::new("JSON FILE").small().strong().color(MUTED));
             ui.horizontal(|ui| {
                 ui.add_enabled(can_work, egui::TextEdit::singleline(&mut self.io_path).hint_text("Full .json path").desired_width(300.0));
-                if ui.add_enabled(can_work && self.loaded.is_some() && !self.dirty(), egui::Button::new("IMPORT DRAFT")).clicked() {
+                if ui.add_enabled(can_work && self.state.loaded() && !self.dirty(), egui::Button::new("IMPORT DRAFT")).clicked() {
                     self.import_json();
                 }
-                if ui.add_enabled(can_work && self.loaded.is_some() && encoded.is_ok(), egui::Button::new("EXPORT NEW FILE")).clicked() {
+                if ui.add_enabled(can_work && self.state.loaded() && encoded.is_ok(), egui::Button::new("EXPORT NEW FILE")).clicked() {
                     self.export_json();
                 }
             });
@@ -1182,7 +1127,7 @@ mod recording_tests {
         use eframe::egui::{self, Event, Modifiers};
         let ctx = egui::Context::default();
         let mut editor = MacroEditor::new();
-        editor.loaded = Some(editor.draft.clone());
+        editor.state.seed_verified(editor.state.draft().clone());
         let id = egui::Id::new("test capture pad");
         let mut frame = |time, focused, events, start| {
             let input = egui::RawInput {
@@ -1225,7 +1170,8 @@ mod recording_tests {
         assert!(editor.recording.is_none());
         assert!(!editor.busy());
         let keys: Vec<_> = editor
-            .draft
+            .state
+            .draft()
             .events
             .iter()
             .map(|event| match event {
@@ -1234,7 +1180,7 @@ mod recording_tests {
             })
             .collect();
         assert_eq!(keys, [(224, true), (4, true), (4, false), (224, false)]);
-        assert!(macros::encode(&editor.draft).is_ok());
+        assert!(macros::encode(editor.state.draft()).is_ok());
     }
 
     #[test]
@@ -1251,7 +1197,7 @@ mod recording_tests {
         use eframe::egui::{self, Event, PointerButton, Pos2};
         let ctx = egui::Context::default();
         let mut editor = MacroEditor::new();
-        editor.loaded = Some(editor.draft.clone());
+        editor.state.seed_verified(editor.state.draft().clone());
         let id = egui::Id::new("mouse capture pad");
         let mut frame = |time, events| {
             let input = egui::RawInput {
@@ -1299,7 +1245,8 @@ mod recording_tests {
             }],
         );
         let events: Vec<_> = editor
-            .draft
+            .state
+            .draft()
             .events
             .iter()
             .filter_map(|event| match event {
@@ -1309,14 +1256,14 @@ mod recording_tests {
             .collect();
         assert_eq!(events, [(240, true), (240, false)]);
         assert!(matches!(
-            editor.draft.events.first(),
+            editor.state.draft().events.first(),
             Some(MacroEvent::Key {
                 usage: 224,
                 down: true,
                 ..
             })
         ));
-        assert!(macros::encode(&editor.draft).is_ok());
+        assert!(macros::encode(editor.state.draft()).is_ok());
     }
 
     #[test]
@@ -1324,7 +1271,7 @@ mod recording_tests {
         use eframe::egui::{self, Event, PointerButton, Pos2};
         let ctx = egui::Context::default();
         let mut editor = MacroEditor::new();
-        editor.loaded = Some(editor.draft.clone());
+        editor.state.seed_verified(editor.state.draft().clone());
         let id = egui::Id::new("outside mouse pad");
         let mut frame = |time, events| {
             let input = egui::RawInput {
@@ -1365,7 +1312,7 @@ mod recording_tests {
         );
         assert!(editor.recording.is_none());
         assert!(matches!(
-            editor.draft.events.last(),
+            editor.state.draft().events.last(),
             Some(MacroEvent::MouseButton {
                 button: 241,
                 down: false,
@@ -1379,9 +1326,10 @@ mod recording_tests {
         use eframe::egui::{self, Pos2};
         let ctx = egui::Context::default();
         let mut editor = MacroEditor::new();
-        editor.loaded = Some(editor.draft.clone());
+        editor.state.seed_verified(editor.state.draft().clone());
         let mut core = Recorder::new(1.0);
-        core.transition(&mut editor.draft, 242, true, 1.0).unwrap();
+        core.transition(editor.state.draft_mut(), 242, true, 1.0)
+            .unwrap();
         editor.recording = Some(Recording {
             core,
             modifiers: egui::Modifiers::NONE,
@@ -1405,7 +1353,7 @@ mod recording_tests {
         output.textures_delta.clear();
         assert!(editor.recording.is_none());
         assert!(matches!(
-            editor.draft.events.last(),
+            editor.state.draft().events.last(),
             Some(MacroEvent::MouseButton {
                 button: 242,
                 down: false,
