@@ -160,14 +160,18 @@ pub fn snapshot() -> Result<Snapshot> {
 
 fn snapshot_unlocked() -> Result<Snapshot> {
     let (_, device) = open_unique()?;
-    let v = read_payload(&device, 0x80, 0, 0)?;
-    let p = read_payload(&device, 0x85, 0, 0)?;
+    snapshot_on_device(&device)
+}
+
+fn snapshot_on_device(device: &HidDevice) -> Result<Snapshot> {
+    let v = read_payload(device, 0x80, 0, 0)?;
+    let p = read_payload(device, 0x85, 0, 0)?;
     if v[0] != 0x80 || p[0] != 0x85 {
         return Err("Unrelated identity response; close other configurators".into());
     }
-    let base = read_matrix(&device, 0x89, p[1])?;
-    let function = read_matrix(&device, 0x90, 0)?;
-    if base != read_matrix(&device, 0x89, p[1])? || function != read_matrix(&device, 0x90, 0)? {
+    let base = read_matrix(device, 0x89, p[1])?;
+    let function = read_matrix(device, 0x90, 0)?;
+    if base != read_matrix(device, 0x89, p[1])? || function != read_matrix(device, 0x90, 0)? {
         return Err("Keymap changed between repeated reads; backup not trusted".into());
     }
     Ok(Snapshot {
@@ -634,15 +638,19 @@ pub fn read_picture() -> Result<Vec<[u8; 3]>> {
 
 fn read_picture_unlocked() -> Result<Vec<[u8; 3]>> {
     let (_, device) = open_unique()?;
+    read_picture_on_device(&device)
+}
+
+fn read_picture_on_device(device: &HidDevice) -> Result<Vec<[u8; 3]>> {
     let mut previous = None;
     for _ in 0..2 {
         let mut pages = Vec::new();
         for page in 0..6 {
-            let barrier = read_payload(&device, 0x80, 0, 0)?;
+            let barrier = read_payload(device, 0x80, 0, 0)?;
             if barrier[0] != 0x80 {
                 return Err("Picture identity barrier failed".into());
             }
-            let bytes = read_payload(&device, 0x8c, 0, page)?;
+            let bytes = read_payload(device, 0x8c, 0, page)?;
             if bytes == barrier {
                 return Err("Picture read returned stale identity".into());
             }
@@ -657,6 +665,49 @@ fn read_picture_unlocked() -> Result<Vec<[u8; 3]>> {
         previous = Some(colors);
     }
     Ok(previous.expect("two reads"))
+}
+
+/// Capture all supported local configuration data without sending setters.
+/// One handle and lock cover both complete sweeps. Other Byakko processes cannot
+/// intervene; an external configurator must still be closed. Progress counts
+/// completed macro slots across the two sweeps, out of 100.
+pub fn capture_configuration(
+    mut progress: impl FnMut(usize, usize),
+) -> Result<crate::configuration::Configuration> {
+    let _lock = transaction_lock()?;
+    let (_, device) = open_unique()?;
+    let mut capture = |pass: usize| -> Result<crate::configuration::Configuration> {
+        let keymaps = snapshot_on_device(&device)?;
+        if keymaps.firmware != 0x0100 || keymaps.profile != 0 {
+            return Err("Configuration capture requires firmware 0x0100, profile 0".into());
+        }
+        let lighting = read_lighting_on_device(&device)?;
+        let settings = read_settings_on_device(&device)?;
+        let picture = read_picture_on_device(&device)?;
+        let mut macros = Vec::with_capacity(50);
+        for slot in 0..50 {
+            macros.push(read_macro_on_device(&device, slot)?);
+            progress(pass * 50 + usize::from(slot) + 1, 100);
+        }
+        // Check identity and maps again after the longer macro sweep.
+        if snapshot_on_device(&device)? != keymaps {
+            return Err("Keyboard identity or keymaps changed during configuration capture".into());
+        }
+        Ok(crate::configuration::Configuration {
+            keymaps,
+            macros,
+            lighting,
+            picture,
+            settings,
+        })
+    };
+    let first = capture(0)?;
+    let second = capture(1)?;
+    if first != second {
+        return Err("Configuration changed between complete captures; no archive saved".into());
+    }
+    crate::configuration::validate(&first)?;
+    Ok(first)
 }
 
 /// Replace custom picture colors, preserving every unedited matrix slot.

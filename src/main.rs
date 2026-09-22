@@ -6,6 +6,45 @@ fn run() -> byakko::device::Result<()> {
         println!(
             "Byakko — native Nia87 configurator\n\n  gui                         Open native workbench\n  devices                     Enumerate matching HID collections\n  inspect                     Read version/profile\n  inspect-lighting             Read global lighting\n  inspect-settings             Read debounce, auto OS, sleep and flags\n  export PATH                  Save raw keymap snapshot to new file\n  export-macro SLOT PATH       Save raw macro bytes to new file\n  export-picture PATH          Save RGB picture to new file\n  restore-keymaps BACKUP        Restore a verified keymap backup\n  restore-macro BACKUP          Restore a macro backup\n\nResearch round-trip checks (write, verify and restore):\n  verify-keymap-roundtrip\n  verify-fn-roundtrip\n  verify-mixed-roundtrip\n  verify-bindings-roundtrip\n  verify-fn-bindings-roundtrip\n  verify-macro-roundtrip\n  verify-lighting-roundtrip\n  verify-picture-roundtrip\n  verify-settings-roundtrip\n  verify-sleep-roundtrip\n\nKeymap writes are paced at one second per changed binding."
         );
+        println!(
+            "\n  capture-configuration PATH  Save verified complete device archive\n  inspect-configuration PATH  Validate archive and show counts (no device I/O)"
+        );
+        return Ok(());
+    }
+    if args.len() == 2 && args[0] == "capture-configuration" {
+        let path = std::path::Path::new(&args[1]);
+        if path.exists() {
+            return Err("Archive path already exists; choose a new file".into());
+        }
+        let configuration = byakko::device::capture_configuration(|done, total| {
+            if done % 10 == 0 {
+                eprintln!("Configuration capture: {done}/{total} macro slot reads");
+            }
+        })?;
+        byakko::configuration::save_new(path, &configuration)?;
+        println!(
+            "Saved both keymaps, all 50 macro slots, current picture, lighting and settings. Two complete captures matched; no setters sent."
+        );
+        return Ok(());
+    }
+    if args.len() == 2 && args[0] == "inspect-configuration" {
+        let archive = byakko::configuration::load(std::path::Path::new(&args[1]))?;
+        let occupied = archive
+            .macros
+            .iter()
+            .filter(|bytes| bytes.iter().any(|&b| b != 0))
+            .count();
+        println!(
+            "Nia87 firmware {:04x}, profile {}; {} base / {} Fn bindings; {} macro slots ({} nonempty); {} picture colors; lighting effect {}; settings present. Archive validated; no device I/O.",
+            archive.keymaps.firmware,
+            archive.keymaps.profile,
+            archive.keymaps.base.len(),
+            archive.keymaps.function.len(),
+            archive.macros.len(),
+            occupied,
+            archive.picture.len(),
+            archive.lighting.effect_id()
+        );
         return Ok(());
     }
     if args.as_slice() == ["verify-fn-roundtrip"] || args.as_slice() == ["verify-mixed-roundtrip"] {
