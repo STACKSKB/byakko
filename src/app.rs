@@ -940,6 +940,7 @@ impl eframe::App for Workbench {
         if self.device_busy() {
             ui.ctx().request_repaint_after(Duration::from_millis(100));
         }
+        self.lighting_editor.handle_close(ui.ctx());
     }
 }
 

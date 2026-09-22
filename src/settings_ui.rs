@@ -28,6 +28,7 @@ pub struct SettingsEditor {
     draft_debounce: Option<u8>,
     draft_auto: Option<bool>,
     draft_sleep: Option<[u16; 4]>,
+    draft_backlight: Option<bool>,
     backup_dir: PathBuf,
     status: String,
     error: bool,
@@ -46,6 +47,7 @@ impl SettingsEditor {
             draft_debounce: None,
             draft_auto: None,
             draft_sleep: None,
+            draft_backlight: None,
             backup_dir: std::env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
                 .join("backups"),
@@ -82,6 +84,13 @@ impl SettingsEditor {
             .as_ref()
             .zip(self.draft_sleep)
             .is_some_and(|(current, draft)| current.sleep_seconds() != draft)
+    }
+
+    fn backlight_dirty(&self) -> bool {
+        self.observed
+            .as_ref()
+            .zip(self.draft_backlight)
+            .is_some_and(|(current, draft)| current.with_backlight(draft) != *current)
     }
 
     fn valid_sleep(sleep: [u16; 4]) -> bool {
@@ -127,8 +136,12 @@ impl SettingsEditor {
             Setting::Debounce(_) => self.debounce_dirty(),
             Setting::AutoOs(_) => self.auto_dirty(),
             Setting::Sleep(value) => self.sleep_dirty() && Self::valid_sleep(value),
+            Setting::Backlight(_) => self.backlight_dirty(),
         };
-        if !dirty || settings::write_report(setting).is_err() {
+        if !dirty
+            || (!matches!(setting, Setting::Backlight(_))
+                && settings::write_report(setting).is_err())
+        {
             return;
         }
         let Some(expected) = self.observed.clone() else {
@@ -151,6 +164,7 @@ impl SettingsEditor {
         let debounce_clean = !self.debounce_dirty();
         let auto_clean = !self.auto_dirty();
         let sleep_clean = !self.sleep_dirty();
+        let backlight_clean = !self.backlight_dirty();
         if debounce_clean || matches!(applied, Some(Setting::Debounce(_))) {
             self.draft_debounce = Some(updated.debounce());
         }
@@ -159,6 +173,9 @@ impl SettingsEditor {
         }
         if sleep_clean || matches!(applied, Some(Setting::Sleep(_))) {
             self.draft_sleep = Some(updated.sleep_seconds());
+        }
+        if backlight_clean || matches!(applied, Some(Setting::Backlight(_))) {
+            self.draft_backlight = Some(updated.backlight_enabled());
         }
         self.observed = Some(updated);
         self.trusted = true;
@@ -313,6 +330,25 @@ impl SettingsEditor {
                             self.draft_sleep = Some(device_sleep);
                         }
                     });
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("BACKLIGHT").small().strong().color(MUTED));
+                    ui.horizontal(|ui| {
+                        ui.label(if observed.backlight_enabled() { "Device on" } else { "Device off" });
+                        if let Some(draft) = self.draft_backlight.as_mut() {
+                            ui.add_enabled_ui(can_work && self.trusted, |ui| {
+                                ui.checkbox(draft, "Enable backlight");
+                            });
+                        }
+                        if ui.add_enabled(can_work && self.trusted && self.backlight_dirty(), egui::Button::new("APPLY BACKLIGHT")).clicked()
+                            && let Some(value) = self.draft_backlight
+                        {
+                            self.start_apply(ui.ctx(), Setting::Backlight(value));
+                        }
+                        if ui.add_enabled(can_work && self.backlight_dirty(), egui::Button::new("REVERT")).clicked() {
+                            self.draft_backlight = Some(observed.backlight_enabled());
+                        }
+                    });
+                    ui.label(RichText::new("Enabling also turns off the keyboard's power-save option, which suppresses lighting. Other option bits are preserved.").small().color(MUTED));
                     ui.add_space(8.0);
                     ui.label(RichText::new("READ-ONLY / STORED VALUES").small().strong().color(MUTED));
                     egui::Grid::new("settings_read_only")

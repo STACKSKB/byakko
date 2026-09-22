@@ -16,6 +16,8 @@ pub mod macros;
 pub mod picture_ui;
 pub mod profiles;
 pub mod protocol;
+pub mod screen_sample;
+pub mod screen_stream;
 pub mod settings;
 #[cfg(feature = "gui")]
 pub mod settings_ui;

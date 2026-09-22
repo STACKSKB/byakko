@@ -194,6 +194,78 @@ pub fn read_settings() -> Result<crate::settings::Settings> {
     read_settings_on_device(&device)
 }
 
+/// Exclusive host-lighting session. The lock covers setup, every frame, and
+/// restoration. Explicit finish reports restoration errors to the caller.
+pub struct ScreenSession {
+    _lock: std::fs::File,
+    device: HidDevice,
+    saved: crate::lighting::Lighting,
+    active: crate::lighting::Lighting,
+    backups: std::path::PathBuf,
+    finished: bool,
+}
+
+impl ScreenSession {
+    pub fn start(expected: &crate::lighting::Lighting, backups: &std::path::Path) -> Result<Self> {
+        let lock = transaction_lock()?;
+        let (_, device) = open_unique()?;
+        if !read_settings_on_device(&device)?.backlight_enabled() {
+            return Err("Enable the backlight in Settings before starting screen color".into());
+        }
+        let desired = crate::lighting::LightingSetting {
+            effect_id: 21,
+            value: None,
+            speed: None,
+            option: None,
+            rgb: None,
+            dazzle: false,
+        };
+        // apply_lighting performs identity and expected-state checks before mutation.
+        let active = apply_lighting_unlocked(expected, &desired, backups)?;
+        Ok(Self {
+            _lock: lock,
+            device,
+            saved: expected.clone(),
+            active,
+            backups: backups.to_owned(),
+            finished: false,
+        })
+    }
+
+    pub fn send_color(&self, rgb: [u8; 3]) -> Result<()> {
+        let mut host = [0u8; 65];
+        host[1..].copy_from_slice(&crate::host_lighting::screen_report(rgb));
+        self.device.send_feature_report(&host)?;
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<crate::lighting::Lighting> {
+        let setting = self
+            .saved
+            .recognized_setting()
+            .ok_or("Unrecognized saved lighting")?;
+        // Expected-state checks prevent overwriting settings changed externally.
+        let restored = apply_lighting_unlocked(&self.active, &setting, &self.backups)?;
+        self.finished = true;
+        Ok(restored)
+    }
+
+    pub fn finish(mut self) -> Result<crate::lighting::Lighting> {
+        let result = self.restore();
+        // Do not silently repeat a failed write during Drop; report it to the UI.
+        self.finished = true;
+        result
+    }
+}
+
+impl Drop for ScreenSession {
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = self.restore();
+        }
+    }
+}
+
 fn read_settings_on_device(device: &HidDevice) -> Result<crate::settings::Settings> {
     let mut previous = None;
     for _ in 0..2 {
@@ -223,7 +295,15 @@ pub fn apply_setting(
 ) -> Result<crate::settings::Settings> {
     use crate::settings::{Setting, Settings};
     let _lock = transaction_lock()?;
-    let report = crate::settings::write_report(setting)?;
+    let target_options = match setting {
+        Setting::Backlight(enabled) => Some(expected.with_backlight(enabled)),
+        _ => None,
+    };
+    let report = if let Some(ref target) = target_options {
+        crate::settings::backlight_write_report(target.raw_reply(0x86).expect("options reply"))?
+    } else {
+        crate::settings::write_report(setting)?
+    };
     let (_, device) = open_unique()?;
     let version = read_payload(&device, 0x80, 0, 0)?;
     let profile = read_payload(&device, 0x85, 0, 0)?;
@@ -252,8 +332,21 @@ pub fn apply_setting(
             }
             Setting::Sleep(expected.sleep_seconds())
         }
+        Setting::Backlight(_) => {
+            replies[3] = target_options
+                .as_ref()
+                .expect("backlight target")
+                .raw_reply(0x86)
+                .expect("options reply")
+                .to_vec();
+            Setting::Backlight(expected.backlight_enabled())
+        }
     };
-    let restore_report = crate::settings::write_report(restore)?;
+    let restore_report = if matches!(setting, Setting::Backlight(_)) {
+        crate::settings::backlight_write_report(expected.raw_reply(0x86).expect("options reply"))?
+    } else {
+        crate::settings::write_report(restore)?
+    };
     let target = Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3])?;
     if &target == expected {
         return Ok(target);
@@ -373,6 +466,14 @@ pub fn apply_lighting(
     backup_dir: &std::path::Path,
 ) -> Result<crate::lighting::Lighting> {
     let _lock = transaction_lock()?;
+    apply_lighting_unlocked(expected, setting, backup_dir)
+}
+
+fn apply_lighting_unlocked(
+    expected: &crate::lighting::Lighting,
+    setting: &crate::lighting::LightingSetting,
+    backup_dir: &std::path::Path,
+) -> Result<crate::lighting::Lighting> {
     if expected.raw()[0] != crate::lighting::LED_READ_COMMAND
         || expected.recognized_setting().is_none()
     {
