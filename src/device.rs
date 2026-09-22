@@ -698,11 +698,10 @@ pub fn apply_keymaps(
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
         return Err("Cannot modify reserved padding slots".into());
     }
-    if expected.function != function {
-        return Err(
-            "Fn media replay passed, but broader verification awaits USB recovery. No writes sent."
-                .into(),
-        );
+    if (0..126)
+        .any(|slot| expected.base[slot] != base[slot] && expected.function[slot] != function[slot])
+    {
+        return Err("Changing both layers of the same key in one transaction is not yet supported; no writes sent".into());
     }
     let current = snapshot_unlocked()?;
     if &current != expected {
@@ -755,18 +754,17 @@ pub fn apply_keymaps(
     }
     let result = (|| -> Result<Snapshot> {
         // The official helper's captured final HID report for a Fn binding is
-        // the single-key 0x15 command with index 0. Apply Fn changes first so
-        // recovery can inspect both maps before restoring base slots.
-        for &(is_fn, slot, _, new) in &changes {
-            if is_fn {
-                write_binding(&device, true, 0, slot, new)?;
-            }
-        }
+        // the single-key 0x15 command with index 0.
         for &(is_fn, slot, _, new) in &changes {
             if is_fn {
                 continue;
             }
             write_binding(&device, false, current.profile, slot, new)?;
+        }
+        for &(is_fn, slot, _, new) in &changes {
+            if is_fn {
+                write_binding(&device, true, 0, slot, new)?;
+            }
         }
         let actual = snapshot_unlocked()?;
         if actual.base != base
@@ -833,6 +831,29 @@ pub fn apply_keymaps(
 
 #[cfg(test)]
 mod lighting_tests {
+    #[test]
+    fn mixed_layer_same_slot_is_rejected_before_device_access() {
+        let expected = super::Snapshot {
+            format_version: 1,
+            firmware: 0x100,
+            profile: 0,
+            base: vec![[0; 4]; 128],
+            function: vec![[0; 4]; 128],
+        };
+        let mut base = expected.base.clone();
+        let mut function = expected.function.clone();
+        base[91] = [0, 0, 0x72, 0];
+        function[91] = [0, 0, 0x73, 0];
+        let error = super::apply_keymaps(
+            &expected,
+            &base,
+            &function,
+            std::path::Path::new("unused-backup-path"),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("both layers of the same key"));
+    }
+
     #[test]
     fn operating_system_lock_excludes_second_handle_and_releases_on_drop() {
         let stamp = std::time::SystemTime::now()

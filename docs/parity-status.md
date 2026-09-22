@@ -7,7 +7,7 @@ This ledger separates implemented configuration storage from end-to-end behavior
 | Native product without JS, Electron or IoT helper | Rust/egui application builds and launches; direct HID reads/writes work with OEM helper stopped | Target-specific dependency/license audit and distributable packaging |
 | Linux configuration | Original hidraw adapter and full GUI pass Linux cross-target checks | Linux link/build, native GUI launch, hidraw permissions, hardware transactions |
 | Plug-and-play Nia87 TKL | Attached device auto-loads built-in 87-key geometry and fixed slots | Stronger board/revision identification, reconnect and multiple-device behavior; clean-machine run |
-| Base and Fn keymaps | Both maps read twice; base remap/restore and captured native Fn media replay pass complete readback | Recover current USB error and reverify state; Fn application transaction and action coverage, physical output and persistence |
+| Base and Fn keymaps | Both maps read twice; base remap/restore and captured native Fn media replay pass complete readback | Fn-only application transactions pass after USB recovery; mixed same-slot edits are guarded; broader action coverage, physical output and persistence remain |
 | Modifier, media and mouse actions | Pure codecs and catalogs implemented | Compare the Nia87-visible official action set, verify missing actions and physical output |
 | Macro storage | Long → short → empty replacement verified; stale-page regression fixed | Official replay comparison, other slots and boundary behavior |
 | Macro editor | Native event table, focused recorder, repeats/modes, import/export and saved-slot binding; three base binding modes read back and restored | Recorder GUI interaction validation, physical playback modes and timing |

@@ -100,3 +100,24 @@ The independent `examples/fn_capture_replay.rs` sent the same command through ou
 A follow-up F24 replay with a 100 ms interval stalled. Debugger stacks placed the main thread inside `HidD_GetManufacturerString`, called by enumeration within `open_unique`, rather than inside a binding report. Only its before snapshot was saved (`fn-replay-1790046859360046800-before.json`). The test was stopped. Optional manufacturer/product string requests have now been removed from Windows enumeration; device identification still uses VID/PID and HID capabilities.
 
 Subsequent configuration reads returned Windows error 31 (device not functioning), while PnP still listed the collections as present and OK. Restarting only `USB\\VID_3151&PID_4015&MI_02\\9&33655970&0&0002` was denied by Windows. **State after that interrupted follow-up has not been reverified**; do not report restoration for that run. After USB recovery, compare both maps with its saved before snapshot and restore any difference before more tests. Fn writes remain guarded pending that recovery and verification through the application transaction path. Physical Fn output remains untested.
+
+## Recovery after the user's USB replug
+
+The new complete snapshot `keymaps-after-user-replug.json` differed from the
+interrupted test's backup only at Fn slot 91: `00 00 73 00` (F24). Thus that
+write survived the physical replug; the interrupted restoration had not
+completed. The application restored the backup and verified both complete maps.
+
+The application transaction path then passed separate Fn F24 and Play/Pause
+write/readback/restore cycles, leaving the base map unchanged. Each restore
+matched the entire original snapshot. Optional USB string lookups remain removed.
+This supports enabling Fn edits and imports; physical output is still untested.
+
+Mixed edits assigning base F23 and Fn F24 to Pause in a single transaction
+failed full-map comparison. Changing write order, inserting a version-read
+barrier, and reopening a handle for each write did not resolve the mismatch.
+Every failed transaction verified restoration of both original maps. Those
+experimental workarounds were removed. The precise firmware/transport cause
+is unresolved; do not claim a proven timing or handle issue. The application
+now rejects simultaneous changes to both layers of the same physical slot
+before device access. `verify-fn-roundtrip` covers the supported Fn-only cases.

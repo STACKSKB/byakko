@@ -4,8 +4,35 @@ fn run() -> byakko::device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.as_slice() == ["--help"] || args.as_slice() == ["-h"] {
         println!(
-            "Byakko — native Nia87 configurator\n\n  gui                         Open native workbench\n  devices                     Enumerate matching HID collections\n  inspect                     Read version/profile\n  inspect-lighting             Read global lighting\n  inspect-settings             Read debounce, auto OS, sleep and flags\n  export PATH                  Save raw keymap snapshot to new file\n  export-macro SLOT PATH       Save raw macro bytes to new file\n  export-picture PATH          Save RGB picture to new file\n  restore-keymaps BACKUP        Restore a verified keymap backup\n  restore-macro BACKUP          Restore a macro backup\n\nResearch round-trip checks (write, verify and restore):\n  verify-keymap-roundtrip\n  verify-bindings-roundtrip\n  verify-macro-roundtrip\n  verify-lighting-roundtrip\n  verify-picture-roundtrip\n  verify-settings-roundtrip\n\nFn writes are currently disabled pending protocol verification."
+            "Byakko — native Nia87 configurator\n\n  gui                         Open native workbench\n  devices                     Enumerate matching HID collections\n  inspect                     Read version/profile\n  inspect-lighting             Read global lighting\n  inspect-settings             Read debounce, auto OS, sleep and flags\n  export PATH                  Save raw keymap snapshot to new file\n  export-macro SLOT PATH       Save raw macro bytes to new file\n  export-picture PATH          Save RGB picture to new file\n  restore-keymaps BACKUP        Restore a verified keymap backup\n  restore-macro BACKUP          Restore a macro backup\n\nResearch round-trip checks (write, verify and restore):\n  verify-keymap-roundtrip\n  verify-fn-roundtrip\n  verify-bindings-roundtrip\n  verify-macro-roundtrip\n  verify-lighting-roundtrip\n  verify-picture-roundtrip\n  verify-settings-roundtrip\n\nSimultaneous changes to both layers of the same key are guarded."
         );
+        return Ok(());
+    }
+    if args.as_slice() == ["verify-fn-roundtrip"] {
+        let original = byakko::device::snapshot()?;
+        if original.base[91] != [0, 0, 0x48, 0] || original.function[91] != [0; 4] {
+            return Err("Expected original Pause fixture; no writes sent".into());
+        }
+        let backups = std::path::Path::new("Research/captures/backups");
+        for binding in [[0, 0, 0x73, 0], [3, 0, 205, 0]] {
+            let base = original.base.clone();
+            let mut function = original.function.clone();
+            function[91] = binding;
+            let written = byakko::device::apply_keymaps(&original, &base, &function, backups)?;
+            let restored = byakko::device::apply_keymaps(
+                &written,
+                &original.base,
+                &original.function,
+                backups,
+            )?;
+            if restored != original {
+                return Err("Complete Fn/base restoration mismatch".into());
+            }
+            println!(
+                "Fn {binding:?}: complete write/readback/restoration verified; base unchanged."
+            );
+        }
+        println!("Physical key output remains untested.");
         return Ok(());
     }
     if args.as_slice() == ["inspect-settings"] {
@@ -89,7 +116,7 @@ fn run() -> byakko::device::Result<()> {
             }
         }
         println!(
-            "All three base-layer macro binding modes passed complete readback and restoration. Fn writes and physical playback remain unverified."
+            "All three base-layer macro binding modes passed complete readback and restoration. Physical playback remains unverified."
         );
         return Ok(());
     }
