@@ -28,6 +28,38 @@ fn macro_worker<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String
 mod lifecycle_tests {
     use super::*;
 
+    #[test]
+    fn local_labels_survive_editor_restart_without_loading_device_data() {
+        let directory = std::env::temp_dir().join(format!(
+            "byakko-label-editor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut first = MacroEditor::new();
+        first.load_local_labels(directory.clone());
+        first.names[49] = "Editor shortcuts".into();
+        let draft = first.draft.clone();
+        first.save_labels();
+        assert!(!first.labels_error);
+        assert_eq!(first.names, first.saved_names);
+        assert_eq!(first.draft, draft);
+        assert!(first.loaded.is_none() && first.observed.is_none());
+        let mut second = MacroEditor::new();
+        second.load_local_labels(directory);
+        assert_eq!(second.names[49], "Editor shortcuts");
+        assert_eq!(second.names, second.saved_names);
+        assert!(second.loaded.is_none() && second.observed.is_none());
+        let saved = second.saved_names.clone();
+        second.names[0] = "a".repeat(257);
+        second.save_labels();
+        assert!(second.labels_error);
+        assert_eq!(second.saved_names, saved);
+        assert_eq!(second.names[0].len(), 257);
+    }
+
     fn pending() -> MacroEditor {
         let mut editor = MacroEditor::new();
         editor.loaded = Some(Macro {
@@ -186,6 +218,10 @@ pub struct MacroEditor {
     play_modes: Vec<u8>,
     io_path: String,
     backup_dir: PathBuf,
+    labels_dir: Option<PathBuf>,
+    saved_names: Vec<String>,
+    labels_status: String,
+    labels_error: bool,
     status: String,
     error: bool,
     busy: bool,
@@ -210,6 +246,10 @@ impl MacroEditor {
             play_modes: vec![0; 50],
             io_path: String::new(),
             backup_dir,
+            labels_dir: None,
+            saved_names: (0..50).map(|slot| format!("Macro {}", slot + 1)).collect(),
+            labels_status: String::new(),
+            labels_error: false,
             status: "Choose a slot, then load it from the keyboard.".into(),
             error: false,
             busy: false,
@@ -227,6 +267,43 @@ impl MacroEditor {
 
     pub fn busy(&self) -> bool {
         self.busy || self.recording.is_some()
+    }
+
+    /// Labels are local slot preferences, not data read from a keyboard.
+    pub fn load_local_labels(&mut self, directory: PathBuf) {
+        self.labels_dir = Some(directory.clone());
+        match crate::macro_labels::load_latest(&directory) {
+            Ok(Some(labels)) => {
+                self.names = labels.names;
+                self.saved_names = self.names.clone();
+                self.labels_status = "Local labels loaded.".into();
+                self.labels_error = false;
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.labels_status = format!("Local labels could not be loaded: {error}");
+                self.labels_error = true;
+            }
+        }
+    }
+
+    fn save_labels(&mut self) {
+        let Some(directory) = &self.labels_dir else {
+            return;
+        };
+        let result = crate::macro_labels::Labels::new(self.names.clone())
+            .and_then(|labels| crate::macro_labels::save_new(directory, &labels));
+        match result {
+            Ok(path) => {
+                self.saved_names = self.names.clone();
+                self.labels_status = format!("Local labels saved to {}", path.display());
+                self.labels_error = false;
+            }
+            Err(error) => {
+                self.labels_status = format!("Local label save failed: {error}");
+                self.labels_error = true;
+            }
+        }
     }
 
     pub fn handle_close(&self, ctx: &egui::Context) {
@@ -825,7 +902,18 @@ impl MacroEditor {
                 ui.label("Name");
                 ui.add_enabled(can_work, egui::TextEdit::singleline(&mut self.names[self.slot as usize]).desired_width(220.0));
                 ui.label(RichText::new("Local label").small().color(MUTED));
+                if ui.add_enabled(can_work && self.labels_dir.is_some() && self.names != self.saved_names,
+                    egui::Button::new("SAVE LABELS")).clicked() {
+                    self.save_labels();
+                }
             });
+            ui.label(RichText::new("Labels belong to Nia87 slots on this computer and are shared across Nia87 keyboards.").small().color(MUTED));
+            if self.names != self.saved_names {
+                ui.label(RichText::new("Local label changes have not been saved.").small().color(ACCENT));
+            }
+            if !self.labels_status.is_empty() {
+                ui.label(RichText::new(&self.labels_status).small().color(if self.labels_error { ACCENT } else { MUTED }));
+            }
             ui.horizontal(|ui| {
                 ui.label("Play mode");
                 ui.add_enabled_ui(can_work, |ui| {
