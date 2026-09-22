@@ -58,7 +58,7 @@ pub fn encode(macro_data: &Macro) -> Result<Vec<u8>, String> {
     bytes.extend_from_slice(&macro_data.repeat_count.to_le_bytes());
 
     for event in &macro_data.events {
-        match *event {
+        let delay_ms = match *event {
             MacroEvent::Key {
                 usage,
                 down,
@@ -69,9 +69,7 @@ pub fn encode(macro_data: &Macro) -> Result<Vec<u8>, String> {
                 }
                 bytes.push(usage);
                 bytes.push((if down { 0x80 } else { 0 }) | short_delay(delay_ms));
-                if delay_ms == 0 || delay_ms > 127 {
-                    bytes.extend_from_slice(&delay_ms.to_le_bytes());
-                }
+                delay_ms
             }
             MacroEvent::MouseButton {
                 button,
@@ -83,16 +81,15 @@ pub fn encode(macro_data: &Macro) -> Result<Vec<u8>, String> {
                 }
                 bytes.push(button);
                 bytes.push((if down { 0x80 } else { 0 }) | short_delay(delay_ms));
-                if delay_ms == 0 || delay_ms > 127 {
-                    bytes.extend_from_slice(&delay_ms.to_le_bytes());
-                }
+                delay_ms
             }
             MacroEvent::Move { dx, dy, delay_ms } => {
                 bytes.extend_from_slice(&[249, short_delay(delay_ms), dx as u8, dy as u8]);
-                if delay_ms == 0 || delay_ms > 127 {
-                    bytes.extend_from_slice(&delay_ms.to_le_bytes());
-                }
+                delay_ms
             }
+        };
+        if delay_ms == 0 || delay_ms > 127 {
+            bytes.extend_from_slice(&delay_ms.to_le_bytes());
         }
         if bytes.len() > SAFE_END {
             return Err(format!("macro exceeds {SAFE_END}-byte safe encoded limit"));
