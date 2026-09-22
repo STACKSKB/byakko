@@ -881,6 +881,9 @@ impl Workbench {
 
 impl eframe::App for Workbench {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Cancel a close while a stream is still owned, before processing its
+        // completion. A restoration error in this frame must remain visible.
+        self.lighting_editor.handle_close(ui.ctx());
         self.poll_worker();
         if !self.device_busy() {
             for (key, tab) in [
