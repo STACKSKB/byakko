@@ -1,5 +1,22 @@
 # Focused macro recording
 
+## Iced migration
+
+The Iced desktop now records keyboard edges and five pointer buttons into the
+shared core draft. Record input opens a dedicated capture view; Stop, window
+focus loss and close finish it. Widget-consumed clicks are excluded. Physical
+key codes retain keypad and left/right modifier identity when the windowing
+system supplies it. No global input hooks or background recording are used.
+
+The pure recorder takes integer milliseconds from the desktop clock, unlike
+the legacy frame timestamps described below. Measured waits follow the preceding
+action, fixed waits use the chosen positive value, and old draft events remain
+unchanged. Nia87 recordings reserve held releases and the policy tail within
+248 bytes. Invalid/oversized timing stops capture; the final held interval is
+set to zero and a notice is shown. See `iced-macro-acceptance.md` for verification.
+
+## Retained research application
+
 Load a macro slot before recording. Start recording to append to the local
 draft, then keep the capture pad focused. Recording does not write the keyboard;
 review the event stream, save the macro, and bind a key separately.

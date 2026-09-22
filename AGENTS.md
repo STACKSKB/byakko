@@ -48,6 +48,9 @@ research baseline, not the structure to port.
 - One serialized executor owns each connected device session. Keep backups,
   pacing, expected-state checks, verification and recovery outcomes explicit.
   Failed or unknown recovery is never reported as a successful save.
+- Recording is an exclusive local session activity. Feed explicit timestamps
+  into core, reserve held-input releases, and finish before close or focus loss.
+  Do not poll the device worker while only recording, or capture global input.
 
 ## Work sequence and evidence
 

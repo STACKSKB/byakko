@@ -79,6 +79,7 @@ pub fn device() -> Result<MemoryDevice, String> {
             .collect(),
     };
     let capabilities = Capabilities {
+        byte_budget: None,
         bindings: ["intro", "pointer"]
             .into_iter()
             .flat_map(|slot| {

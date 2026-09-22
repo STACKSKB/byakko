@@ -23,6 +23,46 @@ pub struct Editor {
 }
 
 impl Editor {
+    pub(crate) fn recorder(
+        &self,
+        policy: super::recorder::DelayPolicy,
+    ) -> Result<super::recorder::Recorder, String> {
+        if self.status != Status::Ready {
+            return Err("Read and verify the macro before recording".into());
+        }
+        super::recorder::Recorder::new(
+            &self.capabilities,
+            self.draft.as_ref().ok_or("Macro is not editable")?,
+            policy,
+        )
+    }
+
+    pub(crate) fn record(
+        &mut self,
+        recorder: &mut super::recorder::Recorder,
+        action: super::Action,
+        at: u64,
+    ) -> Result<super::recorder::Transition, String> {
+        recorder.transition(
+            &self.capabilities,
+            self.draft.as_mut().ok_or("Macro is not editable")?,
+            action,
+            at,
+        )
+    }
+
+    pub(crate) fn stop_recording(
+        &mut self,
+        recorder: &super::recorder::Recorder,
+        at: u64,
+    ) -> Result<super::recorder::StopOutcome, String> {
+        recorder.stop(
+            &self.capabilities,
+            self.draft.as_mut().ok_or("Macro is not editable")?,
+            at,
+        )
+    }
+
     pub fn new(capabilities: Capabilities) -> Result<Self, String> {
         validate_capabilities(&capabilities)?;
         let slot = capabilities.slots[0].id.clone();

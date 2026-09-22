@@ -228,6 +228,7 @@ fn action_label(app: &Desktop, action: &Action) -> String {
 pub(super) fn status(app: &Desktop) -> String {
     use byakko_core::session::Activity;
     match app.session.activity() {
+        Activity::Recording { .. } => return "Recording into the local draft…".into(),
         Activity::Read { .. } | Activity::ReadMacro { .. } => return "Reading device…".into(),
         Activity::Apply { .. } | Activity::ApplyMacro { .. } => {
             return "Backing up, applying and verifying…".into();
