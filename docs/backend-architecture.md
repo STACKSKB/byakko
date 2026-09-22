@@ -1,0 +1,31 @@
+# Reusable native frontend: backend boundary
+
+Byakko currently has a native egui frontend for the Nia87. It is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
+
+## Current coupling
+
+| UI module | Device-specific assumptions in the frontend today |
+| --- | --- |
+| `app.rs` | Calls `device::snapshot`, `apply_keymaps`, `capture_configuration`, and `apply_configuration` directly from workers. Holds `Snapshot` and Nia87 `Configuration`; maps keys using `board::slot_for_usage`, loads `layout::nia87_keys()`, switches only `Base`/`Function`, and stores each binding as `[u8; 4]`. The raw-byte editor, decoding/labels, profile/archive names, 50-slot archive summary, and change review know Nia87 storage details. |
+| `macro_ui.rs` | Calls `device::read_macro`/`apply_macro`; initializes 50 slots and `u8` slot IDs; validates drafts through Nia87 `macros::encode`, and stores the observed 256-byte representation. Macro event encoding, capacity, play modes, and import/export reflect that backend. |
+| `lighting_ui.rs` | Calls `device::read_lighting`/`apply_lighting`, `lighting::write_report` and the Nia87 effect catalog. Holds decoded settings alongside raw lighting reports; displays raw bytes. Screen/audio streaming invokes device-specific stream modules. |
+| `picture_ui.rs` | Uses `layout::nia87_keys()` and `board::slot_for_usage`, edits the Nia87 matrix color array (including nonphysical slots), and calls `device::read_picture`/`apply_picture`. The fixed slot bounds and initial Esc selection are layout assumptions. |
+| `settings_ui.rs` | Calls `device::read_settings`/`apply_setting`, validates via Nia87 `settings::write_report`, and renders a fixed debounce/auto-OS/sleep/backlight set with four raw replies and opcode labels. |
+
+Worker threads, staged drafts, expected-state checks, backups, and readback verification are useful patterns, but the current workers do not themselves establish a backend boundary. Protocol encoding and device operations need to move behind a backend session; widgets should receive typed, discoverable capabilities and state.
+
+## Target boundary
+
+Introduce a device-neutral application model and a `Backend`/`BackendSession` interface. Discovery returns a stable backend identity, device identity, display name, dynamic physical layout, layers, and capabilities. Keys have stable backend-provided logical IDs and geometry; bindings refer to an action model with an explicit `Unsupported`/backend-specific variant where translation is not possible. Avoid using HID usage as a universal physical-key ID or assuming that every binding occupies four bytes. Layers are a list of identified, named layers, not a two-value enum.
+
+Capabilities describe available editing surfaces and their constraints: keymaps; macro slots, event types, limits and play modes; lighting controls/effects and optional per-key color geometry; typed settings with ranges/enums and validation; optional host streaming. Tabs and actions appear only when supported. A backend can expose read-only or partially understood values. The UI edits a typed draft and asks the backend to validate it, preserving unrecognized values until the user explicitly changes them. Nia87-specific options and raw diagnostics live in an explicitly named backend details panel, not in shared widgets.
+
+The session owns transport, protocol codecs, device-specific mapping, capability discovery, serialization, and write policy. A practical interface has operations such as `describe`, `read_state(scope)`, `validate(change)`, `plan(change, expected_revision)`, `apply(plan)`, and `export/import`; exact Rust signatures can evolve. The returned state and changes carry stable key/layer/slot identifiers and a revision or equivalent expected-state token. Before applying, the backend checks observed state against the expected state, creates a recoverable backup, writes, reads back, and reports verification. A capability may refuse writes when safe verification is unavailable. The UI orchestrates worker progress and conflicts without constructing reports or calling firmware codecs.
+
+Portable profiles should contain only actions and capabilities with defined cross-backend meaning and report unsupported mappings during import. A separate lossless native archive is namespaced by backend ID, schema version, and device compatibility identity; its opaque backend payload retains raw/unrecognized data and is round-tripped only by the owning backend. Never silently translate or discard opaque data in a portable export. The existing Nia87 archive remains a Nia87 format until an explicit migration with round-trip tests is implemented.
+
+## Incremental implementation
+
+First slice: extract a small model for `DeviceDescriptor`, dynamic `PhysicalKey`/`LayerId`, key bindings, keymap capability, observed state, and changes; define an injectable keymap session. Adapt the existing Nia87 `device` functions behind it, keeping their expected-state, backup, and readback behavior. Move `app.rs` keymap reading/applying and the key grid/layer selector to the descriptor and typed binding model. Keep Nia87 raw bytes behind the adapter, with a backend details affordance for expert inspection; preserve the existing profile/archive behavior during this slice. Do not move all tabs at once.
+
+Verify with a fake in-memory backend describing a non-87-key layout and at least three layers. Test layout rendering/selection, staged edits, unsupported actions, a stale expected-state conflict, and a failed readback; confirm that none invokes Nia87 mapping or packet code. Run existing Nia87 unit tests and device-free UI tests. Subsequently migrate macros, lighting/picture, settings, and archives one capability at a time, using fake-backend cases for absent or partially supported features. Future QMK/VIA integrations can implement the session independently; this plan does not require firmware flashing, JavaScript in the UI, or copying GPL code.
