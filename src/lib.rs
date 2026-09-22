@@ -4,6 +4,7 @@ pub mod app;
 pub mod board;
 pub mod device;
 pub mod hid;
+pub mod host_lighting;
 pub mod layout;
 pub mod lighting;
 #[cfg(feature = "gui")]
