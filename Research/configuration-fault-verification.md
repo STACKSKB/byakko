@@ -55,3 +55,20 @@ picture colors, lighting or settings. Thus the restored baseline remained
 intact during this interval. This narrows the investigation to the earlier
 transaction/recovery circumstances; it does not identify their cause or prove
 that repeating fault injection is safe.
+
+## Unreadable-keymap recovery fallback
+
+A later code review found that recovery discarded a failed keymap reread with
+`.ok()` and treated every writable slot as different. That could issue 126
+setters per unreadable layer, including unrelated keys the transaction never
+intended to change. It is not established that this branch ran during the
+recorded failure, and this is not a root-cause claim.
+
+Recovery now uses observed differences when a complete map is available. When
+it is unavailable, it restores only slots differing between the attempted and
+original maps. Read failures are included in diagnostics if final recovery
+verification fails. Invalid shapes or reserved-slot differences are rejected;
+full-archive comparison still decides whether recovery succeeded. Pure tests
+cover zero-change and one-change unreadable maps, unexpected observed changes,
+and invalid/reserved data. No fault injection or device setters were run for
+this change; the hardware recovery acceptance gate remains open.

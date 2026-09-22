@@ -821,23 +821,49 @@ fn recover_configuration(
     // Remove new bindings first, then restore their macro contents. Reread
     // between layers to detect a setter's unexpected effect on the other map.
     for function in [true, false] {
-        let observed = snapshot_on_device(device).ok();
+        let observed = match snapshot_on_device(device) {
+            Ok(snapshot) => Some(snapshot),
+            Err(error) => {
+                attempt(
+                    format!("keymap read {function}; recovery limited to planned slots"),
+                    Err(error),
+                );
+                None
+            }
+        };
         let wanted = if function {
             &original.keymaps.function
         } else {
             &original.keymaps.base
         };
-        for slot in 0..126 {
-            let differs = observed.as_ref().is_none_or(|s| {
-                let values = if function { &s.function } else { &s.base };
-                values[slot] != wanted[slot]
-            });
-            if differs {
-                attempt(
-                    format!("key {function}/{slot}"),
-                    write_binding(device, function, 0, slot, wanted[slot]),
-                );
+        let attempted_map = if function {
+            &attempted.keymaps.function
+        } else {
+            &attempted.keymaps.base
+        };
+        let observed_map = observed.as_ref().map(|snapshot| {
+            if function {
+                snapshot.function.as_slice()
+            } else {
+                snapshot.base.as_slice()
             }
+        });
+        let slots =
+            match crate::recovery_keymaps::slots_to_restore(observed_map, attempted_map, wanted) {
+                Ok(slots) => slots,
+                Err(error) => {
+                    attempt(
+                        format!("keymap recovery plan {function}"),
+                        Err(error.into()),
+                    );
+                    continue;
+                }
+            };
+        for slot in slots {
+            attempt(
+                format!("key {function}/{slot}"),
+                write_binding(device, function, 0, slot, wanted[slot]),
+            );
         }
     }
     for &slot in &reverse.macro_slots {
