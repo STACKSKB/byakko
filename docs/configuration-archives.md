@@ -42,8 +42,11 @@ available separately.
 change counts without device access. It does not establish that CURRENT still
 matches the keyboard; Apply always rechecks that itself.
 
-The current picture is captured; this does not claim that all three advertised
-picture banks have been independently identified.
+The addressed index0 picture is captured. The official Nia87 path exposes three
+global picture-effect options, but its selected bulk color reader/writer address
+index0; these are not established as three editable banks. See the
+[selected-path audit](../Research/picture-selector-audit.md). The archive does
+not claim to cover any undiscovered firmware banks.
 
 On the attached Windows Nia87, the first live capture completed both full passes
 and saved a 139,657-byte archive. Inspection found 50 macro slots (one nonempty),

@@ -104,7 +104,7 @@ Most animated modes expose value and speed ranges 0–4. The catalog's direction
 - Kaleidoscope: `out`/`in`.
 - Line wave: right/left.
 - Circle wave: anti-clockwise/clockwise.
-- User picture: picture slots `1`, `2`, `3`.
+- User picture: effect options labeled `1`, `2`, `3`; independent editable banks are not established (see the [selected-path audit](../Research/picture-selector-audit.md)).
 - Music follow 3 and 2: upright/separate/intersect.
 
 RGB and dazzle flags are present on the catalog entries that support them; `LightNeon` and
