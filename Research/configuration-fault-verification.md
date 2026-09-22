@@ -72,3 +72,21 @@ full-archive comparison still decides whether recovery succeeded. Pure tests
 cover zero-change and one-change unreadable maps, unexpected observed changes,
 and invalid/reserved data. No fault injection or device setters were run for
 this change; the hardware recovery acceptance gate remains open.
+
+## Research setter trace
+
+Fault-mode runs now reserve a new JSON trace file before writing and collect
+setter attempts in memory throughout the transaction and recovery. Each entry
+contains the complete host report, sequence, elapsed microseconds, and outcome:
+transport success/error, injected before/after transmission, or unfinished after
+a panic. Transport success means the API returned success, not proof that firmware
+applied the report. This is not a USB bus capture and does not record getter replies.
+
+The trace is thread-local, limited to 4,096 entries with a dropped-entry count,
+and only available with `research-tools`. Nested scopes are rejected without
+resetting the outer trace. Panics preserve unfinished entries and clear the scope.
+The example saves and syncs the trace before evaluating the recovery result;
+process termination or a failed file write can still lose this in-memory evidence.
+There is no disk I/O in the setter wrapper. Mocked tests cover normal and failed
+transmission, both injection modes, panic cleanup, nesting and isolation. No
+additional hardware fault injection was performed for this diagnostic change.

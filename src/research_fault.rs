@@ -55,6 +55,8 @@ pub(crate) fn send<T>(
     report: &[u8],
     transmit: impl FnOnce() -> crate::hid::Result<T>,
 ) -> crate::hid::Result<T> {
+    use crate::research_trace::{self, Outcome};
+    let event = research_trace::begin(report);
     let mode = ARM.with(|slot| {
         let mut guard = slot.borrow_mut();
         let arm = guard.as_mut()?;
@@ -68,6 +70,7 @@ pub(crate) fn send<T>(
     });
 
     if mode == Some(false) {
+        research_trace::finish(event, Outcome::BeforeDeliveryInjected, None);
         return injected_error();
     }
     let result = transmit();
@@ -77,7 +80,16 @@ pub(crate) fn send<T>(
                 arm.fired = true;
             }
         });
+        research_trace::finish(event, Outcome::AfterDeliveryInjected, None);
         return injected_error();
+    }
+    match &result {
+        Ok(_) => research_trace::finish(event, Outcome::TransportOk, None),
+        Err(error) => research_trace::finish(
+            event,
+            Outcome::TransportErr,
+            event.map(|_| error.to_string()),
+        ),
     }
     result
 }
@@ -154,5 +166,60 @@ mod tests {
             assert!(other.join().unwrap().is_ok());
         });
         assert!(!fired);
+    }
+
+    #[test]
+    fn trace_records_transport_success_and_error() {
+        use crate::research_trace::{Outcome, with_trace};
+        let (result, trace) = with_trace(|| {
+            assert!(send(&[0, 0x16, 1], || Ok(())).is_ok());
+            assert!(
+                send(&[0, 0x16, 2], || Err::<(), _>(
+                    io::Error::other("wire error").into()
+                ))
+                .is_err()
+            );
+        });
+        assert!(result.is_ok());
+        assert_eq!(trace.events.len(), 2);
+        assert_eq!(trace.events[0].outcome, Outcome::TransportOk);
+        assert_eq!(trace.events[0].report, [0, 0x16, 1]);
+        assert_eq!(trace.events[1].outcome, Outcome::TransportErr);
+        assert!(
+            trace.events[1]
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("wire error")
+        );
+    }
+
+    #[test]
+    fn trace_distinguishes_pre_and_post_delivery_injection() {
+        use crate::research_trace::{Outcome, with_trace};
+        let (_, before) = with_trace(|| {
+            with_fault(0x16, false, || {
+                assert!(send(&[0, 0x16], || Ok(())).is_err());
+            })
+        });
+        assert_eq!(before.events[0].outcome, Outcome::BeforeDeliveryInjected);
+        let (_, after) = with_trace(|| {
+            with_fault(0x16, true, || {
+                assert!(send(&[0, 0x16], || Ok(())).is_err());
+            })
+        });
+        assert_eq!(after.events[0].outcome, Outcome::AfterDeliveryInjected);
+    }
+
+    #[test]
+    fn trace_preserves_inflight_event_on_transmit_panic() {
+        use crate::research_trace::{Outcome, with_trace};
+        let (result, trace) = with_trace(|| {
+            let _ = send(&[0, 0x16], || -> crate::hid::Result<()> {
+                panic!("transport panic")
+            });
+        });
+        assert!(result.unwrap_err().contains("unverified"));
+        assert_eq!(trace.events[0].outcome, Outcome::Unfinished);
     }
 }

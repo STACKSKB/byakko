@@ -63,13 +63,46 @@ fn main() -> device::Result<()> {
     let backups = std::path::Path::new("Research/captures/backups");
     #[cfg(feature = "research-tools")]
     if let Some(opcode) = fault_opcode {
-        let (result, fired) = byakko::research_fault::with_fault(opcode, true, || {
-            device::apply_configuration(&original, &target, backups, |s| {
-                println!("Fault test: {s}")
+        // Reserve the trace path before any test write. Actual trace collection
+        // is in memory, so diagnostic disk I/O cannot interrupt a setter.
+        use std::io::Write;
+        std::fs::create_dir_all(backups)?;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos();
+        let trace_path = backups.join(format!("configuration-fault-setters-{stamp}.json"));
+        let mut trace_file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&trace_path)?;
+        let (run, trace) = byakko::research_trace::with_trace(|| {
+            byakko::research_fault::with_fault(opcode, true, || {
+                device::apply_configuration(&original, &target, backups, |s| {
+                    println!("Fault test: {s}")
+                })
             })
         });
+        let outcome = match &run {
+            Ok((Ok(_), fired)) => format!("apply succeeded; fault fired: {fired}"),
+            Ok((Err(error), fired)) => format!("{error}; fault fired: {fired}"),
+            Err(error) => error.clone(),
+        };
+        serde_json::to_writer_pretty(
+            &mut trace_file,
+            &serde_json::json!({
+                "format": "byakko-research-setter-trace", "version": 1,
+                "fault_opcode": opcode, "outcome": outcome, "trace": trace,
+                "scope": "Setter calls only; not a USB bus capture or proof of firmware delivery"
+            }),
+        )?;
+        trace_file.write_all(b"\n")?;
+        trace_file.sync_all()?;
+        println!("Setter trace saved to {}", trace_path.display());
+        let (result, fired) =
+            run.map_err(|error| format!("{error}; trace {}", trace_path.display()))?;
         let message = result
-            .expect_err("injected error must be reported")
+            .err()
+            .ok_or("Injected error was not reported; inspect setter trace")?
             .to_string();
         if !fired
             || !message.contains("injected configuration fault")

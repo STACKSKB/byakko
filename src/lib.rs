@@ -30,6 +30,8 @@ pub(crate) mod recovery_keymaps;
 pub(crate) mod recovery_verification;
 #[cfg(feature = "research-tools")]
 pub mod research_fault;
+#[cfg(feature = "research-tools")]
+pub mod research_trace;
 pub mod screen_sample;
 pub mod screen_stream;
 pub mod settings;
