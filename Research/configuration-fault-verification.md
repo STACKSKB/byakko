@@ -41,3 +41,17 @@ thread-local, scoped, single-shot, limited to known setters and excluded from
 normal builds. Its before/after delivery semantics have unit coverage.
 Further fault injection is deferred until the unexplained changes are better
 understood. These improvements do not prove that the original failure is fixed.
+
+## Read-only stability follow-up (2026-09-22)
+
+After the keymap backend separation and macro editor lifecycle changes, a fresh
+`capture-configuration` completed two matching full sweeps without setters.
+The resulting ignored local archive
+`Research/captures/configuration-stability-after-macro-ui.json` is byte-for-byte
+identical to `configuration-first-complete.json`. Both SHA-256 hashes are
+`2137480f0ba425bf06c9ef9a37881096834c928f6d4c21208ed65daf210ba4d4`.
+The bidirectional configuration planner reports zero changed bindings, macros,
+picture colors, lighting or settings. Thus the restored baseline remained
+intact during this interval. This narrows the investigation to the earlier
+transaction/recovery circumstances; it does not identify their cause or prove
+that repeating fault injection is safe.
