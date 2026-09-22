@@ -15,7 +15,7 @@ class LicenseGateTests(unittest.TestCase):
             selection("some-code", FONT_EXPRESSION)
 
     def test_tree_deduplicates_and_fails_closed(self):
-        rows = parse_tree("byakko v0.1.0 (C:\\project)|\nexample v1.0.0|MIT\nexample v1.0.0|MIT (*)\n")
+        rows = parse_tree("byakko v0.1.0 (C:\\project)|\nbyakko-core v0.1.0 (C:\\project\\crates\\byakko-core)|\nexample v1.0.0|MIT\nexample v1.0.0|MIT (*)\n")
         self.assertEqual(len(rows), 1)
         for text in ("", "not a package|MIT", "a v1|MIT\na v1|ISC"):
             with self.assertRaises(ValueError):

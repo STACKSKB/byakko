@@ -6,6 +6,10 @@ edition = "2024"
 publish = false
 description = "Native Nia87 configuration research tools"
 
+[workspace]
+members = ["crates/byakko-core"]
+resolver = "3"
+
 [features]
 default = ["gui"]
 gui = ["dep:eframe"]
@@ -25,6 +29,7 @@ name = "capture_configuration_trace"
 required-features = ["research-tools"]
 
 [dependencies]
+byakko-core = { path = "crates/byakko-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 eframe = { version = "=0.36.2", optional = true, default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "accesskit"] }
