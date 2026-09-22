@@ -2,10 +2,10 @@
 use crate::nia87::{
     actions, board,
     device::{self, Snapshot},
-    layout,
+    layout, macro_adapter,
 };
 use byakko_core::{
-    Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State, validate_changes,
+    Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State, macros, validate_changes,
     validate_state,
 };
 use std::{collections::BTreeMap, path::Path};
@@ -308,7 +308,7 @@ impl Nia87Adapter {
     }
 }
 
-impl crate::KeymapDevice for Nia87Adapter {
+impl crate::Device for Nia87Adapter {
     fn read(&mut self) -> Result<State, String> {
         Nia87Adapter::read(self)
     }
@@ -320,6 +320,19 @@ impl crate::KeymapDevice for Nia87Adapter {
         backup_dir: &Path,
     ) -> Result<State, byakko_core::session::ApplyFailure> {
         self.apply_detailed(expected, changes, backup_dir)
+    }
+
+    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
+        macro_adapter::read(slot)
+    }
+
+    fn apply_macro(
+        &mut self,
+        expected: &macros::Snapshot,
+        desired: &macros::Program,
+        backup_dir: &Path,
+    ) -> Result<macros::Snapshot, byakko_core::session::ApplyFailure> {
+        macro_adapter::apply(expected, desired, backup_dir)
     }
 }
 

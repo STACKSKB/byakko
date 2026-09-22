@@ -12,7 +12,7 @@ use iced::{
 pub(super) fn keymap(app: &Desktop) -> Element<'_, Message> {
     let descriptor = app.session.descriptor();
     let dirty = app.session.changes();
-    let ready = *app.session.status() == Status::Ready;
+    let ready = !app.busy() && *app.session.status() == Status::Ready;
     let layers = row(descriptor.layers.iter().map(|layer| {
         button(text(&layer.label))
             .style(if layer.id == app.layer {
@@ -35,7 +35,7 @@ pub(super) fn keymap(app: &Desktop) -> Element<'_, Message> {
     ]
     .spacing(12)
     .align_y(iced::Center);
-    let mut content = column![toolbar, text(status(app.session.status())), layers].spacing(12);
+    let mut content = column![toolbar, text(status(app)), layers].spacing(12);
     if let Some(notice) = &app.notice {
         content = content.push(text(notice));
     }
@@ -149,7 +149,8 @@ fn selected_label(app: &Desktop) -> String {
 
 fn search(app: &Desktop) -> Element<'_, Message> {
     let query = app.search.to_lowercase();
-    let editable = *app.session.status() == Status::Ready
+    let editable = !app.busy()
+        && *app.session.status() == Status::Ready
         && app
             .session
             .descriptor()
@@ -198,12 +199,18 @@ fn action_label(descriptor: &Descriptor, action: &Action) -> String {
     }
 }
 
-fn status(status: &Status) -> String {
-    match status {
+fn status(app: &Desktop) -> String {
+    use byakko_core::session::Activity;
+    match app.session.activity() {
+        Activity::Read { .. } | Activity::ReadMacro { .. } => return "Reading device…".into(),
+        Activity::Apply { .. } | Activity::ApplyMacro { .. } => {
+            return "Backing up, applying and verifying…".into();
+        }
+        Activity::Idle => {}
+    }
+    match app.session.status() {
         Status::Disconnected => "Disconnected · draft retained".into(),
-        Status::Loading { .. } => "Reading device…".into(),
         Status::Ready => "Readback verified · edits are staged until applied".into(),
-        Status::Applying { .. } => "Backing up, applying and verifying…".into(),
         Status::Conflict { .. } => "Device changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => match problem {
             Problem::ReadRequired => "Read the device before editing".into(),

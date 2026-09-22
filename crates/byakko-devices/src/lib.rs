@@ -1,6 +1,6 @@
 //! Native effect boundary. One worker owns the backend; the UI owns no HID I/O.
 use byakko_core::{
-    Change, State,
+    Change, State, macros,
     session::{ApplyFailure, Command, Completion, Recovery},
 };
 use std::{
@@ -24,7 +24,7 @@ pub mod storage;
 
 /// Implementations must validate expected state, back up, write and verify.
 /// Success means verified device state, not merely successful transmission.
-pub trait KeymapDevice: Send + 'static {
+pub trait Device: Send + 'static {
     fn read(&mut self) -> Result<State, String>;
     fn apply(
         &mut self,
@@ -32,7 +32,25 @@ pub trait KeymapDevice: Send + 'static {
         changes: &[Change],
         backup_dir: &Path,
     ) -> Result<State, ApplyFailure>;
+
+    fn read_macro(&mut self, _slot: &str) -> Result<macros::Snapshot, String> {
+        Err("Macro operations are unsupported by this device".into())
+    }
+
+    fn apply_macro(
+        &mut self,
+        _expected: &macros::Snapshot,
+        _desired: &macros::Program,
+        _backup_dir: &Path,
+    ) -> Result<macros::Snapshot, ApplyFailure> {
+        Err(ApplyFailure {
+            message: "Macro operations are unsupported by this device".into(),
+            recovery: Recovery::NotAttempted,
+        })
+    }
 }
+
+pub use Device as KeymapDevice;
 
 /// Both queues are bounded. Closing the window must wait for an outstanding
 /// operation: dropping the executor cannot cancel a write already in progress.
@@ -43,7 +61,7 @@ pub struct Executor {
 }
 
 impl Executor {
-    pub fn spawn(mut device: impl KeymapDevice, backup_dir: PathBuf) -> std::io::Result<Self> {
+    pub fn spawn(mut device: impl Device, backup_dir: PathBuf) -> std::io::Result<Self> {
         let (commands, requests) = mpsc::sync_channel::<Command>(1);
         let (responses, completions) = mpsc::sync_channel(1);
         let generation = Arc::new(AtomicU64::new(0));
@@ -87,13 +105,13 @@ impl Executor {
 
     /// Feed a rejected completion back into the core just like a worker result,
     /// so a full/closed queue cannot strand its pending operation.
-    pub fn try_submit(&self, command: Command) -> Result<(), Completion> {
+    pub fn try_submit(&self, command: Command) -> Result<(), Box<Completion>> {
         self.commands.try_send(command).map_err(|error| {
             let (command, message) = match error {
                 TrySendError::Full(command) => (command, "Device command queue is full"),
                 TrySendError::Disconnected(command) => (command, "Device executor is closed"),
             };
-            failure(&command, message.into(), Recovery::NotAttempted)
+            Box::new(failure(&command, message.into(), Recovery::NotAttempted))
         })
     }
 
@@ -118,6 +136,16 @@ fn token(command: &Command) -> (u64, u64) {
             generation,
             operation,
             ..
+        }
+        | Command::ReadMacro {
+            generation,
+            operation,
+            ..
+        }
+        | Command::ApplyMacro {
+            generation,
+            operation,
+            ..
         } => (*generation, *operation),
     }
 }
@@ -135,10 +163,22 @@ fn failure(command: &Command, message: String, recovery: Recovery) -> Completion
             operation,
             result: Err(ApplyFailure { message, recovery }),
         },
+        Command::ReadMacro { slot, .. } => Completion::ReadMacro {
+            generation,
+            operation,
+            slot: slot.clone(),
+            result: Err(message),
+        },
+        Command::ApplyMacro { expected, .. } => Completion::ApplyMacro {
+            generation,
+            operation,
+            slot: expected.slot.clone(),
+            result: Err(ApplyFailure { message, recovery }),
+        },
     }
 }
 
-fn execute(device: &mut impl KeymapDevice, command: &Command, backup_dir: &Path) -> Completion {
+fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Completion {
     let (generation, operation) = token(command);
     catch_unwind(AssertUnwindSafe(|| match command {
         Command::Read { .. } => Completion::Read {
@@ -152,6 +192,20 @@ fn execute(device: &mut impl KeymapDevice, command: &Command, backup_dir: &Path)
             generation,
             operation,
             result: device.apply(expected, changes, backup_dir),
+        },
+        Command::ReadMacro { slot, .. } => Completion::ReadMacro {
+            generation,
+            operation,
+            slot: slot.clone(),
+            result: device.read_macro(slot),
+        },
+        Command::ApplyMacro {
+            expected, desired, ..
+        } => Completion::ApplyMacro {
+            generation,
+            operation,
+            slot: expected.slot.clone(),
+            result: device.apply_macro(expected, desired, backup_dir),
         },
     }))
     .unwrap_or_else(|_| {
@@ -409,15 +463,15 @@ mod tests {
         };
         worker.try_submit(apply(2)).unwrap();
         assert!(matches!(
-            worker.try_submit(apply(3)),
-            Err(Completion::Apply {
+            *worker.try_submit(apply(3)).unwrap_err(),
+            Completion::Apply {
                 generation: 1,
                 operation: 3,
                 result: Err(ApplyFailure {
                     recovery: Recovery::NotAttempted,
                     ..
                 })
-            })
+            }
         ));
         worker.set_generation(0);
         release.send(()).unwrap();
@@ -430,5 +484,210 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .unwrap();
         assert_eq!(writes.load(Ordering::SeqCst), 0);
+    }
+
+    fn macro_snapshot() -> macros::Snapshot {
+        macros::Snapshot {
+            backend_id: "memory".into(),
+            slot: "slot-00".into(),
+            revision: vec![1],
+            content: macros::Content::Editable(macros::Program {
+                repeat_count: 1,
+                events: vec![],
+            }),
+        }
+    }
+
+    #[test]
+    fn default_macro_operations_are_typed_unsupported_results() {
+        let state = State {
+            revision: vec![],
+            bindings: BTreeMap::new(),
+        };
+        let worker = Executor::spawn(
+            MemoryDevice {
+                state,
+                writes: Arc::new(AtomicUsize::new(0)),
+            },
+            PathBuf::new(),
+        )
+        .unwrap();
+        worker.set_generation(1);
+        worker
+            .try_submit(Command::ReadMacro {
+                generation: 1,
+                operation: 1,
+                slot: "slot-00".into(),
+            })
+            .unwrap();
+        assert!(
+            matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Completion::ReadMacro { generation: 1, operation: 1, slot, result: Err(message) }
+            if slot == "slot-00" && message.contains("unsupported"))
+        );
+        let expected = macro_snapshot();
+        worker
+            .try_submit(Command::ApplyMacro {
+                generation: 1,
+                operation: 2,
+                expected: expected.clone(),
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            })
+            .unwrap();
+        assert!(
+            matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Completion::ApplyMacro { generation: 1, operation: 2, slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, message }) }
+            if slot == expected.slot && message.contains("unsupported"))
+        );
+    }
+
+    struct OrderedDevice {
+        log: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    }
+
+    impl Device for OrderedDevice {
+        fn read(&mut self) -> Result<State, String> {
+            self.log.lock().unwrap().push("keymap read");
+            Ok(State {
+                revision: vec![],
+                bindings: BTreeMap::new(),
+            })
+        }
+        fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+            self.log.lock().unwrap().push("keymap apply");
+            Ok(State {
+                revision: vec![],
+                bindings: BTreeMap::new(),
+            })
+        }
+        fn read_macro(&mut self, _: &str) -> Result<macros::Snapshot, String> {
+            self.log.lock().unwrap().push("macro read");
+            Ok(macro_snapshot())
+        }
+        fn apply_macro(
+            &mut self,
+            _: &macros::Snapshot,
+            _: &macros::Program,
+            _: &Path,
+        ) -> Result<macros::Snapshot, ApplyFailure> {
+            self.log.lock().unwrap().push("macro apply");
+            Ok(macro_snapshot())
+        }
+    }
+
+    #[test]
+    fn one_worker_orders_keymap_and_macro_operations() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let worker = Executor::spawn(OrderedDevice { log: log.clone() }, PathBuf::new()).unwrap();
+        worker.set_generation(1);
+        let expected = macro_snapshot();
+        let commands = [
+            Command::Read {
+                generation: 1,
+                operation: 1,
+            },
+            Command::ReadMacro {
+                generation: 1,
+                operation: 2,
+                slot: expected.slot.clone(),
+            },
+            Command::Apply {
+                generation: 1,
+                operation: 3,
+                expected: State {
+                    revision: vec![],
+                    bindings: BTreeMap::new(),
+                },
+                changes: vec![],
+            },
+            Command::ApplyMacro {
+                generation: 1,
+                operation: 4,
+                expected,
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            },
+        ];
+        for command in commands {
+            worker.try_submit(command).unwrap();
+            worker
+                .completions
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+        }
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["keymap read", "macro read", "keymap apply", "macro apply"]
+        );
+    }
+
+    #[test]
+    fn old_generation_macro_apply_is_rejected_before_device_access() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let worker = Executor::spawn(OrderedDevice { log: log.clone() }, PathBuf::new()).unwrap();
+        worker.set_generation(2);
+        worker
+            .try_submit(Command::ApplyMacro {
+                generation: 1,
+                operation: 1,
+                expected: macro_snapshot(),
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            })
+            .unwrap();
+        assert!(
+            matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Completion::ApplyMacro { generation: 1, operation: 1, slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, .. }) }
+            if slot == "slot-00")
+        );
+        assert!(log.lock().unwrap().is_empty());
+    }
+
+    struct PanickingMacroDevice;
+
+    impl Device for PanickingMacroDevice {
+        fn read(&mut self) -> Result<State, String> {
+            unreachable!()
+        }
+        fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+            unreachable!()
+        }
+        fn apply_macro(
+            &mut self,
+            _: &macros::Snapshot,
+            _: &macros::Program,
+            _: &Path,
+        ) -> Result<macros::Snapshot, ApplyFailure> {
+            panic!("macro write panic")
+        }
+    }
+
+    #[test]
+    fn panicked_macro_write_returns_correlated_unverified_completion() {
+        let worker = Executor::spawn(PanickingMacroDevice, PathBuf::new()).unwrap();
+        worker.set_generation(7);
+        worker
+            .try_submit(Command::ApplyMacro {
+                generation: 7,
+                operation: 9,
+                expected: macro_snapshot(),
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            })
+            .unwrap();
+        assert!(
+            matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Completion::ApplyMacro { generation: 7, operation: 9, slot, result: Err(ApplyFailure { recovery: Recovery::Unverified, .. }) }
+            if slot == "slot-00")
+        );
     }
 }

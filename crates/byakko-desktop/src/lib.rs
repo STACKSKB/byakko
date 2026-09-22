@@ -77,10 +77,7 @@ pub fn run(descriptor: Descriptor, executor: Executor) -> Result<(), Box<dyn std
 
 impl Desktop {
     fn busy(&self) -> bool {
-        matches!(
-            self.session.status(),
-            Status::Loading { .. } | Status::Applying { .. }
-        )
+        self.session.busy()
     }
 
     fn read(&mut self) {
@@ -99,7 +96,7 @@ impl Desktop {
         match request {
             Ok(command) => {
                 if let Err(completion) = self.executor.try_submit(command) {
-                    self.session.accept(completion);
+                    self.session.accept(*completion);
                 }
             }
             Err(message) => self.notice = Some(message),
@@ -155,7 +152,7 @@ impl Desktop {
     fn close(&mut self) -> Task<Message> {
         if self.busy() {
             self.closing = Closing::Waiting;
-        } else if !self.session.changes().is_empty() {
+        } else if self.session.dirty() {
             self.closing = Closing::ConfirmDiscard;
         } else {
             return iced::exit();
