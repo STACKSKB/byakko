@@ -3,6 +3,7 @@ mod lighting_ops;
 mod macro_files;
 mod macro_ops;
 mod picture_ops;
+mod settings_ops;
 pub use macro_files::{FileOperation, FileTicket};
 mod recording;
 
@@ -55,6 +56,16 @@ pub enum Command {
         expected: crate::picture::Snapshot,
         desired: BTreeMap<String, [u8; 3]>,
     },
+    ReadSettings {
+        generation: u64,
+        operation: u64,
+    },
+    ApplySetting {
+        generation: u64,
+        operation: u64,
+        expected: crate::settings::Snapshot,
+        edit: crate::settings::Edit,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -100,6 +111,16 @@ pub enum Completion {
         generation: u64,
         operation: u64,
         result: Result<crate::picture::Snapshot, ApplyFailure>,
+    },
+    ReadSettings {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::settings::Snapshot, String>,
+    },
+    ApplySetting {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::settings::Snapshot, ApplyFailure>,
     },
 }
 
@@ -171,6 +192,12 @@ pub enum Activity {
     ApplyPicture {
         operation: u64,
     },
+    ReadSettings {
+        operation: u64,
+    },
+    ApplySetting {
+        operation: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -190,6 +217,7 @@ pub struct Session {
     macros: Option<crate::macros::editor::Editor>,
     lighting: Option<crate::lighting::editor::Editor>,
     picture: Option<crate::picture::editor::Editor>,
+    settings: Option<crate::settings::editor::Editor>,
 }
 
 /// Compatibility name for consumers using only the keymap surface.
@@ -229,6 +257,7 @@ impl Session {
             macros: None,
             lighting: None,
             picture: None,
+            settings: None,
         })
     }
 
@@ -260,6 +289,7 @@ impl Session {
         self.invalidate_macros();
         self.invalidate_lighting();
         self.invalidate_picture();
+        self.invalidate_settings();
         Ok(self.generation)
     }
 
@@ -274,6 +304,7 @@ impl Session {
         self.invalidate_macros();
         self.invalidate_lighting();
         self.invalidate_picture();
+        self.invalidate_settings();
     }
 
     pub fn changes(&self) -> Vec<Change> {
@@ -355,6 +386,7 @@ impl Session {
         self.invalidate_macros();
         self.invalidate_lighting();
         self.invalidate_picture();
+        self.invalidate_settings();
         Ok(Command::Apply {
             generation: self.generation,
             operation,
@@ -374,6 +406,7 @@ impl Session {
             || self.macros.as_ref().is_some_and(|editor| editor.dirty())
             || self.lighting.as_ref().is_some_and(|editor| editor.dirty())
             || self.picture.as_ref().is_some_and(|editor| editor.dirty())
+            || self.settings.as_ref().is_some_and(|editor| editor.dirty())
     }
 
     fn require_idle(&self) -> Result<(), String> {
@@ -397,6 +430,11 @@ impl Session {
     }
     fn invalidate_picture(&mut self) {
         if let Some(editor) = self.picture.as_mut() {
+            editor.invalidate();
+        }
+    }
+    fn invalidate_settings(&mut self) {
+        if let Some(editor) = self.settings.as_mut() {
             editor.invalidate();
         }
     }
@@ -487,6 +525,26 @@ impl Session {
                     operation: *operation,
                 },
             ),
+            Completion::ReadSettings {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ReadSettings {
+                    operation: *operation,
+                },
+            ),
+            Completion::ApplySetting {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ApplySetting {
+                    operation: *operation,
+                },
+            ),
         };
         if generation != self.generation || expected != self.activity {
             return Acceptance::IgnoredStale;
@@ -524,6 +582,16 @@ impl Session {
                 .picture
                 .as_mut()
                 .expect("pending picture capability")
+                .accept_apply(result),
+            Completion::ReadSettings { result, .. } => self
+                .settings
+                .as_mut()
+                .expect("pending settings capability")
+                .accept_read(result),
+            Completion::ApplySetting { result, .. } => self
+                .settings
+                .as_mut()
+                .expect("pending settings capability")
                 .accept_apply(result),
         }
         Acceptance::Accepted

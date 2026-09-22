@@ -42,6 +42,14 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
             Some(Message::Page(Page::Picture)),
         ));
     }
+    if app.session.settings().is_some() {
+        navigation = navigation.push(panels::selectable_button(
+            &app.ui,
+            "Settings",
+            app.page == Page::Settings,
+            Some(Message::Page(Page::Settings)),
+        ));
+    }
     let mut content = column![
         text(&app.session.descriptor().device_name).size(app.ui.type_scale.page_title),
         navigation
@@ -67,6 +75,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
         Page::Macros => super::macro_view::view(app),
         Page::Lighting => super::lighting::view(app),
         Page::Picture => super::picture::view(app),
+        Page::Settings => super::settings::view(app),
     });
     container(content)
         .padding(app.ui.spacing.page_padding)
@@ -263,13 +272,15 @@ pub(super) fn status(app: &Desktop) -> String {
         Activity::Read { .. }
         | Activity::ReadMacro { .. }
         | Activity::ReadLighting { .. }
-        | Activity::ReadPicture { .. } => {
+        | Activity::ReadPicture { .. }
+        | Activity::ReadSettings { .. } => {
             return "Reading device…".into();
         }
         Activity::Apply { .. }
         | Activity::ApplyMacro { .. }
         | Activity::ApplyLighting { .. }
-        | Activity::ApplyPicture { .. } => {
+        | Activity::ApplyPicture { .. }
+        | Activity::ApplySetting { .. } => {
             return "Backing up, applying and verifying…".into();
         }
         Activity::Idle => {}

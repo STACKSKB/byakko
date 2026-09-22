@@ -4,7 +4,7 @@ use crate::Device;
 use byakko_core::{
     Change, Descriptor, State, lighting, macros, picture,
     session::{ApplyFailure, Recovery},
-    validate_changes, validate_state,
+    settings, validate_changes, validate_state,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -30,6 +30,7 @@ pub struct MemoryDevice {
     macros: Option<MacroStorage>,
     lighting: Option<StoredLighting>,
     picture: Option<StoredPicture>,
+    settings: Option<StoredSettings>,
 }
 
 struct StoredLighting {
@@ -46,6 +47,13 @@ struct StoredPicture {
     snapshot: picture::Snapshot,
 }
 
+struct StoredSettings {
+    capabilities: settings::Capabilities,
+    initial_revision: Vec<u8>,
+    revision_number: u64,
+    snapshot: settings::Snapshot,
+}
+
 impl MemoryDevice {
     pub fn new(descriptor: Descriptor, state: State) -> Result<Self, String> {
         validate_state(&descriptor, &state)?;
@@ -57,6 +65,7 @@ impl MemoryDevice {
             macros: None,
             lighting: None,
             picture: None,
+            settings: None,
         })
     }
 
@@ -160,6 +169,34 @@ impl MemoryDevice {
 
     pub fn picture_capabilities(&self) -> Option<&picture::Capabilities> {
         self.picture.as_ref().map(|stored| &stored.capabilities)
+    }
+
+    pub fn with_settings(
+        mut self,
+        capabilities: settings::Capabilities,
+        snapshot: settings::Snapshot,
+    ) -> Result<Self, String> {
+        if self.settings.is_some() {
+            return Err("Memory device settings are already configured".into());
+        }
+        settings::validate_capabilities(&capabilities)?;
+        if capabilities.backend_id != self.descriptor.backend_id
+            || snapshot.backend_id != capabilities.backend_id
+        {
+            return Err("Settings capabilities or snapshot belong to another backend".into());
+        }
+        settings::validate_snapshot(&capabilities, &snapshot)?;
+        self.settings = Some(StoredSettings {
+            capabilities,
+            initial_revision: snapshot.revision.clone(),
+            revision_number: 0,
+            snapshot,
+        });
+        Ok(self)
+    }
+
+    pub fn settings_capabilities(&self) -> Option<&settings::Capabilities> {
+        self.settings.as_ref().map(|stored| &stored.capabilities)
     }
 }
 
@@ -330,6 +367,55 @@ impl Device for MemoryDevice {
         let mut next = candidate;
         next.revision = stored.initial_revision.clone();
         next.revision.extend_from_slice(&next_number.to_be_bytes());
+        stored.snapshot = next.clone();
+        stored.revision_number = next_number;
+        Ok(next)
+    }
+
+    fn read_settings(&mut self) -> Result<settings::Snapshot, String> {
+        self.settings
+            .as_ref()
+            .map(|stored| stored.snapshot.clone())
+            .ok_or_else(|| "Settings operations are unsupported by this device".into())
+    }
+
+    fn apply_setting(
+        &mut self,
+        expected: &settings::Snapshot,
+        edit: &settings::Edit,
+        _backup_dir: &Path,
+    ) -> Result<settings::Snapshot, ApplyFailure> {
+        let reject = |message| ApplyFailure {
+            message,
+            recovery: Recovery::NotAttempted,
+        };
+        let stored = self
+            .settings
+            .as_mut()
+            .ok_or_else(|| reject("Settings operations are unsupported by this device".into()))?;
+        if &stored.snapshot != expected {
+            return Err(reject("Stale expected settings snapshot".into()));
+        }
+        let content = &stored.snapshot.content;
+        let settings::Content::Editable(current) = content else {
+            return Err(reject("Opaque settings cannot be edited".into()));
+        };
+        settings::validate_value(&stored.capabilities, edit).map_err(reject)?;
+        if !current.contains_key(&edit.id) {
+            return Err(reject("Unknown settings field".into()));
+        }
+        let next_number = stored
+            .revision_number
+            .checked_add(1)
+            .ok_or_else(|| reject("Memory settings revision exhausted".into()))?;
+        let mut next = stored.snapshot.clone();
+        let settings::Content::Editable(values) = &mut next.content else {
+            unreachable!()
+        };
+        values.insert(edit.id.clone(), edit.value.clone());
+        next.revision = stored.initial_revision.clone();
+        next.revision.extend_from_slice(&next_number.to_be_bytes());
+        settings::validate_snapshot(&stored.capabilities, &next).map_err(reject)?;
         stored.snapshot = next.clone();
         stored.revision_number = next_number;
         Ok(next)
@@ -849,6 +935,134 @@ mod tests {
         assert_eq!(
             session.picture().unwrap().draft().unwrap()["editable"],
             [4, 5, 6]
+        );
+    }
+
+    fn settings_fixture() -> (
+        Descriptor,
+        State,
+        settings::Capabilities,
+        settings::Snapshot,
+    ) {
+        let (descriptor, state) = fixture();
+        let capabilities = settings::Capabilities {
+            backend_id: "memory".into(),
+            fields: vec![
+                settings::Field {
+                    id: "enabled".into(),
+                    label: "Enabled".into(),
+                    kind: settings::Kind::Toggle,
+                },
+                settings::Field {
+                    id: "timer".into(),
+                    label: "Timer".into(),
+                    kind: settings::Kind::Number {
+                        min: 1,
+                        max: 60,
+                        step: 1,
+                        unit: "min".into(),
+                        disabled_zero: true,
+                    },
+                },
+            ],
+        };
+        let snapshot = settings::Snapshot {
+            backend_id: "memory".into(),
+            revision: vec![0xaa],
+            content: settings::Content::Editable(BTreeMap::from([
+                ("enabled".into(), settings::Value::Toggle(false)),
+                ("timer".into(), settings::Value::Number(5)),
+            ])),
+        };
+        (descriptor, state, capabilities, snapshot)
+    }
+
+    #[test]
+    fn one_field_memory_setting_apply_checks_baseline_and_constraints() {
+        let (descriptor, state, capabilities, initial) = settings_fixture();
+        let mut device = MemoryDevice::new(descriptor, state)
+            .unwrap()
+            .with_settings(capabilities, initial.clone())
+            .unwrap();
+        let edit = settings::Edit {
+            id: "timer".into(),
+            value: settings::Value::Number(6),
+        };
+        let mut stale = initial.clone();
+        stale.revision.push(0xff);
+        assert!(
+            device
+                .apply_setting(&stale, &edit, Path::new("ignored"))
+                .is_err()
+        );
+        let invalid = settings::Edit {
+            id: "timer".into(),
+            value: settings::Value::Number(61),
+        };
+        assert!(
+            device
+                .apply_setting(&initial, &invalid, Path::new("ignored"))
+                .is_err()
+        );
+        assert_eq!(device.read_settings().unwrap(), initial);
+        let updated = device
+            .apply_setting(&initial, &edit, Path::new("ignored"))
+            .unwrap();
+        assert_eq!(
+            updated.content,
+            settings::Content::Editable(BTreeMap::from([
+                ("enabled".into(), settings::Value::Toggle(false)),
+                ("timer".into(), settings::Value::Number(6)),
+            ]))
+        );
+        assert_eq!(updated.revision.len(), initial.revision.len() + 8);
+        assert!(
+            device
+                .apply_setting(&initial, &edit, Path::new("ignored"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn settings_read_and_apply_use_the_serial_executor() {
+        use byakko_core::session::{Acceptance, Session};
+        use std::time::Duration;
+        let (descriptor, state, capabilities, snapshot) = settings_fixture();
+        let device = MemoryDevice::new(descriptor.clone(), state)
+            .unwrap()
+            .with_settings(capabilities.clone(), snapshot)
+            .unwrap();
+        let mut session = Session::new(descriptor)
+            .unwrap()
+            .with_settings(capabilities)
+            .unwrap();
+        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
+        worker.set_generation(session.connect().unwrap());
+        worker
+            .try_submit(session.request_settings_read().unwrap())
+            .unwrap();
+        let result = worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(session.accept(result), Acceptance::Accepted);
+        session
+            .edit_setting(settings::Edit {
+                id: "enabled".into(),
+                value: settings::Value::Toggle(true),
+            })
+            .unwrap();
+        worker
+            .try_submit(session.request_setting_apply().unwrap())
+            .unwrap();
+        let result = worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(session.accept(result), Acceptance::Accepted);
+        assert_eq!(
+            session.settings().unwrap().draft().unwrap()["enabled"],
+            settings::Value::Toggle(true)
         );
     }
 }

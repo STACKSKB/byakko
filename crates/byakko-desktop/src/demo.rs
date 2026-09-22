@@ -222,10 +222,46 @@ pub fn device() -> Result<MemoryDevice, String> {
         revision: vec![0xF1],
         content: byakko_core::picture::Content::Editable(colors),
     };
+    let settings = byakko_core::settings::Capabilities {
+        backend_id: "memory".into(),
+        fields: vec![
+            byakko_core::settings::Field {
+                id: "studio_mode".into(),
+                label: "Studio mode".into(),
+                kind: byakko_core::settings::Kind::Toggle,
+            },
+            byakko_core::settings::Field {
+                id: "repeat_delay".into(),
+                label: "Repeat delay".into(),
+                kind: byakko_core::settings::Kind::Number {
+                    min: 2,
+                    max: 20,
+                    step: 2,
+                    unit: "ms".into(),
+                    disabled_zero: false,
+                },
+            },
+        ],
+    };
+    let settings_snapshot = byakko_core::settings::Snapshot {
+        backend_id: "memory".into(),
+        revision: vec![0xE1],
+        content: byakko_core::settings::Content::Editable(std::collections::BTreeMap::from([
+            (
+                "studio_mode".into(),
+                byakko_core::settings::Value::Toggle(false),
+            ),
+            (
+                "repeat_delay".into(),
+                byakko_core::settings::Value::Number(8),
+            ),
+        ])),
+    };
     MemoryDevice::new(descriptor, state)?
         .with_macros(capabilities, snapshots)?
         .with_lighting(lighting, initial)?
-        .with_picture(picture, picture_snapshot)
+        .with_picture(picture, picture_snapshot)?
+        .with_settings(settings, settings_snapshot)
 }
 
 fn lighting_capabilities() -> byakko_core::lighting::Capabilities {
