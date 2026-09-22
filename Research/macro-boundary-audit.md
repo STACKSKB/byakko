@@ -39,3 +39,21 @@ Scope: original `src/macros.rs` compared with protocol facts in the supplied, ig
 | Slots | Guard accepts 0–49. | The configuration store around 23,589,000 sets a default maximum of 50 macro assignments and assigns the first free index starting at 0. Some other device families use 20. | Generic 50-entry evidence supports 0–49 for this device family, but the bundle excerpt does not prove the firmware's last accepted index. Slot 49 deserves a reversible write/read/restore test. |
 
 The supplied bundle is minified and has several hardware-family implementations. Offsets above refer to the current bundle's character positions and identify the simple macro implementation; they are not source line numbers. A passing codec unit test alone cannot establish firmware interpretation or physical playback.
+
+## Offline comparison and macro editor lifecycle
+
+`cargo run --no-default-features --example compare_macro_capture -- Research/captures/macro-official-headers-1.log`
+parses the retained official HID log without accessing a device. It validates
+complete 67-byte debugger dumps, ordered macro pages, header length and checksum.
+The captured short macro contains one page: 56 logical bytes observed and 200
+unsent bytes unknown. With the explicit `--assume-zero-unobserved` comparison
+option, its observed data and opcode/slot/page/length fields match the native
+writer. The final marker differs (official page0; native page4). Unsent bytes
+are not evidence of firmware clearing, and this comparison does not prove
+playback or interrupted-write semantics. No transport policy was changed.
+
+The native macro editor now cancels window close while a device worker is
+running, before processing same-frame completion. Worker panics become visible
+unverified-state errors; drafts survive errors or unexpected returned bytes.
+Device-free tests cover close/error races, mismatched readback and panic
+completion. These checks do not resolve the separate hardware recovery failure.

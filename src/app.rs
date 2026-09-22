@@ -1319,6 +1319,7 @@ impl eframe::App for Workbench {
         // completion. A restoration error in this frame must remain visible.
         self.handle_archive_close(ui.ctx());
         self.keymap_editor.handle_close(ui.ctx());
+        self.macro_editor.handle_close(ui.ctx());
         self.lighting_editor.handle_close(ui.ctx());
         self.poll_worker();
         if !self.device_busy() && self.keymap_editor.dirty_count() == 0 {
