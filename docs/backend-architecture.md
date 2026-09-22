@@ -93,6 +93,36 @@ panics report Unverified. No recovery decision parses a display string. Existing
 write order, delays, backup and full readback remain unchanged; hardware fault
 recovery has not been reaccepted on the strength of these structural changes.
 
+## Macro migration foundation
+
+`byakko-core::macros` defines owned, serializable programs, events, snapshots,
+capabilities and atomic draft edits. Key usages, pointer button usages, signed
+movement and wait-after values are wider than Nia87 storage fields; available
+slots and ranges come from a backend. Editing returns a validated candidate and
+does not change the original on rejection. The backend must still validate its
+encoded capacity before a candidate is accepted for storage.
+
+`byakko-devices::nia87::macro_adapter` translates these values to the reviewed
+simple-macro codec. Five pointer buttons have semantic usage IDs; wheel events
+retain backend-scoped action IDs and edge flags until portable semantics are
+established. Repeat zero is retained without claiming infinite playback. The
+key's playback mode remains separate from the slot's shared repeat count; the
+existing explicit count-1 policy for toggle/hold must survive UI migration.
+
+Macro snapshots preserve the entire raw revision. Valid extended encodings of
+short waits remain editable with the original before-image intact. Unknown or
+malformed stores are exposed as opaque, preserved for inspection/export and
+rejected for writes. Draft validation rejects a decoded baseline that differs
+from its raw revision, wrong backend IDs, unsupported actions and byte overflow.
+The native macro transaction now returns typed recovery status through a shared
+error adapter, retaining its previous wire sequence, delays and diagnostics.
+
+This is a model/adapter foundation, not a completed Iced macro editor. Macro
+commands still need integration into the single serialized executor and shared
+device lifecycle; do not add a second macro worker or copy the legacy panel's
+operation state into the view. Recorder, binding, file/label and UI workflows
+remain migration work. No live macro writes were performed for this step.
+
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 
 ## Implemented first slice
