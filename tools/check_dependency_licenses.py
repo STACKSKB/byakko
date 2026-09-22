@@ -17,8 +17,11 @@ CHOICES = {
     "ISC": "ISC",
     "Zlib": "Zlib",
     "BSL-1.0": "BSL-1.0",
+    "BSD-2-Clause": "BSD-2-Clause",
+    "BSD-3-Clause": "BSD-3-Clause",
     "MIT OR Apache-2.0": "MIT",
     "MIT/Apache-2.0": "MIT",
+    "Apache-2.0/MIT": "MIT",
     "Apache-2.0 OR MIT": "MIT",
     "Apache-2.0 AND MIT": "Apache-2.0 AND MIT",
     "Apache-2.0 OR GPL-2.0-only": "Apache-2.0",
@@ -54,7 +57,7 @@ def parse_tree(text):
             raise ValueError(f"Unexpected cargo tree row: {line!r}")
         name, version = match.groups()
         expression = expression.removesuffix(" (*)").strip()
-        if name in {"byakko", "byakko-core", "byakko-devices"}:
+        if name in {"byakko", "byakko-core", "byakko-devices", "byakko-desktop"}:
             continue  # Project license remains the owner's decision.
         row = {"name": name, "version": version, "declared": expression,
                "selected": selection(name, expression)}
@@ -69,21 +72,26 @@ def parse_tree(text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--package", default="byakko", help="Workspace application package to audit")
     parser.add_argument("--output", type=Path, help="Create a new JSON inventory; never overwrite")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
-    inventory = {"scope": "default features, normal/build edges, current host build dependencies",
+    inventory = {"package": args.package,
+                 "scope": "default features, normal/build edges, current host build dependencies",
                  "limitations": "Metadata only; source headers and release notices need separate review",
                  "targets": {}}
     for target in TARGETS:
         result = subprocess.run(
-            ["cargo", "tree", "--locked", "--offline", "--target", target,
+            ["cargo", "tree", "-p", args.package, "--locked", "--offline", "--target", target,
              "--edges", "normal,build", "--prefix", "none", "--format", "{p}|{l}"],
             cwd=root, capture_output=True, text=True, check=True)
         rows = parse_tree(result.stdout)
         inventory["targets"][target] = rows
         print(f"{target}: {len(rows)} dependency packages; recognized license selections")
-    print("Font assets retain OFL/Ubuntu font-license obligations. Source audit is separate.")
+    if any(row["name"] == "epaint_default_fonts"
+           for rows in inventory["targets"].values() for row in rows):
+        print("Font assets retain OFL/Ubuntu font-license obligations.")
+    print("Source audit is separate.")
     if args.output:
         with args.output.open("x", encoding="utf-8") as output:
             json.dump(inventory, output, indent=2)

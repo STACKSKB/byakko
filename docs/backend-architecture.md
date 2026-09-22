@@ -26,9 +26,36 @@ adapters. Any service will need its own session identity, origin/authentication
 policy and bounded request validation; none is exposed by this change. No
 JavaScript or browser engine is introduced into the native application.
 
-The session model is initially tested independently. Connecting it to the Nia87
-executor and Iced view is the next migration step; the legacy controllers are
-not yet replaced. The three-package target remains core, devices and desktop.
+The session model now drives the first Iced keymap screen in
+`crates/byakko-desktop`. Its library receives a descriptor and executor; only
+the binary composition root imports the temporary Nia87 bridge. Views own no
+firmware representation, file paths, baseline copies or device workers. The
+three-package target remains core, devices and desktop; the legacy package is
+a temporary fourth dependency until the reviewed firmware modules move.
+
+Startup reads automatically; selection, search, staging, change review, apply,
+verification, revert and explicit read/reconnect use the same core owner.
+Generation publication precedes each read. The UI polls the bounded completion
+queue every 25 ms only while a command is pending; no timer runs while idle.
+Closing waits for in-flight I/O. Failed/uncertain completion keeps the window
+and draft open; closing a dirty idle draft requires explicit discard. A dirty
+reconnect conflict blocks editing/apply and retains the draft: revert, then
+read to accept device values. There is no automatic hotplug monitor yet.
+
+`--demo` composes the same screen/executor with `MemoryDevice`: three keys,
+three named layers, one read-only opaque binding, no hardware/file effects.
+The memory backend validates expected state and advances opaque revisions.
+Tests cover stale writes, fixed-key rejection, retained opaque values, UI layer
+selection and close/failure transitions. Those tests do not establish physical
+key output or graphical interaction correctness.
+
+Iced 0.14 uses tiny-skia and system fonts here; WGPU, egui and the bundled Fira
+font are absent from the desktop's normal dependency graph. The legacy root
+GUI still uses egui when built separately or as part of all-feature workspace
+checks. `tools/check_dependency_licenses.py --package byakko-desktop` audits the
+Windows/Linux normal/build metadata separately; distribution asset notices and
+source-header review remain required. Core compiles independently for WASM;
+the native desktop is not a browser frontend.
 
 `crates/byakko-devices` now provides the serialized native executor and a small
 `KeymapDevice` effect contract. It depends only on core. The current Nia87
