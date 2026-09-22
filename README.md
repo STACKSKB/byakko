@@ -4,7 +4,7 @@ A native, USB-first Menel Nia87 configurator under investigation. The intended a
 
 ## Current status
 
-A native keymap workbench is implemented, with automatic Nia87 TKL layout, base and Fn editing, staged changes, automatic backups and complete readback verification. Media, pointer and modifier combinations are available. The native macro editor supports event editing, saved-slot bindings and JSON import/export. Long macro storage, shorter replacement and empty restoration passed live readback checks. Global effect and per-key color panels are implemented; brightness and one per-key color passed reversible readback tests. Fn F24 and media writes now pass application readback and restoration. Simultaneous changes to both layers of the same key remain guarded. This is a development build, not yet feature complete. See [docs/live-evidence.md](docs/live-evidence.md) for the exact verification limits.
+A native keymap workbench is implemented, with automatic Nia87 TKL layout, base and Fn editing, staged changes, automatic backups and complete readback verification. Media, pointer and modifier combinations are available. The native macro editor supports event editing, saved-slot bindings and JSON import/export. Long macro storage, shorter replacement and empty restoration passed live readback checks. Global effect and per-key color panels are implemented; brightness and one per-key color passed reversible readback tests. Fn F24 and media writes now pass application readback and restoration. Mixed base/Fn changes now pass complete verification with one-second spacing between key writes. This is a development build, not yet feature complete. See [docs/live-evidence.md](docs/live-evidence.md) for the exact verification limits.
 
 ```console
 cargo run --locked -- devices
@@ -17,7 +17,7 @@ Validated on the attached Windows keyboard: `3151:4015`, configuration collectio
 
 The built-in Nia87 slot profile comes from our observed default map, independently checked against the supplied vendor fixture. It does not depend on current key assignments or require repeated layout setup. 2.4 GHz configuration is deferred until USB works and receiver capability is measured.
 
-The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a focused keyboard macro recorder. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Four wireless sleep timers have native controls and passed complete write/readback/restoration tests. Keyboard options remain read-only. A captured official Fn media binding now passes native write/readback/restoration. USB access recovered after a replug; the pending test binding was restored, and Fn editing is enabled. Mixed edits to both layers of the same slot remain guarded.
+The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a focused keyboard macro recorder. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Four wireless sleep timers have native controls and passed complete write/readback/restoration tests. Keyboard options remain read-only. A captured official Fn media binding now passes native write/readback/restoration. USB access recovered after a replug; the pending test binding was restored, and Fn editing is enabled. Mixed edits to both layers of the same slot are now supported and verified by readback/restoration.
 
 ## Research and provenance
 

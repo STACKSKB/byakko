@@ -713,7 +713,9 @@ fn write_binding(
         function, index, slot, binding,
     )?);
     device.send_feature_report(&payload)?;
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    // Firmware 0100 can cross-write base/Fn values when setters are only
+    // 100 ms apart. A 1 s interval passed mixed-layer write/restore tests.
+    std::thread::sleep(std::time::Duration::from_secs(1));
     Ok(())
 }
 
@@ -734,11 +736,6 @@ pub fn apply_keymaps(
     }
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
         return Err("Cannot modify reserved padding slots".into());
-    }
-    if (0..126)
-        .any(|slot| expected.base[slot] != base[slot] && expected.function[slot] != function[slot])
-    {
-        return Err("Changing both layers of the same key in one transaction is not yet supported; no writes sent".into());
     }
     let current = snapshot_unlocked()?;
     if &current != expected {
@@ -885,7 +882,7 @@ mod lighting_tests {
     }
 
     #[test]
-    fn mixed_layer_same_slot_is_rejected_before_device_access() {
+    fn reserved_slot_is_rejected_before_device_access() {
         let expected = super::Snapshot {
             format_version: 1,
             firmware: 0x100,
@@ -894,9 +891,8 @@ mod lighting_tests {
             function: vec![[0; 4]; 128],
         };
         let mut base = expected.base.clone();
-        let mut function = expected.function.clone();
-        base[91] = [0, 0, 0x72, 0];
-        function[91] = [0, 0, 0x73, 0];
+        let function = expected.function.clone();
+        base[127] = [0, 0, 0x72, 0];
         let error = super::apply_keymaps(
             &expected,
             &base,
@@ -904,7 +900,7 @@ mod lighting_tests {
             std::path::Path::new("unused-backup-path"),
         )
         .unwrap_err();
-        assert!(error.to_string().contains("both layers of the same key"));
+        assert!(error.to_string().contains("reserved padding"));
     }
 
     #[test]

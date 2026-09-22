@@ -140,7 +140,10 @@ impl Workbench {
         let ctx = ctx.clone();
         self.busy = true;
         self.error = false;
-        self.status = "Comparing device state, backing up, and applying staged changes…".into();
+        self.status = format!(
+            "Backing up and applying {} key changes; allow about one second per change plus verification…",
+            self.dirty_count()
+        );
         std::thread::spawn(move || {
             let result = device::apply_keymaps(&expected, &base, &function, &backup_dir)
                 .map_err(|error| error.to_string());

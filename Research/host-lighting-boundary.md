@@ -1,5 +1,10 @@
 # Nia87 host lighting boundary (static research)
 
+Follow-up: `host-frame-protocol.md` traces the selected inherited methods to
+screen opcode `0x0f` and ordinary USB music opcode `0x0e`, with field layouts
+and transport distinctions. The unknown-frame statements below record the
+earlier investigation stage; final helper/HID capture remains outstanding.
+
 This is a bounded trace of the selected Nia87 path in the supplied current
 official web bundle, `Research/extracted/web-current/main_68eaf5ce.js`. No
 device I/O was performed for this note and no vendor source is copied into the

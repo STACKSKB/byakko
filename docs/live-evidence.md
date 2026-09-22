@@ -184,3 +184,21 @@ keymaps, all 128 picture colors, and all raw scalar settings with its before
 state; all matched. This establishes selected parameter cases for every
 onboard effect ID 0–19, not every combination or visible animation behavior.
 Host music/screen modes 20–22 were not exercised by these tests.
+
+## Mixed-layer writes resolved by write spacing
+
+A direct post-write GetFeature response did not resolve mixed-layer writes at
+100 ms spacing; both original maps were restored. The official web UI then
+assigned base A and Fn B to Pause, and native full-map reads confirmed the
+two distinct values. The official UI restored the original assignments; the
+complete exported snapshot hash matched the original backup. This rules out
+a general inability of the firmware to store different layer assignments.
+
+With one second between native writes, the standalone mixed F23/F24 replay
+passed. The application transaction path then passed both base F23 + Fn F24
+and base F23 + Fn Play/Pause, **without** extra response reads. Every test
+restored and verified both complete original maps. `write_binding` now waits
+one second after each setter, including recovery writes, and the mixed-layer
+guard is removed. This establishes a verified interval, not a measured
+minimum or an explanation of the firmware internals. Physical output remains
+untested. `verify-mixed-roundtrip` reproduces the application checks.
