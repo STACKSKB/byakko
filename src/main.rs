@@ -9,6 +9,18 @@ fn run() -> byakko::device::Result<()> {
         println!(
             "\n  capture-configuration PATH  Save verified complete device archive\n  inspect-configuration PATH  Validate archive and show counts (no device I/O)"
         );
+        println!("  plan-configuration CURRENT TARGET  Validate restoration between two archives");
+        return Ok(());
+    }
+    if args.len() == 3 && args[0] == "plan-configuration" {
+        let current = byakko::configuration::load(std::path::Path::new(&args[1]))?;
+        let target = byakko::configuration::load(std::path::Path::new(&args[2]))?;
+        let plan = byakko::configuration_plan::plan(&current, &target)?;
+        byakko::configuration_plan::plan(&target, &current)?;
+        println!(
+            "Restore plan: {} bindings, macro slots {:?}, {} picture colors, lighting {}, settings {:?}. Both directions validated; no device I/O.",
+            plan.key_bindings, plan.macro_slots, plan.picture_keys, plan.lighting, plan.settings
+        );
         return Ok(());
     }
     if args.len() == 2 && args[0] == "capture-configuration" {
