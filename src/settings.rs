@@ -13,6 +13,8 @@ pub const OPTIONS_READ: u8 = 0x86;
 pub enum Setting {
     Debounce(u8),
     AutoOs(bool),
+    /// Bluetooth/2.4 GHz normal timers followed by their deep-sleep timers.
+    Sleep([u16; 4]),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -136,9 +138,8 @@ pub fn read_requests() -> [[u8; REPORT_LEN]; 4] {
         .map(|opcode| crate::protocol::read_request(opcode, 0, 0))
 }
 
-/// Encode only the two settings with an unambiguous Nia87 setter layout.
-/// Sleep writes remain disabled because their byte-7 data overlaps generic
-/// BIT7 checksum framing.
+/// Encode validated Nia87 scalar settings. Sleep writes use the current
+/// setter's data offsets 8–15, independently verified by live restoration.
 pub fn write_report(setting: Setting) -> Result<[u8; REPORT_LEN], String> {
     let mut report = [0u8; REPORT_LEN];
     match setting {
@@ -152,6 +153,16 @@ pub fn write_report(setting: Setting) -> Result<[u8; REPORT_LEN], String> {
         Setting::AutoOs(value) => {
             report[0] = 0x17;
             report[1] = u8::from(value);
+        }
+        Setting::Sleep(values) => {
+            report[0] = 0x12;
+            for (index, seconds) in values.into_iter().enumerate() {
+                let minimum = if index < 2 { 60 } else { 600 };
+                if seconds != 0 && (!(minimum..=3600).contains(&seconds) || seconds % 60 != 0) {
+                    return Err("Sleep timers require whole minutes: normal 1–60, deep 10–60, or zero to disable".into());
+                }
+                report[8 + index * 2..10 + index * 2].copy_from_slice(&seconds.to_le_bytes());
+            }
         }
     }
     let sum = report[..7]
@@ -219,5 +230,21 @@ mod tests {
         );
         assert!(write_report(Setting::Debounce(0)).is_err());
         assert!(write_report(Setting::Debounce(11)).is_err());
+    }
+
+    #[test]
+    fn sleep_uses_verified_current_layout_and_validates_all_fields() {
+        let report = write_report(Setting::Sleep([180, 120, 600, 600])).unwrap();
+        assert_eq!(&report[..8], &[0x12, 0, 0, 0, 0, 0, 0, 0xed]);
+        assert_eq!(&report[8..16], &[180, 0, 120, 0, 88, 2, 88, 2]);
+        assert!(write_report(Setting::Sleep([0; 4])).is_ok());
+        for values in [
+            [59, 120, 600, 600],
+            [120, 3601, 600, 600],
+            [120, 120, 60, 600],
+            [120, 120, 600, 601],
+        ] {
+            assert!(write_report(Setting::Sleep(values)).is_err());
+        }
     }
 }
