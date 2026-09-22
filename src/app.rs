@@ -194,8 +194,10 @@ impl Workbench {
             self.dirty_count()
         );
         std::thread::spawn(move || {
-            let result = device::apply_keymaps(&expected, &base, &function, &backup_dir)
-                .map_err(|error| error.to_string());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                device::apply_keymaps(&expected, &base, &function, &backup_dir)
+                    .map_err(|error| error.to_string())
+            })).unwrap_or_else(|_| Err("Keymap apply panicked; device state and restoration are unverified. Inspect the backup before retrying.".into()));
             let _ = tx.send(WorkerResult::Applied(result));
             ctx.request_repaint();
         });
@@ -369,6 +371,9 @@ impl Workbench {
     }
 
     fn handle_archive_close(&mut self, ctx: &egui::Context) {
+        if self.busy && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         if self.archive_apply_running && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.status = "Archive apply is still running; close is held until verification or recovery finishes.".into();
@@ -1365,6 +1370,8 @@ impl eframe::App for Workbench {
         self.handle_archive_close(ui.ctx());
         self.keymap_editor.handle_close(ui.ctx());
         self.macro_editor.handle_close(ui.ctx());
+        self.picture_editor.handle_close(ui.ctx());
+        self.settings_editor.handle_close(ui.ctx());
         self.lighting_editor.handle_close(ui.ctx());
         self.poll_worker();
         self.maybe_retry_read(ui.ctx());
@@ -1643,6 +1650,28 @@ mod tests {
             .unwrap();
         app.poll_worker();
         assert!(app.retry_schedule.deadline().is_some());
+    }
+
+    #[test]
+    fn legacy_keymap_write_close_is_held_until_error_is_visible() {
+        let mut app = Workbench::without_read();
+        app.load(snapshot(0));
+        app.selected = Some(4);
+        app.set_binding([9, 0, 5, 0]);
+        app.busy = true;
+        app.tx
+            .send(WorkerResult::Applied(Err("readback failed".into())))
+            .unwrap();
+        let output = close_frame(&mut app);
+        app.poll_worker();
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::CancelClose)
+        );
+        assert!(app.error && app.dirty_count() > 0);
+        assert!(!app.busy);
+        assert_eq!(app.status, "readback failed");
     }
 
     #[test]

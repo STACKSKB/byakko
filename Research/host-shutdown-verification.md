@@ -9,3 +9,18 @@ Three headless egui event tests pass: pending close waits, successful completion
 No device writes were needed for this lifecycle regression. Native window Start/Stop and close testing remains pending because the available capture tool fails with Windows interface error0x80004002.
 
 A separate headless egui macro-recorder test now sends modifier changes and physical/logical key events through `process_recording`, then simulates loss of window focus. It verifies physical A is recorded despite a logical Z label, repeat keydowns are omitted, held A and Control are released, and the resulting macro still encodes. This tests the actual recorder event path without synthesizing keyboard input to other applications or claiming firmware playback.
+
+## Ordinary configuration workers
+
+The same close-before-completion ordering now covers ordinary global lighting,
+per-key colors, settings and the legacy keymap path used to bind saved macros.
+These operations cancel close while running, retain staged data on error, and
+leave verification/recovery errors visible. They do not close automatically
+when a worker finishes; the user can close again after reviewing the result.
+Host lighting retains its separate stop-and-restore deferred-close behavior.
+
+Device worker panics become completion errors that explicitly leave device
+state/restoration unverified. This prevents a permanently busy UI but cannot
+promise rollback after arbitrary panics. Headless close/error and panic tests
+exercise these paths without HID writes. OS-window close testing and hardware
+fault-recovery acceptance remain separate pending gates.

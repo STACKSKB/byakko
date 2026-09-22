@@ -98,7 +98,10 @@ impl PictureEditor {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = device::read_picture().map_err(|error| error.to_string());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                device::read_picture().map_err(|error| error.to_string())
+            }))
+            .unwrap_or_else(|_| Err("Picture read panicked; device state is unverified.".into()));
             let _ = tx.send(WorkerResult::Read(result));
             ctx.request_repaint();
         });
@@ -118,11 +121,20 @@ impl PictureEditor {
         self.busy = true;
         self.set_status("Backing up, writing changed colors, and verifying all 128 slots…");
         std::thread::spawn(move || {
-            let result = device::apply_picture(&expected, &desired, &backup_dir)
-                .map_err(|error| error.to_string());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                device::apply_picture(&expected, &desired, &backup_dir)
+                    .map_err(|error| error.to_string())
+            }))
+            .unwrap_or_else(|_| Err("Picture apply panicked; restoration is unverified. Inspect the backup before retrying.".into()));
             let _ = tx.send(WorkerResult::Applied(result));
             ctx.request_repaint();
         });
+    }
+
+    pub fn handle_close(&self, ctx: &egui::Context) {
+        if self.busy && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
     }
 
     fn poll_worker(&mut self) {
@@ -337,6 +349,7 @@ impl PictureEditor {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, blocked: bool) {
+        self.handle_close(ui.ctx());
         self.poll_worker();
         if !self.first_read_started && !blocked && !self.busy {
             self.start_read(ui.ctx());
@@ -380,11 +393,51 @@ impl PictureEditor {
             ui.add_space(8.0);
             ui.label(egui::RichText::new(&self.status).color(if self.error { ACCENT } else { INK }));
         });
+        self.handle_close(ui.ctx());
     }
 }
 
 impl Default for PictureEditor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close_frame(editor: &mut PictureEditor) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |ui| editor.handle_close(ui.ctx()));
+        output.textures_delta.clear();
+        output
+    }
+
+    #[test]
+    fn close_is_cancelled_before_same_frame_error_completion() {
+        let mut editor = PictureEditor::new();
+        editor.observed = Some(vec![[1, 2, 3]; 128]);
+        editor.draft = vec![[4, 5, 6]; 128];
+        let draft_before = editor.draft.clone();
+        editor.busy = true;
+        editor
+            .tx
+            .send(WorkerResult::Applied(Err("restore failed".into())))
+            .unwrap();
+        let output = close_frame(&mut editor);
+        editor.poll_worker();
+        let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!editor.busy);
+        assert!(editor.error);
+        assert_eq!(editor.draft, draft_before);
     }
 }
