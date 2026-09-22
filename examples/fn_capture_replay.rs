@@ -9,7 +9,7 @@ fn save(name: &str, value: &device::Snapshot) -> Result<()> {
     Ok(())
 }
 
-fn send(function: bool, binding: [u8; 4]) -> Result<()> {
+fn send(function: bool, binding: [u8; 4], read_response: bool) -> Result<()> {
     println!("Opening configuration collection for function={function}, binding={binding:?}");
     let (_, device) = device::open_unique()?;
     let mut host = [0; 65];
@@ -18,15 +18,26 @@ fn send(function: bool, binding: [u8; 4]) -> Result<()> {
     )?);
     device.send_feature_report(&host)?;
     println!("Feature write returned successfully");
-    std::thread::sleep(Duration::from_millis(100));
+    std::thread::sleep(Duration::from_millis(1000));
+    if read_response {
+        let mut reply = [0; 65];
+        let count = device.get_feature_report(&mut reply)?;
+        println!(
+            "Post-write response: length={count}, prefix={:02x?}",
+            &reply[..13]
+        );
+    }
     Ok(())
 }
 
 fn main() -> Result<()> {
-    let binding = match std::env::args().nth(1).as_deref() {
+    let mode = std::env::args().nth(1);
+    let read_response = mode.as_deref() == Some("mixed-response");
+    let binding = match mode.as_deref() {
         None => [3, 0, 205, 0],
         Some("f24") => [0, 0, 0x73, 0],
-        _ => return Err("Expected no argument or f24".into()),
+        Some("mixed-response") => [0, 0, 0x73, 0],
+        _ => return Err("Expected no argument, f24 or mixed-response".into()),
     };
     let before = device::snapshot()?;
     if before.firmware != 0x100
@@ -42,17 +53,23 @@ fn main() -> Result<()> {
     let prefix = format!("Research/captures/fn-replay-{stamp}");
     save(&format!("{prefix}-before.json"), &before)?;
     let result = (|| -> Result<bool> {
-        send(true, binding)?;
+        if read_response {
+            send(false, [0, 0, 0x72, 0], true)?;
+        }
+        send(true, binding, read_response)?;
         let actual = device::snapshot()?;
         save(&format!("{prefix}-after.json"), &actual)?;
         let mut desired = before.clone();
         desired.function[91] = binding;
+        if read_response {
+            desired.base[91] = [0, 0, 0x72, 0];
+        }
         Ok(actual == desired)
     })();
-    send(true, before.function[91])?;
+    send(true, before.function[91], read_response)?;
     let restored = device::snapshot()?;
     if restored.base[91] != before.base[91] {
-        send(false, before.base[91])?;
+        send(false, before.base[91], read_response)?;
     }
     let restored = device::snapshot()?;
     save(&format!("{prefix}-restored.json"), &restored)?;
