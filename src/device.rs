@@ -121,6 +121,28 @@ pub struct Snapshot {
     pub function: Vec<[u8; 4]>,
 }
 
+// Production forwards directly. The explicitly enabled research build can
+// simulate one transport failure while retaining a real device for recovery.
+trait FeatureSetter {
+    fn send_setter(&self, report: &[u8]) -> Result<()>;
+}
+
+impl FeatureSetter for HidDevice {
+    fn send_setter(&self, report: &[u8]) -> Result<()> {
+        #[cfg(feature = "research-tools")]
+        let result = crate::research_fault::send(report, || self.send_feature_report(report));
+        #[cfg(not(feature = "research-tools"))]
+        let result = self.send_feature_report(report);
+        // An error does not prove that the firmware did not receive the setter.
+        // Callers normally sleep only after success; retain the longest known
+        // setter interval before any recovery request on an uncertain result.
+        if result.is_err() {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+        result
+    }
+}
+
 fn read_payload(device: &HidDevice, opcode: u8, index: u8, page: u8) -> Result<[u8; 64]> {
     let mut request = [0u8; 65];
     request[1..].copy_from_slice(&crate::protocol::read_request(opcode, index, page));
@@ -255,7 +277,7 @@ impl HostLightingSession {
         }
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&crate::host_lighting::screen_report(rgb));
-        self.device.send_feature_report(&host)?;
+        self.device.send_setter(&host)?;
         Ok(())
     }
 
@@ -265,7 +287,7 @@ impl HostLightingSession {
         }
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&crate::host_lighting::music_report(bands));
-        self.device.send_feature_report(&host)?;
+        self.device.send_setter(&host)?;
         Ok(())
     }
 
@@ -398,7 +420,7 @@ pub fn apply_setting(
     let send = |data: &[u8; 64]| -> Result<()> {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(data);
-        device.send_feature_report(&host)?;
+        device.send_setter(&host)?;
         std::thread::sleep(std::time::Duration::from_millis(500));
         Ok(())
     };
@@ -474,7 +496,7 @@ fn lighting_restore_report(original: &crate::lighting::Lighting) -> [u8; 64] {
 fn write_lighting_report(device: &HidDevice, report: &[u8; 64]) -> Result<()> {
     let mut host = [0u8; 65];
     host[1..].copy_from_slice(report);
-    device.send_feature_report(&host)?;
+    device.send_setter(&host)?;
     std::thread::sleep(std::time::Duration::from_millis(500));
     Ok(())
 }
@@ -642,8 +664,7 @@ fn read_picture_unlocked() -> Result<Vec<[u8; 3]>> {
 }
 
 fn read_picture_on_device(device: &HidDevice) -> Result<Vec<[u8; 3]>> {
-    let mut previous = None;
-    for _ in 0..2 {
+    stable_picture_reads(|| {
         let mut pages = Vec::new();
         for page in 0..6 {
             let barrier = read_payload(device, 0x80, 0, 0)?;
@@ -656,15 +677,23 @@ fn read_picture_on_device(device: &HidDevice) -> Result<Vec<[u8; 3]>> {
             }
             pages.push(bytes);
         }
-        let colors = crate::lighting::user_picture_from_pages(&pages)?;
-        if let Some(ref first) = previous
-            && first != &colors
-        {
-            return Err("Picture changed between repeated reads".into());
+        Ok(crate::lighting::user_picture_from_pages(&pages)?)
+    })
+}
+
+fn stable_picture_reads(mut read: impl FnMut() -> Result<Vec<[u8; 3]>>) -> Result<Vec<[u8; 3]>> {
+    let mut previous = None;
+    for _ in 0..3 {
+        let colors = read()?;
+        if colors.len() != 128 {
+            return Err("Incomplete picture snapshot".into());
+        }
+        if previous.as_ref() == Some(&colors) {
+            return Ok(colors);
         }
         previous = Some(colors);
     }
-    Ok(previous.expect("two reads"))
+    Err("Picture did not stabilize across three complete reads".into())
 }
 
 /// Capture all supported local configuration data without sending setters.
@@ -824,7 +853,7 @@ fn recover_configuration(
                     crate::lighting::per_key_color_report(0, slot as u8, original.picture[slot])?;
                 let mut host = [0u8; 65];
                 host[1..].copy_from_slice(&report);
-                device.send_feature_report(&host)?;
+                device.send_setter(&host)?;
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 Ok(())
             })();
@@ -845,7 +874,7 @@ fn recover_configuration(
             };
             let mut host = [0u8; 65];
             host[1..].copy_from_slice(&report);
-            device.send_feature_report(&host)?;
+            device.send_setter(&host)?;
             std::thread::sleep(std::time::Duration::from_millis(500));
             Ok(())
         })();
@@ -859,19 +888,20 @@ fn recover_configuration(
     }
     // A transient write error may still have delivered its packet. Only full
     // readback establishes recovery; do not skip it after an individual error.
-    match capture_configuration_on_device(device, |_, _| {}) {
-        Ok(actual) if &actual == original => Ok(()),
-        result => {
-            let verification = match result {
-                Ok(_) => "complete original configuration differs".to_owned(),
-                Err(error) => error.to_string(),
-            };
-            Err(format!(
-                "Recovery unverified: {verification}; section failures: {}",
-                failures.join("; ")
-            )
-            .into())
-        }
+    let first = capture_configuration_on_device(device, |_, _| {}).map_err(|e| e.to_string());
+    let verified = crate::recovery_verification::verify(original, first, || {
+        // An aborted Windows feature request can leave this handle unusable.
+        // Reopen only for readback under the same lock, never to retry setters.
+        let (_, fresh) = open_unique().map_err(|e| e.to_string())?;
+        capture_configuration_on_device(&fresh, |_, _| {}).map_err(|e| e.to_string())
+    });
+    match verified {
+        Ok(()) => Ok(()),
+        Err(verification) => Err(format!(
+            "Recovery unverified: {verification}; section failures: {}",
+            failures.join("; ")
+        )
+        .into()),
     }
 }
 
@@ -917,7 +947,7 @@ fn write_configuration_changes(
                     crate::lighting::per_key_color_report(0, slot as u8, target.picture[slot])?;
                 let mut host = [0u8; 65];
                 host[1..].copy_from_slice(&report);
-                device.send_feature_report(&host)?;
+                device.send_setter(&host)?;
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
@@ -935,7 +965,7 @@ fn write_configuration_changes(
         };
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&report);
-        device.send_feature_report(&host)?;
+        device.send_setter(&host)?;
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
     if !plan.settings.is_empty() && read_settings_on_device(device)? != target.settings {
@@ -994,7 +1024,7 @@ pub fn apply_picture(
                 slot as u8,
                 colors[slot],
             )?);
-            device.send_feature_report(&host)?;
+            device.send_setter(&host)?;
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         Ok(())
@@ -1034,7 +1064,7 @@ fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
     for report in crate::macros::write_reports(slot, bytes)? {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&report);
-        device.send_feature_report(&host)?;
+        device.send_setter(&host)?;
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
     std::thread::sleep(std::time::Duration::from_millis(200));
@@ -1130,7 +1160,7 @@ fn write_binding(
     payload[1..].copy_from_slice(&crate::protocol::single_key_report(
         function, index, slot, binding,
     )?);
-    device.send_feature_report(&payload)?;
+    device.send_setter(&payload)?;
     // Firmware 0100 can cross-write base/Fn values when setters are only
     // 100 ms apart. A 1 s interval passed mixed-layer write/restore tests.
     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -1336,6 +1366,20 @@ mod lighting_tests {
         // Retain the empty test artifact in accordance with the no-deletion rule.
     }
     use super::*;
+
+    #[test]
+    fn picture_requires_two_consecutive_complete_matches() {
+        let old = vec![[0; 3]; 128];
+        let new = vec![[12, 34, 56]; 128];
+        let mut transition = [old.clone(), new.clone(), new.clone()].into_iter();
+        assert_eq!(
+            stable_picture_reads(|| Ok(transition.next().unwrap())).unwrap(),
+            new
+        );
+        let mut oscillating = [old.clone(), new, old].into_iter();
+        assert!(stable_picture_reads(|| Ok(oscillating.next().unwrap())).is_err());
+        assert!(stable_picture_reads(|| Ok(vec![[0; 3]; 127])).is_err());
+    }
 
     #[test]
     fn restore_report_recreates_known_fields_without_sending_opaque_tail() {
