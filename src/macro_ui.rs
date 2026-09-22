@@ -482,7 +482,7 @@ impl MacroEditor {
             held: Vec::new(),
             skip_start_frame: true,
         });
-        self.set_status("Recording keyboard events into the draft. Click STOP or leave the capture pad to finish.");
+        self.set_status("Recording focused keyboard and mouse events. Click STOP or leave the capture pad to finish.");
         true
     }
 
@@ -494,11 +494,7 @@ impl MacroEditor {
         let mut delay = recording_delay_ms(now, recording.last_at).unwrap_or(0);
         let long_gap = recording_delay_ms(now, recording.last_at).is_none();
         for usage in recording.held.into_iter().rev() {
-            self.draft.events.push(MacroEvent::Key {
-                usage,
-                down: false,
-                delay_ms: delay,
-            });
+            self.draft.events.push(recorded_event(usage, false, delay));
             delay = 0;
         }
         debug_assert!(
@@ -536,19 +532,15 @@ impl MacroEditor {
         } else {
             next_held.retain(|held| *held != usage);
         }
-        self.draft.events.push(MacroEvent::Key {
-            usage,
-            down,
-            delay_ms,
-        });
-        let mut capacity_probe = self.draft.clone();
-        capacity_probe
+        self.draft
             .events
-            .extend(next_held.iter().map(|usage| MacroEvent::Key {
-                usage: *usage,
-                down: false,
-                delay_ms: 0,
-            }));
+            .push(recorded_event(usage, down, delay_ms));
+        let mut capacity_probe = self.draft.clone();
+        capacity_probe.events.extend(
+            next_held
+                .iter()
+                .map(|usage| recorded_event(*usage, false, 0)),
+        );
         if macros::encode(&capacity_probe).is_err() {
             self.draft.events.pop();
             return Err(
@@ -583,7 +575,12 @@ impl MacroEditor {
         Ok(())
     }
 
-    fn process_recording(&mut self, ctx: &egui::Context, capture_id: egui::Id) {
+    fn process_recording(
+        &mut self,
+        ctx: &egui::Context,
+        capture_id: egui::Id,
+        capture_rect: egui::Rect,
+    ) {
         let Some(mut recording) = self.recording.take() else {
             return;
         };
@@ -667,6 +664,28 @@ impl MacroEditor {
                 egui::Event::Ime(egui::ImeEvent::Commit(_))
                 | egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { .. }) => {
                     Err("IME input cannot be recorded as physical key events".into())
+                }
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers,
+                } => {
+                    if !capture_rect.contains(pos) {
+                        self.recording = Some(recording);
+                        self.stop_recording(
+                            ctx,
+                            "Recording stopped outside the capture pad.",
+                            false,
+                        );
+                        return;
+                    }
+                    mouse_usage(button).map_or(Ok(()), |usage| {
+                        self.sync_modifiers(&mut recording, modifiers, now)
+                            .and_then(|()| {
+                                self.record_transition(&mut recording, usage, pressed, now)
+                            })
+                    })
                 }
                 _ => Ok(()),
             };
@@ -877,7 +896,7 @@ impl MacroEditor {
                 Err(error) => ui.label(RichText::new(format!("{encoded_size}/248 encoded bytes · Cannot save: {error}")).color(ACCENT)),
             };
             ui.add_space(8.0);
-            ui.label(RichText::new("KEYBOARD RECORDER").small().strong().color(MUTED));
+            ui.label(RichText::new("FOCUSED KEYBOARD / MOUSE RECORDER").small().strong().color(MUTED));
             let mut just_started = false;
             ui.horizontal(|ui| {
                 if self.recording.is_some() {
@@ -894,7 +913,7 @@ impl MacroEditor {
                         just_started = self.start_recording(ui.ctx());
                     }
                 }
-                ui.label(RichText::new("Window-focused keys only · no device write").small().color(MUTED));
+                ui.label(RichText::new("Window-focused keys and mouse buttons only · no device write").small().color(MUTED));
             });
             if self.recording.is_some() {
                 let capture_id = ui.make_persistent_id("macro_keyboard_capture");
@@ -907,7 +926,7 @@ impl MacroEditor {
                 ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER,
                     "RECORDING · keep this pad focused · click STOP to finish",
                     egui::FontId::proportional(12.0), INK);
-                self.process_recording(ui.ctx(), capture_id);
+                self.process_recording(ui.ctx(), capture_id, rect);
             }
             ui.label(RichText::new("Delays use egui frame time (millisecond rounding); events in one frame share a timestamp. Keypad and left/right modifier identity may be unavailable.").small().color(MUTED));
             ui.add_space(9.0);
@@ -1112,6 +1131,32 @@ fn key_usage(key: egui::Key) -> Option<u8> {
     })
 }
 
+fn mouse_usage(button: egui::PointerButton) -> Option<u8> {
+    Some(match button {
+        egui::PointerButton::Primary => 240,
+        egui::PointerButton::Secondary => 241,
+        egui::PointerButton::Middle => 242,
+        egui::PointerButton::Extra1 => 243,
+        egui::PointerButton::Extra2 => 244,
+    })
+}
+
+fn recorded_event(usage: u8, down: bool, delay_ms: u16) -> MacroEvent {
+    if (240..=244).contains(&usage) {
+        MacroEvent::MouseButton {
+            button: usage,
+            down,
+            delay_ms,
+        }
+    } else {
+        MacroEvent::Key {
+            usage,
+            down,
+            delay_ms,
+        }
+    }
+}
+
 #[cfg(test)]
 mod recording_tests {
     use super::{MacroEditor, Recording, key_usage, recording_delay_ms};
@@ -1138,7 +1183,7 @@ mod recording_tests {
                     response.request_focus();
                     assert!(editor.start_recording(ui.ctx()));
                 }
-                editor.process_recording(ui.ctx(), id);
+                editor.process_recording(ui.ctx(), id, ui.max_rect());
             });
             output.textures_delta.clear();
         };
@@ -1235,6 +1280,218 @@ mod recording_tests {
             editor.draft.events.last(),
             Some(MacroEvent::Key {
                 usage: 5,
+                down: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn records_mouse_press_and_release_inside_capture_pad() {
+        use eframe::egui::{self, Event, PointerButton, Pos2};
+        let ctx = egui::Context::default();
+        let mut editor = MacroEditor::new();
+        editor.loaded = Some(editor.draft.clone());
+        let id = egui::Id::new("mouse capture pad");
+        let mut frame = |time, events| {
+            let input = egui::RawInput {
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                let rect = ui.max_rect();
+                let response = ui.interact(rect, id, egui::Sense::click());
+                if time == 1.0 {
+                    response.request_focus();
+                    editor.start_recording(ui.ctx());
+                }
+                editor.process_recording(ui.ctx(), id, rect);
+            });
+            output.textures_delta.clear();
+        };
+        frame(1.0, vec![]);
+        frame(
+            1.1,
+            vec![Event::PointerButton {
+                pos: Pos2::new(1.0, 1.0),
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..egui::Modifiers::NONE
+                },
+            }],
+        );
+        frame(
+            1.2,
+            vec![Event::PointerButton {
+                pos: Pos2::new(1.0, 1.0),
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers {
+                    ctrl: true,
+                    command: true,
+                    ..egui::Modifiers::NONE
+                },
+            }],
+        );
+        let events: Vec<_> = editor
+            .draft
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                MacroEvent::MouseButton { button, down, .. } => Some((*button, *down)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(events, [(240, true), (240, false)]);
+        assert!(matches!(
+            editor.draft.events.first(),
+            Some(MacroEvent::Key {
+                usage: 224,
+                down: true,
+                ..
+            })
+        ));
+        assert!(macros::encode(&editor.draft).is_ok());
+    }
+
+    #[test]
+    fn outside_mouse_press_stops_and_releases_held_mouse_button() {
+        use eframe::egui::{self, Event, PointerButton, Pos2};
+        let ctx = egui::Context::default();
+        let mut editor = MacroEditor::new();
+        editor.loaded = Some(editor.draft.clone());
+        let id = egui::Id::new("outside mouse pad");
+        let mut frame = |time, events| {
+            let input = egui::RawInput {
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                let rect = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(100.0, 40.0));
+                let response = ui.interact(rect, id, egui::Sense::click());
+                if time == 1.0 {
+                    response.request_focus();
+                    editor.start_recording(ui.ctx());
+                }
+                editor.process_recording(ui.ctx(), id, rect);
+            });
+            output.textures_delta.clear();
+        };
+        frame(1.0, vec![]);
+        frame(
+            1.1,
+            vec![Event::PointerButton {
+                pos: Pos2::new(1.0, 1.0),
+                button: PointerButton::Secondary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(
+            1.2,
+            vec![Event::PointerButton {
+                pos: Pos2::new(150.0, 50.0),
+                button: PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(editor.recording.is_none());
+        assert!(matches!(
+            editor.draft.events.last(),
+            Some(MacroEvent::MouseButton {
+                button: 241,
+                down: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn focus_loss_releases_held_mouse_button() {
+        use eframe::egui::{self, Pos2};
+        let ctx = egui::Context::default();
+        let mut editor = MacroEditor::new();
+        editor.loaded = Some(editor.draft.clone());
+        editor.recording = Some(Recording {
+            last_at: 1.0,
+            modifiers: egui::Modifiers::NONE,
+            held: vec![242],
+            skip_start_frame: false,
+        });
+        let id = egui::Id::new("focus loss mouse pad");
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                time: Some(1.1),
+                focused: false,
+                ..Default::default()
+            },
+            |ui| {
+                editor.process_recording(
+                    ui.ctx(),
+                    id,
+                    egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(100.0, 40.0)),
+                );
+            },
+        );
+        output.textures_delta.clear();
+        assert!(editor.recording.is_none());
+        assert!(matches!(
+            editor.draft.events.last(),
+            Some(MacroEvent::MouseButton {
+                button: 242,
+                down: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn mouse_release_is_reserved_at_capacity() {
+        let mut editor = MacroEditor::new();
+        for _ in 0..60 {
+            editor.draft.events.extend([
+                MacroEvent::Key {
+                    usage: 4,
+                    down: true,
+                    delay_ms: 1,
+                },
+                MacroEvent::Key {
+                    usage: 4,
+                    down: false,
+                    delay_ms: 1,
+                },
+            ]);
+        }
+        let mut recording = Recording {
+            last_at: 0.0,
+            modifiers: eframe::egui::Modifiers::NONE,
+            held: Vec::new(),
+            skip_start_frame: false,
+        };
+        assert!(
+            editor
+                .record_transition(&mut recording, 240, true, 0.001)
+                .is_ok()
+        );
+        assert!(
+            editor
+                .record_transition(&mut recording, 241, true, 0.002)
+                .is_err()
+        );
+        editor.recording = Some(recording);
+        editor.stop_recording(&eframe::egui::Context::default(), "Stopped", false);
+        assert!(matches!(
+            editor.draft.events.last(),
+            Some(MacroEvent::MouseButton {
+                button: 240,
                 down: false,
                 ..
             })
