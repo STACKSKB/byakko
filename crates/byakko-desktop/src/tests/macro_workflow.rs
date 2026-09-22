@@ -48,7 +48,7 @@ fn settle(app: &mut Desktop) {
     }
 }
 
-pub(super) fn loaded() -> Desktop {
+pub(crate) fn loaded() -> Desktop {
     let mut app = ready();
     send(&mut app, Macro::Select("intro".into()));
     settle(&mut app);

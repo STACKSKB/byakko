@@ -23,6 +23,15 @@ pub struct Editor {
 }
 
 impl Editor {
+    pub(crate) fn replace(&mut self, program: Program) -> Result<(), String> {
+        if self.status != Status::Ready || self.draft.is_none() {
+            return Err("Read an editable macro before importing".into());
+        }
+        validate_program(&self.capabilities, &program)?;
+        self.draft = Some(program);
+        Ok(())
+    }
+
     pub(crate) fn recorder(
         &self,
         policy: super::recorder::DelayPolicy,

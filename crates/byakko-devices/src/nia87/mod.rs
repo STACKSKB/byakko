@@ -11,6 +11,7 @@ pub mod host_lighting;
 pub mod layout;
 pub mod lighting;
 pub mod macro_adapter;
+pub mod macro_file;
 pub mod macros;
 pub mod profiles;
 pub mod protocol;

@@ -22,7 +22,8 @@ save. Saved macros can be staged onto the selected key/layer using advertised
 playback modes; Nia87 toggle/hold require an explicitly saved count of 1.
 Focused keyboard/mouse recording appends to the draft with measured or fixed
 waits and reserved release events. The demo includes editable and opaque macro
-slots. Import/export, lighting, settings, archives and automatic
+slots. The Macro file panel imports into the current draft and exports a new
+JSON file; native version-1 files remain importable. Lighting, settings, archives and automatic
 hotplug discovery still need migration. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and

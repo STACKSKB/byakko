@@ -7,7 +7,8 @@ input controller imports the Nia87 adapter or legacy GUI.
 
 Implemented: select/read slot, inspect and replace events, append, reorder,
 remove, clear, edit stored repeat count, revert, explicit Save & verify, and
-stage a saved macro binding onto the selected key/layer, and focused recording.
+stage a saved macro binding onto the selected key/layer, focused recording,
+and bounded local JSON import/export.
 Action choices and ranges come from capabilities. Keyboard usages and pointer
 movement are numeric inputs in this pre-alpha; pointer buttons and backend
 actions use supplied labels. Wait is after the event. Zero remains an explicit
@@ -45,7 +46,16 @@ waits against the declared storage budget. Focus loss, Stop, input rejection
 and close finish the recording locally; closing then checks whether to discard
 the draft. Pointer motion/wheel and widget-consumed clicks are not recorded.
 
-Validation: 234 workspace library tests pass. New desktop tests run messages
+Macro file imports stage into the currently selected slot after validation;
+source slot and binding metadata do not authorize a write or binding. Names
+and compatible binding preferences survive document round trips. Incompatible
+binding preferences are dropped with a notice. Exports create new files without
+overwriting. Version-1 native macro files are accepted; exports use version 2.
+See `macro-documents.md`. File activity is correlated and excludes edits/I/O;
+failed imports retain the old draft, trust and metadata. Exporting an unverified
+retained draft does not restore device trust.
+
+Validation: 244 workspace library tests pass. New desktop tests run messages
 through the memory executor, verify saved values by rereading, preserve zero
 wait/count and signed motion, reject an out-of-range edit atomically, reject
 opaque writes, and check close/failure/stale-result behavior. Form projections
@@ -57,8 +67,13 @@ clicks, focus loss and close behavior. Physical-key mapping tests distinguish
 keypad keys and left/right modifiers. These are headless input-routing tests;
 OS event delivery and rendered capture interaction remain unverified.
 
-This is not macro feature parity. File import/export and local labels
-remain in the legacy application.
+File tests cover 64 KiB bounds, both versions, unchanged existing outputs,
+validation before creating output, stale completion rejection, cross-backend
+metadata, draft retention and close handling. Four legacy codec tests moved
+from the root package into devices; they are not duplicated in the total.
+
+This is not full acceptance. Persistent local slot labels remain in the legacy
+application; Iced file names are session metadata and document contents.
 No hardware writes were performed for this UI step. Rendered interaction,
 physical playback, Linux runtime and power-cycle persistence remain unverified;
 the screenshot helper failure documented in `iced-keymap-acceptance.md` remains

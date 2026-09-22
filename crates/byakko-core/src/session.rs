@@ -1,5 +1,7 @@
 //! One device lifecycle and command sequence; feature drafts remain deterministic.
+mod macro_files;
 mod macro_ops;
+pub use macro_files::{FileOperation, FileTicket};
 mod recording;
 
 use crate::{Action, Change, Descriptor, State, validate_changes, validate_state};
@@ -95,6 +97,9 @@ pub enum Status {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Activity {
     Idle,
+    MacroFile {
+        ticket: FileTicket,
+    },
     Recording {
         recorder: crate::macros::recorder::Recorder,
     },
