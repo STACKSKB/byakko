@@ -1,6 +1,7 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
 mod macro_binding_view;
 mod macro_editor;
+mod macro_files;
 mod macro_form;
 mod macro_view;
 mod recording;
@@ -19,6 +20,7 @@ use std::{sync::mpsc::TryRecvError, time::Duration};
 
 #[derive(Clone, Debug)]
 enum Message {
+    File(macro_files::Message),
     Record(recording::Message),
     Page(Page),
     Macro(macro_editor::Message),
@@ -49,6 +51,7 @@ enum Closing {
 }
 
 struct Desktop {
+    macro_files: macro_files::Fields,
     clock: std::time::Instant,
     recording_options: recording::Options,
     page: Page,
@@ -68,6 +71,7 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
     let layer = session.descriptor().layers[0].id.clone();
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
+        macro_files: Default::default(),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         page: Page::Keys,
@@ -145,6 +149,16 @@ impl Desktop {
     }
 
     fn poll(&mut self) -> Task<Message> {
+        use byakko_core::session::Activity;
+        if !matches!(
+            self.session.activity(),
+            Activity::Read { .. }
+                | Activity::Apply { .. }
+                | Activity::ReadMacro { .. }
+                | Activity::ApplyMacro { .. }
+        ) {
+            return Task::none();
+        }
         match self.executor.try_receive() {
             Ok(completion) => return self.complete(completion),
             Err(TryRecvError::Empty) => return Task::none(),
@@ -217,6 +231,7 @@ impl Desktop {
             self.closing = Closing::Open;
         }
         match message {
+            Message::File(message) => return self.update_macro_files(message),
             Message::Record(message) => self.update_recording(message),
             Message::Page(page) => self.page = page,
             Message::Macro(message) => self.update_macro(message),
@@ -243,7 +258,12 @@ impl Desktop {
         let close = window::close_requests().map(|_| Message::Close);
         if self.session.recording() {
             Subscription::batch([close, recording::subscription()])
-        } else if self.busy() {
+        } else if self.busy()
+            && !matches!(
+                self.session.activity(),
+                byakko_core::session::Activity::MacroFile { .. }
+            )
+        {
             Subscription::batch([
                 close,
                 iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll),

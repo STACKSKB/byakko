@@ -151,7 +151,7 @@ when closing, even though they invalidate the keymap baseline's trust.
 
 The memory-backed desktop tests exercise event replacement, signed movement,
 zero wait/count preservation, readback, opaque-slot rejection, failure retention
-and close behavior with a separately dirty keymap. File/label workflows still
+and close behavior with a separately dirty keymap. Persistent local labels still
 need migration; the working legacy macro panel is
 not being ported wholesale. See `iced-macro-acceptance.md` for the current limits.
 
@@ -181,6 +181,24 @@ tested independently against its encoder at delay and capacity boundaries;
 native encoding remains the final authority. Other backends may omit this
 model when their encoding does not fit it. No encoding service or closure is
 injected into the browser-portable core.
+
+Macro file operations use a correlated `FileTicket` and `Activity::MacroFile`.
+The core ticket contains identity and operation kind, with no paths or OS file
+handles. It excludes recording, device I/O, other edits and slot switches.
+An import replaces the draft only after complete capability validation; stale
+results cannot alter its data or file metadata. Export can preserve a retained
+unverified draft without restoring its device trust. Iced performs file work
+off the UI thread, waits before closing, and does not poll the device worker
+while the local file operation is active.
+
+`devices::macro_files` bounds JSON to 64 KiB, imports the reviewed native v1
+format and emits core `Document` v2. Exports serialize before exclusive file
+creation and never overwrite. The legacy implementation moved unchanged apart
+from namespace into `devices::nia87::macro_file`; root re-exports it. File names
+and binding preferences are per-slot desktop metadata; unsupported source
+binding preferences are dropped with a notice. Import never stages a keymap
+binding or changes the selected slot. Names currently persist through exported
+documents, not automatically across app restarts. See `macro-documents.md`.
 
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 

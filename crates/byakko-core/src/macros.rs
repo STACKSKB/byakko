@@ -12,6 +12,18 @@ pub struct Program {
     pub events: Vec<Event>,
 }
 
+/// Portable file contents; source identity and binding are metadata, not write targets.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Document {
+    pub format_version: u32,
+    pub backend_id: String,
+    pub source_slot: String,
+    pub name: String,
+    pub binding: Option<String>,
+    pub program: Program,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub action: Action,

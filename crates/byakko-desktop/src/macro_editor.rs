@@ -46,6 +46,9 @@ impl Desktop {
                     None => Some("Select a writable key on the Keys page first".into()),
                 };
                 if self.notice.is_none() {
+                    if let Some(editor) = self.session.macros() {
+                        self.macro_files.remember_binding(editor, &binding);
+                    }
                     self.page = super::Page::Keys;
                 }
             }

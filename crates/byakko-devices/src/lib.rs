@@ -14,6 +14,7 @@ use std::{
 };
 
 pub mod hid;
+pub mod macro_files;
 pub mod memory;
 pub mod nia87;
 #[cfg(feature = "research-tools")]

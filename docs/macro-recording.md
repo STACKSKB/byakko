@@ -15,6 +15,10 @@ unchanged. Nia87 recordings reserve held releases and the policy tail within
 248 bytes. Invalid/oversized timing stops capture; the final held interval is
 set to zero and a notice is shown. See `iced-macro-acceptance.md` for verification.
 
+Iced's Macro file panel also imports the retained application's v1 files and
+exports device-neutral v2 documents. See `macro-documents.md`; the legacy file
+format described later in this document still applies to the research GUI.
+
 ## Retained research application
 
 Load a macro slot before recording. Start recording to append to the local
