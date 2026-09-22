@@ -21,7 +21,7 @@ The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keym
 
 ## Research and provenance
 
-Complete device archives can now be captured and inspected from the native Keys page or with `capture-configuration NEW_PATH.json` and `inspect-configuration PATH.json`. Capture includes all 50 macros, both keymaps, current picture, lighting and settings, with two matching complete reads. Whole-archive restoration remains pending. See [archive format and verification](docs/configuration-archives.md) and the [current acceptance ledger](docs/parity-status.md) for remaining work.
+Complete device archives can be captured, inspected, reviewed and applied from the native Keys page. CLI capture and inspection use `capture-configuration NEW_PATH.json` and `inspect-configuration PATH.json`. Archives include all 50 macros, both keymaps, current picture, lighting and settings. Multi-section application and restoration passed complete hardware readback; failure-injection recovery tests remain pending. See [archive format and verification](docs/configuration-archives.md) and the [current acceptance ledger](docs/parity-status.md) for remaining work.
 
 The product uses original Windows HID and Linux hidraw adapters with permissively licensed OS bindings. HIDAPI was removed after an audit found a GPL header in its build script despite MIT package metadata. Target-specific dependency and distribution notice audits remain necessary before releases.
 

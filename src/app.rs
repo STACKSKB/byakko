@@ -52,6 +52,18 @@ enum WorkerResult {
     Applied(Result<Snapshot, String>),
     ArchiveProgress(usize, usize),
     Archive(Result<crate::configuration::Configuration, String>),
+    ReviewProgress(String),
+    Review(Result<Box<StagedReview>, String>),
+    ApplyReviewProgress(String),
+    ApplyReview(Result<Snapshot, String>),
+}
+
+#[derive(Clone)]
+struct StagedReview {
+    current: crate::configuration::Configuration,
+    target: crate::configuration::Configuration,
+    summary: crate::configuration_plan::ChangeSummary,
+    reverse: crate::configuration_plan::ChangeSummary,
 }
 
 struct Workbench {
@@ -74,6 +86,8 @@ struct Workbench {
     archive_path: String,
     archive_progress: Option<(usize, usize)>,
     archive_summary: Option<String>,
+    reviewed_archive: Option<StagedReview>,
+    archive_apply_running: bool,
     status: String,
     error: bool,
     busy: bool,
@@ -105,6 +119,8 @@ impl Workbench {
             archive_path: "nia87-configuration.json".into(),
             archive_progress: None,
             archive_summary: None,
+            reviewed_archive: None,
+            archive_apply_running: false,
             status: "Reading connected keyboard…".into(),
             error: false,
             busy: false,
@@ -123,6 +139,8 @@ impl Workbench {
             return;
         }
         self.busy = true;
+        self.reviewed_archive = None;
+        self.archive_apply_running = false;
         self.error = false;
         self.status = "Reading base and Fn keymaps…".into();
         let tx = self.tx.clone();
@@ -147,6 +165,8 @@ impl Workbench {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         self.busy = true;
+        self.reviewed_archive = None;
+        self.archive_apply_running = false;
         self.error = false;
         self.status = format!(
             "Backing up and applying {} key changes; allow about one second per change plus verification…",
@@ -176,6 +196,8 @@ impl Workbench {
             return;
         }
         self.busy = true;
+        self.reviewed_archive = None;
+        self.archive_apply_running = false;
         self.error = false;
         self.archive_progress = Some((0, 100));
         self.archive_summary = None;
@@ -206,6 +228,8 @@ impl Workbench {
     }
 
     fn inspect_archive(&mut self) {
+        self.reviewed_archive = None;
+        self.archive_apply_running = false;
         match crate::configuration::load(std::path::Path::new(self.archive_path.trim())) {
             Ok(configuration) => {
                 let macro_nonempty = configuration
@@ -239,6 +263,88 @@ impl Workbench {
                 self.error = true;
             }
         }
+    }
+
+    fn start_archive_review(&mut self, ctx: &egui::Context) {
+        if self.device_busy() || self.dirty_count() != 0 {
+            return;
+        }
+        let path = PathBuf::from(self.archive_path.trim());
+        if path.as_os_str().is_empty() {
+            self.status = "Choose an archive to review.".into();
+            self.error = true;
+            return;
+        }
+        self.busy = true;
+        self.error = false;
+        self.reviewed_archive = None;
+        self.status = "Loading archive and capturing the complete current configuration…".into();
+        let tx = self.tx.clone();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let target = crate::configuration::load(&path).map_err(|e| e.to_string())?;
+                let current = device::capture_configuration(|done, total| {
+                    let _ = tx.send(WorkerResult::ReviewProgress(format!(
+                        "Capturing current configuration: {done}/{total} macro reads"
+                    )));
+                    repaint.request_repaint();
+                })
+                .map_err(|e| e.to_string())?;
+                let summary = crate::configuration_plan::plan(&current, &target)?;
+                let reverse = crate::configuration_plan::plan(&target, &current)?;
+                Ok(StagedReview {
+                    current,
+                    target,
+                    summary,
+                    reverse,
+                })
+            }));
+            let result = match result {
+                Ok(result) => result,
+                Err(_) => Err("Archive review failed unexpectedly.".into()),
+            };
+            let _ = tx.send(WorkerResult::Review(result.map(Box::new)));
+            repaint.request_repaint();
+        });
+    }
+
+    fn start_archive_apply(&mut self, ctx: &egui::Context) {
+        let Some(review) = self.reviewed_archive.clone() else {
+            return;
+        };
+        if self.device_busy() || self.dirty_count() != 0 {
+            return;
+        }
+        self.busy = true;
+        self.archive_apply_running = true;
+        self.error = false;
+        self.status = "Applying reviewed archive; backup, verification, and recovery may take several minutes…".into();
+        let backup_dir = self.backup_dir.clone();
+        let tx = self.tx.clone();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                device::apply_configuration(
+                    &review.current,
+                    &review.target,
+                    &backup_dir,
+                    |message| {
+                        let _ = tx.send(WorkerResult::ApplyReviewProgress(message.to_owned()));
+                        repaint.request_repaint();
+                    },
+                )
+                .map_err(|e| e.to_string())
+            }));
+            let result = match result {
+                Ok(result) => result,
+                Err(_) => Err("Archive apply failed unexpectedly.".into()),
+            };
+            let _ = tx.send(WorkerResult::ApplyReview(
+                result.map(|configuration| configuration.keymaps),
+            ));
+            repaint.request_repaint();
+        });
     }
 
     fn poll_worker(&mut self) {
@@ -280,6 +386,54 @@ impl Workbench {
                 WorkerResult::Archive(Err(error)) => {
                     self.busy = false;
                     self.archive_progress = None;
+                    self.status = error;
+                    self.error = true;
+                }
+                WorkerResult::ReviewProgress(message)
+                | WorkerResult::ApplyReviewProgress(message) => {
+                    self.status = message;
+                }
+                WorkerResult::Review(Ok(review)) => {
+                    self.busy = false;
+                    self.archive_summary = Some(format!(
+                        "Review ready: {} key bindings · {} macro slots · {} picture keys · lighting {} · {} settings",
+                        review.summary.key_bindings,
+                        review.summary.macro_slots.len(),
+                        review.summary.picture_keys,
+                        if review.summary.lighting {
+                            "changed"
+                        } else {
+                            "unchanged"
+                        },
+                        review.summary.settings.len()
+                    ));
+                    self.reviewed_archive = Some(*review);
+                    self.status =
+                        "Archive review complete. Apply only after checking the planned changes."
+                            .into();
+                    self.error = false;
+                }
+                WorkerResult::Review(Err(error)) => {
+                    self.busy = false;
+                    self.reviewed_archive = None;
+                    self.status = error;
+                    self.error = true;
+                }
+                WorkerResult::ApplyReview(Ok(snapshot)) => {
+                    self.busy = false;
+                    self.archive_apply_running = false;
+                    self.reviewed_archive = None;
+                    self.load(snapshot);
+                    self.status = format!(
+                        "Reviewed archive applied and verified. Other editor panels must reload. Backups: {}",
+                        self.backup_dir.display()
+                    );
+                    self.error = false;
+                }
+                WorkerResult::ApplyReview(Err(error)) => {
+                    self.busy = false;
+                    self.archive_apply_running = false;
+                    self.reviewed_archive = None;
                     self.status = error;
                     self.error = true;
                 }
@@ -901,17 +1055,23 @@ impl Workbench {
         });
         ui.collapsing("Configuration archive", |ui| {
             ui.label("Captures saved device state: both keymaps, all 50 macro slots, current picture, lighting, and settings.");
-            ui.label(egui::RichText::new("Unsaved drafts are not included. Archive restoration is not available yet.").small().color(MUTED));
+            ui.label(egui::RichText::new("Unsaved drafts are not included. Review captures a fresh current state before any restore.").small().color(MUTED));
             ui.horizontal(|ui| {
                 ui.label("Path");
                 ui.add_enabled_ui(!self.device_busy(), |ui| {
-                    ui.text_edit_singleline(&mut self.archive_path);
+                    if ui.text_edit_singleline(&mut self.archive_path).changed() {
+                        self.reviewed_archive = None;
+                    }
                 });
                 if ui.add_enabled(!self.device_busy(), egui::Button::new("CAPTURE TO NEW FILE")).clicked() {
                     self.start_archive_capture(ui.ctx());
                 }
                 if ui.add_enabled(!self.device_busy(), egui::Button::new("INSPECT FILE")).clicked() {
                     self.inspect_archive();
+                }
+                let can_review = !self.device_busy() && self.dirty_count() == 0;
+                if ui.add_enabled(can_review, egui::Button::new("REVIEW RESTORE")).clicked() {
+                    self.start_archive_review(ui.ctx());
                 }
             });
             if let Some((done, total)) = self.archive_progress {
@@ -922,6 +1082,49 @@ impl Workbench {
             }
             if let Some(summary) = &self.archive_summary {
                 ui.label(egui::RichText::new(summary).color(INK));
+            }
+            if let Some(review) = &self.reviewed_archive {
+                ui.separator();
+                ui.label(egui::RichText::new("REVIEWED RESTORE").small().strong().color(MUTED));
+                ui.label(format!(
+                    "Forward: {} key bindings, {} macro slots, {} picture keys, lighting {}, {} settings",
+                    review.summary.key_bindings, review.summary.macro_slots.len(), review.summary.picture_keys,
+                    if review.summary.lighting { "changed" } else { "unchanged" }, review.summary.settings.len()
+                ));
+                ui.label(format!(
+                    "Recovery plan: {} key bindings, {} macro slots, {} picture keys, lighting {}, {} settings",
+                    review.reverse.key_bindings, review.reverse.macro_slots.len(), review.reverse.picture_keys,
+                    if review.reverse.lighting { "changed" } else { "unchanged" }, review.reverse.settings.len()
+                ));
+                let mut details = Vec::new();
+                for (layer, before, after) in [
+                    ("BASE", &review.current.keymaps.base, &review.target.keymaps.base),
+                    ("FN", &review.current.keymaps.function, &review.target.keymaps.function),
+                ] {
+                    for (slot, (old, new)) in before.iter().zip(after).enumerate() {
+                        if old != new { details.push(format!("{layer} slot {slot}: {} → {}", format_bytes(*old), format_bytes(*new))); }
+                    }
+                }
+                if !review.summary.macro_slots.is_empty() {
+                    details.push(format!("Macro slots changed: {}", review.summary.macro_slots.iter().map(|slot| slot.to_string()).collect::<Vec<_>>().join(", ")));
+                }
+                if !review.summary.settings.is_empty() {
+                    details.push(format!("Settings: {:?}", review.summary.settings));
+                }
+                if review.summary.lighting {
+                    details.push(format!("Lighting bytes: {:?} → {:?}", &review.current.lighting.raw()[1..8], &review.target.lighting.raw()[1..8]));
+                }
+                for (slot, (old, new)) in review.current.picture.iter().zip(&review.target.picture).enumerate() {
+                    if old != new { details.push(format!("Picture slot {slot}: {old:?} → {new:?}")); }
+                }
+                if details.is_empty() { details.push("No writable changes; archive already matches the captured device.".into()); }
+                egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
+                    for detail in details { ui.monospace(detail); }
+                });
+                let can_apply = !self.device_busy() && self.dirty_count() == 0;
+                if ui.add_enabled(can_apply, egui::Button::new("APPLY REVIEWED ARCHIVE")).clicked() {
+                    self.start_archive_apply(ui.ctx());
+                }
             }
         });
         let board_width = (ui.available_width() - 320.0).max(500.0);
@@ -1017,6 +1220,12 @@ impl eframe::App for Workbench {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Cancel a close while a stream is still owned, before processing its
         // completion. A restoration error in this frame must remain visible.
+        if self.archive_apply_running && ui.ctx().input(|input| input.viewport().close_requested())
+        {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.status = "Archive apply is still running; close is held until verification or recovery finishes.".into();
+        }
         self.lighting_editor.handle_close(ui.ctx());
         self.poll_worker();
         if !self.device_busy() {

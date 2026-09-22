@@ -20,11 +20,28 @@ unknown to the editor. Files are created exclusively; an existing file is never
 overwritten. `inspect-configuration PATH.json` validates and reports section
 counts without opening the keyboard or printing macro contents.
 
-This first archive implementation supports capture and inspection. Applying a
-complete archive is still pending: it needs supported-field validation,
-expected-state checks, a durable before-image, ordering of macros before their
-bindings, and verified recovery across section failures. The existing local
-keymap draft and individual macro import/export continue to work separately.
+Use **REVIEW RESTORE** to compare an archive with a fresh complete capture.
+The review lists changed sections; **APPLY REVIEWED ARCHIVE** is a separate
+action. Apply rechecks the complete expected state and saves a durable archive
+before sending setters. Macro contents are written before their bindings.
+Reserved slots, opaque setting differences and changed macros that cannot
+round-trip exactly are rejected before writes. Unknown unchanged bytes remain
+preserved. Saved host lighting modes do not automatically start screen/audio
+capture. Other editor drafts are retained and those panels must reload afterward.
+
+On failure, recovery first restores keymaps, then attempts each affected macro,
+picture, scalar setting and lighting section. An individual section failure
+does not suppress later recovery attempts. Complete repeated readback determines
+whether recovery succeeded. Disconnection, process termination and partial-write
+failure recovery still need fault-injection acceptance tests; the durable
+before-image is retained regardless. Normal window close is held while archive
+application is active. The existing keymap and macro import/export remain
+available separately.
+
+`plan-configuration CURRENT.json TARGET.json` checks both directions and prints
+change counts without device access. It does not establish that CURRENT still
+matches the keyboard; Apply always rechecks that itself.
+
 The current picture is captured; this does not claim that all three advertised
 picture banks have been independently identified.
 
@@ -34,6 +51,15 @@ and saved a 139,657-byte archive. Inspection found 50 macro slots (one nonempty)
 bytes matched the preceding verified backups. A concurrent `inspect` command
 was rejected while capture held the lock. The private fixture remains ignored
 at `Research/captures/configuration-first-complete.json`.
+
+The reversible `verify_configuration_roundtrip` example then changed Pause to
+F24, populated unbound macro49, changed picture slot91, reduced Ripple brightness
+from4 to3 and changed debounce from1 to2 in one archive application. It applied
+the original archive afterward. Both applications passed complete repeated
+readback of every archive section. No key was physically pressed and the macro
+was never bound or played. This normal round trip does not test a failed setter
+or unplugged-device recovery. The revised best-effort recovery path has been
+reviewed and cross-compiled but still needs injected-failure verification.
 
 Archive files may contain personal keyboard macros. They stay at the chosen
 local path; Byakko performs no upload or sharing.
