@@ -58,8 +58,50 @@ impl KeymapEditor {
     pub fn observed(&self) -> Option<&State> {
         self.observed.as_ref()
     }
+    pub fn status(&self) -> (&str, bool) {
+        (&self.status, self.error)
+    }
+    pub fn action(&self, layer: &str, key: &str) -> Option<&Action> {
+        self.draft.get(layer)?.get(key)
+    }
+    pub fn observed_action(&self, layer: &str, key: &str) -> Option<&Action> {
+        self.observed.as_ref()?.bindings.get(layer)?.get(key)
+    }
+    pub fn stage_change(&mut self, change: Change) -> Result<(), String> {
+        if self.busy {
+            return Err("A keymap operation is running".into());
+        }
+        let expected = self.observed.as_ref().ok_or("Read the keyboard first")?;
+        let mut draft = self.draft.clone();
+        draft
+            .get_mut(&change.layer)
+            .ok_or("Unknown layer")?
+            .get_mut(&change.key)
+            .ok_or("Unknown key")?
+            .clone_from(&change.action);
+        self.backend
+            .validate(expected, &differences(expected, &draft))?;
+        self.draft = draft;
+        self.error = false;
+        self.status = "Change staged locally.".into();
+        Ok(())
+    }
+    pub fn revert(&mut self) {
+        if !self.busy
+            && let Some(observed) = &self.observed
+        {
+            self.draft = observed.bindings.clone();
+            self.error = false;
+            self.status = "Staged changes reverted.".into();
+        }
+    }
     pub fn busy(&self) -> bool {
         self.busy
+    }
+    #[cfg(test)]
+    pub(crate) fn inject_result(&mut self, result: Result<State, String>) {
+        self.busy = true;
+        self.tx.send(result).unwrap();
     }
     pub fn dirty_count(&self) -> usize {
         self.changes().len()
@@ -83,6 +125,8 @@ impl KeymapEditor {
         let changes = differences(expected, &desired.bindings);
         self.backend.validate(expected, &changes)?;
         self.draft = desired.bindings;
+        self.error = false;
+        self.status = "Imported changes staged locally.".into();
         Ok(())
     }
 
@@ -95,20 +139,12 @@ impl KeymapEditor {
 
     fn stage(&mut self, action: Action) -> Result<(), String> {
         let key = self.selected.clone().ok_or("Select a key first")?;
-        let expected = self.observed.as_ref().ok_or("Read the keyboard first")?;
         let change = Change {
             layer: self.layer.clone(),
-            key: key.clone(),
-            action: action.clone(),
+            key,
+            action,
         };
-        self.backend.validate(expected, &[change])?;
-        self.draft
-            .get_mut(&self.layer)
-            .ok_or("Unknown layer")?
-            .insert(key, action);
-        self.error = false;
-        self.status = "Change staged locally.".into();
-        Ok(())
+        self.stage_change(change)
     }
 
     pub fn start_apply(&mut self, ctx: &egui::Context) {
@@ -347,9 +383,8 @@ impl KeymapEditor {
                     egui::Button::new("REVERT DRAFT"),
                 )
                 .clicked()
-                && let Some(state) = self.observed.clone()
             {
-                let _ = self.load(state);
+                self.revert();
             }
             ui.colored_label(
                 if self.error {
