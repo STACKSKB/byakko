@@ -4,7 +4,7 @@ A native, USB-first Menel Nia87 configurator under investigation. The intended a
 
 ## Current status
 
-The approved architecture migration uses **Iced**. Its keymap, macro and global lighting slices are
+The approved architecture migration uses **Iced**. Its keymap, macro, global lighting and per-key picture slices are
 available separately from the retained research GUI:
 
 ```console
@@ -25,14 +25,19 @@ waits and reserved release events. The demo includes editable and opaque macro
 slots. The Macro file panel imports into the current draft and exports a new
 JSON file; native version-1 files remain importable. Lighting offers the
 backend's built-in effects, option choices, brightness, speed and color when
-supported; edits use the same staged and verified save workflow. Host-driven
-lighting, per-key colors, settings, archives and automatic hotplug discovery
-still need migration. The following feature inventory and
+supported; edits use the same staged and verified save workflow. Per-key RGB
+picture storage has a separate capability-driven editor and staged device
+workflow; storing RGB values is separate from selecting the built-in global
+picture effect. This slice has only read-only USB baseline verification, with
+no live picture writes. Host-driven lighting, settings, archives and automatic
+hotplug discovery still need migration. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and
 [current boundary](docs/backend-architecture.md). The
 [lighting acceptance notes](docs/iced-lighting-acceptance.md) distinguish
 headless verification from writes on the attached keyboard. The
+[per-key picture acceptance notes](docs/iced-picture-acceptance.md) record its
+storage model and physical verification limits. The
 [desktop UI boundary](docs/desktop-ui-architecture.md) describes the shared
 style data and responsive panels.
 

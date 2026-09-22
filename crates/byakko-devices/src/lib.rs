@@ -1,6 +1,6 @@
 //! Native effect boundary. One worker owns the backend; the UI owns no HID I/O.
 use byakko_core::{
-    Change, State, lighting, macros,
+    Change, State, lighting, macros, picture,
     session::{ApplyFailure, Command, Completion, Recovery},
 };
 use std::{
@@ -62,6 +62,22 @@ pub trait Device: Send + 'static {
     ) -> Result<lighting::Snapshot, ApplyFailure> {
         Err(ApplyFailure {
             message: "Lighting operations are unsupported by this device".into(),
+            recovery: Recovery::NotAttempted,
+        })
+    }
+
+    fn read_picture(&mut self) -> Result<picture::Snapshot, String> {
+        Err("Picture operations are unsupported by this device".into())
+    }
+
+    fn apply_picture(
+        &mut self,
+        _expected: &picture::Snapshot,
+        _desired: &std::collections::BTreeMap<String, [u8; 3]>,
+        _backup_dir: &Path,
+    ) -> Result<picture::Snapshot, ApplyFailure> {
+        Err(ApplyFailure {
+            message: "Picture operations are unsupported by this device".into(),
             recovery: Recovery::NotAttempted,
         })
     }
@@ -173,6 +189,15 @@ fn token(command: &Command) -> (u64, u64) {
             operation,
             ..
         } => (*generation, *operation),
+        Command::ReadPicture {
+            generation,
+            operation,
+        }
+        | Command::ApplyPicture {
+            generation,
+            operation,
+            ..
+        } => (*generation, *operation),
     }
 }
 
@@ -207,6 +232,16 @@ fn failure(command: &Command, message: String, recovery: Recovery) -> Completion
             result: Err(message),
         },
         Command::ApplyLighting { .. } => Completion::ApplyLighting {
+            generation,
+            operation,
+            result: Err(ApplyFailure { message, recovery }),
+        },
+        Command::ReadPicture { .. } => Completion::ReadPicture {
+            generation,
+            operation,
+            result: Err(message),
+        },
+        Command::ApplyPicture { .. } => Completion::ApplyPicture {
             generation,
             operation,
             result: Err(ApplyFailure { message, recovery }),
@@ -254,6 +289,18 @@ fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Co
             generation,
             operation,
             result: device.apply_lighting(expected, desired, backup_dir),
+        },
+        Command::ReadPicture { .. } => Completion::ReadPicture {
+            generation,
+            operation,
+            result: device.read_picture(),
+        },
+        Command::ApplyPicture {
+            expected, desired, ..
+        } => Completion::ApplyPicture {
+            generation,
+            operation,
+            result: device.apply_picture(expected, desired, backup_dir),
         },
     }))
     .unwrap_or_else(|_| {

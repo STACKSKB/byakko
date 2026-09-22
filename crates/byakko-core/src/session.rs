@@ -2,6 +2,7 @@
 mod lighting_ops;
 mod macro_files;
 mod macro_ops;
+mod picture_ops;
 pub use macro_files::{FileOperation, FileTicket};
 mod recording;
 
@@ -44,6 +45,16 @@ pub enum Command {
         expected: crate::lighting::Snapshot,
         desired: crate::lighting::Setting,
     },
+    ReadPicture {
+        generation: u64,
+        operation: u64,
+    },
+    ApplyPicture {
+        generation: u64,
+        operation: u64,
+        expected: crate::picture::Snapshot,
+        desired: BTreeMap<String, [u8; 3]>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -79,6 +90,16 @@ pub enum Completion {
         generation: u64,
         operation: u64,
         result: Result<crate::lighting::Snapshot, ApplyFailure>,
+    },
+    ReadPicture {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::picture::Snapshot, String>,
+    },
+    ApplyPicture {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::picture::Snapshot, ApplyFailure>,
     },
 }
 
@@ -144,6 +165,12 @@ pub enum Activity {
     ApplyLighting {
         operation: u64,
     },
+    ReadPicture {
+        operation: u64,
+    },
+    ApplyPicture {
+        operation: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -162,6 +189,7 @@ pub struct Session {
     activity: Activity,
     macros: Option<crate::macros::editor::Editor>,
     lighting: Option<crate::lighting::editor::Editor>,
+    picture: Option<crate::picture::editor::Editor>,
 }
 
 /// Compatibility name for consumers using only the keymap surface.
@@ -200,6 +228,7 @@ impl Session {
             activity: Activity::Idle,
             macros: None,
             lighting: None,
+            picture: None,
         })
     }
 
@@ -230,6 +259,7 @@ impl Session {
         };
         self.invalidate_macros();
         self.invalidate_lighting();
+        self.invalidate_picture();
         Ok(self.generation)
     }
 
@@ -243,6 +273,7 @@ impl Session {
         self.activity = Activity::Idle;
         self.invalidate_macros();
         self.invalidate_lighting();
+        self.invalidate_picture();
     }
 
     pub fn changes(&self) -> Vec<Change> {
@@ -323,6 +354,7 @@ impl Session {
         self.activity = Activity::Apply { operation };
         self.invalidate_macros();
         self.invalidate_lighting();
+        self.invalidate_picture();
         Ok(Command::Apply {
             generation: self.generation,
             operation,
@@ -341,6 +373,7 @@ impl Session {
         !self.changes().is_empty()
             || self.macros.as_ref().is_some_and(|editor| editor.dirty())
             || self.lighting.as_ref().is_some_and(|editor| editor.dirty())
+            || self.picture.as_ref().is_some_and(|editor| editor.dirty())
     }
 
     fn require_idle(&self) -> Result<(), String> {
@@ -359,6 +392,11 @@ impl Session {
 
     fn invalidate_lighting(&mut self) {
         if let Some(editor) = self.lighting.as_mut() {
+            editor.invalidate();
+        }
+    }
+    fn invalidate_picture(&mut self) {
+        if let Some(editor) = self.picture.as_mut() {
             editor.invalidate();
         }
     }
@@ -429,6 +467,26 @@ impl Session {
                     operation: *operation,
                 },
             ),
+            Completion::ReadPicture {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ReadPicture {
+                    operation: *operation,
+                },
+            ),
+            Completion::ApplyPicture {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ApplyPicture {
+                    operation: *operation,
+                },
+            ),
         };
         if generation != self.generation || expected != self.activity {
             return Acceptance::IgnoredStale;
@@ -456,6 +514,16 @@ impl Session {
                 .lighting
                 .as_mut()
                 .expect("pending lighting capability")
+                .accept_apply(result),
+            Completion::ReadPicture { result, .. } => self
+                .picture
+                .as_mut()
+                .expect("pending picture capability")
+                .accept_read(result),
+            Completion::ApplyPicture { result, .. } => self
+                .picture
+                .as_mut()
+                .expect("pending picture capability")
                 .accept_apply(result),
         }
         Acceptance::Accepted

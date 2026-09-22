@@ -3,11 +3,12 @@
 This ledger separates implemented configuration storage from end-to-end behavior. Source observations live in `feature-inventory.md`; attached-device evidence lives in `live-evidence.md`. Neither a shared OEM encoder nor an advertised catalog proves that every feature works on this board.
 
 The table records the retained research application's feature evidence. The
-approved Iced migration currently has keymap, macro and built-in global lighting
-editing/read/save slices;
+approved Iced migration currently has keymap, macro, built-in global lighting
+and per-key picture editing/read/save slices;
 it has not yet inherited the remaining screens or feature parity. See
-`iced-keymap-acceptance.md`, `iced-macro-acceptance.md` and
-`iced-lighting-acceptance.md` for its exact scope.
+`iced-keymap-acceptance.md`, `iced-macro-acceptance.md`,
+`iced-lighting-acceptance.md` and `iced-picture-acceptance.md` for its exact
+scope.
 
 | Requirement | Current evidence | Remaining acceptance work |
 | --- | --- | --- |
@@ -20,11 +21,14 @@ it has not yet inherited the remaining screens or feature parity. See
 | Macro storage | Exact 248-byte → short → empty replacement verified in slots1/24/49; 33 mixed key/mouse/movement events and delay boundaries stored exactly in slot49, then full configuration restoration verified; official short-macro capture confirms 56-byte page header | Broader official replay vectors, physical playback and timing; repeat-zero and movement-delay semantics |
 | Macro editor | Native event table, focused keyboard/mouse-button recorder, repeats/modes, local labels, import/export and saved-slot binding; base/Fn binding modes read back and restore; recorder intervals attach to the preceding action; fixed-delay recording, reversible Clear draft and terminal-delay policy covered by pure/headless tests; toggle/hold require explicitly staged count 1 before save/bind | OS GUI interaction validation; physical playback modes and timing |
 | Global lighting | Native controls; selected cases for IDs0–19 pass write/read/restore; webcam confirms steady red/green | Broader visual/option coverage and reactive effects |
-| Per-key colors | Native physical layout editor; single-color write/restore passes all 128 RGB values; selected official Nia87 bulk reader/writer address index0, with three separate global effect options (see `Research/picture-selector-audit.md`) | GUI interaction coverage, physical effect-option semantics and visual validation |
+| Per-key colors | Retained research GUI has native physical layout editor; earlier single-color write/restore passed, while selected official bulk reader/writer addresses index0 and has three separate global effect options (see `Research/picture-selector-audit.md`). Iced now has a capability-driven RGB editor and memory workflow; the attached USB baseline was checked read-only, with no live writes in this slice. RGB storage is separate from selecting the global picture effect. | Iced GUI interaction and visual validation; physical per-key write/read/restore acceptance; effect-option semantics |
 | Host-driven lighting | Captured actual0D music/0E screen commands; Windows screen/WASAPI streams pass hardware/camera/restoration checks; Linux output-monitor sampler cross-builds; headless close-event success/failure checks pass | OS GUI interaction/close verification, sustained streaming, Wayland capture, Linux runtime/audio routing, X11 disconnect handling |
 | Other settings | Native debounce, auto-OS, four sleep timers and backlight switch pass reversible complete settings readback | Physical sleep behavior and remaining option semantics; report-rate metadata exists but the selected official Nia87 descriptor does not enable its control (see `Research/report-rate-selected-path.md`) |
 | Local configurations | Full native archive capture, review and guarded apply; normal multi-section round trip passes; first injected failure failed recovery, original archive subsequently restored and verified; headless close/error tests pass | Resolve unexplained state changes during failed transport/recovery; repeat failure-injection acceptance; OS GUI interaction |
 | Robust device transactions | Expected-state checks, disk backups, readback/rollback and OS-held interprocess lock; optional blocking Windows USB string reads removed | USB error recovery, disconnect/reconnect and partial failure tests |
 | 2.4 GHz | Deferred by USB-first scope | Receiver identification, transport capability and separate verification when available |
+
+Host-driven effects remain a later capability; they require a distinct host
+stream lifecycle and are not part of per-key RGB picture storage.
 
 Firmware flashing, vendor account login and cloud sharing are outside the local stock-firmware configurator scope. OEM database metadata and UI arrangements are not product implementation sources. Physical tests remain explicitly pending while the user is AFK.

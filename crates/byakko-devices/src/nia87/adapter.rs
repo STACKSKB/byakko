@@ -347,6 +347,19 @@ impl crate::Device for Nia87Adapter {
     ) -> Result<byakko_core::lighting::Snapshot, byakko_core::session::ApplyFailure> {
         crate::nia87::lighting_adapter::apply(expected, desired, backup_dir)
     }
+
+    fn read_picture(&mut self) -> Result<byakko_core::picture::Snapshot, String> {
+        crate::nia87::picture_adapter::read()
+    }
+
+    fn apply_picture(
+        &mut self,
+        expected: &byakko_core::picture::Snapshot,
+        desired: &BTreeMap<String, [u8; 3]>,
+        backup_dir: &Path,
+    ) -> Result<byakko_core::picture::Snapshot, byakko_core::session::ApplyFailure> {
+        crate::nia87::picture_adapter::apply(expected, desired, backup_dir)
+    }
 }
 
 #[cfg(test)]

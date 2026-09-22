@@ -9,6 +9,7 @@ use byakko_devices::KeymapDevice;
 mod demo;
 mod lighting_workflow;
 pub(crate) mod macro_workflow;
+mod picture_workflow;
 mod recording_workflow;
 
 fn ready() -> Desktop {
@@ -18,6 +19,8 @@ fn ready() -> Desktop {
         .with_macros(device.macro_capabilities().unwrap().clone())
         .unwrap()
         .with_lighting(device.lighting_capabilities().unwrap().clone())
+        .unwrap()
+        .with_picture(device.picture_capabilities().unwrap().clone())
         .unwrap();
     let generation = session.connect().unwrap();
     let Command::Read { operation, .. } = session.request_read().unwrap() else {
@@ -32,6 +35,7 @@ fn ready() -> Desktop {
     executor.set_generation(generation);
     Desktop {
         ui: panels::UiStyle::DEFAULT,
+        picture_selected: None,
         macro_files: Default::default(),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),

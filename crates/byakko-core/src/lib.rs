@@ -2,8 +2,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod draft;
+
 pub mod lighting;
 pub mod macros;
+pub mod picture;
 pub mod session;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

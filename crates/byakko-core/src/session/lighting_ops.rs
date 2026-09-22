@@ -59,6 +59,7 @@ impl Session {
             problem: Problem::ReadRequired,
         };
         self.invalidate_macros();
+        self.invalidate_picture();
         Ok(Command::ApplyLighting {
             generation: self.generation,
             operation,

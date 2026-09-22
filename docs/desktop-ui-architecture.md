@@ -23,9 +23,19 @@ lighting page chooses panel arrangement and dispatches edits; it contains no
 firmware effect IDs, color capability cases or report encoding. The memory
 demo advertises a different lighting catalog to exercise that separation.
 
+Per-key picture editing follows the same boundary. The core picture editor
+owns a baseline and RGB draft keyed by backend-provided key IDs, while the
+desktop renders color edits and sends owned picture commands. Nia87 maps those
+IDs to physical matrix slots and retains all 128 RGB triples in its revision,
+including slots outside the visible key catalog. Its RGB storage is separate
+from choosing the global built-in picture effect. The attached USB device has
+only had a read-only baseline check for this Iced slice; no live picture write
+has been performed.
+
 This is a pre-alpha composition layer, not a frozen visual design. Toolbars
 and compact pane interaction still need rendered UI review. Static interface
 copy currently lives near its view; backend labels and control availability
-come from descriptors and projections. Future settings and per-key editing
-should use the same data and control boundaries instead of adding one-off
-widget trees or mutable duplicate drafts.
+come from descriptors and projections. Future settings and archives should use
+the same data and control boundaries instead of adding one-off widget trees or
+mutable duplicate drafts. Host-driven effects and 2.4 GHz support remain later
+capabilities.

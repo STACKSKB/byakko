@@ -15,7 +15,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             (
                 Session::new(nia87::descriptor())?
                     .with_macros(nia87::macro_adapter::capabilities())?
-                    .with_lighting(nia87::lighting_adapter::capabilities())?,
+                    .with_lighting(nia87::lighting_adapter::capabilities())?
+                    .with_picture(nia87::picture_adapter::capabilities())?,
                 Executor::spawn(Nia87Adapter, backups)?,
             )
         }
@@ -33,6 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         device
                             .lighting_capabilities()
                             .expect("demo lighting configured")
+                            .clone(),
+                    )?
+                    .with_picture(
+                        device
+                            .picture_capabilities()
+                            .expect("demo picture configured")
                             .clone(),
                     )?,
                 Executor::spawn(device, Default::default())?,

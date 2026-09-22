@@ -59,11 +59,15 @@ research baseline, not the structure to port.
 
 ## Work sequence and evidence
 
-- The pure model, memory backend, Nia87 adapter, and Iced keymap, macro and
-  built-in global lighting workflows now exercise the approved boundary.
-  Continue per-key colors, settings, archives and discovery one capability at
-  a time. Do not pursue UI polish or accessibility work before architecture
-  review checkpoints.
+- The pure model, memory backend, Nia87 adapter, and Iced keymap, macro,
+  built-in global lighting and per-key picture workflows now exercise the
+  approved boundary. The Iced picture flow has only read-only USB baseline
+  verification; keep live picture writes pending while physical acceptance is
+  unavailable and the earlier recovery discrepancy is unresolved. RGB storage
+  is separate from selecting the global picture effect. Continue settings,
+  archives and discovery one capability at a time. Host-driven effects and
+  2.4 GHz remain later capabilities. Do not pursue UI polish or accessibility
+  work before architecture review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; do not move whole screen controllers into new packages.
 - Test invariants and failure boundaries: stale results, conflicts, rejected
