@@ -98,11 +98,31 @@ pub fn plan(current: &Configuration, target: &Configuration) -> Result<ChangeSum
     }
 
     let mut changed_settings = Vec::new();
-    for (opcode, writable) in [
-        (settings::DEBOUNCE_READ, &[2][..]),
-        (settings::AUTO_OS_READ, &[1][..]),
-        (settings::SLEEP_READ, &[1, 2, 3, 4, 5, 6, 7, 8][..]),
-        (settings::OPTIONS_READ, &[2, 4][..]),
+    for (opcode, writable, desired, restore) in [
+        (
+            settings::DEBOUNCE_READ,
+            &[2][..],
+            Setting::Debounce(target.settings.debounce()),
+            Setting::Debounce(current.settings.debounce()),
+        ),
+        (
+            settings::AUTO_OS_READ,
+            &[1][..],
+            Setting::AutoOs(target.settings.auto_os()),
+            Setting::AutoOs(current.settings.auto_os()),
+        ),
+        (
+            settings::SLEEP_READ,
+            &[1, 2, 3, 4, 5, 6, 7, 8][..],
+            Setting::Sleep(target.settings.sleep_seconds()),
+            Setting::Sleep(current.settings.sleep_seconds()),
+        ),
+        (
+            settings::OPTIONS_READ,
+            &[2, 4][..],
+            Setting::Backlight(target.settings.backlight_enabled()),
+            Setting::Backlight(current.settings.backlight_enabled()),
+        ),
     ] {
         let before = current.settings.raw_reply(opcode).unwrap();
         let after = target.settings.raw_reply(opcode).unwrap();
@@ -116,61 +136,28 @@ pub fn plan(current: &Configuration, target: &Configuration) -> Result<ChangeSum
         if before == after {
             continue;
         }
-        let setting = match opcode {
-            settings::DEBOUNCE_READ => Setting::Debounce(target.settings.debounce()),
-            settings::AUTO_OS_READ => {
-                if after[1] > 1 {
-                    return Err("auto-OS target must be canonical 0 or 1".into());
-                }
-                Setting::AutoOs(target.settings.auto_os())
-            }
-            settings::SLEEP_READ => Setting::Sleep(target.settings.sleep_seconds()),
-            settings::OPTIONS_READ => {
-                let enabled = target.settings.backlight_enabled();
-                if current
-                    .settings
-                    .with_backlight(enabled)
-                    .raw_reply(opcode)
-                    .unwrap()
-                    != after
-                {
-                    return Err("options target cannot be produced by the backlight setter".into());
-                }
-                if target
-                    .settings
-                    .with_backlight(current.settings.backlight_enabled())
-                    .raw_reply(opcode)
-                    .unwrap()
-                    != before
-                {
-                    return Err(
-                        "options current state cannot be restored by the backlight setter".into(),
-                    );
-                }
-                Setting::Backlight(enabled)
-            }
-            _ => unreachable!(),
-        };
-        if !matches!(setting, Setting::Backlight(_)) {
-            settings::write_report(setting)
-                .map_err(|e| format!("settings reply 0x{opcode:02x}: {e}"))?;
-            let rollback = match opcode {
-                settings::DEBOUNCE_READ => Setting::Debounce(current.settings.debounce()),
-                settings::AUTO_OS_READ => {
-                    if before[1] > 1 {
-                        return Err(
-                            "auto-OS current value is not canonical 0 or 1 for rollback".into()
-                        );
-                    }
-                    Setting::AutoOs(current.settings.auto_os())
-                }
-                settings::SLEEP_READ => Setting::Sleep(current.settings.sleep_seconds()),
-                _ => unreachable!(),
-            };
-            settings::write_report(rollback)
-                .map_err(|e| format!("settings reply 0x{opcode:02x} rollback: {e}"))?;
+        if opcode == settings::AUTO_OS_READ && after[1] > 1 {
+            return Err("auto-OS target must be canonical 0 or 1".into());
         }
-        changed_settings.push(setting);
+        let forward = current
+            .settings
+            .plan_change(desired)
+            .map_err(|e| format!("settings reply 0x{opcode:02x}: {e}"))?;
+        let reverse = target
+            .settings
+            .plan_change(restore)
+            .map_err(|e| format!("settings reply 0x{opcode:02x} rollback: {e}"))?;
+        if opcode == settings::OPTIONS_READ {
+            if forward.target.raw_reply(opcode) != Some(after) {
+                return Err("options target cannot be produced by the backlight setter".into());
+            }
+            if reverse.target.raw_reply(opcode) != Some(before) {
+                return Err(
+                    "options current state cannot be restored by the backlight setter".into(),
+                );
+            }
+        }
+        changed_settings.push(desired);
     }
 
     Ok(ChangeSummary {
@@ -383,6 +370,27 @@ mod tests {
             plan(&before, &after)
                 .unwrap_err()
                 .contains("cannot be restored")
+        );
+    }
+
+    #[test]
+    fn unchanged_unknown_setting_is_archival_but_changed_value_needs_safe_rollback() {
+        let mut before = fixture();
+        set_reply(&mut before, settings::AUTO_OS_READ, 1, 2);
+        let mut after = before.clone();
+        after.picture[4] = [1, 2, 3];
+        assert_eq!(plan(&before, &after).unwrap().picture_keys, 1);
+        set_reply(&mut after, settings::AUTO_OS_READ, 1, 0);
+        assert!(plan(&before, &after).unwrap_err().contains("canonical"));
+
+        let mut before = fixture();
+        set_reply(&mut before, settings::DEBOUNCE_READ, 2, 0);
+        let mut after = before.clone();
+        set_reply(&mut after, settings::DEBOUNCE_READ, 2, 5);
+        assert!(
+            plan(&before, &after)
+                .unwrap_err()
+                .contains("settings reply 0x91")
         );
     }
 

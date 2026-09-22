@@ -159,6 +159,9 @@ impl Settings {
                 Setting::Debounce(self.debounce())
             }
             Setting::AutoOs(value) => {
+                if self.auto_os_raw[1] > 1 {
+                    return Err("auto-OS current value is not canonical 0 or 1 for rollback".into());
+                }
                 target.auto_os_raw[1] = u8::from(value);
                 Setting::AutoOs(self.auto_os())
             }
@@ -180,7 +183,11 @@ impl Settings {
                 backlight_write_report(&target.options_raw)?,
                 backlight_write_report(&self.options_raw)?,
             ),
-            _ => (write_report(setting)?, write_report(restore)?),
+            _ => (
+                write_report(setting)?,
+                write_report(restore)
+                    .map_err(|error| format!("Cannot encode recovery setting: {error}"))?,
+            ),
         };
         Ok(SettingPlan {
             target,
@@ -350,6 +357,18 @@ mod tests {
         unrecognized.debounce_raw[2] = 0;
         assert!(unrecognized.plan_change(Setting::Debounce(4)).is_err());
         assert_eq!(unrecognized.debounce(), 0);
+        let mut unrecognized = before.clone();
+        unrecognized.auto_os_raw[1] = 2;
+        assert!(unrecognized.plan_change(Setting::AutoOs(false)).is_err());
+        // An unknown, untouched field is retained when editing another setting.
+        assert_eq!(
+            unrecognized
+                .plan_change(Setting::Debounce(4))
+                .unwrap()
+                .target
+                .auto_os_raw[1],
+            2
+        );
         assert_eq!(before, captured());
     }
 
