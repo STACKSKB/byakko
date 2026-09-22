@@ -40,16 +40,19 @@ decisions from effects. File splitting alone is not a complexity reduction.
   boundaries. Review branch count, nesting and state combinations as well as size;
   do not move branches into tiny helpers just to improve a metric.
 
-The next structural work is to isolate the macro recorder from egui, extract
-archive workflow decisions, and separate device sessions, feature operations and
-transaction recovery. Preserve wire behavior during these changes. Feature
-expansion remains secondary to this cleanup.
+The macro recorder now owns deterministic timing, held-input and capacity rules
+without egui or I/O. The archive controller owns its operation state and worker
+channel; the workbench coordinates it with the other editors. Remaining structural
+work includes macro file/device orchestration and separating device sessions,
+feature operations and transaction recovery. Preserve wire behavior during these
+changes. Feature expansion remains secondary to this cleanup.
 
 ## Current frontend coupling
 
 | UI module | Device-specific assumptions in the frontend today |
 | --- | --- |
-| `app.rs` | Calls `device::snapshot`, `capture_configuration`, and `apply_configuration` from workers and holds Nia87 archive review state. Keymap baseline, draft and apply work belong to the shared editor. The Nia87 inspector/macro-binding view still uses `board::slot_for_usage`, `layout::nia87_keys()` and Base/Function layers, with adapter projections for raw actions. Profile/archive formats and the 50-slot archive summary remain Nia87-specific. |
+| `app.rs` | Calls `device::snapshot` from its read worker and coordinates the archive controller. Keymap baseline, draft and apply work belong to the shared editor. The Nia87 inspector/macro-binding view still uses `board::slot_for_usage`, `layout::nia87_keys()` and Base/Function layers, with adapter projections for raw actions. Profile/archive formats and archive change rendering remain Nia87-specific. |
+| `archive_workflow.rs` | Owns capture/review/apply states and workers calling Nia87 `capture_configuration` and `apply_configuration`. Review planning, archive serialization and section summaries remain Nia87-specific. State separation does not make this a generic backend capability. |
 | `macro_ui.rs` | Calls `device::read_macro`/`apply_macro`; initializes 50 slots and `u8` slot IDs; validates drafts through Nia87 `macros::encode`, and stores the observed 256-byte representation. Macro event encoding, capacity, play modes, and import/export reflect that backend. |
 | `lighting_ui.rs` | Calls `device::read_lighting`/`apply_lighting`, `lighting::write_report` and the Nia87 effect catalog. Holds decoded settings alongside raw lighting reports; displays raw bytes. Screen/audio streaming invokes device-specific stream modules. |
 | `picture_ui.rs` | Uses `layout::nia87_keys()` and `board::slot_for_usage`, edits the Nia87 matrix color array (including nonphysical slots), and calls `device::read_picture`/`apply_picture`. The fixed slot bounds and initial Esc selection are layout assumptions. |

@@ -1,6 +1,8 @@
 pub mod actions;
 #[cfg(feature = "gui")]
 pub mod app;
+#[cfg(feature = "gui")]
+pub(crate) mod archive_workflow;
 pub mod audio_bands;
 pub mod audio_sample;
 pub mod audio_stream;
