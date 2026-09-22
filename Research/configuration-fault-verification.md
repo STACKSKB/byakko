@@ -153,3 +153,34 @@ an incomplete trace cannot prove that an unrecorded operation did not occur.
 Mocked exchanges cover success, partial-buffer errors, malformed lengths,
 panics, and mixed getter/setter ordering. This instrumentation has not yet been
 used for another hardware fault injection; recovery acceptance remains open.
+
+## Live read-only trace baseline
+
+The new `capture_configuration_trace` example completed against the attached
+Nia87. It captured two matching complete configurations: both maps, all 50
+macro slots, picture, lighting, and settings. The trace contains 1,952 getter
+exchanges, all with transport success, returned length 65 and report ID zero;
+zero events were dropped and no setters were recorded or called by this path.
+
+Local artifacts (ignored capture data):
+
+- `Research/captures/configuration-getter-trace-baseline.json`:
+  SHA-256 `2137480f0ba425bf06c9ef9a37881096834c928f6d4c21208ed65daf210ba4d4`.
+- `Research/captures/configuration-getter-trace-baseline-transport.json`:
+  SHA-256 `d3b88f454bbf0782c1cb3b51b13105b361a1d8cf33f7e726077e30c7b814cafa`.
+
+The archive is byte-identical to `configuration-before-macro-events.json`.
+Bidirectional planning reports zero differences in every section. This verifies
+the live getter instrumentation and continued baseline stability; it does not
+establish recovery under a transport fault.
+
+Repeat with distinct, unused output paths:
+
+```text
+cargo run --no-default-features --features research-tools --example capture_configuration_trace -- NEW_ARCHIVE.json NEW_TRACE.json
+```
+
+The example reserves the trace path before USB I/O, saves diagnostics even if
+capture fails or panics, and saves an archive only after two full captures match.
+Both outputs refuse overwrites. If the archive path aliases the reserved trace,
+the command stops before USB I/O and retains the empty reserved trace file.
