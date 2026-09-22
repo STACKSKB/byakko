@@ -1,5 +1,6 @@
 //! One device lifecycle and command sequence; feature drafts remain deterministic.
 mod macro_ops;
+mod recording;
 
 use crate::{Action, Change, Descriptor, State, validate_changes, validate_state};
 use serde::{Deserialize, Serialize};
@@ -94,10 +95,23 @@ pub enum Status {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Activity {
     Idle,
-    Read { operation: u64 },
-    Apply { operation: u64 },
-    ReadMacro { operation: u64, slot: String },
-    ApplyMacro { operation: u64, slot: String },
+    Recording {
+        recorder: crate::macros::recorder::Recorder,
+    },
+    Read {
+        operation: u64,
+    },
+    Apply {
+        operation: u64,
+    },
+    ReadMacro {
+        operation: u64,
+        slot: String,
+    },
+    ApplyMacro {
+        operation: u64,
+        slot: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -185,6 +199,11 @@ impl Session {
     }
 
     pub fn disconnect(&mut self) {
+        if let Activity::Recording { recorder } = &self.activity {
+            // No new host timestamp is available on disconnect; release immediately.
+            let at = recorder.last_timestamp();
+            let _ = self.stop_macro_recording(at);
+        }
         self.status = Status::Disconnected;
         self.activity = Activity::Idle;
         self.invalidate_macros();

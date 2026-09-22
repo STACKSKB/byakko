@@ -2,6 +2,7 @@ use super::*;
 
 fn capabilities() -> Capabilities {
     Capabilities {
+        byte_budget: None,
         backend_id: "test".into(),
         slots: vec![Choice {
             id: "scene-a".into(),
@@ -15,6 +16,64 @@ fn capabilities() -> Capabilities {
         backend_actions: vec![],
         bindings: vec![],
     }
+}
+
+#[test]
+fn byte_budget_rejects_invalid_models_and_checked_overflow() {
+    let mut caps = capabilities();
+    caps.byte_budget = Some(ByteBudget {
+        limit: 6,
+        overhead: 2,
+        key: 2,
+        button: 0,
+        movement: 0,
+        backend: 0,
+        inline_delays: 1..=127,
+        extended_delay: 2,
+    });
+    let event = Event {
+        action: Action::Key {
+            usage: 4,
+            pressed: true,
+        },
+        delay_ms: 0,
+    };
+    let program = Program {
+        repeat_count: 1,
+        events: vec![event.clone()],
+    };
+    assert!(validate_program(&caps, &program).is_ok());
+    assert!(
+        validate_program(
+            &caps,
+            &Program {
+                events: vec![event.clone(), event],
+                ..program
+            }
+        )
+        .is_err()
+    );
+    let budget = caps.byte_budget.as_mut().unwrap();
+    budget.key = u32::MAX;
+    budget.limit = u32::MAX;
+    assert!(
+        validate_program(
+            &caps,
+            &Program {
+                repeat_count: 1,
+                events: vec![Event {
+                    action: Action::Key {
+                        usage: 4,
+                        pressed: true
+                    },
+                    delay_ms: 1
+                }]
+            }
+        )
+        .is_err()
+    );
+    caps.byte_budget.as_mut().unwrap().inline_delays = std::ops::RangeInclusive::new(2, 1);
+    assert!(validate_capabilities(&caps).is_err());
 }
 
 fn program() -> Program {

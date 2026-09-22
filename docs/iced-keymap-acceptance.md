@@ -41,5 +41,5 @@ sections or establish their current state.
   behavior still need their respective acceptance checks.
 - The earlier whole-archive injected-failure recovery problem is unresolved;
   relocating the implementation does not repair or reaccept it.
-- Iced macro recording/files, lighting/settings/archive surfaces, discovery/hotplug lifecycle
+- Iced macro files/labels, lighting/settings/archive surfaces, discovery/hotplug lifecycle
   and the remaining official configurator parity are still migration work.

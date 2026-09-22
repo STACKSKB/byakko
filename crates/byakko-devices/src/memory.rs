@@ -308,6 +308,7 @@ mod tests {
 
     fn macro_capabilities() -> macros::Capabilities {
         macros::Capabilities {
+            byte_budget: None,
             bindings: vec![],
             backend_id: "memory".into(),
             slots: ["first", "second"]

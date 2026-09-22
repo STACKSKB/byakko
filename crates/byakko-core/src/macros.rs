@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, ops::RangeInclusive};
 pub mod editor;
+pub mod recorder;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Program {
@@ -62,6 +63,20 @@ pub struct Binding {
     pub required_repeat_count: Option<u32>,
 }
 
+/// Additive encoded-size model supplied by a backend. The backend codec remains
+/// responsible for final encoding and validation.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ByteBudget {
+    pub limit: u32,
+    pub overhead: u32,
+    pub key: u32,
+    pub button: u32,
+    pub movement: u32,
+    pub backend: u32,
+    pub inline_delays: RangeInclusive<u32>,
+    pub extended_delay: u32,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
     pub backend_id: String,
@@ -74,6 +89,8 @@ pub struct Capabilities {
     pub backend_actions: Vec<Choice>,
     #[serde(default)]
     pub bindings: Vec<Binding>,
+    #[serde(default)]
+    pub byte_budget: Option<ByteBudget>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -147,6 +164,20 @@ pub fn validate_capabilities(capabilities: &Capabilities) -> Result<(), String> 
     if buttons.len() != capabilities.buttons.len() || buttons.contains(&0) {
         return Err("Invalid macro pointer button capabilities".into());
     }
+    if let Some(budget) = &capabilities.byte_budget
+        && (budget.overhead > budget.limit
+            || budget.inline_delays.is_empty()
+            || [
+                (capabilities.keys.is_some(), budget.key),
+                (!capabilities.buttons.is_empty(), budget.button),
+                (capabilities.movement.is_some(), budget.movement),
+                (!capabilities.backend_actions.is_empty(), budget.backend),
+            ]
+            .into_iter()
+            .any(|(supported, cost)| supported && cost == 0))
+    {
+        return Err("Invalid macro byte budget".into());
+    }
     let slots: BTreeSet<_> = capabilities
         .slots
         .iter()
@@ -173,6 +204,10 @@ pub fn validate_program(capabilities: &Capabilities, program: &Program) -> Resul
     if !capabilities.repeat_counts.contains(&program.repeat_count) {
         return Err("Macro repeat count is outside backend limits".into());
     }
+    let mut encoded_size = capabilities
+        .byte_budget
+        .as_ref()
+        .map(|budget| budget.overhead);
     for (index, event) in program.events.iter().enumerate() {
         if !capabilities.delays_ms.contains(&event.delay_ms) {
             return Err(format!("Event {index}: wait is outside backend limits"));
@@ -202,6 +237,27 @@ pub fn validate_program(capabilities: &Capabilities, program: &Program) -> Resul
             return Err(format!(
                 "Event {index}: action is unsupported by this backend"
             ));
+        }
+        if let (Some(budget), Some(size)) = (&capabilities.byte_budget, &mut encoded_size) {
+            let action_bytes = match &event.action {
+                Action::Key { .. } => budget.key,
+                Action::Button { .. } => budget.button,
+                Action::Move { .. } => budget.movement,
+                Action::Backend { .. } => budget.backend,
+            };
+            *size = size
+                .checked_add(action_bytes)
+                .and_then(|size| {
+                    size.checked_add(if budget.inline_delays.contains(&event.delay_ms) {
+                        0
+                    } else {
+                        budget.extended_delay
+                    })
+                })
+                .ok_or_else(|| "Macro encoded size overflows byte budget".to_owned())?;
+            if *size > budget.limit {
+                return Err(format!("Event {index}: macro exceeds byte budget"));
+            }
         }
     }
     Ok(())

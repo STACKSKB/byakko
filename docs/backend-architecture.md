@@ -151,8 +151,8 @@ when closing, even though they invalidate the keymap baseline's trust.
 
 The memory-backed desktop tests exercise event replacement, signed movement,
 zero wait/count preservation, readback, opaque-slot rejection, failure retention
-and close behavior with a separately dirty keymap. Recorder and
-file/label workflows still need migration; the working legacy macro panel is
+and close behavior with a separately dirty keymap. File/label workflows still
+need migration; the working legacy macro panel is
 not being ported wholesale. See `iced-macro-acceptance.md` for the current limits.
 
 Macro capabilities advertise each slot's binding choices as typed keymap
@@ -164,6 +164,23 @@ before staging a binding. Mode selection never rewrites the macro count. The
 same staged-change review and serialized keymap apply perform the later write.
 This policy check occurs at staging; keymap expected-state checks cover keymaps,
 and do not make macro content and bindings one atomic transaction.
+
+The core recorder appends through the macro editor's sole draft. It receives
+integer millisecond timestamps, suppresses duplicate edges, preserves the old
+prefix, and reserves reverse-order releases before accepting another edge.
+`Activity::Recording` excludes device operations and all other edits. Iced owns
+the clock and physical-input mapping; it shows a dedicated capture view,
+excludes widget-consumed clicks, and ends capture on focus loss or close.
+No worker polling runs during recording. Oversized timing intervals stop the
+recording; the final held interval falls back to zero with an explicit notice.
+
+Optional `ByteBudget` capability data describes additive encoding sizes, so
+core can enforce storage limits without importing Nia87 packets. Supported
+action costs must be positive and arithmetic is checked. Nia87's model is
+tested independently against its encoder at delay and capacity boundaries;
+native encoding remains the final authority. Other backends may omit this
+model when their encoding does not fit it. No encoding service or closure is
+injected into the browser-portable core.
 
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 

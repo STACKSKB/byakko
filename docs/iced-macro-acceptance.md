@@ -7,7 +7,7 @@ input controller imports the Nia87 adapter or legacy GUI.
 
 Implemented: select/read slot, inspect and replace events, append, reorder,
 remove, clear, edit stored repeat count, revert, explicit Save & verify, and
-stage a saved macro binding onto the selected key/layer.
+stage a saved macro binding onto the selected key/layer, and focused recording.
 Action choices and ranges come from capabilities. Keyboard usages and pointer
 movement are numeric inputs in this pre-alpha; pointer buttons and backend
 actions use supplied labels. Wait is after the event. Zero remains an explicit
@@ -36,14 +36,28 @@ a third-layer binding, applies it through the memory executor and verifies
 the resulting keymap and macro. Native capability fixtures check the known
 four-byte bindings and count policy at the first and last slots.
 
-Validation: 217 workspace library tests pass. New desktop tests run messages
+Recording uses a dedicated capture view, physical keyboard codes and five
+pointer buttons. Measured timing uses host event timestamps in milliseconds;
+fixed waits and a 50 ms measured tail preserve the established Nia87 policy.
+For a backend with a smaller allowed maximum, the measured tail uses that
+maximum. Existing events are not retimed. Core reserves releases and terminal
+waits against the declared storage budget. Focus loss, Stop, input rejection
+and close finish the recording locally; closing then checks whether to discard
+the draft. Pointer motion/wheel and widget-consumed clicks are not recorded.
+
+Validation: 234 workspace library tests pass. New desktop tests run messages
 through the memory executor, verify saved values by rereading, preserve zero
 wait/count and signed motion, reject an out-of-range edit atomically, reject
 opaque writes, and check close/failure/stale-result behavior. Form projections
 round-trip every demo action kind. Windows and Linux all-target/all-feature
-Clippy pass with warnings denied. Windows release builds.
+Clippy pass with warnings denied. Core checks for WASM; Windows release builds.
+Recorder tests cover asymmetric waits, duplicate edges, old-prefix preservation,
+held releases, exact capacity, oversized intervals, fixed timing, excluded UI
+clicks, focus loss and close behavior. Physical-key mapping tests distinguish
+keypad keys and left/right modifiers. These are headless input-routing tests;
+OS event delivery and rendered capture interaction remain unverified.
 
-This is not macro feature parity. Recording, file import/export and local labels
+This is not macro feature parity. File import/export and local labels
 remain in the legacy application.
 No hardware writes were performed for this UI step. Rendered interaction,
 physical playback, Linux runtime and power-cycle persistence remain unverified;

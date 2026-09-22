@@ -8,6 +8,7 @@ use byakko_devices::KeymapDevice;
 #[path = "demo.rs"]
 mod demo;
 mod macro_workflow;
+mod recording_workflow;
 
 fn ready() -> Desktop {
     let mut device = demo::device().unwrap();
@@ -27,6 +28,8 @@ fn ready() -> Desktop {
     let executor = Executor::spawn(device, Default::default()).unwrap();
     executor.set_generation(generation);
     Desktop {
+        clock: std::time::Instant::now(),
+        recording_options: Default::default(),
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),

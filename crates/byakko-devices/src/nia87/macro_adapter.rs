@@ -2,8 +2,8 @@
 use crate::nia87::{actions, device, macros as native};
 use byakko_core::{
     macros::{
-        self, Action, Binding, ButtonChoice, Capabilities, Choice, Content, Event, Program,
-        Snapshot,
+        self, Action, Binding, ButtonChoice, ByteBudget, Capabilities, Choice, Content, Event,
+        Program, Snapshot,
     },
     session::{ApplyFailure, Recovery},
 };
@@ -34,6 +34,16 @@ fn slot_number(slot: &str) -> Result<u8, String> {
 
 pub fn capabilities() -> Capabilities {
     Capabilities {
+        byte_budget: Some(ByteBudget {
+            limit: 248,
+            overhead: 2,
+            key: 2,
+            button: 2,
+            movement: 4,
+            backend: 2,
+            inline_delays: 1..=127,
+            extended_delay: 2,
+        }),
         bindings: (0..50)
             .flat_map(|slot| {
                 [
@@ -260,6 +270,81 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn byte_budget_matches_native_encoding_boundaries() {
+        let caps = capabilities();
+        let actions = [
+            Action::Key {
+                usage: 4,
+                pressed: true,
+            },
+            Action::Button {
+                button: 1,
+                pressed: false,
+            },
+            Action::Move { dx: -128, dy: 127 },
+            Action::Backend {
+                backend_id: BACKEND_ID.into(),
+                id: "wheel-left".into(),
+                pressed: true,
+            },
+        ];
+        for action in actions {
+            for delay_ms in [0, 1, 127, 128, 65535] {
+                for count in [1, 40, 41, 60, 61, 62, 120, 122, 123, 124] {
+                    let program = Program {
+                        repeat_count: 1,
+                        events: vec![
+                            Event {
+                                action: action.clone(),
+                                delay_ms
+                            };
+                            count
+                        ],
+                    };
+                    let native_value = native::Macro {
+                        repeat_count: 1,
+                        events: program
+                            .events
+                            .iter()
+                            .map(|event| match &event.action {
+                                Action::Key { usage, pressed } => native::MacroEvent::Key {
+                                    usage: *usage as u8,
+                                    down: *pressed,
+                                    delay_ms: event.delay_ms as u16,
+                                },
+                                Action::Button { button, pressed } => {
+                                    native::MacroEvent::MouseButton {
+                                        button: *button as u8 + 239,
+                                        down: *pressed,
+                                        delay_ms: event.delay_ms as u16,
+                                    }
+                                }
+                                Action::Move { dx, dy } => native::MacroEvent::Move {
+                                    dx: *dx as i8,
+                                    dy: *dy as i8,
+                                    delay_ms: event.delay_ms as u16,
+                                },
+                                Action::Backend { pressed, .. } => {
+                                    native::MacroEvent::MouseButton {
+                                        button: 245,
+                                        down: *pressed,
+                                        delay_ms: event.delay_ms as u16,
+                                    }
+                                }
+                            })
+                            .collect(),
+                    };
+                    assert_eq!(
+                        macros::validate_program(&caps, &program).is_ok(),
+                        native::encode(&native_value).is_ok(),
+                        "{action:?} delay={delay_ms} count={count}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn binding_capabilities_retain_wire_modes_and_explicit_count_policy() {

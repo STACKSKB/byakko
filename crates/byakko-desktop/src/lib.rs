@@ -3,6 +3,8 @@ mod macro_binding_view;
 mod macro_editor;
 mod macro_form;
 mod macro_view;
+mod recording;
+mod recording_input;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -17,6 +19,7 @@ use std::{sync::mpsc::TryRecvError, time::Duration};
 
 #[derive(Clone, Debug)]
 enum Message {
+    Record(recording::Message),
     Page(Page),
     Macro(macro_editor::Message),
     SelectLayer(String),
@@ -46,6 +49,8 @@ enum Closing {
 }
 
 struct Desktop {
+    clock: std::time::Instant,
+    recording_options: recording::Options,
     page: Page,
     macro_form: macro_form::Form,
     repeat_input: String,
@@ -63,6 +68,8 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
     let layer = session.descriptor().layers[0].id.clone();
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
+        clock: std::time::Instant::now(),
+        recording_options: Default::default(),
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),
@@ -184,6 +191,9 @@ impl Desktop {
     }
 
     fn close(&mut self) -> Task<Message> {
+        if self.session.recording() && !self.finish_recording(std::time::Instant::now()) {
+            return Task::none();
+        }
         if self.busy() {
             self.closing = Closing::Waiting;
         } else if self.session.dirty() {
@@ -195,6 +205,9 @@ impl Desktop {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        if self.session.recording() && !matches!(message, Message::Record(_) | Message::Close) {
+            return Task::none();
+        }
         if self.closing == Closing::ConfirmDiscard
             && !matches!(
                 message,
@@ -204,6 +217,7 @@ impl Desktop {
             self.closing = Closing::Open;
         }
         match message {
+            Message::Record(message) => self.update_recording(message),
             Message::Page(page) => self.page = page,
             Message::Macro(message) => self.update_macro(message),
             Message::SelectLayer(layer) => self.layer = layer,
@@ -227,7 +241,9 @@ impl Desktop {
 
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
-        if self.busy() {
+        if self.session.recording() {
+            Subscription::batch([close, recording::subscription()])
+        } else if self.busy() {
             Subscription::batch([
                 close,
                 iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll),
@@ -238,6 +254,10 @@ impl Desktop {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        view::shell(self)
+        if self.session.recording() {
+            recording::capture_view(self)
+        } else {
+            view::shell(self)
+        }
     }
 }

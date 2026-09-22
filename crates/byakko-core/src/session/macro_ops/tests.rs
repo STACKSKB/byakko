@@ -26,6 +26,7 @@ fn ready() -> Session {
         actions: vec![],
     };
     let capabilities = macros::Capabilities {
+        byte_budget: None,
         backend_id: "memory".into(),
         slots: vec![macros::Choice {
             id: "scene".into(),

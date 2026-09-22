@@ -3,6 +3,7 @@ use crate::macros::{Action, Choice, Event};
 
 fn caps() -> Capabilities {
     Capabilities {
+        byte_budget: None,
         backend_id: "memory".into(),
         slots: ["one", "two"]
             .map(|id| Choice {
