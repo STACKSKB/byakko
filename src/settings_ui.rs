@@ -40,7 +40,7 @@ pub struct SettingsEditor {
 }
 
 impl SettingsEditor {
-    pub fn new() -> Self {
+    pub fn new_with_backup_dir(backup_dir: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             observed: None,
@@ -48,9 +48,7 @@ impl SettingsEditor {
             draft_auto: None,
             draft_sleep: None,
             draft_backlight: None,
-            backup_dir: std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join("backups"),
+            backup_dir,
             status: "Open Settings to read the keyboard's scalar settings.".into(),
             error: false,
             busy: false,
@@ -59,6 +57,11 @@ impl SettingsEditor {
             tx,
             rx,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new() -> Self {
+        Self::new_with_backup_dir(std::env::temp_dir().join("byakko-test-backups"))
     }
 
     pub fn busy(&self) -> bool {
@@ -402,6 +405,7 @@ impl SettingsEditor {
     }
 }
 
+#[cfg(test)]
 impl Default for SettingsEditor {
     fn default() -> Self {
         Self::new()

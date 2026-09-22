@@ -105,17 +105,20 @@ struct Workbench {
 }
 
 impl Workbench {
-    fn new(ctx: &egui::Context) -> Self {
-        let mut app = Self::without_read();
+    fn new(ctx: &egui::Context, data_dir: PathBuf) -> Self {
+        let mut app = Self::without_read_at(data_dir);
         app.start_read(ctx);
         app
     }
 
+    #[cfg(test)]
     fn without_read() -> Self {
+        Self::without_read_at(std::env::temp_dir().join("byakko-test-data"))
+    }
+
+    fn without_read_at(data_dir: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
-        let backup_dir = std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join("backups");
+        let backup_dir = data_dir.join("backups");
         Self {
             keys: layout::nia87_keys(),
             observed: None,
@@ -124,16 +127,28 @@ impl Workbench {
             selected: None,
             layer: Layer::Base,
             tab: WorkbenchTab::Keys,
-            macro_editor: MacroEditor::new(),
-            lighting_editor: crate::lighting_ui::LightingEditor::new(),
-            picture_editor: crate::picture_ui::PictureEditor::new(),
-            settings_editor: crate::settings_ui::SettingsEditor::new(),
+            macro_editor: MacroEditor::new_with_backup_dir(backup_dir.clone()),
+            lighting_editor: crate::lighting_ui::LightingEditor::new_with_backup_dir(
+                backup_dir.clone(),
+            ),
+            picture_editor: crate::picture_ui::PictureEditor::new_with_backup_dir(
+                backup_dir.clone(),
+            ),
+            settings_editor: crate::settings_ui::SettingsEditor::new_with_backup_dir(
+                backup_dir.clone(),
+            ),
             search: String::new(),
             modifiers: [false; 4],
             raw_editor: String::new(),
             test_input: String::new(),
-            profile_path: "nia87-keymap.json".into(),
-            archive_path: "nia87-configuration.json".into(),
+            profile_path: data_dir
+                .join("nia87-keymap.json")
+                .to_string_lossy()
+                .into_owned(),
+            archive_path: data_dir
+                .join("nia87-configuration.json")
+                .to_string_lossy()
+                .into_owned(),
             archive_progress: None,
             archive_summary: None,
             reviewed_archive: None,
@@ -1497,6 +1512,21 @@ fn parse_bytes(input: &str) -> Option<[u8; 4]> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn explicit_data_dir_controls_gui_default_paths() {
+        let root = std::env::temp_dir().join("byakko-explicit-path-test");
+        let app = Workbench::without_read_at(root.clone());
+        assert_eq!(app.backup_dir, root.join("backups"));
+        assert_eq!(
+            PathBuf::from(app.profile_path),
+            root.join("nia87-keymap.json")
+        );
+        assert_eq!(
+            PathBuf::from(app.archive_path),
+            root.join("nia87-configuration.json")
+        );
+    }
+
     fn snapshot(fill: u8) -> Snapshot {
         Snapshot {
             format_version: 1,
@@ -1818,6 +1848,9 @@ pub fn run() -> eframe::Result {
     eframe::run_native(
         "Byakko · Nia87",
         options,
-        Box::new(|cc| Ok(Box::new(Workbench::new(&cc.egui_ctx)))),
+        Box::new(|cc| {
+            let data_dir = crate::storage::prepare_user_data_dir()?;
+            Ok(Box::new(Workbench::new(&cc.egui_ctx, data_dir)))
+        }),
     )
 }

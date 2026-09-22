@@ -196,7 +196,7 @@ pub struct MacroEditor {
 }
 
 impl MacroEditor {
-    pub fn new() -> Self {
+    pub fn new_with_backup_dir(backup_dir: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             slot: 0,
@@ -209,9 +209,7 @@ impl MacroEditor {
             names: (0..50).map(|slot| format!("Macro {}", slot + 1)).collect(),
             play_modes: vec![0; 50],
             io_path: String::new(),
-            backup_dir: std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join("backups"),
+            backup_dir,
             status: "Choose a slot, then load it from the keyboard.".into(),
             error: false,
             busy: false,
@@ -220,6 +218,11 @@ impl MacroEditor {
             tx,
             rx,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new() -> Self {
+        Self::new_with_backup_dir(std::env::temp_dir().join("byakko-test-backups"))
     }
 
     pub fn busy(&self) -> bool {
@@ -935,6 +938,7 @@ impl MacroEditor {
     }
 }
 
+#[cfg(test)]
 impl Default for MacroEditor {
     fn default() -> Self {
         Self::new()

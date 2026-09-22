@@ -11,6 +11,9 @@ cargo run --locked -- devices
 cargo run --locked -- gui
 ```
 
+GUI backups and default exports use a stable per-user directory; see
+[local file locations](docs/local-storage.md). Existing files are retained.
+
 The `devices` command only enumerates. `descriptor`, `inspect`, and `export <new-file.json>` inspect the configuration interface and keymaps. The GUI reads automatically, stages edits locally, and writes only on explicit Apply. A candidate USB match alone does not establish the model uniquely. Close the official configurator/helper before connecting to avoid competing transactions.
 
 Validated on the attached Windows keyboard: `3151:4015`, configuration collection on interface 2, usage `FFFF:0002`, raw firmware version `0100`. A Pause-to-F24 remap and an unbound macro storage test were both read back and restored. Windows builds, protocol tests and Clippy pass. Physical output and power-cycle persistence remain untested while the user is AFK. Linux core and GUI cross-target linking checks pass; native Linux runtime behavior, hidraw permissions, and hardware transactions remain untested. The original adapters currently support Windows and Linux; macOS is not implemented.
