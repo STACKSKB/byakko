@@ -48,7 +48,7 @@ fn main() -> device::Result<()> {
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_nanos();
-    let trace_path = directory.join(format!("macro-events-setters-{stamp}.json"));
+    let trace_path = directory.join(format!("macro-events-transport-{stamp}.json"));
     let mut trace_file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -57,13 +57,13 @@ fn main() -> device::Result<()> {
     serde_json::to_writer_pretty(
         &mut trace_file,
         &serde_json::json!({
-            "format": "byakko-research-setter-trace", "version": 1,
+            "format": "byakko-research-transport-trace", "version": 2,
             "result": format!("{result:?}"), "trace": trace,
-            "scope": "Setter API calls, not USB bus capture or proof of firmware execution"
+            "scope": "Setter attempts and read_payload exchanges; not USB bus capture or proof of firmware execution"
         }),
     )?;
     trace_file.sync_all()?;
-    println!("Setter trace: {}", trace_path.display());
+    println!("Transport trace: {}", trace_path.display());
     result.map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { error.into() })?
 }
 

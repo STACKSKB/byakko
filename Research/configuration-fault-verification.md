@@ -129,3 +129,27 @@ observations would also enlarge the failure surface. The next hardware audit
 must capture getter replies alongside the bounded setter trace, distinguishing
 an unstable read from persistent collateral state before changing recovery
 policy. No device reads, setters, or fault injection were performed for this audit.
+
+## Getter diagnostics
+
+Research traces now include `read_payload` exchanges in the same ordered,
+thread-local buffer as setter attempts. The combined limit is 16,384 events
+to retain several complete archive sweeps, including identity barriers. Each getter records its
+request and the complete initialized 65-byte reply buffer, plus the returned
+length when the exchange succeeds. A failed exchange retains any partial bytes;
+these are diagnostic buffer contents, not a valid reply. Length/prefix validation
+still happens in the transport after tracing, so malformed responses remain
+available for analysis. Transport success alone does not establish protocol
+validity or stable device state.
+
+The example artifacts use `byakko-research-transport-trace`, version 2, and
+`operation` distinguishes getters from setters. Existing version-1 setter-only
+artifacts remain unchanged. Direct inspection requests outside `read_payload`
+are not traced. The recorder performs no disk I/O and does not change request
+order, request bytes, or transport delays. Getter requests are never passed to
+the setter fault injector. The shared cap reports dropped events explicitly;
+an incomplete trace cannot prove that an unrecorded operation did not occur.
+
+Mocked exchanges cover success, partial-buffer errors, malformed lengths,
+panics, and mixed getter/setter ordering. This instrumentation has not yet been
+used for another hardware fault injection; recovery acceptance remains open.
