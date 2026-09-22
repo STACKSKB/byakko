@@ -143,9 +143,8 @@ impl PictureEditor {
     fn poll_worker(&mut self) {
         while let Ok(message) = self.rx.try_recv() {
             self.busy = false;
-            let was_apply = matches!(&message, WorkerResult::Applied(_));
             match message {
-                WorkerResult::Read(Ok(colors)) | WorkerResult::Applied(Ok(colors)) => {
+                WorkerResult::Read(Ok(colors)) => {
                     if colors.len() != 128 {
                         self.trusted = false;
                         self.set_error(format!(
@@ -157,14 +156,23 @@ impl PictureEditor {
                     self.draft = colors.clone();
                     self.observed = Some(colors);
                     self.trusted = true;
-                    if was_apply {
-                        self.set_status(format!(
-                            "Picture readback matched all 128 slots. Backup in {}",
-                            self.backup_dir.display()
-                        ));
-                    } else {
-                        self.set_status("Picture read twice and matched. Select a key to edit its stored color.");
+                    self.set_status(
+                        "Picture read twice and matched. Select a key to edit its stored color.",
+                    );
+                }
+                WorkerResult::Applied(Ok(colors)) => {
+                    if colors.len() != 128 || self.draft.len() != 128 || colors != self.draft {
+                        self.trusted = false;
+                        self.set_error("Picture apply returned a mismatched readback; device state is unverified. Draft retained. Re-read before another apply.");
+                        continue;
                     }
+                    self.draft = colors.clone();
+                    self.observed = Some(colors);
+                    self.trusted = true;
+                    self.set_status(format!(
+                        "Picture readback matched all 128 slots. Backup in {}",
+                        self.backup_dir.display()
+                    ));
                 }
                 WorkerResult::Read(Err(error)) => {
                     self.trusted = false;
@@ -443,5 +451,35 @@ mod tests {
         assert!(!editor.busy);
         assert!(editor.error);
         assert_eq!(editor.draft, draft_before);
+    }
+
+    #[test]
+    fn applied_mismatch_retains_picture_draft_and_prior_observation() {
+        let mut editor = PictureEditor::new();
+        let prior = vec![[1, 2, 3]; 128];
+        let draft = vec![[4, 5, 6]; 128];
+        editor.observed = Some(prior.clone());
+        editor.draft = draft.clone();
+        let mut wrong = draft.clone();
+        wrong[91] = [9, 9, 9];
+        editor.tx.send(WorkerResult::Applied(Ok(wrong))).unwrap();
+        editor.poll_worker();
+        assert_eq!(editor.observed, Some(prior));
+        assert_eq!(editor.draft, draft);
+        assert!(!editor.trusted && editor.error && editor.status.contains("unverified"));
+    }
+
+    #[test]
+    fn applied_exact_picture_accepts_all_slots() {
+        let mut editor = PictureEditor::new();
+        editor.observed = Some(vec![[1, 2, 3]; 128]);
+        editor.draft = vec![[4, 5, 6]; 128];
+        editor
+            .tx
+            .send(WorkerResult::Applied(Ok(editor.draft.clone())))
+            .unwrap();
+        editor.poll_worker();
+        assert_eq!(editor.observed.as_ref(), Some(&editor.draft));
+        assert!(editor.trusted && !editor.error);
     }
 }

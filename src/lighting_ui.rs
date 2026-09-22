@@ -239,20 +239,23 @@ impl LightingEditor {
                 }
                 WorkerResult::Applied(Ok(observed)) => {
                     let decoded = observed.recognized_setting();
-                    self.trusted = decoded.is_some();
+                    let matches_draft = decoded.as_ref().zip(self.draft.as_ref()).is_some_and(|(decoded, draft)| {
+                        matches!((lighting::write_report(decoded), lighting::write_report(draft)),
+                            (Ok(actual), Ok(expected)) if actual == expected)
+                    });
+                    if !matches_draft {
+                        self.trusted = false;
+                        self.set_error("Lighting apply returned an unrecognized or mismatched readback; device state is unverified. Draft retained. Re-read before another apply.");
+                        continue;
+                    }
                     self.loaded = decoded.clone();
                     self.draft = decoded;
                     self.observed = Some(observed);
-                    if self.trusted {
-                        self.set_status(format!(
-                            "Lighting settings read back and matched. Backup in {}",
-                            self.backup_dir.display()
-                        ));
-                    } else {
-                        self.set_error(
-                            "Write readback contained an unrecognized mode. Reload before editing.",
-                        );
-                    }
+                    self.trusted = true;
+                    self.set_status(format!(
+                        "Lighting settings read back and matched. Backup in {}",
+                        self.backup_dir.display()
+                    ));
                 }
                 WorkerResult::Applied(Err(error)) => {
                     self.trusted = false;
@@ -537,6 +540,100 @@ fn summary(setting: &LightingSetting) -> String {
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
+
+    fn response_for(setting: &LightingSetting) -> Lighting {
+        let report = lighting::write_report(setting).unwrap();
+        let mut reply = report;
+        reply[0] = lighting::LED_READ_COMMAND;
+        Lighting::decode(&reply).unwrap()
+    }
+
+    #[test]
+    fn applied_mismatch_retains_lighting_draft_and_prior_observation() {
+        let mut editor = LightingEditor::new();
+        let prior = response_for(&LightingSetting {
+            effect_id: 1,
+            value: Some(2),
+            speed: None,
+            option: None,
+            rgb: Some([1, 2, 3]),
+            dazzle: false,
+        });
+        let draft = LightingSetting {
+            effect_id: 1,
+            value: Some(4),
+            speed: None,
+            option: None,
+            rgb: Some([255, 255, 255]),
+            dazzle: false,
+        };
+        editor.observed = Some(prior.clone());
+        editor.loaded = prior.recognized_setting();
+        editor.draft = Some(draft.clone());
+        let wrong = response_for(&LightingSetting {
+            value: Some(3),
+            ..draft.clone()
+        });
+        editor.tx.send(WorkerResult::Applied(Ok(wrong))).unwrap();
+        editor.poll_worker();
+        assert_eq!(editor.observed, Some(prior));
+        assert_eq!(editor.draft, Some(draft));
+        assert!(!editor.trusted && editor.error && editor.status.contains("unverified"));
+    }
+
+    #[test]
+    fn applied_canonical_white_readback_is_accepted() {
+        let mut editor = LightingEditor::new();
+        let draft = LightingSetting {
+            effect_id: 1,
+            value: Some(4),
+            speed: None,
+            option: None,
+            rgb: Some([255, 255, 255]),
+            dazzle: false,
+        };
+        editor.draft = Some(draft);
+        let readback = response_for(editor.draft.as_ref().unwrap());
+        assert_eq!(readback.raw_rgb(), [250, 255, 250]);
+        editor
+            .tx
+            .send(WorkerResult::Applied(Ok(readback.clone())))
+            .unwrap();
+        editor.poll_worker();
+        assert_eq!(editor.observed, Some(readback));
+        assert_eq!(editor.draft.as_ref().unwrap().rgb, Some([255, 255, 255]));
+        assert!(editor.trusted && !editor.error);
+    }
+
+    #[test]
+    fn applied_unrecognized_mode_retains_lighting_state() {
+        let mut editor = LightingEditor::new();
+        let draft = LightingSetting {
+            effect_id: 1,
+            value: Some(4),
+            speed: None,
+            option: None,
+            rgb: Some([1, 2, 3]),
+            dazzle: false,
+        };
+        let prior = response_for(&draft);
+        editor.observed = Some(prior.clone());
+        editor.loaded = Some(draft.clone());
+        editor.draft = Some(draft.clone());
+        let mut unknown = [0u8; 64];
+        unknown[0] = lighting::LED_READ_COMMAND;
+        unknown[1] = 0xfe;
+        editor
+            .tx
+            .send(WorkerResult::Applied(Ok(
+                Lighting::decode(&unknown).unwrap()
+            )))
+            .unwrap();
+        editor.poll_worker();
+        assert_eq!(editor.observed, Some(prior));
+        assert_eq!(editor.draft, Some(draft));
+        assert!(!editor.trusted && editor.error && editor.status.contains("unverified"));
+    }
 
     #[test]
     fn ordinary_write_close_waits_and_keeps_failed_draft() {
