@@ -1,17 +1,15 @@
 //! Native macro editor. Device transactions run on worker threads.
 
 use std::{
-    fs::OpenOptions,
-    io::Write,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
 };
 
 use eframe::egui::{self, Color32, RichText};
-use serde::{Deserialize, Serialize};
 
 use crate::{
     device, layout,
+    macro_file::{self, MacroFile},
     macros::{self, Macro, MacroEvent},
 };
 
@@ -152,15 +150,6 @@ impl EventKind {
             Self::Move => "Move",
         }
     }
-}
-
-#[derive(Serialize, Deserialize)]
-struct MacroFile {
-    format_version: u32,
-    slot: u8,
-    name: String,
-    play_mode: u8,
-    macro_data: Macro,
 }
 
 enum WorkerResult {
@@ -401,17 +390,7 @@ impl MacroEditor {
             play_mode: self.play_modes[self.slot as usize],
             macro_data: self.draft.clone(),
         };
-        let result = (|| -> Result<(), String> {
-            let mut handle = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(path)
-                .map_err(|error| error.to_string())?;
-            serde_json::to_writer_pretty(&mut handle, &file).map_err(|error| error.to_string())?;
-            handle.write_all(b"\n").map_err(|error| error.to_string())?;
-            handle.sync_all().map_err(|error| error.to_string())?;
-            Ok(())
-        })();
+        let result = macro_file::save_new(std::path::Path::new(path), &file);
         match result {
             Ok(()) => self.set_status(format!("Draft exported to {path}.")),
             Err(error) => self.set_error(format!("Export failed: {error}")),
@@ -434,15 +413,7 @@ impl MacroEditor {
             self.set_error("Save or revert the current draft before importing another file.");
             return;
         }
-        let result = (|| -> Result<MacroFile, String> {
-            let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-            let file: MacroFile = serde_json::from_str(&text).map_err(|error| error.to_string())?;
-            if file.format_version != 1 || file.play_mode > 2 || file.slot > 49 {
-                return Err("Unsupported macro JSON version, slot, or play mode".into());
-            }
-            macros::encode(&file.macro_data)?;
-            Ok(file)
-        })();
+        let result = macro_file::load(std::path::Path::new(path));
         match result {
             Ok(file) => {
                 self.draft = file.macro_data;

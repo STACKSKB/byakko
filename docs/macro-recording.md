@@ -20,3 +20,13 @@ Headless event tests exercise the recorder and codec without sending input to
 other applications or writing the device. They do not establish firmware
 playback timing, movement semantics or physical key activation; those remain
 hardware validation requirements.
+
+## Local macro files
+
+Import and export preserve the existing version-1 JSON format: slot, local
+name, playback mode, repeat count and typed events. Imports are bounded to
+64 KiB before JSON parsing and validate the 248-byte device encoding before
+staging. Invalid files leave the current draft unchanged. Exports validate the
+entire output before creating a new file and never overwrite an existing one.
+Importing into a loaded slot stages data there; the file's slot is metadata,
+not permission to write another device slot. Neither file operation writes HID.
