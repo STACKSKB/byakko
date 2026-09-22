@@ -377,7 +377,7 @@ impl LightingEditor {
                     ui.label(RichText::new("DRAFT").small().strong().color(MUTED));
                     self.editor(ui, can_work && self.trusted);
                     if self.draft.as_ref().is_some_and(|draft| matches!(draft.effect_id, 20 | 22)) {
-                        ui.label("Audio lighting samples system playback locally, not your microphone. No audio is saved or transmitted. Windows only; Linux audio capture is pending.");
+                        ui.label("Audio lighting samples system playback, not your microphone. No recordings are saved. Windows WASAPI or Linux PulseAudio / PipeWire Pulse monitor; Linux runtime verification is pending.");
                         if self.stream_stop.is_none() && ui.add_enabled(can_work && self.trusted, egui::Button::new("START AUDIO LIGHTING")).clicked() {
                             self.start_audio(ui.ctx());
                         }
@@ -452,6 +452,75 @@ fn run_host_worker(
 ) -> Result<Lighting, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation))
         .unwrap_or_else(|_| Err("Host-lighting worker failed unexpectedly. Re-read the keyboard before further changes; restoration is unverified.".into()))
+}
+
+fn default_for(effect: &Effect, previous: Option<&LightingSetting>) -> LightingSetting {
+    LightingSetting {
+        effect_id: effect.id,
+        value: effect
+            .value
+            .then(|| previous.and_then(|draft| draft.value).unwrap_or(4)),
+        speed: effect
+            .speed
+            .then(|| previous.and_then(|draft| draft.speed).unwrap_or(2)),
+        option: (!effect.options.is_empty()).then_some(0),
+        rgb: effect.rgb.then(|| {
+            previous
+                .and_then(|draft| draft.rgb)
+                .unwrap_or([255, 255, 255])
+        }),
+        dazzle: effect.dazzle && previous.is_some_and(|draft| draft.dazzle),
+    }
+}
+
+fn friendly_name(effect: &Effect) -> &'static str {
+    match effect.id {
+        0 => "Off",
+        1 => "Steady",
+        2 => "Breathing",
+        3 => "Neon",
+        4 => "Wave",
+        5 => "Ripple",
+        6 => "Raindrop",
+        7 => "Snake",
+        8 => "Press action",
+        9 => "Convergence",
+        10 => "Sine wave",
+        11 => "Kaleidoscope",
+        12 => "Line wave",
+        13 => "User picture",
+        14 => "Laser",
+        15 => "Circle wave",
+        16 => "Dazzling",
+        17 => "Rain down",
+        18 => "Meteor",
+        19 => "Press action off",
+        20 => "Music follow 3",
+        21 => "Screen color",
+        22 => "Music follow 2",
+        _ => "Unknown",
+    }
+}
+
+fn summary(setting: &LightingSetting) -> String {
+    let effect = lighting::effect_by_id(setting.effect_id).expect("catalog draft");
+    let mut parts = vec![friendly_name(effect).to_owned()];
+    if let Some(value) = setting.value {
+        parts.push(format!("brightness {value}"));
+    }
+    if let Some(speed) = setting.speed {
+        parts.push(format!("speed {speed}"));
+    }
+    if let Some(option) = setting.option {
+        parts.push(effect.options[option as usize].to_owned());
+    }
+    if let Some([r, g, b]) = setting.rgb {
+        parts.push(format!("#{r:02X}{g:02X}{b:02X}"));
+    }
+    if setting.dazzle {
+        parts.push("dazzle".into());
+    }
+    parts.join(" · ")
 }
 
 #[cfg(test)]
@@ -536,73 +605,4 @@ mod lifecycle_tests {
                 .contains("restoration is unverified")
         );
     }
-}
-
-fn default_for(effect: &Effect, previous: Option<&LightingSetting>) -> LightingSetting {
-    LightingSetting {
-        effect_id: effect.id,
-        value: effect
-            .value
-            .then(|| previous.and_then(|draft| draft.value).unwrap_or(4)),
-        speed: effect
-            .speed
-            .then(|| previous.and_then(|draft| draft.speed).unwrap_or(2)),
-        option: (!effect.options.is_empty()).then_some(0),
-        rgb: effect.rgb.then(|| {
-            previous
-                .and_then(|draft| draft.rgb)
-                .unwrap_or([255, 255, 255])
-        }),
-        dazzle: effect.dazzle && previous.is_some_and(|draft| draft.dazzle),
-    }
-}
-
-fn friendly_name(effect: &Effect) -> &'static str {
-    match effect.id {
-        0 => "Off",
-        1 => "Steady",
-        2 => "Breathing",
-        3 => "Neon",
-        4 => "Wave",
-        5 => "Ripple",
-        6 => "Raindrop",
-        7 => "Snake",
-        8 => "Press action",
-        9 => "Convergence",
-        10 => "Sine wave",
-        11 => "Kaleidoscope",
-        12 => "Line wave",
-        13 => "User picture",
-        14 => "Laser",
-        15 => "Circle wave",
-        16 => "Dazzling",
-        17 => "Rain down",
-        18 => "Meteor",
-        19 => "Press action off",
-        20 => "Music follow 3",
-        21 => "Screen color",
-        22 => "Music follow 2",
-        _ => "Unknown",
-    }
-}
-
-fn summary(setting: &LightingSetting) -> String {
-    let effect = lighting::effect_by_id(setting.effect_id).expect("catalog draft");
-    let mut parts = vec![friendly_name(effect).to_owned()];
-    if let Some(value) = setting.value {
-        parts.push(format!("brightness {value}"));
-    }
-    if let Some(speed) = setting.speed {
-        parts.push(format!("speed {speed}"));
-    }
-    if let Some(option) = setting.option {
-        parts.push(effect.options[option as usize].to_owned());
-    }
-    if let Some([r, g, b]) = setting.rgb {
-        parts.push(format!("#{r:02X}{g:02X}{b:02X}"));
-    }
-    if setting.dazzle {
-        parts.push("dazzle".into());
-    }
-    parts.join(" · ")
 }

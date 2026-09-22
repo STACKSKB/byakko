@@ -1015,6 +1015,66 @@ mod recording_tests {
     use eframe::egui::Key;
 
     #[test]
+    fn egui_recording_tracks_physical_keys_and_releases_on_focus_loss() {
+        use eframe::egui::{self, Event, Modifiers};
+        let ctx = egui::Context::default();
+        let mut editor = MacroEditor::new();
+        editor.loaded = Some(editor.draft.clone());
+        let id = egui::Id::new("test capture pad");
+        let mut frame = |time, focused, events, start| {
+            let input = egui::RawInput {
+                time: Some(time),
+                focused,
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                let response = ui.interact(ui.max_rect(), id, egui::Sense::click());
+                if start {
+                    response.request_focus();
+                    assert!(editor.start_recording(ui.ctx()));
+                }
+                editor.process_recording(ui.ctx(), id);
+            });
+            output.textures_delta.clear();
+        };
+        frame(1.0, true, vec![], true);
+        let ctrl = Modifiers {
+            ctrl: true,
+            command: true,
+            ..Modifiers::NONE
+        };
+        let key = |repeat| Event::Key {
+            key: Key::Z,
+            physical_key: Some(Key::A),
+            pressed: true,
+            repeat,
+            modifiers: ctrl,
+        };
+        frame(
+            1.1,
+            true,
+            vec![Event::ModifiersChanged(ctrl), key(false)],
+            false,
+        );
+        frame(1.15, true, vec![key(true)], false);
+        frame(1.2, false, vec![], false);
+        assert!(editor.recording.is_none());
+        assert!(!editor.busy());
+        let keys: Vec<_> = editor
+            .draft
+            .events
+            .iter()
+            .map(|event| match event {
+                MacroEvent::Key { usage, down, .. } => (*usage, *down),
+                _ => panic!("Unexpected non-key event"),
+            })
+            .collect();
+        assert_eq!(keys, [(224, true), (4, true), (4, false), (224, false)]);
+        assert!(macros::encode(&editor.draft).is_ok());
+    }
+
+    #[test]
     fn maps_physical_keys_and_rejects_unavailable_usages() {
         assert_eq!(key_usage(Key::A), Some(4));
         assert_eq!(key_usage(Key::F24), Some(115));

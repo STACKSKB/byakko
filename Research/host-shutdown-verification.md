@@ -7,3 +7,5 @@ The workbench now handles close requests before polling workers and again after 
 Three headless egui event tests pass: pending close waits, successful completion permits close, and same-frame restoration failure cancels close. A panic test confirms a completion error is produced. The success/wait cases share one test, for three tests total. The headless harness explicitly consumes/discards font texture deltas; it does not substitute for an OS-window integration test.
 
 No device writes were needed for this lifecycle regression. Native window Start/Stop and close testing remains pending because the available capture tool fails with Windows interface error0x80004002.
+
+A separate headless egui macro-recorder test now sends modifier changes and physical/logical key events through `process_recording`, then simulates loss of window focus. It verifies physical A is recorded despite a logical Z label, repeat keydowns are omitted, held A and Control are released, and the resulting macro still encodes. This tests the actual recorder event path without synthesizing keyboard input to other applications or claiming firmware playback.

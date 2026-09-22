@@ -1,13 +1,21 @@
 //! Native, read-only system playback sampling for host lighting.
 //!
 //! Create and use `AudioSampler` on the same worker thread. On Windows it
-//! captures the default render endpoint through WASAPI loopback. Samples are
+//! captures the default render endpoint through WASAPI loopback; on Linux it
+//! records the default output monitor through the installed PulseAudio API.
+//! Samples are
 //! averaged to mono and never saved or sent anywhere by this module.
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+#[path = "audio_sample_linux.rs"]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::AudioSampler;
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub struct AudioSampler;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 impl AudioSampler {
     pub fn new() -> Result<Self, String> {
         Err("system playback capture is not available on this platform yet".into())
