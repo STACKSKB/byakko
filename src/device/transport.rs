@@ -141,10 +141,18 @@ pub(super) fn read_payload(
 ) -> Result<[u8; 64]> {
     let mut request = [0u8; 65];
     request[1..].copy_from_slice(&crate::protocol::read_request(opcode, index, page));
-    device.send_feature_report(&request)?;
-    std::thread::sleep(std::time::Duration::from_millis(30));
-    let mut reply = [0u8; 65];
-    let n = device.get_feature_report(&mut reply)?;
+    let exchange = |reply: &mut [u8; 65]| {
+        device.send_feature_report(&request)?;
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        device.get_feature_report(reply)
+    };
+    #[cfg(feature = "research-tools")]
+    let (n, reply) = crate::research_trace::read(&request, exchange)?;
+    #[cfg(not(feature = "research-tools"))]
+    let (n, reply) = {
+        let mut reply = [0u8; 65];
+        (exchange(&mut reply)?, reply)
+    };
     if n != 65 || reply[0] != 0 {
         return Err(format!("Invalid HID response length/prefix: {n}").into());
     }

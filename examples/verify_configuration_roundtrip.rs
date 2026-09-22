@@ -70,7 +70,7 @@ fn main() -> device::Result<()> {
         let stamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
             .as_nanos();
-        let trace_path = backups.join(format!("configuration-fault-setters-{stamp}.json"));
+        let trace_path = backups.join(format!("configuration-fault-transport-{stamp}.json"));
         let mut trace_file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -90,19 +90,19 @@ fn main() -> device::Result<()> {
         serde_json::to_writer_pretty(
             &mut trace_file,
             &serde_json::json!({
-                "format": "byakko-research-setter-trace", "version": 1,
+                "format": "byakko-research-transport-trace", "version": 2,
                 "fault_opcode": opcode, "outcome": outcome, "trace": trace,
-                "scope": "Setter calls only; not a USB bus capture or proof of firmware delivery"
+                "scope": "Setter attempts and read_payload exchanges; not a USB bus capture or proof of firmware delivery"
             }),
         )?;
         trace_file.write_all(b"\n")?;
         trace_file.sync_all()?;
-        println!("Setter trace saved to {}", trace_path.display());
+        println!("Transport trace saved to {}", trace_path.display());
         let (result, fired) =
             run.map_err(|error| format!("{error}; trace {}", trace_path.display()))?;
         let message = result
             .err()
-            .ok_or("Injected error was not reported; inspect setter trace")?
+            .ok_or("Injected error was not reported; inspect transport trace")?
             .to_string();
         if !fired
             || !message.contains("injected configuration fault")
