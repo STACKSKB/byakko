@@ -27,6 +27,13 @@ pub struct Settings {
     options_raw: Vec<u8>,
 }
 
+/// A complete, device-free decision for one guarded setting transaction.
+pub(crate) struct SettingPlan {
+    pub target: Settings,
+    pub report: [u8; REPORT_LEN],
+    pub restore_report: [u8; REPORT_LEN],
+}
+
 impl<'de> Deserialize<'de> for Settings {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
@@ -139,6 +146,49 @@ impl Settings {
         target
     }
 
+    /// Preserve raw replies while preparing both forward and recovery reports.
+    /// No transport should run until both directions can be encoded.
+    pub(crate) fn plan_change(&self, setting: Setting) -> Result<SettingPlan, String> {
+        let mut target = match setting {
+            Setting::Backlight(enabled) => self.with_backlight(enabled),
+            _ => self.clone(),
+        };
+        let restore = match setting {
+            Setting::Debounce(value) => {
+                target.debounce_raw[2] = value;
+                Setting::Debounce(self.debounce())
+            }
+            Setting::AutoOs(value) => {
+                target.auto_os_raw[1] = u8::from(value);
+                Setting::AutoOs(self.auto_os())
+            }
+            Setting::Sleep(values) => {
+                for (bytes, value) in target.sleep_raw[1..9]
+                    .as_chunks_mut::<2>()
+                    .0
+                    .iter_mut()
+                    .zip(values)
+                {
+                    bytes.copy_from_slice(&value.to_le_bytes());
+                }
+                Setting::Sleep(self.sleep_seconds())
+            }
+            Setting::Backlight(_) => Setting::Backlight(self.backlight_enabled()),
+        };
+        let (report, restore_report) = match setting {
+            Setting::Backlight(_) => (
+                backlight_write_report(&target.options_raw)?,
+                backlight_write_report(&self.options_raw)?,
+            ),
+            _ => (write_report(setting)?, write_report(restore)?),
+        };
+        Ok(SettingPlan {
+            target,
+            report,
+            restore_report,
+        })
+    }
+
     pub fn raw_reply(&self, opcode: u8) -> Option<&[u8]> {
         match opcode {
             DEBOUNCE_READ => Some(&self.debounce_raw),
@@ -236,6 +286,71 @@ mod tests {
         let restored: Settings =
             serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
         assert_eq!(restored, settings);
+    }
+
+    #[test]
+    fn setting_plans_preserve_other_fields_and_prepare_recovery() {
+        let before = captured();
+        for (setting, opcode, offset, bytes, restore) in [
+            (
+                Setting::Debounce(4),
+                DEBOUNCE_READ,
+                2,
+                vec![4],
+                Setting::Debounce(1),
+            ),
+            (
+                Setting::AutoOs(true),
+                AUTO_OS_READ,
+                1,
+                vec![1],
+                Setting::AutoOs(false),
+            ),
+            (
+                Setting::Sleep([180, 0, 3600, 600]),
+                SLEEP_READ,
+                1,
+                vec![180, 0, 0, 0, 16, 14, 88, 2],
+                Setting::Sleep([120, 120, 600, 600]),
+            ),
+        ] {
+            let plan = before.plan_change(setting).unwrap();
+            for section in [DEBOUNCE_READ, AUTO_OS_READ, SLEEP_READ, OPTIONS_READ] {
+                let mut expected = before.raw_reply(section).unwrap().to_vec();
+                if section == opcode {
+                    expected[offset..offset + bytes.len()].copy_from_slice(&bytes);
+                }
+                assert_eq!(plan.target.raw_reply(section).unwrap(), expected);
+            }
+            assert_eq!(plan.report, write_report(setting).unwrap());
+            assert_eq!(plan.restore_report, write_report(restore).unwrap());
+        }
+        let on = before.plan_change(Setting::Backlight(true)).unwrap();
+        assert_eq!(on.target, before.with_backlight(true));
+        assert_eq!(
+            on.report,
+            backlight_write_report(&on.target.options_raw).unwrap()
+        );
+        // Recovery retains the original power-save byte, not just the enabled boolean.
+        assert_eq!(
+            on.restore_report,
+            backlight_write_report(&before.options_raw).unwrap()
+        );
+        assert_eq!(on.restore_report[4], 1);
+        assert_eq!(on.restore_report[50], 0xab);
+        assert_eq!(before, captured());
+    }
+
+    #[test]
+    fn setting_plan_rejects_unencodable_forward_or_recovery_values() {
+        let before = captured();
+        assert!(before.plan_change(Setting::Debounce(0)).is_err());
+        assert!(before.plan_change(Setting::Sleep([1; 4])).is_err());
+        let mut unrecognized = before.clone();
+        unrecognized.debounce_raw[2] = 0;
+        assert!(unrecognized.plan_change(Setting::Debounce(4)).is_err());
+        assert_eq!(unrecognized.debounce(), 0);
+        assert_eq!(before, captured());
     }
 
     #[test]
