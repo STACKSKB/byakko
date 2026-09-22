@@ -23,6 +23,10 @@ research baseline, not the structure to port.
 - Three boundaries: `core` owns domain values and deterministic transitions;
   `devices` executes effects and owns firmware/OS details; `desktop` renders
   state and emits messages. Core imports neither outer layer.
+- Implement in `crates/byakko-{core,devices,desktop}`. The legacy root package
+  may depend on these packages; the new desktop must not depend on the legacy
+  package. Nia87 implementations belong under `byakko-devices::nia87`, with
+  root re-exports only for compatibility. Do not maintain duplicate codecs.
 - Core has no GUI types, filesystem paths, HID handles, threads, clocks,
   networking, environment reads or platform conditionals. Supply inputs such
   as timestamps explicitly. Transport-facing commands/results use owned,

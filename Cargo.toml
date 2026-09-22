@@ -13,7 +13,7 @@ resolver = "3"
 [features]
 default = ["gui"]
 gui = ["dep:eframe"]
-research-tools = []
+research-tools = ["byakko-devices/research-tools"]
 
 [[bin]]
 name = "rpc_capture"
@@ -37,6 +37,3 @@ eframe = { version = "=0.36.2", optional = true, default-features = false, featu
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_HumanInterfaceDevice", "Win32_Storage_FileSystem", "Win32_Security"] }

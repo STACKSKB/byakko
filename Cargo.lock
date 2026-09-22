@@ -489,7 +489,6 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -504,7 +503,6 @@ dependencies = [
 name = "byakko-desktop"
 version = "0.1.0"
 dependencies = [
- "byakko",
  "byakko-core",
  "byakko-devices",
  "iced",
@@ -515,6 +513,10 @@ name = "byakko-devices"
 version = "0.1.0"
 dependencies = [
  "byakko-core",
+ "libc",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
