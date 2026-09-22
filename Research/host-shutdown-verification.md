@@ -21,6 +21,7 @@ Host lighting retains its separate stop-and-restore deferred-close behavior.
 
 Device worker panics become completion errors that explicitly leave device
 state/restoration unverified. This prevents a permanently busy UI but cannot
-promise rollback after arbitrary panics. Headless close/error and panic tests
-exercise these paths without HID writes. OS-window close testing and hardware
+promise rollback after arbitrary panics. Headless close/error tests exercise
+these panels without HID writes; direct panic tests cover the lighting and
+macro wrappers. OS-window close testing and hardware
 fault-recovery acceptance remain separate pending gates.
