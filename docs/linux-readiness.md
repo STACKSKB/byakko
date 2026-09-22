@@ -1,5 +1,9 @@
 # Linux build and release readiness
 
+## Linked build update
+
+The full GUI now cross-links to an ELF64 Linux executable using cargo-zigbuild and Zig. See [the reproducible build record](linux-link-build.md). Linux execution, GUI startup, and physical hidraw access remain untested. The earlier audit below is historical.
+
 ## Update after native-adapter migration
 
 The audit below records the earlier HIDAPI dependency graph. That dependency was subsequently removed from both manifest and lockfile because of the build-script license discrepancy. The product now uses original `src/hid/windows.rs` and `src/hid/linux.rs` adapters with `windows-sys` and `libc`. A Rust Linux target was installed and both the core and full GUI passed `cargo check --target x86_64-unknown-linux-gnu --offline`. These checks do not link or execute a Linux program. Elevated WSL enumeration found only `docker-desktop`, not a general Linux development distro. The permission example and runtime test gates below still apply; dependency graph counts must be regenerated for release.
