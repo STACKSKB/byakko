@@ -1,6 +1,7 @@
 //! Macro values and atomic draft edits. Encoded capacity and wire formats belong to backends.
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, ops::RangeInclusive};
+pub mod editor;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Program {

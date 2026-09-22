@@ -1,4 +1,5 @@
-//! Deterministic keymap session decisions. An outer executor performs commands.
+//! One device lifecycle and command sequence; feature drafts remain deterministic.
+mod macro_ops;
 
 use crate::{Action, Change, Descriptor, State, validate_changes, validate_state};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,17 @@ pub enum Command {
         expected: State,
         changes: Vec<Change>,
     },
+    ReadMacro {
+        generation: u64,
+        operation: u64,
+        slot: String,
+    },
+    ApplyMacro {
+        generation: u64,
+        operation: u64,
+        expected: crate::macros::Snapshot,
+        desired: crate::macros::Program,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -31,6 +43,18 @@ pub enum Completion {
         generation: u64,
         operation: u64,
         result: Result<State, ApplyFailure>,
+    },
+    ReadMacro {
+        generation: u64,
+        operation: u64,
+        slot: String,
+        result: Result<crate::macros::Snapshot, String>,
+    },
+    ApplyMacro {
+        generation: u64,
+        operation: u64,
+        slot: String,
+        result: Result<crate::macros::Snapshot, ApplyFailure>,
     },
 }
 
@@ -61,11 +85,19 @@ pub enum Problem {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Status {
     Disconnected,
-    Loading { operation: u64 },
     Ready,
-    Applying { operation: u64 },
     Conflict { device: State },
     Unverified { problem: Problem },
+}
+
+/// Exactly one device operation can be pending across every editing surface.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Activity {
+    Idle,
+    Read { operation: u64 },
+    Apply { operation: u64 },
+    ReadMacro { operation: u64, slot: String },
+    ApplyMacro { operation: u64, slot: String },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,16 +106,21 @@ pub enum Acceptance {
     IgnoredStale,
 }
 
-pub struct KeymapSession {
+pub struct Session {
     descriptor: Descriptor,
     baseline: Option<State>,
     draft: Option<Bindings>,
     status: Status,
     generation: u64,
     next_operation: u64,
+    activity: Activity,
+    macros: Option<crate::macros::editor::Editor>,
 }
 
-impl KeymapSession {
+/// Compatibility name for consumers using only the keymap surface.
+pub type KeymapSession = Session;
+
+impl Session {
     pub fn new(descriptor: Descriptor) -> Result<Self, String> {
         let bindings = descriptor
             .layers
@@ -113,6 +150,8 @@ impl KeymapSession {
             status: Status::Disconnected,
             generation: 0,
             next_operation: 0,
+            activity: Activity::Idle,
+            macros: None,
         })
     }
 
@@ -133,6 +172,7 @@ impl KeymapSession {
     }
 
     pub fn connect(&mut self) -> Result<u64, String> {
+        self.require_idle()?;
         self.generation = self
             .generation
             .checked_add(1)
@@ -140,11 +180,14 @@ impl KeymapSession {
         self.status = Status::Unverified {
             problem: Problem::ReadRequired,
         };
+        self.invalidate_macros();
         Ok(self.generation)
     }
 
     pub fn disconnect(&mut self) {
         self.status = Status::Disconnected;
+        self.activity = Activity::Idle;
+        self.invalidate_macros();
     }
 
     pub fn changes(&self) -> Vec<Change> {
@@ -169,7 +212,7 @@ impl KeymapSession {
     }
 
     pub fn stage(&mut self, change: Change) -> Result<(), String> {
-        if self.status != Status::Ready {
+        if self.busy() || self.status != Status::Ready {
             return Err("Read and verify the connected device before editing".into());
         }
         validate_changes(&self.descriptor, std::slice::from_ref(&change))?;
@@ -182,10 +225,7 @@ impl KeymapSession {
     }
 
     pub fn revert(&mut self) -> Result<(), String> {
-        if matches!(
-            self.status,
-            Status::Loading { .. } | Status::Applying { .. }
-        ) {
+        if self.busy() {
             return Err("Wait for the keymap operation before reverting".into());
         }
         let baseline = self.baseline.as_ref().ok_or("No keymap baseline")?;
@@ -202,14 +242,12 @@ impl KeymapSession {
     }
 
     pub fn request_read(&mut self) -> Result<Command, String> {
-        if matches!(
-            self.status,
-            Status::Disconnected | Status::Loading { .. } | Status::Applying { .. }
-        ) {
+        if self.busy() || self.status == Status::Disconnected {
             return Err("No connected idle device is available for reading".into());
         }
         let operation = self.operation()?;
-        self.status = Status::Loading { operation };
+        self.activity = Activity::Read { operation };
+        self.invalidate_macros();
         Ok(Command::Read {
             generation: self.generation,
             operation,
@@ -217,7 +255,7 @@ impl KeymapSession {
     }
 
     pub fn request_apply(&mut self) -> Result<Command, String> {
-        if self.status != Status::Ready {
+        if self.busy() || self.status != Status::Ready {
             return Err("Read and verify the device before applying".into());
         }
         let expected = self.baseline.as_ref().ok_or("No keymap baseline")?.clone();
@@ -227,7 +265,8 @@ impl KeymapSession {
         }
         validate_changes(&self.descriptor, &changes)?;
         let operation = self.operation()?;
-        self.status = Status::Applying { operation };
+        self.activity = Activity::Apply { operation };
+        self.invalidate_macros();
         Ok(Command::Apply {
             generation: self.generation,
             operation,
@@ -236,37 +275,94 @@ impl KeymapSession {
         })
     }
 
+    pub fn activity(&self) -> &Activity {
+        &self.activity
+    }
+    pub fn busy(&self) -> bool {
+        self.activity != Activity::Idle
+    }
+    pub fn dirty(&self) -> bool {
+        !self.changes().is_empty() || self.macros.as_ref().is_some_and(|editor| editor.dirty())
+    }
+
+    fn require_idle(&self) -> Result<(), String> {
+        if self.busy() {
+            Err("Wait for the current device operation".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn invalidate_macros(&mut self) {
+        if let Some(editor) = self.macros.as_mut() {
+            editor.invalidate();
+        }
+    }
+
     pub fn accept(&mut self, completion: Completion) -> Acceptance {
-        let pending = match &completion {
+        let (generation, expected) = match &completion {
             Completion::Read {
                 generation,
                 operation,
                 ..
-            } => {
-                *generation == self.generation
-                    && self.status
-                        == Status::Loading {
-                            operation: *operation,
-                        }
-            }
+            } => (
+                *generation,
+                Activity::Read {
+                    operation: *operation,
+                },
+            ),
             Completion::Apply {
                 generation,
                 operation,
                 ..
-            } => {
-                *generation == self.generation
-                    && self.status
-                        == Status::Applying {
-                            operation: *operation,
-                        }
-            }
+            } => (
+                *generation,
+                Activity::Apply {
+                    operation: *operation,
+                },
+            ),
+            Completion::ReadMacro {
+                generation,
+                operation,
+                slot,
+                ..
+            } => (
+                *generation,
+                Activity::ReadMacro {
+                    operation: *operation,
+                    slot: slot.clone(),
+                },
+            ),
+            Completion::ApplyMacro {
+                generation,
+                operation,
+                slot,
+                ..
+            } => (
+                *generation,
+                Activity::ApplyMacro {
+                    operation: *operation,
+                    slot: slot.clone(),
+                },
+            ),
         };
-        if !pending {
+        if generation != self.generation || expected != self.activity {
             return Acceptance::IgnoredStale;
         }
+        self.activity = Activity::Idle;
         match completion {
             Completion::Read { result, .. } => self.accept_read(result),
             Completion::Apply { result, .. } => self.accept_apply(result),
+            Completion::ReadMacro { result, .. } => self
+                .macros
+                .as_mut()
+                .expect("pending macro capability")
+                .accept_read(result),
+            Completion::ApplyMacro { result, .. } => self
+                .macros
+                .as_mut()
+                .expect("pending macro capability")
+                .accept_apply(result),
         }
         Acceptance::Accepted
     }
@@ -439,8 +535,8 @@ mod tests {
             Acceptance::IgnoredStale
         );
         assert_eq!(
-            session.status(),
-            &Status::Loading {
+            session.activity(),
+            &Activity::Read {
                 operation: next_operation
             }
         );

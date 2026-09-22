@@ -117,11 +117,31 @@ from its raw revision, wrong backend IDs, unsupported actions and byte overflow.
 The native macro transaction now returns typed recovery status through a shared
 error adapter, retaining its previous wire sequence, delays and diagnostics.
 
-This is a model/adapter foundation, not a completed Iced macro editor. Macro
-commands still need integration into the single serialized executor and shared
-device lifecycle; do not add a second macro worker or copy the legacy panel's
-operation state into the view. Recorder, binding, file/label and UI workflows
-remain migration work. No live macro writes were performed for this step.
+Macro commands now use the same executor as keymaps. `session::Session` owns one
+generation, monotonically increasing operation sequence and `Activity` enum for
+both surfaces; the compatibility name `KeymapSession` refers to that same owner.
+Keymap trust and macro trust are independent from pending activity. Every
+request, edit, slot switch and revert checks the shared activity guard. Replies
+must match kind, generation, operation and macro slot before any state changes;
+the macro editor separately checks the returned snapshot's backend and slot.
+
+Each surface retains its own baseline/draft for its distinct data. A failed
+macro operation retains the draft and requires rereading before another save.
+Reconnect preserves dirty drafts; a changed observed revision enters conflict.
+Keymap reads/writes invalidate macro trust; macro writes invalidate keymap trust
+before dispatch, because earlier hardware recovery showed unexplained changes
+outside the intended fields. Reverting a draft does not restore trust. A
+generation change rejects queued old work but cannot interrupt started I/O;
+desktop close continues to wait on the shared activity before dropping the
+executor. Process termination is not a rollback guarantee.
+
+The deterministic memory backend has optional macro capabilities/storage and
+exact expected-state checks. Tests now exercise the complete session → worker →
+memory apply → completion → session path and verify rereads and retained opaque
+slots. Unsupported operations, stale commands, panics, conflicts and malformed
+readback remain explicit failures. No live macro writes were performed for this
+step. The Iced macro screen, recorder, binding and file/label workflows still
+need migration; the working legacy macro panel is not being ported wholesale.
 
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 
