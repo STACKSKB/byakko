@@ -150,7 +150,7 @@ impl Workbench {
     }
 
     fn start_read(&mut self, ctx: &egui::Context) {
-        if self.device_busy() || self.dirty_count() > 0 || self.keymap_editor.dirty_count() > 0 {
+        if self.device_busy() {
             return;
         }
         self.busy = true;
@@ -398,11 +398,33 @@ impl Workbench {
             match message {
                 WorkerResult::Read(Ok(snapshot)) => {
                     self.busy = false;
-                    self.retry_schedule.succeeded();
-                    self.load(snapshot);
-                    self.status =
-                        "Device read complete. Select a key to inspect its binding.".into();
-                    self.error = false;
+                    match backend::nia87::from_snapshot(&snapshot) {
+                        Err(error) => {
+                            self.retry_schedule.failed(Instant::now());
+                            self.status = format!(
+                                "Device read rejected: {error}. Retrying read automatically."
+                            );
+                            self.error = true;
+                        }
+                        Ok(_) => {
+                            self.retry_schedule.succeeded();
+                            if self.dirty_count() > 0 || self.keymap_editor.dirty_count() > 0 {
+                                if self.observed.as_ref() == Some(&snapshot) {
+                                    self.status = "Device read matched the loaded baseline. Staged key changes were retained.".into();
+                                    self.error = false;
+                                } else {
+                                    self.status = "Device keymaps changed since the draft was staged. Draft and loaded baseline were retained. Export the draft if needed, revert it, then read again.".into();
+                                    self.error = true;
+                                }
+                            } else {
+                                self.load(snapshot);
+                                self.status =
+                                    "Device read complete. Select a key to inspect its binding."
+                                        .into();
+                                self.error = false;
+                            }
+                        }
+                    }
                 }
                 WorkerResult::Applied(Ok(snapshot)) => {
                     self.busy = false;
@@ -415,14 +437,10 @@ impl Workbench {
                 }
                 WorkerResult::Read(Err(error)) => {
                     self.busy = false;
-                    if self.observed.is_none() {
-                        self.retry_schedule.failed(Instant::now());
-                        self.status = format!(
-                            "{error} Waiting for a supported keyboard; retrying automatically."
-                        );
-                    } else {
-                        self.status = error;
-                    }
+                    self.retry_schedule.failed(Instant::now());
+                    self.status = format!(
+                        "{error} Waiting for a supported keyboard; retrying read automatically."
+                    );
                     self.error = true;
                 }
                 WorkerResult::Applied(Err(error)) => {
@@ -501,19 +519,11 @@ impl Workbench {
     }
 
     fn maybe_retry_read(&mut self, ctx: &egui::Context) {
-        if self.observed.is_none()
-            && !self.device_busy()
-            && self.dirty_count() == 0
-            && self.keymap_editor.dirty_count() == 0
-            && self.retry_schedule.due(Instant::now())
-        {
-            self.status = "Retrying initial device discovery…".into();
+        if !self.device_busy() && self.retry_schedule.due(Instant::now()) {
+            self.status = "Retrying device read…".into();
             self.start_read(ctx);
         }
-        if self.observed.is_none()
-            && !self.device_busy()
-            && self.dirty_count() == 0
-            && self.keymap_editor.dirty_count() == 0
+        if !self.device_busy()
             && let Some(deadline) = self.retry_schedule.deadline()
         {
             let now = Instant::now();
@@ -758,9 +768,7 @@ impl Workbench {
                     .color(MUTED),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let can_read = !self.device_busy()
-                    && self.dirty_count() == 0
-                    && self.keymap_editor.dirty_count() == 0;
+                let can_read = !self.device_busy();
                 if ui
                     .add_enabled(can_read, egui::Button::new("RECONNECT / READ"))
                     .clicked()
@@ -1607,6 +1615,100 @@ mod tests {
     }
 
     #[test]
+    fn matching_read_preserves_staged_key_changes() {
+        let mut app = Workbench::without_read();
+        let baseline = snapshot(0);
+        app.load(baseline.clone());
+        app.selected = Some(4);
+        app.set_binding([0, 0, 5, 0]);
+        let staged = app.base.clone();
+        let generic_changes = app.keymap_editor.changes();
+        app.tx
+            .send(WorkerResult::Read(Ok(baseline.clone())))
+            .unwrap();
+        app.poll_worker();
+        assert_eq!(app.base, staged);
+        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(app.keymap_editor.changes(), generic_changes);
+        assert!(!app.error);
+    }
+
+    #[test]
+    fn differing_read_retains_draft_and_baseline_as_conflict() {
+        let mut app = Workbench::without_read();
+        let baseline = snapshot(0);
+        app.load(baseline.clone());
+        app.selected = Some(4);
+        app.set_binding([0, 0, 5, 0]);
+        let staged = app.base.clone();
+        let generic_changes = app.keymap_editor.changes();
+        app.tx.send(WorkerResult::Read(Ok(snapshot(1)))).unwrap();
+        app.poll_worker();
+        assert_eq!(app.base, staged);
+        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(app.keymap_editor.changes(), generic_changes);
+        assert!(app.error && app.status.contains("Export the draft if needed"));
+        assert!(app.retry_schedule.deadline().is_none());
+    }
+
+    #[test]
+    fn failed_read_after_load_retries_without_losing_draft() {
+        let mut app = Workbench::without_read();
+        let baseline = snapshot(0);
+        app.load(baseline.clone());
+        app.selected = Some(4);
+        app.set_binding([0, 0, 5, 0]);
+        let staged = app.base.clone();
+        app.tx
+            .send(WorkerResult::Read(Err("disconnected".into())))
+            .unwrap();
+        app.poll_worker();
+        assert_eq!(app.base, staged);
+        assert_eq!(app.observed, Some(baseline));
+        assert!(app.retry_schedule.deadline().is_some());
+    }
+
+    #[test]
+    fn differing_read_keeps_generic_only_draft() {
+        let mut app = Workbench::without_read();
+        let baseline = snapshot(0);
+        app.load(baseline.clone());
+        let mut desired = baseline.clone();
+        desired.base[9] = [0, 0, 4, 0];
+        app.keymap_editor
+            .stage_state(backend::nia87::from_snapshot(&desired).unwrap())
+            .unwrap();
+        assert_eq!(app.dirty_count(), 0);
+        let staged = app.keymap_editor.changes();
+        app.tx.send(WorkerResult::Read(Ok(snapshot(1)))).unwrap();
+        app.poll_worker();
+        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(app.keymap_editor.changes(), staged);
+        assert!(app.error && app.status.contains("revert it, then read again"));
+    }
+
+    #[test]
+    fn invalid_read_cannot_replace_loaded_state_and_apply_error_does_not_retry() {
+        let mut app = Workbench::without_read();
+        let baseline = snapshot(0);
+        app.load(baseline.clone());
+        let mut invalid = snapshot(1);
+        invalid.format_version = 2;
+        app.tx.send(WorkerResult::Read(Ok(invalid))).unwrap();
+        app.poll_worker();
+        assert_eq!(app.observed, Some(baseline.clone()));
+        assert!(app.retry_schedule.deadline().is_some());
+        app.retry_schedule.succeeded();
+        app.tx
+            .send(WorkerResult::Applied(Err("write failed".into())))
+            .unwrap();
+        app.poll_worker();
+        assert_eq!(app.observed, Some(baseline));
+        assert!(app.retry_schedule.deadline().is_none());
+        assert_eq!(app.status, "write failed");
+    }
+
+    #[test]
     fn generic_import_bridge_preserves_raw_snapshot_for_export() {
         let mut app = Workbench::without_read();
         let expected = snapshot(0);
@@ -1689,15 +1791,15 @@ mod tests {
     }
 
     #[test]
-    fn observed_read_error_and_apply_error_do_not_schedule_retry() {
+    fn observed_read_error_schedules_retry_but_apply_error_does_not() {
         let mut app = Workbench::without_read();
         app.load(snapshot(0));
         app.tx
             .send(WorkerResult::Read(Err("transient read error".into())))
             .unwrap();
         app.poll_worker();
-        assert!(app.retry_schedule.deadline().is_none());
-        app.observed = None;
+        assert!(app.retry_schedule.deadline().is_some());
+        app.retry_schedule.succeeded();
         app.tx
             .send(WorkerResult::Applied(Err("write failed".into())))
             .unwrap();
