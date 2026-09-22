@@ -211,6 +211,26 @@ impl SettingsEditor {
                     self.set_error(format!("Settings read failed: {error}"));
                 }
                 WorkerResult::Applied(setting, Ok(updated)) => {
+                    let matches = match setting {
+                        Setting::Debounce(value) => {
+                            self.draft_debounce == Some(value) && updated.debounce() == value
+                        }
+                        Setting::AutoOs(value) => {
+                            self.draft_auto == Some(value) && updated.auto_os() == value
+                        }
+                        Setting::Sleep(value) => {
+                            self.draft_sleep == Some(value) && updated.sleep_seconds() == value
+                        }
+                        Setting::Backlight(value) => {
+                            self.draft_backlight == Some(value)
+                                && updated.backlight_enabled() == value
+                        }
+                    };
+                    if !matches {
+                        self.trusted = false;
+                        self.set_error("Setting worker returned an unexpected value; device state is unverified. Drafts retained; re-read before another apply.");
+                        continue;
+                    }
                     self.accept_read(updated, Some(setting));
                     self.set_status(format!(
                         "Setting readback matched. Backup saved in {}",
@@ -415,6 +435,62 @@ impl Default for SettingsEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fixture(debounce: u8) -> Settings {
+        let mut replies = [[0u8; 64]; 4];
+        for (reply, opcode) in replies.iter_mut().zip([0x91, 0x97, 0x92, 0x86]) {
+            reply[0] = opcode;
+        }
+        replies[0][2] = debounce;
+        Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3]).unwrap()
+    }
+
+    #[test]
+    fn mismatched_success_retains_all_setting_drafts() {
+        for setting in [
+            Setting::Debounce(5),
+            Setting::AutoOs(true),
+            Setting::Sleep([60, 60, 600, 600]),
+            Setting::Backlight(false),
+        ] {
+            let mut editor = SettingsEditor::new();
+            let baseline = fixture(1);
+            editor.accept_read(baseline.clone(), None);
+            editor.draft_debounce = Some(5);
+            editor.draft_auto = Some(true);
+            editor.draft_sleep = Some([60, 60, 600, 600]);
+            editor.draft_backlight = Some(false);
+            editor.busy = true;
+            editor
+                .tx
+                .send(WorkerResult::Applied(setting, Ok(baseline.clone())))
+                .unwrap();
+            editor.poll_worker();
+            assert!(!editor.busy && !editor.trusted && editor.error);
+            assert_eq!(editor.observed, Some(baseline));
+            assert_eq!(editor.draft_debounce, Some(5));
+            assert_eq!(editor.draft_auto, Some(true));
+            assert_eq!(editor.draft_sleep, Some([60, 60, 600, 600]));
+            assert_eq!(editor.draft_backlight, Some(false));
+        }
+    }
+
+    #[test]
+    fn matching_success_accepts_only_applied_setting_and_keeps_other_drafts() {
+        let mut editor = SettingsEditor::new();
+        editor.accept_read(fixture(1), None);
+        editor.draft_debounce = Some(5);
+        editor.draft_auto = Some(true);
+        editor
+            .tx
+            .send(WorkerResult::Applied(Setting::Debounce(5), Ok(fixture(5))))
+            .unwrap();
+        editor.poll_worker();
+        assert!(editor.trusted && !editor.error);
+        assert!(!editor.debounce_dirty());
+        assert!(editor.auto_dirty());
+        assert_eq!(editor.draft_auto, Some(true));
+    }
 
     fn close_frame(editor: &mut SettingsEditor) -> egui::FullOutput {
         let ctx = egui::Context::default();

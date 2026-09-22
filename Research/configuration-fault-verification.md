@@ -90,3 +90,18 @@ process termination or a failed file write can still lose this in-memory evidenc
 There is no disk I/O in the setter wrapper. Mocked tests cover normal and failed
 transmission, both injection modes, panic cleanup, nesting and isolation. No
 additional hardware fault injection was performed for this diagnostic change.
+
+## Native editor result checks
+
+The picture, lighting and scalar-settings editors now check successful worker
+results against the requested draft before replacing their loaded state. Picture
+comparison covers all128 RGB triples. Lighting compares canonical setter reports
+so the documented white sentinel is accepted without accepting a different
+effect or value. Scalar settings compare the applied value with both the worker
+result and current draft; unrelated settings drafts remain staged.
+
+Unexpected results retain the old baseline and draft, mark the state unverified,
+and require another read before applying. Device-free worker-message tests cover
+these cases and accepted matching results. The transport layer still performs
+the full reserved-byte/readback checks; these UI checks neither establish USB
+recovery nor identify the cause of the earlier hardware failure.
