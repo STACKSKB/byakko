@@ -5,6 +5,7 @@ pub mod audio_bands;
 pub mod audio_sample;
 pub mod audio_stream;
 pub mod board;
+pub mod configuration;
 pub mod device;
 pub mod hid;
 pub mod host_lighting;

@@ -50,6 +50,8 @@ impl Layer {
 enum WorkerResult {
     Read(Result<Snapshot, String>),
     Applied(Result<Snapshot, String>),
+    ArchiveProgress(usize, usize),
+    Archive(Result<crate::configuration::Configuration, String>),
 }
 
 struct Workbench {
@@ -69,6 +71,9 @@ struct Workbench {
     raw_editor: String,
     test_input: String,
     profile_path: String,
+    archive_path: String,
+    archive_progress: Option<(usize, usize)>,
+    archive_summary: Option<String>,
     status: String,
     error: bool,
     busy: bool,
@@ -97,6 +102,9 @@ impl Workbench {
             raw_editor: String::new(),
             test_input: String::new(),
             profile_path: "nia87-keymap.json".into(),
+            archive_path: "nia87-configuration.json".into(),
+            archive_progress: None,
+            archive_summary: None,
             status: "Reading connected keyboard…".into(),
             error: false,
             busy: false,
@@ -152,17 +160,99 @@ impl Workbench {
         });
     }
 
+    fn start_archive_capture(&mut self, ctx: &egui::Context) {
+        if self.device_busy() {
+            return;
+        }
+        let path = PathBuf::from(self.archive_path.trim());
+        if path.as_os_str().is_empty() {
+            self.status = "Choose a path for the configuration archive.".into();
+            self.error = true;
+            return;
+        }
+        if path.exists() {
+            self.status = format!("Archive path already exists: {}", path.display());
+            self.error = true;
+            return;
+        }
+        self.busy = true;
+        self.error = false;
+        self.archive_progress = Some((0, 100));
+        self.archive_summary = None;
+        self.status =
+            "Capturing complete device configuration; this may take a few minutes…".into();
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let result: Result<crate::configuration::Configuration, String> =
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    device::capture_configuration(|done, total| {
+                        let _ = tx.send(WorkerResult::ArchiveProgress(done, total));
+                        ctx.request_repaint();
+                    })
+                    .map_err(|error| error.to_string())
+                    .and_then(|configuration| {
+                        crate::configuration::save_new(&path, &configuration)
+                            .map(|()| configuration)
+                            .map_err(|error| error.to_string())
+                    })
+                })) {
+                    Ok(result) => result,
+                    Err(_) => Err("Configuration capture failed unexpectedly.".into()),
+                };
+            let _ = tx.send(WorkerResult::Archive(result));
+            ctx.request_repaint();
+        });
+    }
+
+    fn inspect_archive(&mut self) {
+        match crate::configuration::load(std::path::Path::new(self.archive_path.trim())) {
+            Ok(configuration) => {
+                let macro_nonempty = configuration
+                    .macros
+                    .iter()
+                    .filter(|slot| slot.iter().any(|byte| *byte != 0))
+                    .count();
+                let base_nonempty = configuration
+                    .keymaps
+                    .base
+                    .iter()
+                    .filter(|binding| **binding != [0; 4])
+                    .count();
+                let function_nonempty = configuration
+                    .keymaps
+                    .function
+                    .iter()
+                    .filter(|binding| **binding != [0; 4])
+                    .count();
+                self.archive_summary = Some(format!(
+                    "50 macro slots ({macro_nonempty} non-empty) · keymaps: {base_nonempty} base / {function_nonempty} Fn bindings · picture: {} RGB slots · lighting: {} bytes · settings: 4 raw replies",
+                    configuration.picture.len(),
+                    configuration.lighting.raw().len(),
+                ));
+                self.status = "Archive inspected; no device or draft state changed.".into();
+                self.error = false;
+            }
+            Err(error) => {
+                self.archive_summary = None;
+                self.status = error.to_string();
+                self.error = true;
+            }
+        }
+    }
+
     fn poll_worker(&mut self) {
         while let Ok(message) = self.rx.try_recv() {
-            self.busy = false;
             match message {
                 WorkerResult::Read(Ok(snapshot)) => {
+                    self.busy = false;
                     self.load(snapshot);
                     self.status =
                         "Device read complete. Select a key to inspect its binding.".into();
                     self.error = false;
                 }
                 WorkerResult::Applied(Ok(snapshot)) => {
+                    self.busy = false;
                     self.load(snapshot);
                     self.status = format!(
                         "Changes applied and verified. Backup directory: {}",
@@ -171,6 +261,25 @@ impl Workbench {
                     self.error = false;
                 }
                 WorkerResult::Read(Err(error)) | WorkerResult::Applied(Err(error)) => {
+                    self.busy = false;
+                    self.status = error;
+                    self.error = true;
+                }
+                WorkerResult::ArchiveProgress(done, total) => {
+                    self.archive_progress = Some((done, total));
+                }
+                WorkerResult::Archive(Ok(_configuration)) => {
+                    self.busy = false;
+                    self.archive_progress = Some((100, 100));
+                    self.status = format!(
+                        "Configuration archive saved to {}. Captured device state only; drafts were not included.",
+                        self.archive_path
+                    );
+                    self.error = false;
+                }
+                WorkerResult::Archive(Err(error)) => {
+                    self.busy = false;
+                    self.archive_progress = None;
                     self.status = error;
                     self.error = true;
                 }
@@ -789,6 +898,31 @@ impl Workbench {
                     }
                 }
             });
+        });
+        ui.collapsing("Configuration archive", |ui| {
+            ui.label("Captures saved device state: both keymaps, all 50 macro slots, current picture, lighting, and settings.");
+            ui.label(egui::RichText::new("Unsaved drafts are not included. Archive restoration is not available yet.").small().color(MUTED));
+            ui.horizontal(|ui| {
+                ui.label("Path");
+                ui.add_enabled_ui(!self.device_busy(), |ui| {
+                    ui.text_edit_singleline(&mut self.archive_path);
+                });
+                if ui.add_enabled(!self.device_busy(), egui::Button::new("CAPTURE TO NEW FILE")).clicked() {
+                    self.start_archive_capture(ui.ctx());
+                }
+                if ui.add_enabled(!self.device_busy(), egui::Button::new("INSPECT FILE")).clicked() {
+                    self.inspect_archive();
+                }
+            });
+            if let Some((done, total)) = self.archive_progress {
+                ui.horizontal(|ui| {
+                    ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).desired_width(180.0));
+                    ui.label(format!("{done}/{total} macro reads"));
+                });
+            }
+            if let Some(summary) = &self.archive_summary {
+                ui.label(egui::RichText::new(summary).color(INK));
+            }
         });
         let board_width = (ui.available_width() - 320.0).max(500.0);
         ui.horizontal(|ui| {
