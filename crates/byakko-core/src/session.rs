@@ -1,4 +1,5 @@
 //! One device lifecycle and command sequence; feature drafts remain deterministic.
+mod lighting_ops;
 mod macro_files;
 mod macro_ops;
 pub use macro_files::{FileOperation, FileTicket};
@@ -33,6 +34,16 @@ pub enum Command {
         expected: crate::macros::Snapshot,
         desired: crate::macros::Program,
     },
+    ReadLighting {
+        generation: u64,
+        operation: u64,
+    },
+    ApplyLighting {
+        generation: u64,
+        operation: u64,
+        expected: crate::lighting::Snapshot,
+        desired: crate::lighting::Setting,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -58,6 +69,16 @@ pub enum Completion {
         operation: u64,
         slot: String,
         result: Result<crate::macros::Snapshot, ApplyFailure>,
+    },
+    ReadLighting {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::lighting::Snapshot, String>,
+    },
+    ApplyLighting {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::lighting::Snapshot, ApplyFailure>,
     },
 }
 
@@ -117,6 +138,12 @@ pub enum Activity {
         operation: u64,
         slot: String,
     },
+    ReadLighting {
+        operation: u64,
+    },
+    ApplyLighting {
+        operation: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -134,6 +161,7 @@ pub struct Session {
     next_operation: u64,
     activity: Activity,
     macros: Option<crate::macros::editor::Editor>,
+    lighting: Option<crate::lighting::editor::Editor>,
 }
 
 /// Compatibility name for consumers using only the keymap surface.
@@ -171,6 +199,7 @@ impl Session {
             next_operation: 0,
             activity: Activity::Idle,
             macros: None,
+            lighting: None,
         })
     }
 
@@ -200,6 +229,7 @@ impl Session {
             problem: Problem::ReadRequired,
         };
         self.invalidate_macros();
+        self.invalidate_lighting();
         Ok(self.generation)
     }
 
@@ -212,6 +242,7 @@ impl Session {
         self.status = Status::Disconnected;
         self.activity = Activity::Idle;
         self.invalidate_macros();
+        self.invalidate_lighting();
     }
 
     pub fn changes(&self) -> Vec<Change> {
@@ -291,6 +322,7 @@ impl Session {
         let operation = self.operation()?;
         self.activity = Activity::Apply { operation };
         self.invalidate_macros();
+        self.invalidate_lighting();
         Ok(Command::Apply {
             generation: self.generation,
             operation,
@@ -306,7 +338,9 @@ impl Session {
         self.activity != Activity::Idle
     }
     pub fn dirty(&self) -> bool {
-        !self.changes().is_empty() || self.macros.as_ref().is_some_and(|editor| editor.dirty())
+        !self.changes().is_empty()
+            || self.macros.as_ref().is_some_and(|editor| editor.dirty())
+            || self.lighting.as_ref().is_some_and(|editor| editor.dirty())
     }
 
     fn require_idle(&self) -> Result<(), String> {
@@ -319,6 +353,12 @@ impl Session {
 
     fn invalidate_macros(&mut self) {
         if let Some(editor) = self.macros.as_mut() {
+            editor.invalidate();
+        }
+    }
+
+    fn invalidate_lighting(&mut self) {
+        if let Some(editor) = self.lighting.as_mut() {
             editor.invalidate();
         }
     }
@@ -369,6 +409,26 @@ impl Session {
                     slot: slot.clone(),
                 },
             ),
+            Completion::ReadLighting {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ReadLighting {
+                    operation: *operation,
+                },
+            ),
+            Completion::ApplyLighting {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ApplyLighting {
+                    operation: *operation,
+                },
+            ),
         };
         if generation != self.generation || expected != self.activity {
             return Acceptance::IgnoredStale;
@@ -386,6 +446,16 @@ impl Session {
                 .macros
                 .as_mut()
                 .expect("pending macro capability")
+                .accept_apply(result),
+            Completion::ReadLighting { result, .. } => self
+                .lighting
+                .as_mut()
+                .expect("pending lighting capability")
+                .accept_read(result),
+            Completion::ApplyLighting { result, .. } => self
+                .lighting
+                .as_mut()
+                .expect("pending lighting capability")
                 .accept_apply(result),
         }
         Acceptance::Accepted

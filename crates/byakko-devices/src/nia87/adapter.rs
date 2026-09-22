@@ -334,6 +334,19 @@ impl crate::Device for Nia87Adapter {
     ) -> Result<macros::Snapshot, byakko_core::session::ApplyFailure> {
         macro_adapter::apply(expected, desired, backup_dir)
     }
+
+    fn read_lighting(&mut self) -> Result<byakko_core::lighting::Snapshot, String> {
+        crate::nia87::lighting_adapter::read()
+    }
+
+    fn apply_lighting(
+        &mut self,
+        expected: &byakko_core::lighting::Snapshot,
+        desired: &byakko_core::lighting::Setting,
+        backup_dir: &Path,
+    ) -> Result<byakko_core::lighting::Snapshot, byakko_core::session::ApplyFailure> {
+        crate::nia87::lighting_adapter::apply(expected, desired, backup_dir)
+    }
 }
 
 #[cfg(test)]

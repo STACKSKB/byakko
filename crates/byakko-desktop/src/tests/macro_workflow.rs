@@ -36,7 +36,7 @@ fn send(app: &mut Desktop, message: Macro) {
     let _ = app.update(Message::Macro(message));
 }
 
-fn settle(app: &mut Desktop) {
+pub(super) fn settle(app: &mut Desktop) {
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     while app.busy() {
         assert!(

@@ -14,19 +14,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let backups = byakko_devices::storage::user_data_dir()?.join("backups");
             (
                 Session::new(nia87::descriptor())?
-                    .with_macros(nia87::macro_adapter::capabilities())?,
+                    .with_macros(nia87::macro_adapter::capabilities())?
+                    .with_lighting(nia87::lighting_adapter::capabilities())?,
                 Executor::spawn(Nia87Adapter, backups)?,
             )
         }
         [flag] if flag == "--demo" => {
             let device = demo::device()?;
             (
-                Session::new(device.descriptor().clone())?.with_macros(
-                    device
-                        .macro_capabilities()
-                        .expect("demo macros configured")
-                        .clone(),
-                )?,
+                Session::new(device.descriptor().clone())?
+                    .with_macros(
+                        device
+                            .macro_capabilities()
+                            .expect("demo macros configured")
+                            .clone(),
+                    )?
+                    .with_lighting(
+                        device
+                            .lighting_capabilities()
+                            .expect("demo lighting configured")
+                            .clone(),
+                    )?,
                 Executor::spawn(device, Default::default())?,
             )
         }

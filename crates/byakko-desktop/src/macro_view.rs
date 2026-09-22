@@ -3,6 +3,7 @@ use super::{
     Desktop, Message,
     macro_editor::Message as Macro,
     macro_form::{self, Input, Kind},
+    panels,
 };
 use byakko_core::macros::{
     Action, Content, Edit, Event,
@@ -17,19 +18,24 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
     let Some(editor) = app.session.macros() else {
         return text("This device has no macro editor").into();
     };
-    let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
-    let slots = column(editor.capabilities().slots.iter().map(|choice| {
-        button(text(&choice.label))
-            .width(Fill)
-            .style(if choice.id == editor.slot() {
-                button::primary
-            } else {
-                button::secondary
-            })
-            .on_press_maybe((!app.busy()).then(|| Message::Macro(Macro::Select(choice.id.clone()))))
-            .into()
+    panels::split(&app.ui, || slots(app, editor), || detail(app, editor))
+}
+
+fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
+    let choices = column(editor.capabilities().slots.iter().map(|choice| {
+        panels::selectable_button(
+            &app.ui,
+            choice.label.clone(),
+            choice.id == editor.slot(),
+            (!app.busy()).then(|| Message::Macro(Macro::Select(choice.id.clone()))),
+        )
     }))
-    .spacing(4);
+    .spacing(app.ui.spacing.xs);
+    panels::panel(&app.ui, "Slots", scrollable(choices).height(Fill).into())
+}
+
+fn detail<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
+    let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
     let toolbar = row![
         button("Read slot").on_press_maybe((!app.busy()).then_some(Message::Macro(Macro::Read))),
         button("Revert draft").on_press_maybe(
@@ -43,8 +49,8 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
             "No staged changes"
         }),
     ]
-    .spacing(10);
-    let mut content = column![toolbar, text(status(app, editor))].spacing(10);
+    .spacing(app.ui.spacing.m);
+    let mut content = column![toolbar, text(status(app, editor))].spacing(app.ui.spacing.m);
     content = content.push(super::recording::controls(app, editable));
     content = content.push(super::macro_files::view(app, editor));
     content = content.push(super::macro_binding_view::view(app, editor));
@@ -56,7 +62,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
     if let Some(program) = editor.draft() {
         let repeat = text_input("Count", &app.repeat_input)
             .on_input_maybe(editable.then_some(|value| Message::Macro(Macro::RepeatInput(value))))
-            .width(100);
+            .width(app.ui.fields.compact);
         content = content.push(
             row![
                 text(format!("Stored repeat count: {}", program.repeat_count)),
@@ -68,7 +74,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
                         .then_some(Message::Macro(Macro::Edit(Edit::Clear)))
                 ),
             ]
-            .spacing(10),
+            .spacing(app.ui.spacing.m),
         );
         let events = column(program.events.iter().enumerate().map(|(index, event)| {
             row![
@@ -97,21 +103,19 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
                     editable.then_some(Message::Macro(Macro::Edit(Edit::Remove { at: index })))
                 ),
             ]
-            .spacing(5)
+            .spacing(app.ui.spacing.xs)
             .into()
         }))
-        .spacing(4);
+        .spacing(app.ui.spacing.xs);
         content = content
             .push(scrollable(events).height(Fill))
             .push(composer(app, editor, editable));
     }
-    row![
-        scrollable(slots).width(180).height(Fill),
-        content.width(Fill).height(Fill)
-    ]
-    .spacing(18)
-    .height(Fill)
-    .into()
+    panels::panel(
+        &app.ui,
+        "Macro editor",
+        content.width(Fill).height(Fill).into(),
+    )
 }
 
 fn composer<'a>(app: &'a Desktop, editor: &Editor, editable: bool) -> Element<'a, Message> {
@@ -127,7 +131,7 @@ fn composer<'a>(app: &'a Desktop, editor: &Editor, editable: bool) -> Element<'a
     } else {
         text("Read an editable slot to stage events").into()
     };
-    let mut fields = row![kind].spacing(8);
+    let mut fields = row![kind].spacing(app.ui.spacing.s);
     match &form.kind {
         Some(Kind::Key) => {
             fields = fields.push(
@@ -135,7 +139,7 @@ fn composer<'a>(app: &'a Desktop, editor: &Editor, editable: bool) -> Element<'a
                     .on_input_maybe(
                         editable.then_some(|v| Message::Macro(Macro::Form(Input::First(v)))),
                     )
-                    .width(160),
+                    .width(app.ui.fields.regular),
             )
         }
         Some(Kind::Move) => {
@@ -145,14 +149,14 @@ fn composer<'a>(app: &'a Desktop, editor: &Editor, editable: bool) -> Element<'a
                         .on_input_maybe(
                             editable.then_some(|v| Message::Macro(Macro::Form(Input::First(v)))),
                         )
-                        .width(100),
+                        .width(app.ui.fields.compact),
                 )
                 .push(
                     text_input("Vertical", &form.second)
                         .on_input_maybe(
                             editable.then_some(|v| Message::Macro(Macro::Form(Input::Second(v)))),
                         )
-                        .width(100),
+                        .width(app.ui.fields.compact),
                 );
         }
         _ => {}
@@ -181,19 +185,19 @@ fn composer<'a>(app: &'a Desktop, editor: &Editor, editable: bool) -> Element<'a
             text("Wait after (ms)"),
             text_input("Wait", &form.wait)
                 .on_input_maybe(editable.then_some(|v| Message::Macro(Macro::Form(Input::Wait(v)))))
-                .width(100),
+                .width(app.ui.fields.compact),
             button("Stage event")
                 .on_press_maybe(editable.then_some(Message::Macro(Macro::StageEvent))),
             button("New event").on_press_maybe(editable.then_some(Message::Macro(Macro::NewEvent))),
         ]
-        .spacing(8),
+        .spacing(app.ui.spacing.s),
         text(format!(
             "{limits} · wait {:?} ms · repeat {:?}",
             caps.delays_ms, caps.repeat_counts
         ))
-        .size(13),
+        .size(app.ui.type_scale.body),
     ]
-    .spacing(8)
+    .spacing(app.ui.spacing.s)
     .into()
 }
 

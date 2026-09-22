@@ -1,5 +1,5 @@
 //! Binding choices are advertised actions, not UI-generated firmware codes.
-use super::{Desktop, Message, Page, macro_editor::Message as Macro};
+use super::{Desktop, Message, Page, macro_editor::Message as Macro, panels};
 use byakko_core::{
     macros::{
         Edit,
@@ -42,9 +42,11 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
         let mut mode = column![button(text(&choice.label)).on_press_maybe(
             (ready && result.is_ok()).then(|| Message::Macro(Macro::Bind(choice.id.clone())))
         ),]
-        .spacing(4);
+        .spacing(app.ui.spacing.xs);
         if let Some(required) = choice.required_repeat_count {
-            mode = mode.push(text(format!("Requires saved count {required}")).size(13));
+            mode = mode.push(
+                text(format!("Requires saved count {required}")).size(app.ui.type_scale.body),
+            );
             if editor
                 .draft()
                 .is_some_and(|program| program.repeat_count != required)
@@ -58,30 +60,31 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
         }
         mode.into()
     }))
-    .spacing(12);
+    .spacing(app.ui.spacing.m);
     let mut content = column![
         row![
             text(target),
             button("Choose key").on_press(Message::Page(Page::Keys)),
         ]
-        .spacing(10),
+        .spacing(app.ui.spacing.m),
         modes,
-        text("Binding stages a keymap change. Review and apply it on Keys.").size(13)
+        text("Binding stages a keymap change. Review and apply it on Keys.")
+            .size(app.ui.type_scale.body)
     ]
-    .spacing(6);
+    .spacing(app.ui.spacing.s);
     if *app.session.status() != Status::Ready {
         content = content.push(
             row![
                 text("Read keymaps, then read this slot before binding."),
                 button("Read keymaps").on_press_maybe((!app.busy()).then_some(Message::Read)),
             ]
-            .spacing(8),
+            .spacing(app.ui.spacing.s),
         );
     } else if editor.dirty() {
         content = content.push(
             text("Save the macro before binding. Its count affects every key using this slot.")
-                .size(13),
+                .size(app.ui.type_scale.body),
         );
     }
-    content.into()
+    panels::panel(&app.ui, "Key binding", content.into())
 }

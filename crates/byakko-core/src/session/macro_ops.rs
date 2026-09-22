@@ -97,6 +97,7 @@ impl Session {
         self.status = Status::Unverified {
             problem: Problem::ReadRequired,
         };
+        self.invalidate_lighting();
         Ok(Command::ApplyMacro {
             generation: self.generation,
             operation,

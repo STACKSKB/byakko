@@ -1,5 +1,5 @@
 //! Window input and clock adapter for the deterministic core recorder.
-use super::{Desktop, Message as AppMessage, Page, macro_form::number};
+use super::{Desktop, Message as AppMessage, Page, macro_form::number, panels};
 use byakko_core::macros::recorder::{DelayPolicy, StopOutcome};
 use iced::{
     Element, Event, Fill, Subscription, event,
@@ -115,14 +115,14 @@ pub(super) fn controls(app: &Desktop, editable: bool) -> Element<'_, AppMessage>
             .label("Fixed wait")
             .on_toggle_maybe(editable.then_some(|value| AppMessage::Record(Message::Fixed(value)))),
         text_input("Wait (ms)", &app.recording_options.delay)
-            .width(100)
+            .width(app.ui.fields.compact)
             .on_input_maybe(
                 (editable && app.recording_options.fixed)
                     .then_some(|value| AppMessage::Record(Message::Delay(value)))
             ),
         text("Appends to the draft"),
     ]
-    .spacing(10)
+    .spacing(app.ui.spacing.m)
     .into()
 }
 
@@ -133,18 +133,17 @@ pub(super) fn capture_view(app: &Desktop) -> Element<'_, AppMessage> {
         .and_then(|editor| editor.draft())
         .map_or(0, |program| program.events.len());
     let mut content = column![
-        text("Recording input").size(28),
         text("Type or click in this window. Keyboard and five mouse buttons are captured."),
         text("Stop or leave the window to finish. Held inputs receive release events."),
         text(format!("{events} events in draft · no device writes")),
         button("Stop recording").on_press(AppMessage::Record(Message::Stop)),
     ]
-    .spacing(16);
+    .spacing(app.ui.spacing.l);
     if let Some(notice) = &app.notice {
         content = content.push(text(notice));
     }
-    container(content)
-        .padding(30)
+    container(panels::panel(&app.ui, "Recording input", content.into()))
+        .padding(app.ui.spacing.page_padding)
         .width(Fill)
         .height(Fill)
         .into()

@@ -1,0 +1,154 @@
+use super::*;
+use crate::lighting::Message as Lighting;
+use byakko_core::lighting::{Channel, Color, Content, Edit, editor::Status as LightingStatus};
+use macro_workflow::settle;
+
+fn send(app: &mut Desktop, message: Lighting) {
+    let _ = app.update(Message::Lighting(message));
+}
+
+fn loaded() -> Desktop {
+    let mut app = ready();
+    let _ = app.update(Message::Page(Page::Lighting));
+    send(&mut app, Lighting::Read);
+    settle(&mut app);
+    assert_eq!(
+        app.session.lighting().unwrap().status(),
+        &LightingStatus::Ready
+    );
+    app
+}
+
+#[test]
+fn lighting_uses_capabilities_and_memory_executor_without_losing_other_drafts() {
+    let mut app = loaded();
+    app.stage(1);
+    let keys = app.session.changes();
+    send(&mut app, Lighting::Edit(Edit::Effect("sweep".into())));
+    send(&mut app, Lighting::Edit(Edit::Brightness(63)));
+    send(&mut app, Lighting::Edit(Edit::Speed(7)));
+    send(&mut app, Lighting::Edit(Edit::Option("in".into())));
+    send(&mut app, Lighting::Edit(Edit::Channel(Channel::Red, 20)));
+    send(&mut app, Lighting::Edit(Edit::Channel(Channel::Blue, 40)));
+    let draft = app.session.lighting().unwrap().draft().unwrap().clone();
+    assert_eq!(draft.color, Some(Color::Rgb([20, 255, 40])));
+    assert_eq!(draft.brightness, Some(63));
+    assert_eq!(draft.speed, Some(7));
+    assert_eq!(draft.option.as_deref(), Some("in"));
+    send(&mut app, Lighting::Edit(Edit::Effect("sweep".into())));
+    assert_eq!(app.session.lighting().unwrap().draft(), Some(&draft));
+    send(&mut app, Lighting::Edit(Edit::Brightness(81)));
+    assert!(app.notice.is_some());
+    assert_eq!(app.session.lighting().unwrap().draft(), Some(&draft));
+    drop(app.view());
+    send(&mut app, Lighting::Apply);
+    assert!(app.busy());
+    send(&mut app, Lighting::Edit(Edit::Color(Color::Rainbow)));
+    assert_eq!(app.session.lighting().unwrap().draft(), Some(&draft));
+    settle(&mut app);
+    assert!(app.notice.is_none());
+    assert_eq!(
+        app.session.lighting().unwrap().status(),
+        &LightingStatus::Ready
+    );
+    assert!(!app.session.lighting().unwrap().dirty());
+    assert_eq!(app.session.changes(), keys);
+    assert!(matches!(app.session.status(), Status::Unverified { .. }));
+    send(&mut app, Lighting::Read);
+    settle(&mut app);
+    assert_eq!(
+        app.session.lighting().unwrap().baseline().unwrap().content,
+        Content::Editable(draft)
+    );
+    send(&mut app, Lighting::Edit(Edit::Color(Color::Rainbow)));
+    send(&mut app, Lighting::Edit(Edit::Channel(Channel::Green, 2)));
+    assert!(app.notice.is_some());
+    assert_eq!(
+        app.session.lighting().unwrap().draft().unwrap().color,
+        Some(Color::Rainbow)
+    );
+    send(&mut app, Lighting::Edit(Edit::Effect("off".into())));
+    let off = app.session.lighting().unwrap().draft().unwrap();
+    assert_eq!(
+        (off.brightness, off.speed, &off.option, &off.color),
+        (None, None, &None, &None)
+    );
+    send(&mut app, Lighting::Revert);
+    assert!(!app.session.lighting().unwrap().dirty());
+}
+
+#[test]
+fn close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic() {
+    let mut app = loaded();
+    send(&mut app, Lighting::Edit(Edit::Brightness(42)));
+    let baseline = app.session.lighting().unwrap().baseline().cloned();
+    let draft = app.session.lighting().unwrap().draft().cloned();
+    let Command::ApplyLighting {
+        generation,
+        operation,
+        ..
+    } = app.session.request_lighting_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+    let _ = app.complete(Completion::ApplyLighting {
+        generation,
+        operation: operation + 1,
+        result: Ok(baseline.clone().unwrap()),
+    });
+    assert_eq!(app.closing, Closing::Waiting);
+    assert!(app.busy());
+    let failure = ApplyFailure {
+        message: "readback mismatch".into(),
+        recovery: Recovery::Failed,
+    };
+    let _ = app.complete(Completion::ApplyLighting {
+        generation,
+        operation,
+        result: Err(failure.clone()),
+    });
+    assert_eq!(app.closing, Closing::Open);
+    let editor = app.session.lighting().unwrap();
+    assert_eq!(editor.baseline(), baseline.as_ref());
+    assert_eq!(editor.draft(), draft.as_ref());
+    assert_eq!(
+        editor.status(),
+        &LightingStatus::Unverified {
+            problem: byakko_core::session::Problem::Apply(failure)
+        }
+    );
+    assert!(app.session.request_lighting_apply().is_err());
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
+}
+
+#[test]
+fn verified_lighting_close_checks_its_result_despite_keymap_invalidation() {
+    let mut app = loaded();
+    send(&mut app, Lighting::Edit(Edit::Brightness(42)));
+    let Command::ApplyLighting {
+        generation,
+        operation,
+        mut expected,
+        desired,
+    } = app.session.request_lighting_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    let _ = app.update(Message::Close);
+    expected.content = Content::Editable(desired);
+    let _ = app.complete(Completion::ApplyLighting {
+        generation,
+        operation,
+        result: Ok(expected),
+    });
+    // complete() returned the exit task; it must not classify keymap ReadRequired as lighting failure.
+    assert_eq!(app.closing, Closing::Waiting);
+    assert!(!app.session.dirty());
+    assert_eq!(
+        app.session.lighting().unwrap().status(),
+        &LightingStatus::Ready
+    );
+}

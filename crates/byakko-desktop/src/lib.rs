@@ -1,9 +1,12 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
+mod control_widgets;
+mod lighting;
 mod macro_binding_view;
 mod macro_editor;
 mod macro_files;
 mod macro_form;
 mod macro_view;
+mod panels;
 mod recording;
 mod recording_input;
 #[cfg(test)]
@@ -15,11 +18,12 @@ use byakko_core::{
     session::{Acceptance, Command, Completion, Session, Status},
 };
 use byakko_devices::Executor;
-use iced::{Element, Subscription, Task, Theme, window};
+use iced::{Element, Subscription, Task, window};
 use std::{sync::mpsc::TryRecvError, time::Duration};
 
 #[derive(Clone, Debug)]
 enum Message {
+    Lighting(lighting::Message),
     File(macro_files::Message),
     Record(recording::Message),
     Page(Page),
@@ -41,6 +45,7 @@ enum Message {
 enum Page {
     Keys,
     Macros,
+    Lighting,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,6 +56,7 @@ enum Closing {
 }
 
 struct Desktop {
+    ui: panels::UiStyle,
     macro_files: macro_files::Fields,
     clock: std::time::Instant,
     recording_options: recording::Options,
@@ -71,6 +77,7 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
     let layer = session.descriptor().layers[0].id.clone();
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
+        ui: panels::UiStyle::DEFAULT,
         macro_files: Default::default(),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
@@ -95,10 +102,10 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
         Desktop::view,
     )
     .title("Byakko")
-    .theme(Theme::Dark)
+    .theme(panels::UiStyle::DEFAULT.theme)
     .subscription(Desktop::subscription)
     .exit_on_close_request(false)
-    .window_size((1140.0, 760.0))
+    .window_size(panels::UiStyle::DEFAULT.initial_window)
     .run()?;
     Ok(())
 }
@@ -156,6 +163,8 @@ impl Desktop {
                 | Activity::Apply { .. }
                 | Activity::ReadMacro { .. }
                 | Activity::ApplyMacro { .. }
+                | Activity::ReadLighting { .. }
+                | Activity::ApplyLighting { .. }
         ) {
             return Task::none();
         }
@@ -175,6 +184,10 @@ impl Desktop {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        let lighting_result = matches!(
+            completion,
+            Completion::ReadLighting { .. } | Completion::ApplyLighting { .. }
+        );
         let macro_result = matches!(
             completion,
             Completion::ReadMacro { .. } | Completion::ApplyMacro { .. }
@@ -182,7 +195,11 @@ impl Desktop {
         if self.session.accept(completion) == Acceptance::IgnoredStale {
             return Task::none();
         }
-        let verified = if macro_result {
+        let verified = if lighting_result {
+            self.session.lighting().is_some_and(|editor| {
+                *editor.status() == byakko_core::lighting::editor::Status::Ready
+            })
+        } else if macro_result {
             let verified = self.session.macros().is_some_and(|editor| {
                 *editor.status() == byakko_core::macros::editor::Status::Ready
             });
@@ -231,6 +248,7 @@ impl Desktop {
             self.closing = Closing::Open;
         }
         match message {
+            Message::Lighting(message) => self.update_lighting(message),
             Message::File(message) => return self.update_macro_files(message),
             Message::Record(message) => self.update_recording(message),
             Message::Page(page) => self.page = page,

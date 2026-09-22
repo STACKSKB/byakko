@@ -1,5 +1,6 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
 use super::{Closing, Desktop, Message, Page};
+use crate::panels;
 use byakko_core::{
     Action,
     session::{Problem, Status},
@@ -10,15 +11,34 @@ use iced::{
 };
 
 pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
-    let mut navigation = row![button("Keys").on_press(Message::Page(Page::Keys))].spacing(8);
+    let mut navigation = row![panels::selectable_button(
+        &app.ui,
+        "Keys",
+        app.page == Page::Keys,
+        Some(Message::Page(Page::Keys)),
+    )]
+    .spacing(app.ui.spacing.s);
     if app.session.macros().is_some() {
-        navigation = navigation.push(button("Macros").on_press(Message::Page(Page::Macros)));
+        navigation = navigation.push(panels::selectable_button(
+            &app.ui,
+            "Macros",
+            app.page == Page::Macros,
+            Some(Message::Page(Page::Macros)),
+        ));
+    }
+    if app.session.lighting().is_some() {
+        navigation = navigation.push(panels::selectable_button(
+            &app.ui,
+            "Lighting",
+            app.page == Page::Lighting,
+            Some(Message::Page(Page::Lighting)),
+        ));
     }
     let mut content = column![
-        text(&app.session.descriptor().device_name).size(24),
+        text(&app.session.descriptor().device_name).size(app.ui.type_scale.page_title),
         navigation
     ]
-    .spacing(12);
+    .spacing(app.ui.spacing.m);
     if let Some(notice) = &app.notice {
         content = content.push(text(notice));
     }
@@ -31,15 +51,16 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
                 button("Keep editing").on_press(Message::KeepEditing),
                 button("Discard & close").on_press(Message::DiscardAndClose),
             ]
-            .spacing(12),
+            .spacing(app.ui.spacing.m),
         ),
     };
     content = content.push(match app.page {
         Page::Keys => keymap(app),
         Page::Macros => super::macro_view::view(app),
+        Page::Lighting => super::lighting::view(app),
     });
     container(content)
-        .padding(20)
+        .padding(app.ui.spacing.page_padding)
         .height(Fill)
         .width(Fill)
         .into()
@@ -50,16 +71,14 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
     let dirty = app.session.changes();
     let ready = !app.busy() && *app.session.status() == Status::Ready;
     let layers = row(descriptor.layers.iter().map(|layer| {
-        button(text(&layer.label))
-            .style(if layer.id == app.layer {
-                button::primary
-            } else {
-                button::secondary
-            })
-            .on_press(Message::SelectLayer(layer.id.clone()))
-            .into()
+        panels::selectable_button(
+            &app.ui,
+            &layer.label,
+            layer.id == app.layer,
+            Some(Message::SelectLayer(layer.id.clone())),
+        )
     }))
-    .spacing(6);
+    .spacing(app.ui.spacing.s);
     let toolbar = row![
         button("Read / reconnect").on_press_maybe((!app.busy()).then_some(Message::Read)),
         button("Revert draft")
@@ -68,9 +87,21 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
             .on_press_maybe((ready && !dirty.is_empty()).then_some(Message::Apply)),
         text(format!("{} staged", dirty.len())),
     ]
-    .spacing(12)
+    .spacing(app.ui.spacing.m)
     .align_y(iced::Center);
-    let mut content = column![toolbar, text(status(app)), layers].spacing(12);
+    let content = column![toolbar, text(status(app)), layers]
+        .spacing(app.ui.spacing.m)
+        .push(panels::split(
+            &app.ui,
+            || panels::panel(&app.ui, "Keys", scrollable(keys(app)).height(Fill).into()),
+            || panels::panel(&app.ui, "Assign & review", keymap_detail(app)),
+        ));
+    content.height(Fill).into()
+}
+
+fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
+    let descriptor = app.session.descriptor();
+    let dirty = app.session.changes();
     let edits = column(dirty.iter().map(|change| {
         let key = descriptor
             .keys
@@ -94,25 +125,16 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
         ))
         .into()
     }))
-    .spacing(5);
-    content = content.push(
-        row![
-            column![text("Keys"), scrollable(keys(app)).height(Fill)]
-                .width(250)
-                .spacing(8),
-            column![
-                text(selected_label(app)).size(20),
-                search(app),
-                text("Staged changes"),
-                scrollable(edits).height(150)
-            ]
-            .width(Fill)
-            .spacing(10),
-        ]
-        .spacing(20)
-        .height(Fill),
-    );
-    content.height(Fill).into()
+    .spacing(app.ui.spacing.xs);
+    column![
+        text(selected_label(app)).size(app.ui.type_scale.section_title),
+        search(app),
+        text("Staged changes"),
+        scrollable(edits).height(Fill)
+    ]
+    .spacing(app.ui.spacing.m)
+    .height(Fill)
+    .into()
 }
 
 fn keys(app: &Desktop) -> Element<'_, Message> {
@@ -131,17 +153,16 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
             binding.map_or_else(|| "Unread".into(), |action| action_label(app, action)),
             if key.writable { "" } else { " (fixed)" }
         );
-        button(text(label).size(14))
-            .width(Fill)
-            .style(if app.selected.as_ref() == Some(&key.id) {
-                button::primary
-            } else {
-                button::secondary
-            })
-            .on_press(Message::SelectKey(key.id.clone()))
-            .into()
+        container(panels::selectable_button(
+            &app.ui,
+            label,
+            app.selected.as_ref() == Some(&key.id),
+            Some(Message::SelectKey(key.id.clone())),
+        ))
+        .width(Fill)
+        .into()
     }))
-    .spacing(3)
+    .spacing(app.ui.spacing.xs)
     .into()
 }
 
@@ -181,12 +202,12 @@ fn search(app: &Desktop) -> Element<'_, Message> {
                     .into()
             }),
     )
-    .spacing(3);
+    .spacing(app.ui.spacing.xs);
     column![
         text_input("Find an action…", &app.search).on_input(Message::Search),
         scrollable(actions).height(Fill)
     ]
-    .spacing(8)
+    .spacing(app.ui.spacing.s)
     .height(Fill)
     .into()
 }
@@ -230,8 +251,10 @@ pub(super) fn status(app: &Desktop) -> String {
     match app.session.activity() {
         Activity::MacroFile { .. } => return "Working with a local macro file…".into(),
         Activity::Recording { .. } => return "Recording into the local draft…".into(),
-        Activity::Read { .. } | Activity::ReadMacro { .. } => return "Reading device…".into(),
-        Activity::Apply { .. } | Activity::ApplyMacro { .. } => {
+        Activity::Read { .. } | Activity::ReadMacro { .. } | Activity::ReadLighting { .. } => {
+            return "Reading device…".into();
+        }
+        Activity::Apply { .. } | Activity::ApplyMacro { .. } | Activity::ApplyLighting { .. } => {
             return "Backing up, applying and verifying…".into();
         }
         Activity::Idle => {}
