@@ -35,6 +35,7 @@ enum WorkbenchTab {
     Macros,
     Lighting,
     Picture,
+    Settings,
 }
 
 impl Layer {
@@ -62,10 +63,12 @@ struct Workbench {
     macro_editor: MacroEditor,
     lighting_editor: crate::lighting_ui::LightingEditor,
     picture_editor: crate::picture_ui::PictureEditor,
+    settings_editor: crate::settings_ui::SettingsEditor,
     search: String,
     modifiers: [bool; 4],
     raw_editor: String,
     test_input: String,
+    profile_path: String,
     status: String,
     error: bool,
     busy: bool,
@@ -88,10 +91,12 @@ impl Workbench {
             macro_editor: MacroEditor::new(),
             lighting_editor: crate::lighting_ui::LightingEditor::new(),
             picture_editor: crate::picture_ui::PictureEditor::new(),
+            settings_editor: crate::settings_ui::SettingsEditor::new(),
             search: String::new(),
             modifiers: [false; 4],
             raw_editor: String::new(),
             test_input: String::new(),
+            profile_path: "nia87-keymap.json".into(),
             status: "Reading connected keyboard…".into(),
             error: false,
             busy: false,
@@ -270,6 +275,7 @@ impl Workbench {
             || self.macro_editor.busy()
             || self.lighting_editor.busy()
             || self.picture_editor.busy()
+            || self.settings_editor.busy()
     }
 
     fn changed(&self, layer: Layer, usage: u8) -> bool {
@@ -397,10 +403,11 @@ impl Workbench {
             );
             let can_switch = !self.device_busy();
             for (tab, label) in [
-                (WorkbenchTab::Keys, "KEYS"),
-                (WorkbenchTab::Macros, "MACROS"),
-                (WorkbenchTab::Lighting, "LIGHTING"),
-                (WorkbenchTab::Picture, "PER-KEY COLOR"),
+                (WorkbenchTab::Keys, "KEYS  Ctrl+1"),
+                (WorkbenchTab::Macros, "MACROS  Ctrl+2"),
+                (WorkbenchTab::Lighting, "LIGHTING  Ctrl+3"),
+                (WorkbenchTab::Picture, "PER-KEY COLOR  Ctrl+4"),
+                (WorkbenchTab::Settings, "SETTINGS  Ctrl+5"),
             ] {
                 ui.add_enabled_ui(can_switch, |ui| {
                     if ui.selectable_label(self.tab == tab, label).clicked() {
@@ -756,6 +763,36 @@ impl Workbench {
     }
 
     fn keys_page(&mut self, ui: &mut egui::Ui) {
+        ui.collapsing("Local keymap file", |ui| {
+            ui.label("Saves both keymaps, including macro slot references. Macro event data and lighting are separate.");
+            ui.horizontal(|ui| {
+                ui.label("Path");
+                ui.text_edit_singleline(&mut self.profile_path);
+                if ui.add_enabled(!self.device_busy() && self.observed.is_some(), egui::Button::new("SAVE NEW FILE")).clicked() {
+                    let mut snapshot = self.observed.clone().expect("enabled when loaded");
+                    snapshot.base = self.base.clone();
+                    snapshot.function = self.function.clone();
+                    match crate::profiles::save_new(std::path::Path::new(&self.profile_path), &snapshot) {
+                        Ok(()) => { self.status = "Saved keymap draft to a new file.".into(); self.error = false; }
+                        Err(e) => { self.status = e.to_string(); self.error = true; }
+                    }
+                }
+                if ui.add_enabled(!self.device_busy() && self.observed.is_some() && self.dirty_count() == 0, egui::Button::new("IMPORT TO DRAFT")).clicked() {
+                    let current = self.observed.as_ref().expect("enabled when loaded");
+                    match crate::profiles::load_for_device(std::path::Path::new(&self.profile_path), current) {
+                        Ok(imported) if imported.function == current.function => {
+                            self.base = imported.base;
+                            self.function = imported.function;
+                            self.sync_editor();
+                            self.status = "Imported keymap to local draft. Review changes before Apply.".into();
+                            self.error = false;
+                        }
+                        Ok(_) => { self.status = "Import needs Fn changes, which are currently read-only; no draft changed.".into(); self.error = true; }
+                        Err(e) => { self.status = e.to_string(); self.error = true; }
+                    }
+                }
+            });
+        });
         let board_width = (ui.available_width() - 320.0).max(500.0);
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -848,9 +885,22 @@ impl Workbench {
 impl eframe::App for Workbench {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_worker();
-        let ctrl_s = ui.input(|input| input.modifiers.ctrl && input.key_pressed(egui::Key::S));
+        if !self.device_busy() {
+            for (key, tab) in [
+                (egui::Key::Num1, WorkbenchTab::Keys),
+                (egui::Key::Num2, WorkbenchTab::Macros),
+                (egui::Key::Num3, WorkbenchTab::Lighting),
+                (egui::Key::Num4, WorkbenchTab::Picture),
+                (egui::Key::Num5, WorkbenchTab::Settings),
+            ] {
+                if ctrl_shortcut(ui, key) {
+                    self.tab = tab;
+                }
+            }
+        }
+        let ctrl_s = ctrl_shortcut(ui, egui::Key::S);
         let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-        if ctrl_s && self.tab == WorkbenchTab::Keys {
+        if ctrl_s && matches!(self.tab, WorkbenchTab::Keys | WorkbenchTab::Macros) {
             self.start_apply(ui.ctx());
         }
         if escape && self.tab == WorkbenchTab::Keys && !self.device_busy() {
@@ -880,6 +930,14 @@ impl eframe::App for Workbench {
                         egui::ScrollArea::vertical()
                             .show(ui, |ui| self.picture_editor.ui(ui, blocked));
                     }
+                    WorkbenchTab::Settings => {
+                        let blocked = self.busy
+                            || self.macro_editor.busy()
+                            || self.lighting_editor.busy()
+                            || self.picture_editor.busy();
+                        egui::ScrollArea::vertical()
+                            .show(ui, |ui| self.settings_editor.ui(ui, blocked));
+                    }
                 }
             });
         if self.device_busy() {
@@ -893,6 +951,17 @@ fn format_bytes(bytes: [u8; 4]) -> String {
         "{:02X} {:02X} {:02X} {:02X}",
         bytes[0], bytes[1], bytes[2], bytes[3]
     )
+}
+
+fn ctrl_shortcut(ui: &egui::Ui, wanted: egui::Key) -> bool {
+    ui.input(|input| {
+        input.events.iter().any(|event| {
+            matches!(event,
+                egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. }
+                    if *key == wanted && modifiers.ctrl
+            )
+        })
+    })
 }
 
 fn modifier_label(usage: u8) -> &'static str {

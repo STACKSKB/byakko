@@ -2,6 +2,47 @@ use std::process::ExitCode;
 
 fn run() -> byakko::device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
+    if args.as_slice() == ["--help"] || args.as_slice() == ["-h"] {
+        println!("Byakko — native Nia87 configurator\n\n  gui                         Open native workbench\n  devices                     Enumerate matching HID collections\n  inspect                     Read version/profile\n  inspect-lighting             Read global lighting\n  inspect-settings             Read debounce, auto OS, sleep and flags\n  export PATH                  Save raw keymap snapshot to new file\n  export-macro SLOT PATH       Save raw macro bytes to new file\n  export-picture PATH          Save RGB picture to new file\n  restore-keymaps BACKUP        Restore a verified keymap backup\n  restore-macro BACKUP          Restore a macro backup\n\nResearch round-trip checks (write, verify and restore):\n  verify-keymap-roundtrip\n  verify-bindings-roundtrip\n  verify-macro-roundtrip\n  verify-lighting-roundtrip\n  verify-picture-roundtrip\n  verify-settings-roundtrip\n\nFn writes are currently disabled pending protocol verification.");
+        return Ok(());
+    }
+    if args.as_slice() == ["inspect-settings"] {
+        let settings = byakko::device::read_settings()?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(
+                &serde_json::json!({"debounce":settings.debounce(),"auto_os":settings.auto_os(),"sleep_seconds":settings.sleep_seconds(),"options_flags":settings.option_flags(),"fn_matrix_enabled":settings.fn_matrix_enabled(),"power_save":settings.power_save_value(),"raw":settings})
+            )?
+        );
+        return Ok(());
+    }
+    if args.as_slice() == ["verify-settings-roundtrip"] {
+        use byakko::settings::Setting;
+        let before = byakko::device::read_settings()?;
+        if before.debounce() != 1 || before.auto_os() {
+            return Err("Expected captured debounce1/auto-off fixture; no writes sent".into());
+        }
+        let maps = byakko::device::snapshot()?;
+        let lighting = byakko::device::read_lighting()?;
+        let backups = std::path::Path::new("Research/captures/backups");
+        let changed = byakko::device::apply_setting(&before, Setting::Debounce(2), backups)?;
+        let restored = byakko::device::apply_setting(&changed, Setting::Debounce(1), backups)?;
+        if restored != before {
+            return Err("Debounce restoration mismatch".into());
+        }
+        let changed = byakko::device::apply_setting(&before, Setting::AutoOs(true), backups)?;
+        let restored = byakko::device::apply_setting(&changed, Setting::AutoOs(false), backups)?;
+        if restored != before
+            || byakko::device::snapshot()? != maps
+            || byakko::device::read_lighting()? != lighting
+        {
+            return Err("Settings test did not restore all checked state".into());
+        }
+        println!(
+            "Debounce1->2->1 and auto-off->on->off verified. All settings, keymaps and global lighting restored; sleep/options not written."
+        );
+        return Ok(());
+    }
     if args.len() == 2 && args[0] == "restore-keymaps" {
         let saved: byakko::device::Snapshot =
             serde_json::from_reader(std::fs::File::open(&args[1])?)?;
