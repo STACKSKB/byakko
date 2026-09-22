@@ -106,7 +106,9 @@ struct Workbench {
 
 impl Workbench {
     fn new(ctx: &egui::Context, data_dir: PathBuf) -> Self {
+        let labels_dir = data_dir.join("macro-labels").join("nia87");
         let mut app = Self::without_read_at(data_dir);
+        app.macro_editor.load_local_labels(labels_dir);
         app.start_read(ctx);
         app
     }
@@ -119,6 +121,7 @@ impl Workbench {
     fn without_read_at(data_dir: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         let backup_dir = data_dir.join("backups");
+        let macro_editor = MacroEditor::new_with_backup_dir(backup_dir.clone());
         Self {
             keys: layout::nia87_keys(),
             observed: None,
@@ -127,7 +130,7 @@ impl Workbench {
             selected: None,
             layer: Layer::Base,
             tab: WorkbenchTab::Keys,
-            macro_editor: MacroEditor::new_with_backup_dir(backup_dir.clone()),
+            macro_editor,
             lighting_editor: crate::lighting_ui::LightingEditor::new_with_backup_dir(
                 backup_dir.clone(),
             ),

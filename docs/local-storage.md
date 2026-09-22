@@ -20,6 +20,19 @@ keymap and full-configuration export paths are `nia87-keymap.json` and
 the GUI. Exports and backups create new files; an existing file is not replaced.
 Macro import/export continues to use the path entered in its file field.
 
+Macro Studio's **Save Labels** stores all50 slot names in
+`macro-labels/nia87/label-NNNNNNNNNNNNNNNNNNNN.json`. These are local per-slot
+preferences shared by Nia87 keyboards on this computer, not names read from
+device memory or proof of an individual keyboard's identity. Names load on
+the next GUI start. Saving labels does not apply a macro, change a binding,
+or persist its play-mode selection. Macro JSON exports still include their name
+and selected play mode.
+
+Label saves create numbered snapshots and leave older files intact. The newest
+snapshot must validate before loading; a damaged newest file produces a visible
+error instead of silently showing older labels. Names are limited to256 UTF-8
+bytes and each snapshot to32 KiB. Unsaved name changes stay visibly marked.
+
 Existing files from older builds stay where they were created. Byakko does not
 move or delete them; an old archive can still be opened by its explicit path.
 CLI commands and research examples retain their explicit path arguments and

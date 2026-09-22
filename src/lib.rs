@@ -19,6 +19,7 @@ pub mod lighting;
 #[cfg(feature = "gui")]
 pub mod lighting_ui;
 pub mod macro_file;
+pub mod macro_labels;
 #[cfg(feature = "gui")]
 pub mod macro_ui;
 pub mod macros;
