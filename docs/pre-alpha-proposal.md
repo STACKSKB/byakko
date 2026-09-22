@@ -1,6 +1,11 @@
-# Pre-alpha architecture proposal — awaiting human review
+# Pre-alpha architecture — approved direction
 
-Status: proposal only. Implementation and hardware work are paused for review.
+Status: approved by the user with Iced selected. Implementation may proceed.
+The user additionally requires future browser delivery: core models and
+command/result contracts must remain independent of Iced, OS transport and
+in-process channels. A future frontend may run the core in WebAssembly or
+expose the native executor through a separately secured service adapter.
+No server, web UI or browser HID support is being implemented in this slice.
 This replaces incremental feature expansion as the immediate priority; it does
 not reduce the full configurator parity objective.
 
