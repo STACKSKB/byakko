@@ -123,7 +123,8 @@ mod lifecycle_tests {
         editor.poll_worker();
         assert!(!editor.state.trusted());
         assert!(editor.error && editor.dirty());
-        editor.state.begin_apply().unwrap();
+        assert!(editor.state.begin_apply().is_err());
+        let mut editor = pending();
         editor
             .tx
             .send(WorkerResult::Applied {
@@ -140,6 +141,21 @@ mod lifecycle_tests {
     fn worker_panic_returns_an_unverified_completion() {
         let result: Result<(), String> = macro_worker(|| panic!("test panic"));
         assert!(result.unwrap_err().contains("restoration are unverified"));
+    }
+
+    #[test]
+    fn invalidation_preserves_macro_draft_and_requires_reload() {
+        let mut editor = MacroEditor::new();
+        editor.state.seed_verified(editor.state.draft().clone());
+        editor.state.draft_mut().repeat_count = 4;
+        let draft = editor.state.draft().clone();
+        editor.invalidate_device_read();
+        assert_eq!(editor.state.draft(), &draft);
+        assert!(editor.state.loaded() && editor.dirty() && !editor.busy());
+        assert!(!editor.state.trusted());
+        assert!(editor.state.begin_apply().is_err());
+        assert!(editor.state.revert());
+        assert!(!editor.state.trusted());
     }
 }
 
@@ -261,6 +277,13 @@ impl MacroEditor {
 
     pub fn busy(&self) -> bool {
         self.state.busy() || self.recording.is_some()
+    }
+
+    pub(crate) fn invalidate_device_read(&mut self) {
+        self.state.mark_unverified();
+        if self.state.loaded() {
+            self.set_error("Device data may have changed. Draft retained; export it if needed, revert, then reload the slot before saving or binding.");
+        }
     }
 
     /// Labels are local slot preferences, not data read from a keyboard.
@@ -942,7 +965,7 @@ impl MacroEditor {
             ui.label(RichText::new("Delays use egui frame time (millisecond rounding); events in one frame share a timestamp. Keypad and left/right modifier identity may be unavailable.").small().color(MUTED));
             ui.add_space(9.0);
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(can_work && self.dirty() && encoded.is_ok(), egui::Button::new("SAVE TO KEYBOARD")).clicked() {
+                if ui.add_enabled(can_work && self.state.trusted() && self.dirty() && encoded.is_ok(), egui::Button::new("SAVE TO KEYBOARD")).clicked() {
                     self.apply(ui.ctx());
                 }
                 if ui.add_enabled(can_work && self.dirty(), egui::Button::new("REVERT DRAFT")).clicked() {

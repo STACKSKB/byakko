@@ -73,6 +73,13 @@ impl LightingEditor {
         self.busy
     }
 
+    pub(crate) fn invalidate_device_read(&mut self) {
+        self.trusted = false;
+        if self.observed.is_some() {
+            self.set_error("Keyboard state was reread or an archive was applied. Lighting draft retained; re-read this panel before applying.");
+        }
+    }
+
     fn start_screen(&mut self, ctx: &egui::Context) {
         if self.busy || !self.trusted {
             return;
@@ -546,6 +553,40 @@ mod lifecycle_tests {
         let mut reply = report;
         reply[0] = lighting::LED_READ_COMMAND;
         Lighting::decode(&reply).unwrap()
+    }
+
+    #[test]
+    fn invalidation_keeps_lighting_draft_and_baseline_without_starting_read() {
+        let mut editor = LightingEditor::new();
+        let initial_status = editor.status.clone();
+        editor.invalidate_device_read();
+        assert_eq!(editor.status, initial_status);
+
+        let setting = LightingSetting {
+            effect_id: 1,
+            value: Some(2),
+            speed: None,
+            option: None,
+            rgb: Some([1, 2, 3]),
+            dazzle: false,
+        };
+        let observed = response_for(&setting);
+        editor.observed = Some(observed.clone());
+        editor.loaded = Some(setting.clone());
+        editor.draft = Some(LightingSetting {
+            value: Some(3),
+            ..setting.clone()
+        });
+        editor.trusted = true;
+        editor.first_read_started = true;
+        let draft = editor.draft.clone();
+        editor.invalidate_device_read();
+        assert_eq!(editor.observed, Some(observed));
+        assert_eq!(editor.loaded, Some(setting));
+        assert_eq!(editor.draft, draft);
+        assert!(!editor.trusted && editor.error && editor.status.contains("re-read"));
+        assert!(editor.first_read_started && !editor.busy);
+        assert!(editor.rx.try_recv().is_err());
     }
 
     #[test]

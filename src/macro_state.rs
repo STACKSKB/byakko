@@ -81,7 +81,7 @@ impl MacroState {
         }
     }
 
-    fn mark_unverified(&mut self) {
+    pub(crate) fn mark_unverified(&mut self) {
         self.baseline = match std::mem::replace(&mut self.baseline, Baseline::Unloaded) {
             Baseline::Verified(value) | Baseline::Unverified(value) => Baseline::Unverified(value),
             Baseline::Unloaded => Baseline::Unloaded,
@@ -119,7 +119,7 @@ impl MacroState {
     }
 
     pub(crate) fn begin_apply(&mut self) -> Result<ApplyRequest, String> {
-        if self.busy() || !self.dirty() {
+        if self.busy() || !self.trusted() || !self.dirty() {
             return Err("No applicable macro draft is ready.".into());
         }
         let expected = self
@@ -361,6 +361,12 @@ mod tests {
         assert_eq!(request.slot, 0);
         assert!(state.complete_apply(0, Ok(vec![0; 256])).is_err());
         assert!(!state.trusted() && state.dirty());
+        assert!(state.begin_apply().is_err());
+        assert!(state.revert());
+        let raw = macros::encode(state.draft()).unwrap();
+        state.begin_read().unwrap();
+        state.complete_read(0, Ok(raw)).unwrap();
+        changed(&mut state);
         state.begin_apply().unwrap();
         state
             .complete_apply(0, Ok(macros::encode(state.draft()).unwrap()))

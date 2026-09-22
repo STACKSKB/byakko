@@ -147,6 +147,7 @@ impl Workbench {
             return;
         }
         self.reading = true;
+        self.invalidate_panel_reads();
         self.retry_schedule.started();
         self.archive.invalidate_review();
         self.error = false;
@@ -200,7 +201,17 @@ impl Workbench {
             return;
         }
         self.archive.start_apply(ctx);
+        if self.archive.busy() {
+            self.invalidate_panel_reads();
+        }
         self.archive_message();
+    }
+
+    fn invalidate_panel_reads(&mut self) {
+        self.macro_editor.invalidate_device_read();
+        self.lighting_editor.invalidate_device_read();
+        self.picture_editor.invalidate_device_read();
+        self.settings_editor.invalidate_device_read();
     }
 
     fn handle_archive_close(&mut self, ctx: &egui::Context) {
