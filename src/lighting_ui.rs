@@ -288,6 +288,9 @@ impl LightingEditor {
                     ui.add_space(8.0);
                     ui.label(RichText::new("DRAFT").small().strong().color(MUTED));
                     self.editor(ui, can_work && self.trusted);
+                    if self.draft.as_ref().is_some_and(|draft| matches!(draft.effect_id, 20..=22)) {
+                        ui.label(RichText::new("Music and screen streaming is not implemented yet. Apply stores the mode only; it does not start a live effect.").color(ACCENT));
+                    }
                     ui.add_space(8.0);
                     if let (Some(loaded), Some(draft)) = (&self.loaded, &self.draft) {
                         let before = summary(loaded);
