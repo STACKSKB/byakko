@@ -21,4 +21,3 @@ This ledger separates implemented configuration storage from end-to-end behavior
 | 2.4 GHz | Deferred by USB-first scope | Receiver identification, transport capability and separate verification when available |
 
 Firmware flashing, vendor account login and cloud sharing are outside the local stock-firmware configurator scope. OEM database metadata and UI arrangements are not product implementation sources. Physical tests remain explicitly pending while the user is AFK.
-

@@ -20,6 +20,95 @@ const MUTED: Color32 = Color32::from_rgb(96, 107, 109);
 const PANEL: Color32 = Color32::from_rgb(252, 251, 246);
 const ACCENT: Color32 = Color32::from_rgb(199, 91, 45);
 
+fn macro_worker<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).unwrap_or_else(|_| {
+        Err("Macro worker panicked; device state and restoration are unverified. Inspect the backup before retrying.".into())
+    })
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    fn pending() -> MacroEditor {
+        let mut editor = MacroEditor::new();
+        editor.loaded = Some(Macro {
+            repeat_count: 1,
+            events: Vec::new(),
+        });
+        editor.draft.repeat_count = 2;
+        editor.busy = true;
+        editor
+    }
+
+    #[test]
+    fn same_frame_close_and_apply_error_preserve_draft_and_error() {
+        let mut editor = pending();
+        let draft = editor.draft.clone();
+        editor
+            .tx
+            .send(WorkerResult::Applied {
+                slot: 0,
+                result: Err("readback failed".into()),
+            })
+            .unwrap();
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |ui| {
+            editor.handle_close(ui.ctx());
+            editor.poll_worker();
+        });
+        output.textures_delta.clear();
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::CancelClose)
+        );
+        assert!(!editor.busy);
+        assert!(!editor.trusted);
+        assert!(editor.error && editor.status.contains("readback failed"));
+        assert_eq!(editor.draft, draft);
+        assert!(editor.dirty());
+    }
+
+    #[test]
+    fn mismatching_success_cannot_mark_macro_saved() {
+        let mut editor = pending();
+        editor
+            .tx
+            .send(WorkerResult::Applied {
+                slot: 0,
+                result: Ok(vec![0; 256]),
+            })
+            .unwrap();
+        editor.poll_worker();
+        assert!(!editor.trusted);
+        assert!(editor.error && editor.dirty());
+        editor
+            .tx
+            .send(WorkerResult::Applied {
+                slot: 0,
+                result: macros::encode(&editor.draft),
+            })
+            .unwrap();
+        editor.poll_worker();
+        assert!(editor.trusted);
+        assert!(!editor.error && !editor.dirty());
+    }
+
+    #[test]
+    fn worker_panic_returns_an_unverified_completion() {
+        let result: Result<(), String> = macro_worker(|| panic!("test panic"));
+        assert!(result.unwrap_err().contains("restoration are unverified"));
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EventKind {
     Key,
@@ -148,6 +237,12 @@ impl MacroEditor {
         self.busy || self.recording.is_some()
     }
 
+    pub fn handle_close(&self, ctx: &egui::Context) {
+        if self.busy && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+    }
+
     fn dirty(&self) -> bool {
         self.loaded
             .as_ref()
@@ -193,7 +288,8 @@ impl MacroEditor {
         self.busy = true;
         self.set_status(format!("Reading macro slot {slot}…"));
         std::thread::spawn(move || {
-            let result = device::read_macro(slot).map_err(|error| error.to_string());
+            let result =
+                macro_worker(|| device::read_macro(slot).map_err(|error| error.to_string()));
             let _ = tx.send(WorkerResult::Loaded { slot, result });
             ctx.request_repaint();
         });
@@ -219,8 +315,10 @@ impl MacroEditor {
         self.busy = true;
         self.set_status(format!("Backing up, writing, and verifying slot {slot}…"));
         std::thread::spawn(move || {
-            let result = device::apply_macro(slot, &expected, &draft, &backup_dir)
-                .map_err(|error| error.to_string());
+            let result = macro_worker(|| {
+                device::apply_macro(slot, &expected, &draft, &backup_dir)
+                    .map_err(|error| error.to_string())
+            });
             let _ = tx.send(WorkerResult::Applied { slot, result });
             ctx.request_repaint();
         });
@@ -253,6 +351,11 @@ impl MacroEditor {
                 }
                 WorkerResult::Applied { slot, result } if slot == self.slot => match result {
                     Ok(bytes) => {
+                        if macros::encode(&self.draft).as_ref() != Ok(&bytes) {
+                            self.trusted = false;
+                            self.set_error("Macro worker returned unexpected bytes; device state is unverified. Draft retained.");
+                            continue;
+                        }
                         self.observed = Some(bytes);
                         self.loaded = Some(self.draft.clone());
                         self.trusted = true;
@@ -690,6 +793,7 @@ impl MacroEditor {
     /// Returns a four-byte macro binding when the user chooses to bind the
     /// loaded, verified slot to the key selected in the surrounding workbench.
     pub fn ui(&mut self, ui: &mut egui::Ui, blocked: bool) -> Option<[u8; 4]> {
+        self.handle_close(ui.ctx());
         self.poll_worker();
         let load_shortcut = ui.input(|input| {
             input.events.iter().any(|event| {
