@@ -53,6 +53,12 @@ session. The UI translates physical input, handles capture focus and presents
 recorder outcomes. Device worker dispatch and file/label controls remain in
 `macro_ui`; the model performs no egui, file or HID operations.
 
+A main-window device reread or full-archive apply invalidates the loaded panel
+baselines, including macros. Drafts remain available for review/export, but
+saving or binding requires a verified slot read. Reverting an invalidated draft
+does not restore trust: reload the slot after reverting. A failed macro apply
+also requires a new read before retrying.
+
 ## Local macro files
 
 Import and export preserve the existing version-1 JSON format: slot, local

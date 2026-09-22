@@ -68,6 +68,13 @@ impl SettingsEditor {
         self.busy
     }
 
+    pub(crate) fn invalidate_device_read(&mut self) {
+        self.trusted = false;
+        if self.observed.is_some() {
+            self.set_error("Keyboard state was reread or an archive was applied. Settings drafts retained; re-read this panel before applying.");
+        }
+    }
+
     fn debounce_dirty(&self) -> bool {
         self.observed
             .as_ref()
@@ -435,6 +442,31 @@ impl Default for SettingsEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalidation_keeps_settings_drafts_and_baseline_without_starting_read() {
+        let mut editor = SettingsEditor::new();
+        let initial_status = editor.status.clone();
+        editor.invalidate_device_read();
+        assert_eq!(editor.status, initial_status);
+
+        let observed = fixture(1);
+        editor.accept_read(observed.clone(), None);
+        editor.draft_debounce = Some(5);
+        editor.draft_auto = Some(true);
+        editor.draft_sleep = Some([60, 60, 600, 600]);
+        editor.draft_backlight = Some(false);
+        editor.first_read_started = true;
+        editor.invalidate_device_read();
+        assert_eq!(editor.observed, Some(observed));
+        assert_eq!(editor.draft_debounce, Some(5));
+        assert_eq!(editor.draft_auto, Some(true));
+        assert_eq!(editor.draft_sleep, Some([60, 60, 600, 600]));
+        assert_eq!(editor.draft_backlight, Some(false));
+        assert!(!editor.trusted && editor.error && editor.status.contains("re-read"));
+        assert!(editor.first_read_started && !editor.busy);
+        assert!(editor.rx.try_recv().is_err());
+    }
 
     fn fixture(debounce: u8) -> Settings {
         let mut replies = [[0u8; 64]; 4];

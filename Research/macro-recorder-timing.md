@@ -84,3 +84,13 @@ Measured pauses beyond 65,535 ms remain explicit errors rather than silently
 clamping. Clear draft stages removal with Revert available; it does not write HID.
 Pure and headless integration tests cover these rules. Physical playback timing
 and repeat behavior remain unverified.
+
+## Remaining playback-mode policy gap
+
+The native repeat-count control still applies to every local playback-mode
+selection. The official save path instead forces stored count 1 outside
+repeat-count mode. Native modes are encoded in key bindings, while repeat count
+belongs to the shared macro slot. Multiple keys may refer to that slot with
+different modes. Implementing the official policy needs an explicit user-facing
+rule for these shared contents; the existing data is not silently normalized.
+The current implementation therefore does not yet claim parity for this case.

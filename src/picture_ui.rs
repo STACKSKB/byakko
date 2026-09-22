@@ -67,6 +67,13 @@ impl PictureEditor {
         self.busy
     }
 
+    pub(crate) fn invalidate_device_read(&mut self) {
+        self.trusted = false;
+        if self.observed.is_some() {
+            self.set_error("Keyboard state was reread or an archive was applied. Picture draft retained; re-read this panel before applying.");
+        }
+    }
+
     fn selected_slot(&self) -> Option<usize> {
         board::slot_for_usage(self.selected).filter(|slot| *slot < self.draft.len())
     }
@@ -418,6 +425,27 @@ impl Default for PictureEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalidation_keeps_picture_draft_and_baseline_without_starting_read() {
+        let mut editor = PictureEditor::new();
+        let initial_status = editor.status.clone();
+        editor.invalidate_device_read();
+        assert_eq!(editor.status, initial_status);
+
+        let observed = vec![[1, 2, 3]; 128];
+        let draft = vec![[4, 5, 6]; 128];
+        editor.observed = Some(observed.clone());
+        editor.draft = draft.clone();
+        editor.trusted = true;
+        editor.first_read_started = true;
+        editor.invalidate_device_read();
+        assert_eq!(editor.observed, Some(observed));
+        assert_eq!(editor.draft, draft);
+        assert!(!editor.trusted && editor.error && editor.status.contains("re-read"));
+        assert!(editor.first_read_started && !editor.busy);
+        assert!(editor.rx.try_recv().is_err());
+    }
 
     fn close_frame(editor: &mut PictureEditor) -> egui::FullOutput {
         let ctx = egui::Context::default();
