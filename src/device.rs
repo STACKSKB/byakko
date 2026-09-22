@@ -196,7 +196,7 @@ pub fn read_settings() -> Result<crate::settings::Settings> {
 
 /// Exclusive host-lighting session. The lock covers setup, every frame, and
 /// restoration. Explicit finish reports restoration errors to the caller.
-pub struct ScreenSession {
+pub struct HostLightingSession {
     _lock: std::fs::File,
     device: HidDevice,
     saved: crate::lighting::Lighting,
@@ -205,13 +205,10 @@ pub struct ScreenSession {
     finished: bool,
 }
 
-impl ScreenSession {
+pub type ScreenSession = HostLightingSession;
+
+impl HostLightingSession {
     pub fn start(expected: &crate::lighting::Lighting, backups: &std::path::Path) -> Result<Self> {
-        let lock = transaction_lock()?;
-        let (_, device) = open_unique()?;
-        if !read_settings_on_device(&device)?.backlight_enabled() {
-            return Err("Enable the backlight in Settings before starting screen color".into());
-        }
         let desired = crate::lighting::LightingSetting {
             effect_id: 21,
             value: None,
@@ -220,8 +217,24 @@ impl ScreenSession {
             rgb: None,
             dazzle: false,
         };
+        Self::start_mode(expected, &desired, backups)
+    }
+
+    pub fn start_mode(
+        expected: &crate::lighting::Lighting,
+        desired: &crate::lighting::LightingSetting,
+        backups: &std::path::Path,
+    ) -> Result<Self> {
+        if !matches!(desired.effect_id, 20..=22) {
+            return Err("Host lighting requires screen or music mode".into());
+        }
+        let lock = transaction_lock()?;
+        let (_, device) = open_unique()?;
+        if !read_settings_on_device(&device)?.backlight_enabled() {
+            return Err("Enable the backlight in Settings before starting host lighting".into());
+        }
         // apply_lighting performs identity and expected-state checks before mutation.
-        let active = apply_lighting_unlocked(expected, &desired, backups)?;
+        let active = apply_lighting_unlocked(expected, desired, backups)?;
         Ok(Self {
             _lock: lock,
             device,
@@ -233,8 +246,21 @@ impl ScreenSession {
     }
 
     pub fn send_color(&self, rgb: [u8; 3]) -> Result<()> {
+        if self.active.effect_id() != 21 {
+            return Err("Screen frame requires screen mode".into());
+        }
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&crate::host_lighting::screen_report(rgb));
+        self.device.send_feature_report(&host)?;
+        Ok(())
+    }
+
+    pub fn send_music(&self, bands: [u8; 32]) -> Result<()> {
+        if !matches!(self.active.effect_id(), 20 | 22) {
+            return Err("Music frame requires music mode".into());
+        }
+        let mut host = [0u8; 65];
+        host[1..].copy_from_slice(&crate::host_lighting::music_report(bands));
         self.device.send_feature_report(&host)?;
         Ok(())
     }
@@ -258,7 +284,7 @@ impl ScreenSession {
     }
 }
 
-impl Drop for ScreenSession {
+impl Drop for HostLightingSession {
     fn drop(&mut self) {
         if !self.finished {
             let _ = self.restore();

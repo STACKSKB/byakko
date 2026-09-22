@@ -1,6 +1,9 @@
 pub mod actions;
 #[cfg(feature = "gui")]
 pub mod app;
+pub mod audio_bands;
+pub mod audio_sample;
+pub mod audio_stream;
 pub mod board;
 pub mod device;
 pub mod hid;

@@ -92,6 +92,29 @@ impl LightingEditor {
         });
     }
 
+    fn start_audio(&mut self, ctx: &egui::Context) {
+        if self.busy || !self.trusted {
+            return;
+        }
+        let (Some(expected), Some(desired)) = (self.observed.clone(), self.draft.clone()) else {
+            return;
+        };
+        if !matches!(desired.effect_id, 20 | 22) {
+            return;
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        self.stream_stop = Some(stop.clone());
+        self.busy = true;
+        self.set_status("Starting system playback lighting. Stop restores the previous effect.");
+        let (tx, ctx, backups) = (self.tx.clone(), ctx.clone(), self.backup_dir.clone());
+        std::thread::spawn(move || {
+            let result = crate::audio_stream::run(&expected, &desired, &backups, &stop)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(WorkerResult::StreamStopped(result));
+            ctx.request_repaint();
+        });
+    }
+
     pub fn handle_close(&mut self, ctx: &egui::Context) {
         if ctx.input(|input| input.viewport().close_requested()) && self.stream_stop.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
@@ -99,9 +122,7 @@ impl LightingEditor {
             if let Some(stop) = &self.stream_stop {
                 stop.store(true, Ordering::Relaxed);
             }
-            self.set_status(
-                "Stopping screen sampling and restoring saved lighting before closing…",
-            );
+            self.set_status("Stopping host lighting and restoring saved lighting before closing…");
         }
         if self.closing && self.stream_stop.is_none() {
             self.closing = false;
@@ -177,7 +198,7 @@ impl LightingEditor {
                             self.loaded = observed.recognized_setting();
                             self.trusted = self.loaded.is_some();
                             self.observed = Some(observed);
-                            self.set_status("Screen sampling stopped. Previous lighting effect restored and verified.");
+                            self.set_status("Host lighting stopped. Previous lighting effect restored and verified.");
                         }
                         Err(error) => {
                             self.closing = false;
@@ -353,19 +374,22 @@ impl LightingEditor {
                     ui.label(RichText::new("DRAFT").small().strong().color(MUTED));
                     self.editor(ui, can_work && self.trusted);
                     if self.draft.as_ref().is_some_and(|draft| matches!(draft.effect_id, 20 | 22)) {
-                        ui.label(RichText::new("Audio sampling is not implemented yet. Apply stores the music mode only.").color(ACCENT));
+                        ui.label("Audio lighting samples system playback locally, not your microphone. No audio is saved or transmitted. Windows only; Linux audio capture is pending.");
+                        if self.stream_stop.is_none() && ui.add_enabled(can_work && self.trusted, egui::Button::new("START AUDIO LIGHTING")).clicked() {
+                            self.start_audio(ui.ctx());
+                        }
                     }
-                    if self.draft.as_ref().is_some_and(|draft| draft.effect_id == 21) || self.stream_stop.is_some() {
+                    if self.draft.as_ref().is_some_and(|draft| draft.effect_id == 21) {
                         ui.label("Screen color samples the primary display locally. No images are saved or transmitted. Windows and X11; Wayland capture is pending.");
                         ui.label("START temporarily selects screen mode; STOP restores the current device effect. Enable backlighting in Settings first.");
-                        if let Some(stop) = self.stream_stop.clone() {
-                            if ui.button("STOP SCREEN COLOR / RESTORE").clicked() {
-                                stop.store(true, Ordering::Relaxed);
-                                self.set_status("Stopping and restoring previous lighting…");
-                            }
-                        } else if ui.add_enabled(can_work && self.trusted, egui::Button::new("START SCREEN COLOR")).clicked() {
+                        if self.stream_stop.is_none() && ui.add_enabled(can_work && self.trusted, egui::Button::new("START SCREEN COLOR")).clicked() {
                             self.start_screen(ui.ctx());
                         }
+                    }
+                    if let Some(stop) = self.stream_stop.clone()
+                        && ui.button("STOP HOST LIGHTING / RESTORE").clicked() {
+                            stop.store(true, Ordering::Relaxed);
+                            self.set_status("Stopping and restoring previous lighting…");
                     }
                     ui.add_space(8.0);
                     if let (Some(loaded), Some(draft)) = (&self.loaded, &self.draft) {
