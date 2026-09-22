@@ -12,7 +12,11 @@ within the 248-byte encoded limit. Repeated down events are ignored.
 
 This recorder is local to the native window; it does not hook global desktop
 input. Pointer movement and wheel actions can be edited manually but are not
-recorded automatically. Event delays use frame timestamps rounded to
+recorded automatically. **Wait after** is the interval from an event to the next
+transition. Recording omits the initial wait before the first action, and does
+not change earlier events when appending a recording. Stop/focus-loss releases
+include the final held interval; a fully released recording has no added tail
+for time spent reaching Stop. Intervals use frame timestamps rounded to
 milliseconds; events within one frame share a timestamp. Keypad and left/right
 modifier identity may be unavailable from the window event stream.
 
@@ -20,6 +24,10 @@ Headless event tests exercise the recorder and codec without sending input to
 other applications or writing the device. They do not establish firmware
 playback timing, movement semantics or physical key activation; those remain
 hardware validation requirements.
+
+The [timing audit](../Research/macro-recorder-timing.md) explains the correction
+from the earlier recorder, which attached intervals one event late. Existing
+macro files are not rewritten automatically.
 
 ## Local macro files
 
