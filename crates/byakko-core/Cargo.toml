@@ -1,0 +1,12 @@
+[package]
+name = "byakko-core"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Platform-independent Byakko configuration model and transitions"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

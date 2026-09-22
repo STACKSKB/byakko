@@ -1,5 +1,35 @@
 # Reusable native frontend: backend boundary
 
+## Approved pre-alpha migration
+
+The user approved `pre-alpha-proposal.md`, selected Iced and required the core to
+support a future browser frontend or service adapter. `AGENTS.md` defines the
+functional-first rules for all work. The sections below describing egui refer
+to the retained research application, not the new desktop architecture.
+
+The first physical boundary is `crates/byakko-core`: device-neutral keymap
+values, validation and deterministic session transitions. Its normal dependency
+is Serde; it has no GUI, HID, filesystem, thread or clock dependencies. The old
+`backend` module re-exports these types so existing codec/adapter tests exercise
+the same definitions rather than a second model.
+
+Commands and completions are owned serializable values with connection
+generation and operation IDs. Serialization is an internal contract at this
+stage, not a stable public API or a network protocol. A browser adapter can
+transport these values or run the core as WebAssembly without depending on
+Iced messages, Rust channels or native HID handles. Device-specific validation
+and expected-state checks remain mandatory in the executor.
+
+Browser delivery does not imply direct WebHID works on this keyboard or every
+browser. Direct browser transport and a native service are separate future
+adapters. Any service will need its own session identity, origin/authentication
+policy and bounded request validation; none is exposed by this change. No
+JavaScript or browser engine is introduced into the native application.
+
+The session model is initially tested independently. Connecting it to the Nia87
+executor and Iced view is the next migration step; the legacy controllers are
+not yet replaced. The three-package target remains core, devices and desktop.
+
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 
 ## Implemented first slice
