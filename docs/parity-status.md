@@ -11,9 +11,9 @@ This ledger separates implemented configuration storage from end-to-end behavior
 | Modifier, media and mouse actions | Pure codecs and catalog, including 12 previously missing visible media/system actions with documented wire facts | Physical output and modifier-combination coverage |
 | Macro storage | Long → short → empty replacement verified; stale-page clearing and transitional-read regression fixed; write-handle identity checked | Official replay comparison, other slots and boundary behavior |
 | Macro editor | Native event table, focused recorder, repeats/modes, import/export and saved-slot binding; all three base and Fn binding modes read back and restored | Recorder GUI interaction validation, physical playback modes and timing |
-| Global lighting | Native controls; brightness write/read/restore passes full settings comparison | Each applicable parameter family and visual validation |
+| Global lighting | Native controls; selected parameter cases for every onboard effect ID 0–19 pass write/read/restore, including color, direction, dazzle, picture selection and off | Visual validation, broader option combinations and host modes |
 | Per-key colors | Native physical layout editor; single-color write/restore passes all 128 RGB values | GUI interaction coverage, picture-slot semantics and visual validation |
-| Host-driven lighting | Official catalog advertises screen and music modes | Determine actual required host processing; independently implement applicable behavior |
+| Host-driven lighting | Official music/screen host dispatch traced; native UI explicitly identifies missing streaming | Capture final stream transport; independently implement native sampling and device frames |
 | Other settings | Native debounce, auto-OS and four sleep timers; all pass reversible complete settings readback; options read-only | Physical sleep behavior, option semantics and report-rate support |
 | Local configurations | Versioned raw-preserving keymap import/export with board/firmware/padding validation; macro JSON | Full settings/macro bundle semantics and GUI interaction coverage |
 | Robust device transactions | Expected-state checks, disk backups, readback/rollback and OS-held interprocess lock; optional blocking Windows USB string reads removed | USB error recovery, disconnect/reconnect and partial failure tests |

@@ -167,3 +167,20 @@ Complete raw settings and both maps matched. The native settings page now
 supports those timers in minutes, including zero to disable. Bounds follow
 the current descriptor: normal 1–60 minutes, deep 10–60 minutes. Physical
 idle/sleep behavior and wireless transport remain untested.
+
+## Onboard lighting family coverage
+
+`examples/lighting_families.rs` now exercises native lighting transactions
+with restoration after every case. Six initial cases covered static white
+(including the near-white wire sentinel), wave direction/speed/custom RGB,
+wave dazzle, neon without RGB, picture selection 2, and off. A second run
+covered every remaining onboard effect ID through 19, with brightness 2,
+speed 2 where applicable, RGB `(8,16,24)` where applicable, and the last
+advertised option where present.
+
+Every case passed exact stored-field verification, decoded back to the desired
+setting, and restored the original lighting. Each run also compared both full
+keymaps, all 128 picture colors, and all raw scalar settings with its before
+state; all matched. This establishes selected parameter cases for every
+onboard effect ID 0–19, not every combination or visible animation behavior.
+Host music/screen modes 20–22 were not exercised by these tests.
