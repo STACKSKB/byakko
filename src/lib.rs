@@ -37,3 +37,4 @@ pub mod screen_stream;
 pub mod settings;
 #[cfg(feature = "gui")]
 pub mod settings_ui;
+pub mod storage;

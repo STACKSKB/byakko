@@ -45,15 +45,13 @@ pub struct LightingEditor {
 }
 
 impl LightingEditor {
-    pub fn new() -> Self {
+    pub fn new_with_backup_dir(backup_dir: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             observed: None,
             loaded: None,
             draft: None,
-            backup_dir: std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join("backups"),
+            backup_dir,
             status: "Open Lighting to read the keyboard's current mode.".into(),
             error: false,
             busy: false,
@@ -64,6 +62,11 @@ impl LightingEditor {
             stream_stop: None,
             closing: false,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new() -> Self {
+        Self::new_with_backup_dir(std::env::temp_dir().join("byakko-test-backups"))
     }
 
     pub fn busy(&self) -> bool {
@@ -440,6 +443,7 @@ impl LightingEditor {
     }
 }
 
+#[cfg(test)]
 impl Default for LightingEditor {
     fn default() -> Self {
         Self::new()

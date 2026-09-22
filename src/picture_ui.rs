@@ -40,16 +40,14 @@ pub struct PictureEditor {
 }
 
 impl PictureEditor {
-    pub fn new() -> Self {
+    pub fn new_with_backup_dir(backup_dir: PathBuf) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             keys: layout::nia87_keys(),
             selected: 0x29, // Esc has a verified slot at index 0.
             observed: None,
             draft: Vec::new(),
-            backup_dir: std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .join("backups"),
+            backup_dir,
             status: "Open Picture to read the keyboard's stored custom colors.".into(),
             error: false,
             busy: false,
@@ -58,6 +56,11 @@ impl PictureEditor {
             tx,
             rx,
         }
+    }
+
+    #[cfg(test)]
+    pub fn new() -> Self {
+        Self::new_with_backup_dir(std::env::temp_dir().join("byakko-test-backups"))
     }
 
     pub fn busy(&self) -> bool {
@@ -397,6 +400,7 @@ impl PictureEditor {
     }
 }
 
+#[cfg(test)]
 impl Default for PictureEditor {
     fn default() -> Self {
         Self::new()
