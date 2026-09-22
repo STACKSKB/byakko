@@ -1301,22 +1301,27 @@ pub fn apply_keymaps(
                 // A failed setter may have changed either map. Read both maps
                 // before recovery, restore Fn first, then reread both maps
                 // because those Fn writes might also have affected base.
-                let observed = snapshot_unlocked().ok();
-                for slot in 0..126 {
-                    if observed
-                        .as_ref()
-                        .is_none_or(|s| s.function[slot] != current.function[slot])
-                    {
-                        write_binding(&device, true, 0, slot, current.function[slot])?;
-                    }
-                }
-                let observed = snapshot_unlocked().ok();
-                for slot in 0..126 {
-                    if observed
-                        .as_ref()
-                        .is_none_or(|s| s.base[slot] != current.base[slot])
-                    {
-                        write_binding(&device, false, current.profile, slot, current.base[slot])?;
+                for (is_fn, profile, attempted, original) in [
+                    (true, 0, function, current.function.as_slice()),
+                    (false, current.profile, base, current.base.as_slice()),
+                ] {
+                    let observed = snapshot_unlocked().ok();
+                    let observed_map = observed.as_ref().map(|snapshot| {
+                        if is_fn {
+                            snapshot.function.as_slice()
+                        } else {
+                            snapshot.base.as_slice()
+                        }
+                    });
+                    // Without a trustworthy read, restore only planned changes.
+                    // Complete readback below must still prove restoration.
+                    let slots = crate::recovery_keymaps::slots_to_restore(
+                        observed_map,
+                        attempted,
+                        original,
+                    )?;
+                    for slot in slots {
+                        write_binding(&device, is_fn, profile, slot, original[slot])?;
                     }
                 }
                 if snapshot_unlocked()? != current {
