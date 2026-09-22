@@ -1,0 +1,4 @@
+# Byakko: observed Nia87 USB configuration collection only.
+# Install the native descriptor helper first. No match means no access grant.
+# Run before systemd's seat ACL processing; no global MODE=0666 permission.
+ACTION=="add|change", SUBSYSTEM=="hidraw", KERNEL=="hidraw*", ATTRS{idVendor}=="3151", ATTRS{idProduct}=="4015", PROGRAM=="/usr/local/libexec/byakko-hidraw-access %k", RESULT=="nia87-config", TAG+="uaccess"
