@@ -3,7 +3,9 @@ mod configuration;
 mod transport;
 
 use crate::hid::HidDevice;
-use apply_error::{detailed, keymap_apply_error, lighting_apply_error, macro_apply_error};
+use apply_error::{
+    detailed, keymap_apply_error, lighting_apply_error, macro_apply_error, picture_apply_error,
+};
 use serde::{Deserialize, Serialize};
 
 pub use configuration::{apply_configuration, capture_configuration};
@@ -590,17 +592,18 @@ pub fn apply_picture(
                 }
                 Ok(())
             })();
-            Err(format!(
-                "Picture apply failed: {error}; restore: {}; backup {}",
-                match restore {
-                    Ok(()) => "verified".into(),
-                    Err(e) => e.to_string(),
-                },
-                path.display()
-            )
-            .into())
+            Err(picture_apply_error(&error, restore, &path).into())
         }
     }
+}
+
+/// The guarded picture transaction with an explicit recovery result.
+pub fn apply_picture_detailed(
+    expected: &[[u8; 3]],
+    desired: &[[u8; 3]],
+    backup_dir: &std::path::Path,
+) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
+    detailed(apply_picture(expected, desired, backup_dir))
 }
 
 fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
@@ -902,6 +905,22 @@ mod lighting_tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("reserved padding"));
+    }
+
+    #[test]
+    fn reserved_picture_slots_are_rejected_before_device_access() {
+        use byakko_core::session::Recovery;
+        let expected = vec![[0; 3]; 128];
+        let mut desired = expected.clone();
+        desired[126] = [1, 2, 3];
+        let failure = super::apply_picture_detailed(
+            &expected,
+            &desired,
+            std::path::Path::new("unused-backup-path"),
+        )
+        .unwrap_err();
+        assert_eq!(failure.recovery, Recovery::NotAttempted);
+        assert!(failure.message.contains("reserved-slot"));
     }
 
     #[test]

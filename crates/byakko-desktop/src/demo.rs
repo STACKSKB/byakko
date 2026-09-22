@@ -209,9 +209,23 @@ pub fn device() -> Result<MemoryDevice, String> {
             &lighting, "steady",
         )?),
     };
+    let picture = byakko_core::picture::Capabilities {
+        backend_id: "memory".into(),
+        keys: vec!["Alpha".into(), "Fixed".into()],
+    };
+    let colors = std::collections::BTreeMap::from([
+        ("Alpha".into(), [12, 34, 56]),
+        ("Fixed".into(), [200, 10, 20]),
+    ]);
+    let picture_snapshot = byakko_core::picture::Snapshot {
+        backend_id: "memory".into(),
+        revision: vec![0xF1],
+        content: byakko_core::picture::Content::Editable(colors),
+    };
     MemoryDevice::new(descriptor, state)?
         .with_macros(capabilities, snapshots)?
-        .with_lighting(lighting, initial)
+        .with_lighting(lighting, initial)?
+        .with_picture(picture, picture_snapshot)
 }
 
 fn lighting_capabilities() -> byakko_core::lighting::Capabilities {

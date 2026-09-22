@@ -7,6 +7,7 @@ mod macro_files;
 mod macro_form;
 mod macro_view;
 mod panels;
+mod picture;
 mod recording;
 mod recording_input;
 #[cfg(test)]
@@ -24,6 +25,7 @@ use std::{sync::mpsc::TryRecvError, time::Duration};
 #[derive(Clone, Debug)]
 enum Message {
     Lighting(lighting::Message),
+    Picture(picture::Message),
     File(macro_files::Message),
     Record(recording::Message),
     Page(Page),
@@ -46,6 +48,7 @@ enum Page {
     Keys,
     Macros,
     Lighting,
+    Picture,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -57,6 +60,7 @@ enum Closing {
 
 struct Desktop {
     ui: panels::UiStyle,
+    picture_selected: Option<String>,
     macro_files: macro_files::Fields,
     clock: std::time::Instant,
     recording_options: recording::Options,
@@ -78,6 +82,7 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
         ui: panels::UiStyle::DEFAULT,
+        picture_selected: None,
         macro_files: Default::default(),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
@@ -165,6 +170,8 @@ impl Desktop {
                 | Activity::ApplyMacro { .. }
                 | Activity::ReadLighting { .. }
                 | Activity::ApplyLighting { .. }
+                | Activity::ReadPicture { .. }
+                | Activity::ApplyPicture { .. }
         ) {
             return Task::none();
         }
@@ -188,6 +195,10 @@ impl Desktop {
             completion,
             Completion::ReadLighting { .. } | Completion::ApplyLighting { .. }
         );
+        let picture_result = matches!(
+            completion,
+            Completion::ReadPicture { .. } | Completion::ApplyPicture { .. }
+        );
         let macro_result = matches!(
             completion,
             Completion::ReadMacro { .. } | Completion::ApplyMacro { .. }
@@ -195,7 +206,11 @@ impl Desktop {
         if self.session.accept(completion) == Acceptance::IgnoredStale {
             return Task::none();
         }
-        let verified = if lighting_result {
+        let verified = if picture_result {
+            self.session.picture().is_some_and(|editor| {
+                *editor.status() == byakko_core::picture::editor::Status::Ready
+            })
+        } else if lighting_result {
             self.session.lighting().is_some_and(|editor| {
                 *editor.status() == byakko_core::lighting::editor::Status::Ready
             })
@@ -249,6 +264,7 @@ impl Desktop {
         }
         match message {
             Message::Lighting(message) => self.update_lighting(message),
+            Message::Picture(message) => self.update_picture(message),
             Message::File(message) => return self.update_macro_files(message),
             Message::Record(message) => self.update_recording(message),
             Message::Page(page) => self.page = page,

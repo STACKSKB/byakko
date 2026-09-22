@@ -6,6 +6,7 @@ use iced::{
 };
 use std::ops::RangeInclusive;
 
+#[derive(Clone)]
 pub struct Choice<Message> {
     pub label: String,
     pub selected: bool,

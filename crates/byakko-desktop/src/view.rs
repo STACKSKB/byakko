@@ -34,6 +34,14 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
             Some(Message::Page(Page::Lighting)),
         ));
     }
+    if app.session.picture().is_some() {
+        navigation = navigation.push(panels::selectable_button(
+            &app.ui,
+            "Per-key colors",
+            app.page == Page::Picture,
+            Some(Message::Page(Page::Picture)),
+        ));
+    }
     let mut content = column![
         text(&app.session.descriptor().device_name).size(app.ui.type_scale.page_title),
         navigation
@@ -58,6 +66,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
         Page::Keys => keymap(app),
         Page::Macros => super::macro_view::view(app),
         Page::Lighting => super::lighting::view(app),
+        Page::Picture => super::picture::view(app),
     });
     container(content)
         .padding(app.ui.spacing.page_padding)
@@ -251,10 +260,16 @@ pub(super) fn status(app: &Desktop) -> String {
     match app.session.activity() {
         Activity::MacroFile { .. } => return "Working with a local macro file…".into(),
         Activity::Recording { .. } => return "Recording into the local draft…".into(),
-        Activity::Read { .. } | Activity::ReadMacro { .. } | Activity::ReadLighting { .. } => {
+        Activity::Read { .. }
+        | Activity::ReadMacro { .. }
+        | Activity::ReadLighting { .. }
+        | Activity::ReadPicture { .. } => {
             return "Reading device…".into();
         }
-        Activity::Apply { .. } | Activity::ApplyMacro { .. } | Activity::ApplyLighting { .. } => {
+        Activity::Apply { .. }
+        | Activity::ApplyMacro { .. }
+        | Activity::ApplyLighting { .. }
+        | Activity::ApplyPicture { .. } => {
             return "Backing up, applying and verifying…".into();
         }
         Activity::Idle => {}

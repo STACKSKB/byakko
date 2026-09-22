@@ -2,7 +2,7 @@
 
 use crate::Device;
 use byakko_core::{
-    Change, Descriptor, State, lighting, macros,
+    Change, Descriptor, State, lighting, macros, picture,
     session::{ApplyFailure, Recovery},
     validate_changes, validate_state,
 };
@@ -29,6 +29,7 @@ pub struct MemoryDevice {
     revision_number: u64,
     macros: Option<MacroStorage>,
     lighting: Option<StoredLighting>,
+    picture: Option<StoredPicture>,
 }
 
 struct StoredLighting {
@@ -36,6 +37,13 @@ struct StoredLighting {
     initial_revision: Vec<u8>,
     revision_number: u64,
     snapshot: lighting::Snapshot,
+}
+
+struct StoredPicture {
+    capabilities: picture::Capabilities,
+    initial_revision: Vec<u8>,
+    revision_number: u64,
+    snapshot: picture::Snapshot,
 }
 
 impl MemoryDevice {
@@ -48,6 +56,7 @@ impl MemoryDevice {
             revision_number: 0,
             macros: None,
             lighting: None,
+            picture: None,
         })
     }
 
@@ -128,6 +137,29 @@ impl MemoryDevice {
 
     pub fn macro_capabilities(&self) -> Option<&macros::Capabilities> {
         self.macros.as_ref().map(|storage| &storage.capabilities)
+    }
+
+    pub fn with_picture(
+        mut self,
+        capabilities: picture::Capabilities,
+        snapshot: picture::Snapshot,
+    ) -> Result<Self, String> {
+        if self.picture.is_some() {
+            return Err("Memory device picture is already configured".into());
+        }
+        picture::validate_capabilities(&capabilities, &self.descriptor)?;
+        picture::validate_snapshot(&capabilities, &snapshot)?;
+        self.picture = Some(StoredPicture {
+            capabilities,
+            initial_revision: snapshot.revision.clone(),
+            revision_number: 0,
+            snapshot,
+        });
+        Ok(self)
+    }
+
+    pub fn picture_capabilities(&self) -> Option<&picture::Capabilities> {
+        self.picture.as_ref().map(|stored| &stored.capabilities)
     }
 }
 
@@ -253,6 +285,51 @@ impl Device for MemoryDevice {
         next.revision = stored.initial_revision.clone();
         next.revision.extend_from_slice(&next_number.to_be_bytes());
         next.content = lighting::Content::Editable(desired.clone());
+        stored.snapshot = next.clone();
+        stored.revision_number = next_number;
+        Ok(next)
+    }
+
+    fn read_picture(&mut self) -> Result<picture::Snapshot, String> {
+        self.picture
+            .as_ref()
+            .map(|stored| stored.snapshot.clone())
+            .ok_or_else(|| "Picture operations are unsupported by this device".into())
+    }
+
+    fn apply_picture(
+        &mut self,
+        expected: &picture::Snapshot,
+        desired: &BTreeMap<String, [u8; 3]>,
+        _backup_dir: &Path,
+    ) -> Result<picture::Snapshot, ApplyFailure> {
+        let reject = |message| ApplyFailure {
+            message,
+            recovery: Recovery::NotAttempted,
+        };
+        let stored = self
+            .picture
+            .as_mut()
+            .ok_or_else(|| reject("Picture operations are unsupported by this device".into()))?;
+        if &stored.snapshot != expected {
+            return Err(reject("Stale expected picture snapshot".into()));
+        }
+        if !matches!(stored.snapshot.content, picture::Content::Editable(_)) {
+            return Err(reject("Opaque picture cannot be edited".into()));
+        }
+        let next_content = picture::Content::Editable(desired.clone());
+        let candidate = picture::Snapshot {
+            content: next_content,
+            ..stored.snapshot.clone()
+        };
+        picture::validate_snapshot(&stored.capabilities, &candidate).map_err(reject)?;
+        let next_number = stored
+            .revision_number
+            .checked_add(1)
+            .ok_or_else(|| reject("Memory picture revision exhausted".into()))?;
+        let mut next = candidate;
+        next.revision = stored.initial_revision.clone();
+        next.revision.extend_from_slice(&next_number.to_be_bytes());
         stored.snapshot = next.clone();
         stored.revision_number = next_number;
         Ok(next)
@@ -655,5 +732,123 @@ mod tests {
                 .is_err()
         );
         assert_eq!(device.read_lighting().unwrap(), opaque);
+    }
+
+    #[test]
+    fn picture_conflict_and_invalid_color_map_leave_snapshot_unchanged() {
+        let (descriptor, state) = fixture();
+        let caps = picture::Capabilities {
+            backend_id: "memory".into(),
+            keys: vec!["editable".into()],
+        };
+        let initial = picture::Snapshot {
+            backend_id: "memory".into(),
+            revision: vec![0x12, 0x34],
+            content: picture::Content::Editable(BTreeMap::from([("editable".into(), [1, 2, 3])])),
+        };
+        let mut device = MemoryDevice::new(descriptor.clone(), state.clone())
+            .unwrap()
+            .with_picture(caps.clone(), initial.clone())
+            .unwrap();
+        let mut stale = initial.clone();
+        stale.revision.push(0xff);
+        let desired = BTreeMap::from([("editable".into(), [4, 5, 6])]);
+        assert!(
+            device
+                .apply_picture(&stale, &desired, Path::new("ignored"))
+                .is_err()
+        );
+        let missing = BTreeMap::new();
+        assert!(
+            device
+                .apply_picture(&initial, &missing, Path::new("ignored"))
+                .is_err()
+        );
+        assert_eq!(device.read_picture().unwrap(), initial);
+        let next = device
+            .apply_picture(&initial, &desired, Path::new("ignored"))
+            .unwrap();
+        assert_eq!(next.content, picture::Content::Editable(desired));
+        assert_eq!(next.revision.len(), initial.revision.len() + 8);
+        assert!(
+            device
+                .apply_picture(
+                    &initial,
+                    &BTreeMap::from([("editable".into(), [7, 8, 9])]),
+                    Path::new("ignored")
+                )
+                .is_err()
+        );
+
+        let opaque = picture::Snapshot {
+            content: picture::Content::Opaque {
+                reason: "unknown".into(),
+            },
+            ..initial.clone()
+        };
+        let mut opaque_device = MemoryDevice::new(descriptor, state)
+            .unwrap()
+            .with_picture(caps, opaque.clone())
+            .unwrap();
+        assert!(
+            opaque_device
+                .apply_picture(
+                    &opaque,
+                    &BTreeMap::from([("editable".into(), [0; 3])]),
+                    Path::new("ignored")
+                )
+                .is_err()
+        );
+        assert_eq!(opaque_device.read_picture().unwrap(), opaque);
+    }
+
+    #[test]
+    fn picture_commands_run_through_the_serial_executor() {
+        use byakko_core::session::{Acceptance, Session};
+        use std::time::Duration;
+        let (descriptor, state) = fixture();
+        let caps = picture::Capabilities {
+            backend_id: "memory".into(),
+            keys: vec!["editable".into()],
+        };
+        let snapshot = picture::Snapshot {
+            backend_id: "memory".into(),
+            revision: vec![8],
+            content: picture::Content::Editable(BTreeMap::from([("editable".into(), [1, 2, 3])])),
+        };
+        let device = MemoryDevice::new(descriptor.clone(), state)
+            .unwrap()
+            .with_picture(caps.clone(), snapshot)
+            .unwrap();
+        let mut session = Session::new(descriptor)
+            .unwrap()
+            .with_picture(caps)
+            .unwrap();
+        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
+        worker.set_generation(session.connect().unwrap());
+        let read = session.request_picture_read().unwrap();
+        worker.try_submit(read).unwrap();
+        let completion = worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(session.accept(completion), Acceptance::Accepted);
+        session
+            .edit_picture(picture::Edit::Color {
+                key: "editable".into(),
+                color: [4, 5, 6],
+            })
+            .unwrap();
+        let apply = session.request_picture_apply().unwrap();
+        worker.try_submit(apply).unwrap();
+        let completion = worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(session.accept(completion), Acceptance::Accepted);
+        assert_eq!(
+            session.picture().unwrap().draft().unwrap()["editable"],
+            [4, 5, 6]
+        );
     }
 }
