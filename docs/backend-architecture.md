@@ -30,6 +30,30 @@ The session model is initially tested independently. Connecting it to the Nia87
 executor and Iced view is the next migration step; the legacy controllers are
 not yet replaced. The three-package target remains core, devices and desktop.
 
+`crates/byakko-devices` now provides the serialized native executor and a small
+`KeymapDevice` effect contract. It depends only on core. The current Nia87
+adapter implements that contract using the existing guarded transaction;
+firmware implementation files still reside in the legacy package during this
+bridge step. The executor owns the adapter on one thread. Existing Nia87
+transactions still open/close their established handles under the process lock;
+this is not yet a persistent physical device session or multi-device discovery.
+
+Both command and completion queues are bounded. The owner publishes the core's
+connection generation before submitting commands and publishes zero on
+disconnect. The worker rejects old-generation/duplicate commands before I/O,
+independently of core's stale-completion checks. A generation change cannot
+cancel a transaction that has already started. The UI must wait for completion
+before closing; dropping a worker is not a rollback policy. Queue rejection
+returns a correlated completion to feed into core, rather than leaving a pending
+operation stranded. These rules apply equally to a future service adapter.
+
+Nia87 keymap apply now exposes a typed recovery result while retaining its old
+diagnostic/API for the research app. Preflight failure reports NotAttempted;
+post-write failures carry the actual Verified/Failed rollback result. Executor
+panics report Unverified. No recovery decision parses a display string. Existing
+write order, delays, backup and full readback remain unchanged; hardware fault
+recovery has not been reaccepted on the strength of these structural changes.
+
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 
 ## Implemented first slice

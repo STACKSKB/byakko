@@ -701,6 +701,56 @@ fn write_binding(
     Ok(())
 }
 
+#[derive(Debug)]
+struct KeymapApplyError(byakko_core::session::ApplyFailure);
+
+impl std::fmt::Display for KeymapApplyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0.message)
+    }
+}
+
+impl std::error::Error for KeymapApplyError {}
+
+fn keymap_apply_error(
+    error: &dyn std::fmt::Display,
+    rollback: Result<()>,
+    backup_path: &std::path::Path,
+) -> KeymapApplyError {
+    use byakko_core::session::{ApplyFailure, Recovery};
+    let (recovery, restore_message) = match rollback {
+        Ok(()) => (Recovery::Verified, "original keymaps verified".to_owned()),
+        Err(error) => (Recovery::Failed, format!("FAILED: {error}")),
+    };
+    KeymapApplyError(ApplyFailure {
+        message: format!(
+            "Apply failed: {error}. Restore result: {restore_message}. Backup: {}",
+            backup_path.display()
+        ),
+        recovery,
+    })
+}
+
+/// The same guarded transaction as `apply_keymaps`, with a typed recovery
+/// outcome for callers that must distinguish verified restore from failure.
+pub fn apply_keymaps_detailed(
+    expected: &Snapshot,
+    base: &[[u8; 4]],
+    function: &[[u8; 4]],
+    backup_dir: &std::path::Path,
+) -> std::result::Result<Snapshot, byakko_core::session::ApplyFailure> {
+    use byakko_core::session::{ApplyFailure, Recovery};
+    apply_keymaps(expected, base, function, backup_dir).map_err(|error| {
+        error
+            .downcast_ref::<KeymapApplyError>()
+            .map(|typed| typed.0.clone())
+            .unwrap_or_else(|| ApplyFailure {
+                message: error.to_string(),
+                recovery: Recovery::NotAttempted,
+            })
+    })
+}
+
 pub fn apply_keymaps(
     expected: &Snapshot,
     base: &[[u8; 4]],
@@ -837,15 +887,7 @@ pub fn apply_keymaps(
                 }
                 Ok(())
             })();
-            Err(format!(
-                "Apply failed: {error}. Restore result: {}. Backup: {}",
-                match rollback {
-                    Ok(()) => "original keymaps verified".to_owned(),
-                    Err(e) => format!("FAILED: {e}"),
-                },
-                path.display()
-            )
-            .into())
+            Err(keymap_apply_error(error.as_ref(), rollback, &path).into())
         }
     }
 }
@@ -888,6 +930,58 @@ mod lighting_tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("reserved padding"));
+    }
+
+    #[test]
+    fn detailed_keymap_preflight_errors_have_no_recovery_attempt() {
+        use byakko_core::session::Recovery;
+        let expected = super::Snapshot {
+            format_version: 1,
+            firmware: 0x0100,
+            profile: 0,
+            base: vec![[0; 4]; 128],
+            function: vec![[0; 4]; 128],
+        };
+        let short = vec![[0; 4]; 127];
+        let failure = super::apply_keymaps_detailed(
+            &expected,
+            &short,
+            &expected.function,
+            std::path::Path::new("unused-backup-path"),
+        )
+        .unwrap_err();
+        assert_eq!(failure.recovery, Recovery::NotAttempted);
+        assert!(failure.message.contains("Invalid keymap shape"));
+        let mut reserved = expected.base.clone();
+        reserved[127] = [1; 4];
+        let failure = super::apply_keymaps_detailed(
+            &expected,
+            &reserved,
+            &expected.function,
+            std::path::Path::new("unused-backup-path"),
+        )
+        .unwrap_err();
+        assert_eq!(failure.recovery, Recovery::NotAttempted);
+        assert!(failure.message.contains("reserved padding"));
+    }
+
+    #[test]
+    fn keymap_rollback_error_preserves_diagnostic_and_typed_outcome() {
+        use byakko_core::session::Recovery;
+        let backup = std::path::Path::new("backup.json");
+        let verified = super::keymap_apply_error(&"write failed", Ok(()), backup);
+        assert_eq!(verified.0.recovery, Recovery::Verified);
+        assert_eq!(
+            verified.to_string(),
+            "Apply failed: write failed. Restore result: original keymaps verified. Backup: backup.json"
+        );
+        let failed =
+            super::keymap_apply_error(&"readback mismatch", Err("restore failed".into()), backup);
+        assert_eq!(failed.0.recovery, Recovery::Failed);
+        assert_eq!(
+            failed.to_string(),
+            "Apply failed: readback mismatch. Restore result: FAILED: restore failed. Backup: backup.json"
+        );
     }
 
     use super::*;

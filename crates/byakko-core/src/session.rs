@@ -39,6 +39,8 @@ pub enum Recovery {
     Verified,
     Failed,
     NotAttempted,
+    /// The executor could not establish whether recovery ran or succeeded.
+    Unverified,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
