@@ -6,7 +6,7 @@ use std::{
         Arc,
         mpsc::{self, Receiver, Sender},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
@@ -101,6 +101,7 @@ struct Workbench {
     rx: Receiver<WorkerResult>,
     backup_dir: PathBuf,
     keymap_editor: KeymapEditor,
+    retry_schedule: crate::discovery::RetrySchedule,
 }
 
 impl Workbench {
@@ -144,6 +145,7 @@ impl Workbench {
             rx,
             keymap_editor: KeymapEditor::new(Arc::new(Nia87Adapter), backup_dir.clone()),
             backup_dir,
+            retry_schedule: crate::discovery::RetrySchedule::new(),
         }
     }
 
@@ -152,6 +154,7 @@ impl Workbench {
             return;
         }
         self.busy = true;
+        self.retry_schedule.started();
         self.reviewed_archive = None;
         self.archive_apply_running = false;
         self.error = false;
@@ -159,7 +162,12 @@ impl Workbench {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = device::snapshot().map_err(|error| error.to_string());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let snapshot = device::snapshot().map_err(|error| error.to_string())?;
+                backend::nia87::from_snapshot(&snapshot)?;
+                Ok(snapshot)
+            }))
+            .unwrap_or_else(|_| Err("Device read failed unexpectedly.".into()));
             let _ = tx.send(WorkerResult::Read(result));
             ctx.request_repaint();
         });
@@ -385,6 +393,7 @@ impl Workbench {
             match message {
                 WorkerResult::Read(Ok(snapshot)) => {
                     self.busy = false;
+                    self.retry_schedule.succeeded();
                     self.load(snapshot);
                     self.status =
                         "Device read complete. Select a key to inspect its binding.".into();
@@ -399,7 +408,19 @@ impl Workbench {
                     );
                     self.error = false;
                 }
-                WorkerResult::Read(Err(error)) | WorkerResult::Applied(Err(error)) => {
+                WorkerResult::Read(Err(error)) => {
+                    self.busy = false;
+                    if self.observed.is_none() {
+                        self.retry_schedule.failed(Instant::now());
+                        self.status = format!(
+                            "{error} Waiting for a supported keyboard; retrying automatically."
+                        );
+                    } else {
+                        self.status = error;
+                    }
+                    self.error = true;
+                }
+                WorkerResult::Applied(Err(error)) => {
                     self.busy = false;
                     self.status = error;
                     self.error = true;
@@ -471,6 +492,30 @@ impl Workbench {
                     self.error = true;
                 }
             }
+        }
+    }
+
+    fn maybe_retry_read(&mut self, ctx: &egui::Context) {
+        if self.observed.is_none()
+            && !self.device_busy()
+            && self.dirty_count() == 0
+            && self.keymap_editor.dirty_count() == 0
+            && self.retry_schedule.due(Instant::now())
+        {
+            self.status = "Retrying initial device discovery…".into();
+            self.start_read(ctx);
+        }
+        if self.observed.is_none()
+            && !self.device_busy()
+            && self.dirty_count() == 0
+            && self.keymap_editor.dirty_count() == 0
+            && let Some(deadline) = self.retry_schedule.deadline()
+        {
+            let now = Instant::now();
+            let delay = deadline
+                .saturating_duration_since(now)
+                .max(Duration::from_secs(1));
+            ctx.request_repaint_after(delay);
         }
     }
 
@@ -1322,6 +1367,7 @@ impl eframe::App for Workbench {
         self.macro_editor.handle_close(ui.ctx());
         self.lighting_editor.handle_close(ui.ctx());
         self.poll_worker();
+        self.maybe_retry_read(ui.ctx());
         if !self.device_busy() && self.keymap_editor.dirty_count() == 0 {
             for (key, tab) in [
                 (egui::Key::Num1, WorkbenchTab::Keys),
@@ -1587,6 +1633,43 @@ mod tests {
         app.revert();
         assert_eq!(app.dirty_count(), 0);
         assert_eq!(app.keymap_editor.dirty_count(), 0);
+    }
+
+    #[test]
+    fn initial_read_failure_schedules_bounded_retry() {
+        let mut app = Workbench::without_read();
+        app.tx
+            .send(WorkerResult::Read(Err("keyboard unavailable".into())))
+            .unwrap();
+        app.poll_worker();
+        assert!(app.retry_schedule.deadline().is_some());
+    }
+
+    #[test]
+    fn successful_initial_read_clears_retry_schedule() {
+        let mut app = Workbench::without_read();
+        app.retry_schedule.failed(Instant::now());
+        app.tx.send(WorkerResult::Read(Ok(snapshot(0)))).unwrap();
+        app.poll_worker();
+        assert!(app.observed.is_some());
+        assert!(app.retry_schedule.deadline().is_none());
+    }
+
+    #[test]
+    fn observed_read_error_and_apply_error_do_not_schedule_retry() {
+        let mut app = Workbench::without_read();
+        app.load(snapshot(0));
+        app.tx
+            .send(WorkerResult::Read(Err("transient read error".into())))
+            .unwrap();
+        app.poll_worker();
+        assert!(app.retry_schedule.deadline().is_none());
+        app.observed = None;
+        app.tx
+            .send(WorkerResult::Applied(Err("write failed".into())))
+            .unwrap();
+        app.poll_worker();
+        assert!(app.retry_schedule.deadline().is_none());
     }
 }
 

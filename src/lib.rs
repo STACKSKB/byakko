@@ -9,6 +9,7 @@ pub mod board;
 pub mod configuration;
 pub mod configuration_plan;
 pub mod device;
+pub mod discovery;
 pub mod hid;
 pub mod host_lighting;
 #[cfg(feature = "gui")]
