@@ -7,6 +7,7 @@ use byakko_core::macros::Edit;
 
 #[derive(Clone, Debug)]
 pub(super) enum Message {
+    Bind(String),
     Select(String),
     Read,
     Apply,
@@ -36,6 +37,18 @@ impl Desktop {
         }
         self.notice = None;
         match message {
+            Message::Bind(binding) => {
+                self.notice = match self.selected.as_deref() {
+                    Some(key) => self
+                        .session
+                        .stage_macro_binding(&self.layer, key, &binding)
+                        .err(),
+                    None => Some("Select a writable key on the Keys page first".into()),
+                };
+                if self.notice.is_none() {
+                    self.page = super::Page::Keys;
+                }
+            }
             Message::Select(slot) => {
                 let changed = self
                     .session

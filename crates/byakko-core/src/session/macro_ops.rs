@@ -1,6 +1,9 @@
 //! Macro-facing session operations. The parent owns the one operation sequence.
 use super::{Activity, Command, Problem, Session, Status};
-use crate::macros::{Capabilities, Edit, editor::Editor};
+use crate::{
+    Change,
+    macros::{Capabilities, Edit, editor::Editor},
+};
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +40,25 @@ impl Session {
             return Err("Device is disconnected".into());
         }
         self.macro_editor()?.edit(edit)
+    }
+
+    pub fn stage_macro_binding(
+        &mut self,
+        layer: &str,
+        key: &str,
+        binding: &str,
+    ) -> Result<(), String> {
+        self.require_idle()?;
+        let action = self
+            .macros
+            .as_ref()
+            .ok_or("Device does not support macro editing")?
+            .binding_action(binding)?;
+        self.stage(Change {
+            layer: layer.into(),
+            key: key.into(),
+            action,
+        })
     }
 
     pub fn revert_macro(&mut self) -> Result<(), String> {

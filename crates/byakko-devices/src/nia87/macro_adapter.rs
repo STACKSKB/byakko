@@ -1,7 +1,10 @@
 //! Translation between portable macro values and the Nia87 simple macro store.
-use crate::nia87::{device, macros as native};
+use crate::nia87::{actions, device, macros as native};
 use byakko_core::{
-    macros::{self, Action, ButtonChoice, Capabilities, Choice, Content, Event, Program, Snapshot},
+    macros::{
+        self, Action, Binding, ButtonChoice, Capabilities, Choice, Content, Event, Program,
+        Snapshot,
+    },
     session::{ApplyFailure, Recovery},
 };
 use std::path::Path;
@@ -31,6 +34,41 @@ fn slot_number(slot: &str) -> Result<u8, String> {
 
 pub fn capabilities() -> Capabilities {
     Capabilities {
+        bindings: (0..50)
+            .flat_map(|slot| {
+                [
+                    (
+                        "counted",
+                        "Play stored count",
+                        actions::MACRO_MODE_REPEAT_TIMES,
+                        None,
+                    ),
+                    (
+                        "toggle",
+                        "Toggle playback",
+                        actions::MACRO_MODE_ON_OFF,
+                        Some(1),
+                    ),
+                    (
+                        "hold",
+                        "Repeat while held",
+                        actions::MACRO_MODE_TOUCH_REPEAT,
+                        Some(1),
+                    ),
+                ]
+                .into_iter()
+                .map(move |(id, label, mode, required_repeat_count)| Binding {
+                    slot: slot_id(slot),
+                    id: id.into(),
+                    label: label.into(),
+                    action: byakko_core::Action::Macro {
+                        slot: slot.into(),
+                        mode,
+                    },
+                    required_repeat_count,
+                })
+            })
+            .collect(),
         backend_id: BACKEND_ID.into(),
         slots: (0..50)
             .map(|slot| Choice {
@@ -222,6 +260,29 @@ pub fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binding_capabilities_retain_wire_modes_and_explicit_count_policy() {
+        let caps = capabilities();
+        macros::validate_capabilities(&caps).unwrap();
+        assert_eq!(caps.bindings.len(), 150);
+        for (slot, id, raw, required) in [
+            ("slot-00", "counted", [9, 0, 0, 0], None),
+            ("slot-00", "toggle", [9, 1, 0, 0], Some(1)),
+            ("slot-49", "hold", [9, 2, 49, 0], Some(1)),
+        ] {
+            let binding = caps
+                .bindings
+                .iter()
+                .find(|b| b.slot == slot && b.id == id)
+                .unwrap();
+            assert_eq!(
+                crate::nia87::adapter::raw_from_action(&binding.action).unwrap(),
+                raw
+            );
+            assert_eq!(binding.required_repeat_count, required);
+        }
+    }
 
     fn empty() -> Snapshot {
         from_bytes("slot-49", &[0; 256]).unwrap()

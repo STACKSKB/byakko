@@ -45,6 +45,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
     ]
     .spacing(10);
     let mut content = column![toolbar, text(status(app, editor))].spacing(10);
+    content = content.push(super::macro_binding_view::view(app, editor));
     if let Some(snapshot) = editor.baseline()
         && let Content::Opaque { reason } = &snapshot.content
     {

@@ -54,6 +54,15 @@ pub struct ButtonChoice {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Binding {
+    pub slot: String,
+    pub id: String,
+    pub label: String,
+    pub action: crate::Action,
+    pub required_repeat_count: Option<u32>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
     pub backend_id: String,
     pub slots: Vec<Choice>,
@@ -63,6 +72,8 @@ pub struct Capabilities {
     pub buttons: Vec<ButtonChoice>,
     pub movement: Option<RangeInclusive<i32>>,
     pub backend_actions: Vec<Choice>,
+    #[serde(default)]
+    pub bindings: Vec<Binding>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -135,6 +146,24 @@ pub fn validate_capabilities(capabilities: &Capabilities) -> Result<(), String> 
         .collect();
     if buttons.len() != capabilities.buttons.len() || buttons.contains(&0) {
         return Err("Invalid macro pointer button capabilities".into());
+    }
+    let slots: BTreeSet<_> = capabilities
+        .slots
+        .iter()
+        .map(|slot| slot.id.as_str())
+        .collect();
+    let mut bindings = BTreeSet::new();
+    for binding in &capabilities.bindings {
+        if !slots.contains(binding.slot.as_str())
+            || binding.id.is_empty()
+            || binding.label.is_empty()
+            || binding
+                .required_repeat_count
+                .is_some_and(|count| !capabilities.repeat_counts.contains(&count))
+            || !bindings.insert((binding.slot.as_str(), binding.id.as_str()))
+        {
+            return Err("Invalid macro binding capabilities".into());
+        }
     }
     Ok(())
 }
