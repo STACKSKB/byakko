@@ -3,7 +3,11 @@
 
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender},
+    },
 };
 
 use eframe::egui::{self, Color32, RichText};
@@ -21,6 +25,7 @@ const ACCENT: Color32 = Color32::from_rgb(199, 91, 45);
 enum WorkerResult {
     Read(Result<Lighting, String>),
     Applied(Result<Lighting, String>),
+    StreamStopped(Result<Lighting, String>),
 }
 
 pub struct LightingEditor {
@@ -35,6 +40,8 @@ pub struct LightingEditor {
     first_read_started: bool,
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
+    stream_stop: Option<Arc<AtomicBool>>,
+    closing: bool,
 }
 
 impl LightingEditor {
@@ -54,11 +61,52 @@ impl LightingEditor {
             first_read_started: false,
             tx,
             rx,
+            stream_stop: None,
+            closing: false,
         }
     }
 
     pub fn busy(&self) -> bool {
         self.busy
+    }
+
+    fn start_screen(&mut self, ctx: &egui::Context) {
+        if self.busy || !self.trusted {
+            return;
+        }
+        let Some(expected) = self.observed.clone() else {
+            return;
+        };
+        let stop = Arc::new(AtomicBool::new(false));
+        self.stream_stop = Some(stop.clone());
+        self.busy = true;
+        self.set_status(
+            "Screen color active while this app is open. Stop restores the previous effect.",
+        );
+        let (tx, ctx, backups) = (self.tx.clone(), ctx.clone(), self.backup_dir.clone());
+        std::thread::spawn(move || {
+            let result =
+                crate::screen_stream::run(&expected, &backups, &stop).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerResult::StreamStopped(result));
+            ctx.request_repaint();
+        });
+    }
+
+    pub fn handle_close(&mut self, ctx: &egui::Context) {
+        if ctx.input(|input| input.viewport().close_requested()) && self.stream_stop.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.closing = true;
+            if let Some(stop) = &self.stream_stop {
+                stop.store(true, Ordering::Relaxed);
+            }
+            self.set_status(
+                "Stopping screen sampling and restoring saved lighting before closing…",
+            );
+        }
+        if self.closing && self.stream_stop.is_none() {
+            self.closing = false;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 
     fn dirty(&self) -> bool {
@@ -122,6 +170,22 @@ impl LightingEditor {
         while let Ok(message) = self.rx.try_recv() {
             self.busy = false;
             match message {
+                WorkerResult::StreamStopped(result) => {
+                    self.stream_stop = None;
+                    match result {
+                        Ok(observed) => {
+                            self.loaded = observed.recognized_setting();
+                            self.trusted = self.loaded.is_some();
+                            self.observed = Some(observed);
+                            self.set_status("Screen sampling stopped. Previous lighting effect restored and verified.");
+                        }
+                        Err(error) => {
+                            self.closing = false;
+                            self.trusted = false;
+                            self.set_error(error);
+                        }
+                    }
+                }
                 WorkerResult::Read(Ok(observed)) => {
                     let decoded = observed.recognized_setting();
                     self.trusted = decoded.is_some();
@@ -288,8 +352,20 @@ impl LightingEditor {
                     ui.add_space(8.0);
                     ui.label(RichText::new("DRAFT").small().strong().color(MUTED));
                     self.editor(ui, can_work && self.trusted);
-                    if self.draft.as_ref().is_some_and(|draft| matches!(draft.effect_id, 20..=22)) {
-                        ui.label(RichText::new("Music and screen streaming is not implemented yet. Apply stores the mode only; it does not start a live effect.").color(ACCENT));
+                    if self.draft.as_ref().is_some_and(|draft| matches!(draft.effect_id, 20 | 22)) {
+                        ui.label(RichText::new("Audio sampling is not implemented yet. Apply stores the music mode only.").color(ACCENT));
+                    }
+                    if self.draft.as_ref().is_some_and(|draft| draft.effect_id == 21) || self.stream_stop.is_some() {
+                        ui.label("Screen color samples the primary display locally. No images are saved or transmitted. Windows and X11; Wayland capture is pending.");
+                        ui.label("START temporarily selects screen mode; STOP restores the current device effect. Enable backlighting in Settings first.");
+                        if let Some(stop) = self.stream_stop.clone() {
+                            if ui.button("STOP SCREEN COLOR / RESTORE").clicked() {
+                                stop.store(true, Ordering::Relaxed);
+                                self.set_status("Stopping and restoring previous lighting…");
+                            }
+                        } else if ui.add_enabled(can_work && self.trusted, egui::Button::new("START SCREEN COLOR")).clicked() {
+                            self.start_screen(ui.ctx());
+                        }
                     }
                     ui.add_space(8.0);
                     if let (Some(loaded), Some(draft)) = (&self.loaded, &self.draft) {
@@ -333,6 +409,14 @@ impl LightingEditor {
 impl Default for LightingEditor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for LightingEditor {
+    fn drop(&mut self) {
+        if let Some(stop) = &self.stream_stop {
+            stop.store(true, Ordering::Relaxed);
+        }
     }
 }
 

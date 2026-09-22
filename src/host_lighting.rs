@@ -2,11 +2,11 @@
 //! These encode frames only; they do not sample audio or capture a screen.
 //! Wireless framing is deliberately separate and is not implemented here.
 
-/// A screen sample is one RGBA pixel. No image or user content is retained.
-pub fn screen_report(rgba: [u8; 4]) -> [u8; 64] {
+/// A screen sample is one RGB pixel, matching the captured Nia87 helper frame.
+pub fn screen_report(rgb: [u8; 3]) -> [u8; 64] {
     let mut report = [0; 64];
-    report[0] = 0x0f;
-    report[1..5].copy_from_slice(&rgba);
+    report[0] = 0x0e;
+    report[1..4].copy_from_slice(&rgb);
     bit7(&mut report);
     report
 }
@@ -15,7 +15,7 @@ pub fn screen_report(rgba: [u8; 4]) -> [u8; 64] {
 /// This is not the nibble-packed wireless format or an audio transform.
 pub fn music_report(intensities: [u8; 32]) -> [u8; 64] {
     let mut report = [0; 64];
-    report[0] = 0x0e;
+    report[0] = 0x0d;
     report[8..40].copy_from_slice(&intensities);
     bit7(&mut report);
     report
@@ -33,8 +33,8 @@ mod tests {
 
     #[test]
     fn screen_header_checksum_wraps_without_consuming_pixel_fields() {
-        let report = screen_report([8, 16, 24, 255]);
-        assert_eq!(&report[..8], &[0x0f, 8, 16, 24, 255, 0, 0, 0xc1]);
+        let report = screen_report([223, 223, 223]);
+        assert_eq!(&report[..8], &[0x0e, 223, 223, 223, 0, 0, 0, 0x54]);
         assert!(report[8..].iter().all(|byte| *byte == 0));
         assert_eq!(
             report[..8]
@@ -48,7 +48,7 @@ mod tests {
     fn music_preserves_all_32_bands_and_zero_pads_tail() {
         let bands = std::array::from_fn(|index| index as u8 * 8);
         let report = music_report(bands);
-        assert_eq!(&report[..8], &[0x0e, 0, 0, 0, 0, 0, 0, 0xf1]);
+        assert_eq!(&report[..8], &[0x0d, 0, 0, 0, 0, 0, 0, 0xf2]);
         assert_eq!(&report[8..40], &bands);
         assert!(report[40..].iter().all(|byte| *byte == 0));
     }

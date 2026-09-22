@@ -15,6 +15,8 @@ pub enum Setting {
     AutoOs(bool),
     /// Bluetooth/2.4 GHz normal timers followed by their deep-sleep timers.
     Sleep([u16; 4]),
+    /// Enabling also clears power-save, which otherwise suppresses lighting.
+    Backlight(bool),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -121,6 +123,22 @@ impl Settings {
         self.options_raw[4]
     }
 
+    pub fn backlight_enabled(&self) -> bool {
+        self.option_flags() & 0x10 == 0 && self.power_save_value() == 0
+    }
+
+    /// Prepare the expected reply while retaining every other option bit and byte.
+    pub fn with_backlight(&self, enabled: bool) -> Self {
+        let mut target = self.clone();
+        if enabled {
+            target.options_raw[2] &= !0x10;
+            target.options_raw[4] = 0;
+        } else {
+            target.options_raw[2] |= 0x10;
+        }
+        target
+    }
+
     pub fn raw_reply(&self, opcode: u8) -> Option<&[u8]> {
         match opcode {
             DEBOUNCE_READ => Some(&self.debounce_raw),
@@ -164,11 +182,27 @@ pub fn write_report(setting: Setting) -> Result<[u8; REPORT_LEN], String> {
                 report[8 + index * 2..10 + index * 2].copy_from_slice(&seconds.to_le_bytes());
             }
         }
+        Setting::Backlight(_) => {
+            return Err("backlight write requires the verified raw options reply".into());
+        }
     }
     let sum = report[..7]
         .iter()
         .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
     report[7] = 0xffu8.wrapping_sub(sum);
+    Ok(report)
+}
+
+/// Convert a verified raw options reply to the observed option-setter frame.
+/// Unknown bytes are retained, including bytes beyond the setter header.
+pub fn backlight_write_report(options_reply: &[u8]) -> Result<[u8; REPORT_LEN], String> {
+    check_reply(options_reply, OPTIONS_READ)?;
+    let mut report = [0u8; REPORT_LEN];
+    report.copy_from_slice(options_reply);
+    report[0] = 0x06;
+    report[7] = !report[..7]
+        .iter()
+        .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
     Ok(report)
 }
 
@@ -246,5 +280,36 @@ mod tests {
         ] {
             assert!(write_report(Setting::Sleep(values)).is_err());
         }
+    }
+
+    #[test]
+    fn backlight_setter_preserves_unknown_options_and_restores_exact_raw_state() {
+        let mut before = captured();
+        before.options_raw[2] = 0xb5; // Other option bits must survive either direction.
+        before.options_raw[3] = 0x83;
+        before.options_raw[4] = 7;
+        before.options_raw[5] = 0x5a;
+        let on = before.with_backlight(true);
+        assert_eq!(on.option_flags(), 0xa5);
+        assert_eq!(on.power_save_value(), 0);
+        assert_eq!(on.raw_reply(OPTIONS_READ).unwrap()[50], 0xab);
+        let write = backlight_write_report(on.raw_reply(OPTIONS_READ).unwrap()).unwrap();
+        assert_eq!(&write[..8], &[6, 0, 0xa5, 0x83, 0, 0x5a, 0, 0x77]);
+        assert_eq!(write[50], 0xab);
+        assert_eq!(
+            write[..7]
+                .iter()
+                .fold(0u8, |s, b| s.wrapping_add(*b))
+                .wrapping_add(write[7]),
+            0xff
+        );
+        let off = on.with_backlight(false);
+        assert_eq!(off.option_flags(), 0xb5);
+        assert_eq!(off.power_save_value(), 0);
+        let restore = backlight_write_report(before.raw_reply(OPTIONS_READ).unwrap()).unwrap();
+        assert_eq!(restore[2], 0xb5);
+        assert_eq!(restore[4], 7);
+        assert_eq!(restore[50], 0xab);
+        assert!(write_report(Setting::Backlight(true)).is_err());
     }
 }

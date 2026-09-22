@@ -1,5 +1,7 @@
 # Nia87 host frame protocol (static bundle trace)
 
+**Superseded:** the opcode and screen-transport conclusions below were disproved by live capture. See [the corrected inheritance trace](host-frame-correction.md) and [native visual verification](host-stream-live-verification.md). This historical record is retained to explain the failed first experiment; do not use its 0x0f/0x0e opcode pair for Nia87.
+
 Source: supplied current bundle `Research/extracted/web-current/main_68eaf5ce.js`, read as text only. These are wire-layout facts from the selected Nia87 inheritance path (`Emt` → `YHe` → base feature class); no device I/O or vendor code was copied into the product.
 
 ## Music follow on this selected path
