@@ -13,7 +13,14 @@ use std::{
     },
 };
 
+pub mod hid;
 pub mod memory;
+pub mod nia87;
+#[cfg(feature = "research-tools")]
+pub mod research_fault;
+#[cfg(feature = "research-tools")]
+pub mod research_trace;
+pub mod storage;
 
 /// Implementations must validate expected state, back up, write and verify.
 /// Success means verified device state, not merely successful transmission.

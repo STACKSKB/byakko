@@ -28,10 +28,10 @@ JavaScript or browser engine is introduced into the native application.
 
 The session model now drives the first Iced keymap screen in
 `crates/byakko-desktop`. Its library receives a descriptor and executor; only
-the binary composition root imports the temporary Nia87 bridge. Views own no
+the binary composition root selects the Nia87 backend. Views own no
 firmware representation, file paths, baseline copies or device workers. The
-three-package target remains core, devices and desktop; the legacy package is
-a temporary fourth dependency until the reviewed firmware modules move.
+desktop now depends only on core, devices and Iced. The legacy root package
+depends on devices for compatibility; it is not a desktop dependency.
 
 Startup reads automatically; selection, search, staging, change review, apply,
 verification, revert and explicit read/reconnect use the same core owner.
@@ -58,12 +58,24 @@ source-header review remain required. Core compiles independently for WASM;
 the native desktop is not a browser frontend.
 
 `crates/byakko-devices` now provides the serialized native executor and a small
-`KeymapDevice` effect contract. It depends only on core. The current Nia87
-adapter implements that contract using the existing guarded transaction;
-firmware implementation files still reside in the legacy package during this
-bridge step. The executor owns the adapter on one thread. Existing Nia87
+`KeymapDevice` effect contract. Nia87 codecs, mapping, transactions and archives
+live under `byakko-devices::nia87`; native HID, storage and feature-gated research
+instrumentation live in devices too. Its dependencies are core, Serde/JSON and
+target-specific OS bindings. Root compatibility modules re-export the same
+implementation, so research/legacy commands do not keep parallel copies. Old
+file paths are retained in accordance with the user's no-deletion instruction.
+The executor owns the adapter on one thread. Existing Nia87
 transactions still open/close their established handles under the process lock;
 this is not yet a persistent physical device session or multi-device discovery.
+
+Migration verification compared 22 implementation modules against the preceding
+source after namespace/rustfmt normalization. Existing tests moved with their
+implementations: the workspace still has 183 passing library tests. Native
+read-only acceptance through `examples/read_keymap.rs` issued the same owned
+core command used by Iced, received its correlated completion and reached Ready.
+Both complete 128-slot keymaps and identity matched the previously captured
+full-configuration baseline exactly. This does not cover writes, physical
+playback, the unresolved recovery fault or graphical interaction.
 
 Both command and completion queues are bounded. The owner publishes the core's
 connection generation before submitting commands and publishes zero on

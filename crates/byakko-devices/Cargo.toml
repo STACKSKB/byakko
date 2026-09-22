@@ -5,5 +5,20 @@ edition = "2024"
 publish = false
 description = "Serialized native device command executor for Byakko"
 
+[features]
+research-tools = []
+
+[[example]]
+name = "read_keymap"
+required-features = ["research-tools"]
+
 [dependencies]
 byakko-core = { path = "../byakko-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Devices_DeviceAndDriverInstallation", "Win32_Devices_HumanInterfaceDevice", "Win32_Storage_FileSystem", "Win32_Security"] }
