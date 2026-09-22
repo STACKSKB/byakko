@@ -20,6 +20,10 @@ required-features = ["research-tools"]
 name = "verify_macro_events"
 required-features = ["research-tools"]
 
+[[example]]
+name = "capture_configuration_trace"
+required-features = ["research-tools"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
