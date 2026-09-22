@@ -69,6 +69,13 @@ the backup, executes the plan and verifies readback. Unencodable recovery values
 are now rejected during preflight, before device reads. Valid transactions retain
 their report order and settling delays.
 
+Archive setting preflight reuses this planner. It additionally checks exact raw
+archive compatibility in both directions, including the stricter backlight
+constraint: a boolean toggle must reproduce the entire options reply. Unknown
+unchanged fields remain archival data. Editing an auto-OS byte other than 0 or 1
+is rejected before writes because a boolean setter cannot restore it exactly;
+editing unrelated settings continues to preserve that byte.
+
 ## Current frontend coupling
 
 | UI module | Device-specific assumptions in the frontend today |
