@@ -29,6 +29,19 @@ The [timing audit](../Research/macro-recorder-timing.md) explains the correction
 from the earlier recorder, which attached intervals one event late. Existing
 macro files are not rewritten automatically.
 
+## Implementation boundary
+
+`macro_recorder` owns deterministic timing, held-input tracking, duplicate
+suppression and encoded-capacity reservation. It receives timestamps explicitly
+and has no egui, device, file or clock access. Rejected transitions leave the
+draft and recorder state unchanged. Stop consumes the recording session and
+releases held inputs in reverse order.
+
+The editor owns the draft and lends it to the recorder while recording; other
+draft edits are disabled during that session. The UI translates physical input,
+handles capture focus and presents typed recorder outcomes. Macro device workers
+and file/label controls still live in `macro_ui` and remain separate cleanup work.
+
 ## Local macro files
 
 Import and export preserve the existing version-1 JSON format: slot, local

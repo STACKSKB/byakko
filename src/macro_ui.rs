@@ -10,6 +10,7 @@ use eframe::egui::{self, Color32, RichText};
 use crate::{
     device, layout,
     macro_file::{self, MacroFile},
+    macro_recorder::Recorder,
     macros::{self, Macro, MacroEvent},
 };
 
@@ -203,10 +204,8 @@ enum RowAction {
 }
 
 struct Recording {
-    last_at: f64,
-    last_event: Option<usize>,
+    core: Recorder,
     modifiers: egui::Modifiers,
-    held: Vec<u8>,
     skip_start_frame: bool,
 }
 
@@ -529,10 +528,8 @@ impl MacroEditor {
             return false;
         }
         self.recording = Some(Recording {
-            last_at: now,
-            last_event: None,
+            core: Recorder::new(now),
             modifiers: egui::Modifiers::NONE,
-            held: Vec::new(),
             skip_start_frame: true,
         });
         self.set_status("Recording focused keyboard and mouse events. Click STOP or leave the capture pad to finish.");
@@ -544,29 +541,13 @@ impl MacroEditor {
             return;
         };
         let now = ctx.input(|input| input.time);
-        let long_gap =
-            !recording.held.is_empty() && recording_delay_ms(now, recording.last_at).is_none();
-        if !recording.held.is_empty()
-            && let Some(index) = recording.last_event
-        {
-            set_event_delay(
-                &mut self.draft.events[index],
-                recording_delay_ms(now, recording.last_at).unwrap_or(0),
-            );
-        }
-        for usage in recording.held.into_iter().rev() {
-            self.draft.events.push(recorded_event(usage, false, 0));
-        }
-        debug_assert!(
-            macros::encode(&self.draft).is_ok(),
-            "release space was reserved"
-        );
-        let suffix = if long_gap {
+        let outcome = recording.core.stop(&mut self.draft, now);
+        let suffix = if outcome == crate::macro_recorder::StopOutcome::PauseTooLong {
             " A pause exceeded 65,535 ms; final release delay was set to zero."
         } else {
             ""
         };
-        if is_error || long_gap {
+        if is_error || outcome == crate::macro_recorder::StopOutcome::PauseTooLong {
             self.set_error(format!("{reason}{suffix}"));
         } else {
             self.set_status(format!("{reason}{suffix}"));
@@ -580,44 +561,11 @@ impl MacroEditor {
         down: bool,
         now: f64,
     ) -> Result<(), String> {
-        let was_held = recording.held.contains(&usage);
-        if was_held == down {
-            return Ok(());
-        }
-        let delay_ms = if recording.last_event.is_some() {
-            recording_delay_ms(now, recording.last_at)
-                .ok_or("A recording pause exceeded the 65,535 ms delay limit")?
-        } else {
-            0
-        };
-        let mut next_held = recording.held.clone();
-        if down {
-            next_held.push(usage);
-        } else {
-            next_held.retain(|held| *held != usage);
-        }
-        let mut candidate = self.draft.clone();
-        if let Some(index) = recording.last_event {
-            set_event_delay(&mut candidate.events[index], delay_ms);
-        }
-        candidate.events.push(recorded_event(usage, down, 0));
-        let new_index = candidate.events.len() - 1;
-        let mut capacity_probe = candidate.clone();
-        capacity_probe.events.extend(
-            next_held
-                .iter()
-                .map(|usage| recorded_event(*usage, false, 0)),
-        );
-        if macros::encode(&capacity_probe).is_err() {
-            return Err(
-                "Recording reached the 248-byte safe limit; held keys were released".into(),
-            );
-        }
-        self.draft = candidate;
-        recording.held = next_held;
-        recording.last_at = now;
-        recording.last_event = Some(new_index);
-        Ok(())
+        recording
+            .core
+            .transition(&mut self.draft, usage, down, now)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     fn sync_modifiers(
@@ -1102,14 +1050,6 @@ fn encoded_size(macro_data: &Macro) -> usize {
         .sum::<usize>()
 }
 
-fn recording_delay_ms(now: f64, previous: f64) -> Option<u16> {
-    if !now.is_finite() || !previous.is_finite() {
-        return None;
-    }
-    let milliseconds = ((now - previous).max(0.0) * 1000.0).round();
-    (milliseconds <= f64::from(u16::MAX)).then_some(milliseconds as u16)
-}
-
 fn is_modifier_key(key: egui::Key) -> bool {
     matches!(
         key,
@@ -1230,33 +1170,10 @@ fn mouse_usage(button: egui::PointerButton) -> Option<u8> {
     })
 }
 
-fn recorded_event(usage: u8, down: bool, delay_ms: u16) -> MacroEvent {
-    if (240..=244).contains(&usage) {
-        MacroEvent::MouseButton {
-            button: usage,
-            down,
-            delay_ms,
-        }
-    } else {
-        MacroEvent::Key {
-            usage,
-            down,
-            delay_ms,
-        }
-    }
-}
-
-fn set_event_delay(event: &mut MacroEvent, delay: u16) {
-    match event {
-        MacroEvent::Key { delay_ms, .. }
-        | MacroEvent::MouseButton { delay_ms, .. }
-        | MacroEvent::Move { delay_ms, .. } => *delay_ms = delay,
-    }
-}
-
 #[cfg(test)]
 mod recording_tests {
-    use super::{MacroEditor, Recording, key_usage, recording_delay_ms};
+    use super::{MacroEditor, Recording, key_usage};
+    use crate::macro_recorder::Recorder;
     use crate::macros::{self, MacroEvent};
     use eframe::egui::Key;
 
@@ -1327,211 +1244,6 @@ mod recording_tests {
         assert_eq!(key_usage(Key::ArrowLeft), Some(80));
         assert_eq!(key_usage(Key::F25), None);
         assert_eq!(key_usage(Key::BrowserBack), None);
-    }
-
-    #[test]
-    fn rounds_frame_time_and_rejects_unrepresentable_pause() {
-        assert_eq!(recording_delay_ms(1.0504, 1.0), Some(50));
-        assert_eq!(recording_delay_ms(1.0, 1.0), Some(0));
-        assert_eq!(recording_delay_ms(70.0, 0.0), None);
-    }
-
-    fn fresh_recording() -> Recording {
-        Recording {
-            last_at: 0.0,
-            last_event: None,
-            modifiers: eframe::egui::Modifiers::NONE,
-            held: Vec::new(),
-            skip_start_frame: false,
-        }
-    }
-
-    #[test]
-    fn recording_places_asymmetric_pauses_after_prior_actions() {
-        let mut editor = MacroEditor::new();
-        let mut recording = fresh_recording();
-        editor
-            .record_transition(&mut recording, 4, true, 100.0)
-            .unwrap();
-        editor
-            .record_transition(&mut recording, 4, false, 100.120)
-            .unwrap();
-        editor
-            .record_transition(&mut recording, 5, true, 100.470)
-            .unwrap();
-        assert!(matches!(
-            editor.draft.events[0],
-            MacroEvent::Key {
-                usage: 4,
-                down: true,
-                delay_ms: 120
-            }
-        ));
-        assert!(matches!(
-            editor.draft.events[1],
-            MacroEvent::Key {
-                usage: 4,
-                down: false,
-                delay_ms: 350
-            }
-        ));
-        assert!(matches!(
-            editor.draft.events[2],
-            MacroEvent::Key {
-                usage: 5,
-                down: true,
-                delay_ms: 0
-            }
-        ));
-    }
-
-    #[test]
-    fn appended_recording_preserves_earlier_draft_delay() {
-        let mut editor = MacroEditor::new();
-        editor.draft.events.push(MacroEvent::Key {
-            usage: 4,
-            down: false,
-            delay_ms: 33,
-        });
-        let mut recording = fresh_recording();
-        editor
-            .record_transition(&mut recording, 5, true, 100.0)
-            .unwrap();
-        editor
-            .record_transition(&mut recording, 5, false, 100.020)
-            .unwrap();
-        assert!(matches!(
-            editor.draft.events[0],
-            MacroEvent::Key { delay_ms: 33, .. }
-        ));
-        assert!(matches!(
-            editor.draft.events[1],
-            MacroEvent::Key { delay_ms: 20, .. }
-        ));
-        assert!(matches!(
-            editor.draft.events[2],
-            MacroEvent::Key { delay_ms: 0, .. }
-        ));
-    }
-
-    #[test]
-    fn stop_waits_after_held_press_then_releases_without_delay() {
-        use eframe::egui;
-        let ctx = egui::Context::default();
-        let mut editor = MacroEditor::new();
-        let mut recording = fresh_recording();
-        editor
-            .record_transition(&mut recording, 4, true, 1.0)
-            .unwrap();
-        editor.recording = Some(recording);
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                time: Some(1.250),
-                ..Default::default()
-            },
-            |_| {},
-        );
-        output.textures_delta.clear();
-        editor.stop_recording(&ctx, "Stopped", false);
-        assert!(matches!(
-            editor.draft.events[0],
-            MacroEvent::Key {
-                usage: 4,
-                down: true,
-                delay_ms: 250
-            }
-        ));
-        assert!(matches!(
-            editor.draft.events[1],
-            MacroEvent::Key {
-                usage: 4,
-                down: false,
-                delay_ms: 0
-            }
-        ));
-    }
-
-    #[test]
-    fn stop_without_held_key_does_not_add_trailing_pause() {
-        use eframe::egui;
-        let ctx = egui::Context::default();
-        let mut editor = MacroEditor::new();
-        let mut recording = fresh_recording();
-        editor
-            .record_transition(&mut recording, 4, true, 1.0)
-            .unwrap();
-        editor
-            .record_transition(&mut recording, 4, false, 1.050)
-            .unwrap();
-        editor.recording = Some(recording);
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                time: Some(100.0),
-                ..Default::default()
-            },
-            |_| {},
-        );
-        output.textures_delta.clear();
-        editor.stop_recording(&ctx, "Stopped", false);
-        assert_eq!(editor.draft.events.len(), 2);
-        assert!(matches!(
-            editor.draft.events[0],
-            MacroEvent::Key { delay_ms: 50, .. }
-        ));
-        assert!(matches!(
-            editor.draft.events[1],
-            MacroEvent::Key { delay_ms: 0, .. }
-        ));
-    }
-
-    #[test]
-    fn reserves_room_to_release_held_keys_at_capacity() {
-        let mut editor = MacroEditor::new();
-        for _ in 0..59 {
-            editor.draft.events.extend([
-                MacroEvent::Key {
-                    usage: 4,
-                    down: true,
-                    delay_ms: 1,
-                },
-                MacroEvent::Key {
-                    usage: 4,
-                    down: false,
-                    delay_ms: 1,
-                },
-            ]);
-        }
-        let mut recording = Recording {
-            last_at: 0.0,
-            last_event: None,
-            modifiers: eframe::egui::Modifiers::NONE,
-            held: Vec::new(),
-            skip_start_frame: false,
-        };
-        assert!(
-            editor
-                .record_transition(&mut recording, 5, true, 0.001)
-                .is_ok()
-        );
-        let accepted = editor.draft.clone();
-        assert!(
-            editor
-                .record_transition(&mut recording, 6, true, 0.002)
-                .is_err()
-        );
-        assert_eq!(editor.draft, accepted);
-        assert_eq!(recording.held, [5]);
-        editor.recording = Some(recording);
-        editor.stop_recording(&eframe::egui::Context::default(), "Stopped", false);
-        assert!(macros::encode(&editor.draft).is_ok());
-        assert!(matches!(
-            editor.draft.events.last(),
-            Some(MacroEvent::Key {
-                usage: 5,
-                down: false,
-                ..
-            })
-        ));
     }
 
     #[test]
@@ -1668,11 +1380,11 @@ mod recording_tests {
         let ctx = egui::Context::default();
         let mut editor = MacroEditor::new();
         editor.loaded = Some(editor.draft.clone());
+        let mut core = Recorder::new(1.0);
+        core.transition(&mut editor.draft, 242, true, 1.0).unwrap();
         editor.recording = Some(Recording {
-            last_at: 1.0,
-            last_event: None,
+            core,
             modifiers: egui::Modifiers::NONE,
-            held: vec![242],
             skip_start_frame: false,
         });
         let id = egui::Id::new("focus loss mouse pad");
@@ -1696,52 +1408,6 @@ mod recording_tests {
             editor.draft.events.last(),
             Some(MacroEvent::MouseButton {
                 button: 242,
-                down: false,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn mouse_release_is_reserved_at_capacity() {
-        let mut editor = MacroEditor::new();
-        for _ in 0..59 {
-            editor.draft.events.extend([
-                MacroEvent::Key {
-                    usage: 4,
-                    down: true,
-                    delay_ms: 1,
-                },
-                MacroEvent::Key {
-                    usage: 4,
-                    down: false,
-                    delay_ms: 1,
-                },
-            ]);
-        }
-        let mut recording = Recording {
-            last_at: 0.0,
-            last_event: None,
-            modifiers: eframe::egui::Modifiers::NONE,
-            held: Vec::new(),
-            skip_start_frame: false,
-        };
-        assert!(
-            editor
-                .record_transition(&mut recording, 240, true, 0.001)
-                .is_ok()
-        );
-        assert!(
-            editor
-                .record_transition(&mut recording, 241, true, 0.002)
-                .is_err()
-        );
-        editor.recording = Some(recording);
-        editor.stop_recording(&eframe::egui::Context::default(), "Stopped", false);
-        assert!(matches!(
-            editor.draft.events.last(),
-            Some(MacroEvent::MouseButton {
-                button: 240,
                 down: false,
                 ..
             })
