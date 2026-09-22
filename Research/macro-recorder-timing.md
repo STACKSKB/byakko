@@ -94,3 +94,11 @@ belongs to the shared macro slot. Multiple keys may refer to that slot with
 different modes. Implementing the official policy needs an explicit user-facing
 rule for these shared contents; the existing data is not silently normalized.
 The current implementation therefore does not yet claim parity for this case.
+
+Implementation follow-up: toggle/hold now block Save and Bind until the draft
+has count 1, with an explicit Stage count 1 action. The control explains that
+mode belongs to the binding and count belongs to the shared slot. Switching
+modes/importing data preserves the count; the user stages and saves the change
+before binding. Device-free tests confirm incompatible counts cannot start an
+apply or mutate a draft. This implements the audited save policy, while actual
+toggle/hold playback remains a physical validation requirement.

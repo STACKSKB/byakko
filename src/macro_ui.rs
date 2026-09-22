@@ -32,6 +32,26 @@ mod lifecycle_tests {
     use super::*;
 
     #[test]
+    fn non_counted_modes_require_explicit_count_change_before_apply() {
+        for mode in [1, 2] {
+            let mut editor = MacroEditor::new();
+            editor.state.seed_verified(editor.state.draft().clone());
+            editor.state.draft_mut().repeat_count = 5;
+            editor.play_modes[0] = mode;
+            let draft = editor.state.draft().clone();
+            editor.apply(&egui::Context::default());
+            assert!(!editor.busy() && editor.error);
+            assert_eq!(editor.state.draft(), &draft);
+            assert!(!editor.playback_count_valid());
+            editor.state.draft_mut().repeat_count = 1;
+            assert!(editor.playback_count_valid());
+            editor.play_modes[0] = 0;
+            editor.state.draft_mut().repeat_count = 5;
+            assert!(editor.playback_count_valid());
+        }
+    }
+
+    #[test]
     fn local_labels_survive_editor_restart_without_loading_device_data() {
         let directory = std::env::temp_dir().join(format!(
             "byakko-label-editor-{}-{}",
@@ -279,6 +299,14 @@ impl MacroEditor {
         self.state.busy() || self.recording.is_some()
     }
 
+    fn playback_count_valid(&self) -> bool {
+        match self.play_modes[self.state.slot() as usize] {
+            0 => true,
+            1 | 2 => self.state.draft().repeat_count == 1,
+            _ => false,
+        }
+    }
+
     pub(crate) fn invalidate_device_read(&mut self) {
         self.state.mark_unverified();
         if self.state.loaded() {
@@ -370,6 +398,10 @@ impl MacroEditor {
     }
 
     fn apply(&mut self, ctx: &egui::Context) {
+        if !self.playback_count_valid() {
+            self.set_error("Toggle and hold modes require a stored repeat count of 1. Stage that count before saving.");
+            return;
+        }
         if self.busy() || !self.dirty() {
             return;
         }
@@ -869,7 +901,7 @@ impl MacroEditor {
                 ui.label(RichText::new(&self.labels_status).small().color(if self.labels_error { ACCENT } else { MUTED }));
             }
             ui.horizontal(|ui| {
-                ui.label("Play mode");
+                ui.label("Binding mode");
                 ui.add_enabled_ui(can_work, |ui| {
                     egui::ComboBox::from_id_salt("macro_play_mode")
                         .selected_text(mode_name(self.play_modes[self.state.slot() as usize]))
@@ -880,8 +912,18 @@ impl MacroEditor {
                         });
                 });
                 ui.label("Repeat count");
-                ui.add_enabled(can_work && self.state.loaded(), egui::DragValue::new(&mut self.state.draft_mut().repeat_count).range(0..=u16::MAX));
+                let counted = self.play_modes[self.state.slot() as usize] == 0;
+                ui.add_enabled(can_work && self.state.loaded() && counted, egui::DragValue::new(&mut self.state.draft_mut().repeat_count).range(0..=u16::MAX));
             });
+            ui.label(RichText::new("Mode is applied with the key binding. Repeat count is shared by every key using this macro slot.").small().color(MUTED));
+            if !self.playback_count_valid() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Toggle and hold modes use a stored count of 1. Save this change before binding.");
+                    if ui.add_enabled(can_work && self.state.loaded(), egui::Button::new("STAGE COUNT 1")).clicked() {
+                        self.state.draft_mut().repeat_count = 1;
+                    }
+                });
+            }
             ui.add_space(8.0);
 
             ui.label(RichText::new("EVENT STREAM").small().strong().color(MUTED));
@@ -965,13 +1007,13 @@ impl MacroEditor {
             ui.label(RichText::new("Delays use egui frame time (millisecond rounding); events in one frame share a timestamp. Keypad and left/right modifier identity may be unavailable.").small().color(MUTED));
             ui.add_space(9.0);
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(can_work && self.state.trusted() && self.dirty() && encoded.is_ok(), egui::Button::new("SAVE TO KEYBOARD")).clicked() {
+                if ui.add_enabled(can_work && self.state.trusted() && self.dirty() && encoded.is_ok() && self.playback_count_valid(), egui::Button::new("SAVE TO KEYBOARD")).clicked() {
                     self.apply(ui.ctx());
                 }
                 if ui.add_enabled(can_work && self.dirty(), egui::Button::new("REVERT DRAFT")).clicked() {
                     self.revert();
                 }
-                let clean = self.state.trusted() && !self.dirty();
+                let clean = self.state.trusted() && !self.dirty() && self.playback_count_valid();
                 if ui.add_enabled(can_work && clean, egui::Button::new("BIND SELECTED KEY")).clicked() {
                     binding = Some([9, self.play_modes[self.state.slot() as usize], self.state.slot(), 0]);
                     self.set_status(format!("Macro slot {} selected for the current key. Apply the keymap to persist its binding.", self.state.slot()));
