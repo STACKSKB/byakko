@@ -26,6 +26,7 @@ pub mod macros;
 pub mod picture_ui;
 pub mod profiles;
 pub mod protocol;
+pub(crate) mod recovery_keymaps;
 pub(crate) mod recovery_verification;
 #[cfg(feature = "research-tools")]
 pub mod research_fault;
