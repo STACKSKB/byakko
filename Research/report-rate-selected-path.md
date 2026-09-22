@@ -1,0 +1,11 @@
+# Nia87 report-rate selected-path audit (static only)
+
+Source: ignored current web bundle `Research/extracted/web-current/main_68eaf5ce.js` (the bundle identified in `sleep-selected-path.md`). This note records observed structure, not a tested device command. No hardware was accessed.
+
+The Nia87 registry has two `yc3121_nia87_soc` entries (VID 12625, PIDs 16401 and 16405) near bundle offsets 9,795,533–9,795,753. Both select layout `oc` and `otherSetting: Gi`. The factory switch near 21,329,355 constructs `Emt`; the selected class inherits through `YHe` and the lineage traced in `host-frame-correction.md`. The selected `oc` layout near 9,541,735 advertises rates 125, 250, 500 and 1000 Hz. That is a catalog value, not evidence of an enabled write control.
+
+`Gi` near 9,422,528 advertises auto-OS, debounce and sleep options. It does **not** set `keybordReportRate`. Other descriptors nearby explicitly set that flag, so its omission is meaningful. The device-information loader near 23,509,474 chooses `getKBReportRate` only when that flag exists; otherwise it calls `getReportRate`. It can therefore display/read a generic report-rate value for Nia87 without exposing the keyboard report-rate control. The selected settings UI is gated on the option flag, as also noted in `docs/settings-protocol.md`.
+
+The older settings protocol note describes an inherited generic `0x01` setter and `0x81` getter with four rate codes. That mapping is **not** sufficient evidence for a Nia87 write feature: the current bundle has several `setReportRate` implementations for different class families, and the selected `Emt`/`YHe` declarations do not provide a Nia87-specific override or UI caller. The current path establishes metadata plus a generic read call, but I found no selected, user-reachable Nia87 report-rate setter call.
+
+Confidence: high that the current registry does not enable the `keybordReportRate` control; medium that Nia87 has no other report-rate UI route (static search only); low that any generic `0x01` write is valid for this firmware. Keep report-rate writing outside the native configurator until a selected caller/override trace or reversible official HID capture establishes it. A read-only official capture could first verify whether the inherited getter actually emits `0x81` on Nia87.
