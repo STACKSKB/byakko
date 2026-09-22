@@ -440,6 +440,7 @@ name = "byakko"
 version = "0.1.0"
 dependencies = [
  "byakko-core",
+ "byakko-devices",
  "eframe",
  "libc",
  "serde",
@@ -453,6 +454,13 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "byakko-devices"
+version = "0.1.0"
+dependencies = [
+ "byakko-core",
 ]
 
 [[package]]

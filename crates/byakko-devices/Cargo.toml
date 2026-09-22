@@ -1,0 +1,9 @@
+[package]
+name = "byakko-devices"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Serialized native device command executor for Byakko"
+
+[dependencies]
+byakko-core = { path = "../byakko-core" }

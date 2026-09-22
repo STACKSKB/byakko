@@ -54,7 +54,7 @@ def parse_tree(text):
             raise ValueError(f"Unexpected cargo tree row: {line!r}")
         name, version = match.groups()
         expression = expression.removesuffix(" (*)").strip()
-        if name in {"byakko", "byakko-core"}:
+        if name in {"byakko", "byakko-core", "byakko-devices"}:
             continue  # Project license remains the owner's decision.
         row = {"name": name, "version": version, "declared": expression,
                "selected": selection(name, expression)}

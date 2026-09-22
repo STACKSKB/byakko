@@ -276,11 +276,50 @@ impl KeymapBackend for Nia87Adapter {
         changes: &[Change],
         backup_dir: &Path,
     ) -> Result<State, String> {
-        let original = revision_snapshot(expected)?;
-        let draft = draft_snapshot(expected, changes)?;
-        let actual = device::apply_keymaps(&original, &draft.base, &draft.function, backup_dir)
-            .map_err(|e| e.to_string())?;
-        from_snapshot(&actual)
+        self.apply_detailed(expected, changes, backup_dir)
+            .map_err(|error| error.message)
+    }
+}
+
+impl Nia87Adapter {
+    fn apply_detailed(
+        &self,
+        expected: &State,
+        changes: &[Change],
+        backup_dir: &Path,
+    ) -> Result<State, byakko_core::session::ApplyFailure> {
+        use byakko_core::session::{ApplyFailure, Recovery};
+        let prepare = || -> Result<_, String> {
+            Ok((
+                revision_snapshot(expected)?,
+                draft_snapshot(expected, changes)?,
+            ))
+        };
+        let (original, draft) = prepare().map_err(|message| ApplyFailure {
+            message,
+            recovery: Recovery::NotAttempted,
+        })?;
+        let actual =
+            device::apply_keymaps_detailed(&original, &draft.base, &draft.function, backup_dir)?;
+        from_snapshot(&actual).map_err(|message| ApplyFailure {
+            message,
+            recovery: Recovery::Unverified,
+        })
+    }
+}
+
+impl byakko_devices::KeymapDevice for Nia87Adapter {
+    fn read(&mut self) -> Result<State, String> {
+        KeymapBackend::read(self)
+    }
+
+    fn apply(
+        &mut self,
+        expected: &State,
+        changes: &[Change],
+        backup_dir: &Path,
+    ) -> Result<State, byakko_core::session::ApplyFailure> {
+        self.apply_detailed(expected, changes, backup_dir)
     }
 }
 
