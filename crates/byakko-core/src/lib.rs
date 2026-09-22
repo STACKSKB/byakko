@@ -8,6 +8,7 @@ pub mod lighting;
 pub mod macros;
 pub mod picture;
 pub mod session;
+pub mod settings;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PhysicalKey {

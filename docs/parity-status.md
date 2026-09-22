@@ -4,10 +4,11 @@ This ledger separates implemented configuration storage from end-to-end behavior
 
 The table records the retained research application's feature evidence. The
 approved Iced migration currently has keymap, macro, built-in global lighting
-and per-key picture editing/read/save slices;
+per-key picture and scalar settings editing/read/save slices;
 it has not yet inherited the remaining screens or feature parity. See
 `iced-keymap-acceptance.md`, `iced-macro-acceptance.md`,
-`iced-lighting-acceptance.md` and `iced-picture-acceptance.md` for its exact
+`iced-lighting-acceptance.md`, `iced-picture-acceptance.md` and
+`iced-settings-acceptance.md` for their exact
 scope.
 
 | Requirement | Current evidence | Remaining acceptance work |
@@ -23,7 +24,7 @@ scope.
 | Global lighting | Native controls; selected cases for IDs0–19 pass write/read/restore; webcam confirms steady red/green | Broader visual/option coverage and reactive effects |
 | Per-key colors | Retained research GUI has native physical layout editor; earlier single-color write/restore passed, while selected official bulk reader/writer addresses index0 and has three separate global effect options (see `Research/picture-selector-audit.md`). Iced now has a capability-driven RGB editor and memory workflow; the attached USB baseline was checked read-only, with no live writes in this slice. RGB storage is separate from selecting the global picture effect. | Iced GUI interaction and visual validation; physical per-key write/read/restore acceptance; effect-option semantics |
 | Host-driven lighting | Captured actual0D music/0E screen commands; Windows screen/WASAPI streams pass hardware/camera/restoration checks; Linux output-monitor sampler cross-builds; headless close-event success/failure checks pass | OS GUI interaction/close verification, sustained streaming, Wayland capture, Linux runtime/audio routing, X11 disconnect handling |
-| Other settings | Native debounce, auto-OS, four sleep timers and backlight switch pass reversible complete settings readback | Physical sleep behavior and remaining option semantics; report-rate metadata exists but the selected official Nia87 descriptor does not enable its control (see `Research/report-rate-selected-path.md`) |
+| Other settings | Native debounce, auto-OS, four sleep timers and backlight switch pass reversible complete settings readback. Iced now exposes these seven fields through capability data with one-field staged saves; its read-only 256-byte USB capture matches the earlier complete archive exactly. | Iced physical write/read/restore and rendered UI acceptance; physical sleep behavior and remaining option semantics; report-rate metadata exists but the selected official Nia87 descriptor does not enable its control (see `Research/report-rate-selected-path.md`) |
 | Local configurations | Full native archive capture, review and guarded apply; normal multi-section round trip passes; first injected failure failed recovery, original archive subsequently restored and verified; headless close/error tests pass | Resolve unexplained state changes during failed transport/recovery; repeat failure-injection acceptance; OS GUI interaction |
 | Robust device transactions | Expected-state checks, disk backups, readback/rollback and OS-held interprocess lock; optional blocking Windows USB string reads removed | USB error recovery, disconnect/reconnect and partial failure tests |
 | 2.4 GHz | Deferred by USB-first scope | Receiver identification, transport capability and separate verification when available |

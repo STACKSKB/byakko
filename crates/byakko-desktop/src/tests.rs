@@ -11,6 +11,7 @@ mod lighting_workflow;
 pub(crate) mod macro_workflow;
 mod picture_workflow;
 mod recording_workflow;
+mod settings_workflow;
 
 fn ready() -> Desktop {
     let mut device = demo::device().unwrap();
@@ -21,6 +22,8 @@ fn ready() -> Desktop {
         .with_lighting(device.lighting_capabilities().unwrap().clone())
         .unwrap()
         .with_picture(device.picture_capabilities().unwrap().clone())
+        .unwrap()
+        .with_settings(device.settings_capabilities().unwrap().clone())
         .unwrap();
     let generation = session.connect().unwrap();
     let Command::Read { operation, .. } = session.request_read().unwrap() else {
@@ -36,6 +39,7 @@ fn ready() -> Desktop {
     Desktop {
         ui: panels::UiStyle::DEFAULT,
         picture_selected: None,
+        settings_selected: None,
         macro_files: Default::default(),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),

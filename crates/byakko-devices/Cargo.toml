@@ -20,6 +20,10 @@ required-features = ["research-tools"]
 name = "read_picture"
 required-features = ["research-tools"]
 
+[[example]]
+name = "read_settings"
+required-features = ["research-tools"]
+
 [dependencies]
 byakko-core = { path = "../byakko-core" }
 serde = { version = "1", features = ["derive"] }

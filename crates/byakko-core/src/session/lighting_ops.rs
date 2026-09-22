@@ -60,6 +60,7 @@ impl Session {
         };
         self.invalidate_macros();
         self.invalidate_picture();
+        self.invalidate_settings();
         Ok(Command::ApplyLighting {
             generation: self.generation,
             operation,

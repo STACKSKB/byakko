@@ -360,6 +360,19 @@ impl crate::Device for Nia87Adapter {
     ) -> Result<byakko_core::picture::Snapshot, byakko_core::session::ApplyFailure> {
         crate::nia87::picture_adapter::apply(expected, desired, backup_dir)
     }
+
+    fn read_settings(&mut self) -> Result<byakko_core::settings::Snapshot, String> {
+        crate::nia87::settings_adapter::read()
+    }
+
+    fn apply_setting(
+        &mut self,
+        expected: &byakko_core::settings::Snapshot,
+        edit: &byakko_core::settings::Edit,
+        backup_dir: &Path,
+    ) -> Result<byakko_core::settings::Snapshot, byakko_core::session::ApplyFailure> {
+        crate::nia87::settings_adapter::apply(expected, edit, backup_dir)
+    }
 }
 
 #[cfg(test)]

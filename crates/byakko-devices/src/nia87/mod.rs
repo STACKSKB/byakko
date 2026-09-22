@@ -20,3 +20,4 @@ pub mod protocol;
 mod recovery_keymaps;
 mod recovery_verification;
 pub mod settings;
+pub mod settings_adapter;

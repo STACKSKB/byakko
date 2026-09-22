@@ -5,6 +5,7 @@ mod transport;
 use crate::hid::HidDevice;
 use apply_error::{
     detailed, keymap_apply_error, lighting_apply_error, macro_apply_error, picture_apply_error,
+    settings_apply_error,
 };
 use serde::{Deserialize, Serialize};
 
@@ -271,17 +272,18 @@ pub fn apply_setting(
                 }
                 Ok(())
             })();
-            Err(format!(
-                "Setting apply failed: {error}; restore: {}; backup {}",
-                match restore {
-                    Ok(()) => "verified".into(),
-                    Err(e) => e.to_string(),
-                },
-                path.display()
-            )
-            .into())
+            Err(settings_apply_error(&error, restore, &path).into())
         }
     }
+}
+
+/// Guarded one-setting transaction with an explicit recovery outcome.
+pub fn apply_setting_detailed(
+    expected: &crate::nia87::settings::Settings,
+    setting: crate::nia87::settings::Setting,
+    backup_dir: &std::path::Path,
+) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::session::ApplyFailure> {
+    detailed(apply_setting(expected, setting, backup_dir))
 }
 
 fn read_lighting_on_device(device: &HidDevice) -> Result<crate::nia87::lighting::Lighting> {

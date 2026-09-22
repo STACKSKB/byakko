@@ -2,6 +2,7 @@
 use byakko_core::{
     Change, State, lighting, macros, picture,
     session::{ApplyFailure, Command, Completion, Recovery},
+    settings,
 };
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
@@ -78,6 +79,22 @@ pub trait Device: Send + 'static {
     ) -> Result<picture::Snapshot, ApplyFailure> {
         Err(ApplyFailure {
             message: "Picture operations are unsupported by this device".into(),
+            recovery: Recovery::NotAttempted,
+        })
+    }
+
+    fn read_settings(&mut self) -> Result<settings::Snapshot, String> {
+        Err("Settings operations are unsupported by this device".into())
+    }
+
+    fn apply_setting(
+        &mut self,
+        _expected: &settings::Snapshot,
+        _edit: &settings::Edit,
+        _backup_dir: &Path,
+    ) -> Result<settings::Snapshot, ApplyFailure> {
+        Err(ApplyFailure {
+            message: "Settings operations are unsupported by this device".into(),
             recovery: Recovery::NotAttempted,
         })
     }
@@ -198,6 +215,15 @@ fn token(command: &Command) -> (u64, u64) {
             operation,
             ..
         } => (*generation, *operation),
+        Command::ReadSettings {
+            generation,
+            operation,
+        }
+        | Command::ApplySetting {
+            generation,
+            operation,
+            ..
+        } => (*generation, *operation),
     }
 }
 
@@ -242,6 +268,16 @@ fn failure(command: &Command, message: String, recovery: Recovery) -> Completion
             result: Err(message),
         },
         Command::ApplyPicture { .. } => Completion::ApplyPicture {
+            generation,
+            operation,
+            result: Err(ApplyFailure { message, recovery }),
+        },
+        Command::ReadSettings { .. } => Completion::ReadSettings {
+            generation,
+            operation,
+            result: Err(message),
+        },
+        Command::ApplySetting { .. } => Completion::ApplySetting {
             generation,
             operation,
             result: Err(ApplyFailure { message, recovery }),
@@ -301,6 +337,16 @@ fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Co
             generation,
             operation,
             result: device.apply_picture(expected, desired, backup_dir),
+        },
+        Command::ReadSettings { .. } => Completion::ReadSettings {
+            generation,
+            operation,
+            result: device.read_settings(),
+        },
+        Command::ApplySetting { expected, edit, .. } => Completion::ApplySetting {
+            generation,
+            operation,
+            result: device.apply_setting(expected, edit, backup_dir),
         },
     }))
     .unwrap_or_else(|_| {

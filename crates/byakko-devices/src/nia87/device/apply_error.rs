@@ -99,6 +99,24 @@ pub(super) fn picture_apply_error(
     })
 }
 
+pub(super) fn settings_apply_error(
+    error: &dyn fmt::Display,
+    rollback: Result<()>,
+    backup: &Path,
+) -> ApplyError {
+    let (recovery, restore) = match rollback {
+        Ok(()) => (Recovery::Verified, "original settings verified".to_owned()),
+        Err(error) => (Recovery::Failed, format!("FAILED: {error}")),
+    };
+    ApplyError(ApplyFailure {
+        message: format!(
+            "Settings apply failed: {error}. Restore result: {restore}. Backup: {}",
+            backup.display()
+        ),
+        recovery,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +174,20 @@ mod tests {
         assert_eq!(failure.recovery, Recovery::Failed);
         assert!(failure.message.contains("restore mismatch"));
         assert!(failure.message.contains("picture-before.json"));
+    }
+
+    #[test]
+    fn settings_recovery_is_typed_and_preserves_diagnostic() {
+        let path = Path::new("settings-before.json");
+        let restored = settings_apply_error(&"readback mismatch", Ok(()), path);
+        assert_eq!(
+            detailed::<()>(Err(restored.into())).unwrap_err().recovery,
+            Recovery::Verified
+        );
+        let failed = settings_apply_error(&"write failed", Err("restore mismatch".into()), path);
+        let failure = detailed::<()>(Err(failed.into())).unwrap_err();
+        assert_eq!(failure.recovery, Recovery::Failed);
+        assert!(failure.message.contains("restore mismatch"));
+        assert!(failure.message.contains("settings-before.json"));
     }
 }

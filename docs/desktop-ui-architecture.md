@@ -32,10 +32,18 @@ from choosing the global built-in picture effect. The attached USB device has
 only had a read-only baseline check for this Iced slice; no live picture write
 has been performed.
 
+Scalar settings use an advertised field catalog with toggle or bounded numeric
+types and units. The Iced page renders that catalog in the same split panels;
+its demo advertises different fields and ranges from Nia87. Core allows one
+staged field at a time because the native transaction applies one setting.
+The Nia87 adapter retains all four raw 64-byte replies in its revision and
+converts sleep minutes to the device's seconds. The attached keyboard has only
+had a read-only check through this Iced path.
+
 This is a pre-alpha composition layer, not a frozen visual design. Toolbars
 and compact pane interaction still need rendered UI review. Static interface
 copy currently lives near its view; backend labels and control availability
-come from descriptors and projections. Future settings and archives should use
+come from descriptors and projections. Future archives should use
 the same data and control boundaries instead of adding one-off widget trees or
 mutable duplicate drafts. Host-driven effects and 2.4 GHz support remain later
 capabilities.
