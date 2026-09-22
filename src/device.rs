@@ -698,24 +698,22 @@ pub fn apply_keymaps(
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
         return Err("Cannot modify reserved padding slots".into());
     }
-    let fn_changed = expected.function != function;
-    if fn_changed {
-        return Err("Fn writes remain under investigation: both traced setter paths failed live verification. No writes sent.".into());
+    if expected.function != function {
+        return Err(
+            "Fn media replay passed, but broader verification awaits USB recovery. No writes sent."
+                .into(),
+        );
     }
-    let fn_reports = if fn_changed {
-        crate::protocol::full_matrix_reports(true, 0, function)?
-    } else {
-        Vec::new()
-    };
-    let fn_restore = if fn_changed {
-        crate::protocol::full_matrix_reports(true, 0, &expected.function)?
-    } else {
-        Vec::new()
-    };
     let current = snapshot_unlocked()?;
     if &current != expected {
         return Err(
             "Keyboard changed since it was loaded. Reload before applying; no writes sent.".into(),
+        );
+    }
+    if current.firmware != 0x0100 || current.profile != 0 {
+        return Err(
+            "Firmware/profile differs from validated Nia87 0x0100/profile 0; no keymap writes sent"
+                .into(),
         );
     }
     let changes: Vec<_> = (0..126)
@@ -742,30 +740,33 @@ pub fn apply_keymaps(
     serde_json::to_writer_pretty(&mut backup, &current)?;
     backup.sync_all()?;
     let (_, device) = open_unique()?;
-    let write_fn_pages = |reports: &[[u8; 64]]| -> Result<()> {
-        for report in reports {
-            let mut host = [0u8; 65];
-            host[1..].copy_from_slice(report);
-            device.send_feature_report(&host)?;
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        Ok(())
-    };
+    // The write handle is opened after the backup. Recheck its identity too,
+    // so a reconnect cannot put these reports onto an unvalidated device.
+    let version = read_payload(&device, 0x80, 0, 0)?;
+    let profile = read_payload(&device, 0x85, 0, 0)?;
+    if version[0] != 0x80
+        || u16::from_le_bytes([version[1], version[2]]) != 0x0100
+        || profile[0] != 0x85
+        || profile[1] != 0
+    {
+        return Err(
+            "Write handle is not validated Nia87 firmware 0x0100/profile 0; no writes sent".into(),
+        );
+    }
     let result = (|| -> Result<Snapshot> {
-        // Firmware 0100 aliases the vendor's simple Fn command to the base
-        // map. Use the distinct full Fn matrix operation instead.
-        write_fn_pages(&fn_reports)?;
+        // The official helper's captured final HID report for a Fn binding is
+        // the single-key 0x15 command with index 0. Apply Fn changes first so
+        // recovery can inspect both maps before restoring base slots.
+        for &(is_fn, slot, _, new) in &changes {
+            if is_fn {
+                write_binding(&device, true, 0, slot, new)?;
+            }
+        }
         for &(is_fn, slot, _, new) in &changes {
             if is_fn {
                 continue;
             }
-            write_binding(
-                &device,
-                is_fn,
-                if is_fn { 0 } else { current.profile },
-                slot,
-                new,
-            )?;
+            write_binding(&device, false, current.profile, slot, new)?;
         }
         let actual = snapshot_unlocked()?;
         if actual.base != base
@@ -791,16 +792,18 @@ pub fn apply_keymaps(
         Ok(actual) => Ok(actual),
         Err(error) => {
             let rollback = (|| -> Result<()> {
+                // A failed setter may have changed either map. Read both maps
+                // before recovery, restore Fn first, then reread both maps
+                // because those Fn writes might also have affected base.
                 let observed = snapshot_unlocked().ok();
-                if fn_changed
-                    && observed
+                for slot in 0..126 {
+                    if observed
                         .as_ref()
-                        .is_none_or(|s| s.function != current.function)
-                {
-                    write_fn_pages(&fn_restore)?;
+                        .is_none_or(|s| s.function[slot] != current.function[slot])
+                    {
+                        write_binding(&device, true, 0, slot, current.function[slot])?;
+                    }
                 }
-                // Inspect both maps after a failed operation, not just the
-                // requested changes: a misrouted command may alter other slots.
                 let observed = snapshot_unlocked().ok();
                 for slot in 0..126 {
                     if observed

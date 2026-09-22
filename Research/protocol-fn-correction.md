@@ -1,5 +1,12 @@
 # Nia87 Fn single-key write correction
 
+> Historical investigation below. Superseding evidence: the current official
+> helper sends single-key `0x15`, and a native 65-byte media-binding replay
+> passed complete-map comparison and restoration. See `protocol-web-fn.md`
+> and `docs/live-evidence.md`. The cause of the earlier failures is unresolved;
+> do not treat them as proof of universal base-map aliasing. A later enumeration
+> stall and USB error prevent broader validation, so product Fn writes remain guarded.
+
 ## Observed conflict
 
 A guarded F24 (`00 00 73 00`) Fn single-key attempt at physical Pause slot 91
