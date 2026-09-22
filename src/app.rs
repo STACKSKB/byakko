@@ -312,11 +312,6 @@ impl Workbench {
     }
 
     fn set_binding(&mut self, bytes: [u8; 4]) {
-        if self.layer == Layer::Function {
-            self.error = true;
-            self.status = "Fn is read-only pending remaining device validation.".into();
-            return;
-        }
         let Some(usage) = self.selected else {
             return;
         };
@@ -438,7 +433,7 @@ impl Workbench {
             }
             ui.separator();
             if self.layer == Layer::Function {
-                ui.colored_label(ACCENT, "READ-ONLY · Fn validation pending");
+                ui.label(egui::RichText::new("Fn layer · staged key bindings").color(MUTED));
             }
             ui.label(
                 egui::RichText::new(format!("{} staged slot(s)", self.dirty_count())).color(
@@ -780,14 +775,13 @@ impl Workbench {
                 if ui.add_enabled(!self.device_busy() && self.observed.is_some() && self.dirty_count() == 0, egui::Button::new("IMPORT TO DRAFT")).clicked() {
                     let current = self.observed.as_ref().expect("enabled when loaded");
                     match crate::profiles::load_for_device(std::path::Path::new(&self.profile_path), current) {
-                        Ok(imported) if imported.function == current.function => {
+                        Ok(imported) => {
                             self.base = imported.base;
                             self.function = imported.function;
                             self.sync_editor();
                             self.status = "Imported keymap to local draft. Review changes before Apply.".into();
                             self.error = false;
                         }
-                        Ok(_) => { self.status = "Import needs Fn changes, which are currently read-only; no draft changed.".into(); self.error = true; }
                         Err(e) => { self.status = e.to_string(); self.error = true; }
                     }
                 }
