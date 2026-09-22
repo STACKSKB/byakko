@@ -1,0 +1,34 @@
+[
+  {
+    "file": "emoji-icon-font-mit-license.txt",
+    "sha256": "b9d2c1d909aa149996fd4c91dcb92b2362a04431640c1d200959da94caf8cde1"
+  },
+  {
+    "file": "emoji-icon-font.ttf",
+    "sha256": "f426bec371f484646d002717e2c555a95cd5145e635d83a48bbef83f3abf18ca"
+  },
+  {
+    "file": "Hack-Regular.ttf",
+    "sha256": "15f55cc0c85a2988d2b4b3a8cdb5d77fdfbaf319e1bb5309d725db9818fb7125"
+  },
+  {
+    "file": "Hack-Regular.txt",
+    "sha256": "47c0cccbeec7e8614548cc485588b28149e7874188df5f41b36efebcee285c87"
+  },
+  {
+    "file": "NotoEmoji-Regular.ttf",
+    "sha256": "415dc6290378574135b64c808dc640c1df7531973290c4970c51fdeb849cb0c5"
+  },
+  {
+    "file": "OFL.txt",
+    "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+  },
+  {
+    "file": "Ubuntu-Light.ttf",
+    "sha256": "80307b8da7649aa4ee4d484b232140e3ce1ec0ca093073d3c53c8f5a5ced7a70"
+  },
+  {
+    "file": "UFL.txt",
+    "sha256": "2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002"
+  }
+]
