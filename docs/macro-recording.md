@@ -15,8 +15,8 @@ input. Pointer movement and wheel actions can be edited manually but are not
 recorded automatically. **Wait after** is the interval from an event to the next
 transition. Recording omits the initial wait before the first action, and does
 not change earlier events when appending a recording. Stop/focus-loss releases
-include the final held interval; a fully released recording has no added tail
-for time spent reaching Stop. Intervals use frame timestamps rounded to
+include the final held interval; time spent reaching Stop does not extend a
+fully released recording. Intervals use frame timestamps rounded to
 milliseconds; events within one frame share a timestamp. Keypad and left/right
 modifier identity may be unavailable from the window event stream.
 
@@ -28,10 +28,13 @@ hardware validation requirements.
 The [timing audit](../Research/macro-recorder-timing.md) explains the correction
 from the earlier recorder, which attached intervals one event late. Existing
 macro files are not rewritten automatically.
-The follow-up audit also identifies an outstanding save-time difference: the
-official timeline adds a final50ms delay when it ends in an action (or its fixed
-recording delay when enabled). Native recorded events currently end with zero
-wait. This remains a timing-parity gap, especially for repeated playback.
+New measured recordings finish with a 50 ms wait, matching the audited official
+save path. Fixed delay uses the selected 1–65,535 ms value for recorded intervals
+and the final wait. Synthetic releases have zero waits between them. Existing
+manual/imported events, including explicit zero waits, remain unchanged.
+
+Clear draft removes events locally while retaining repeat count and metadata.
+Revert restores the loaded baseline; Save to keyboard applies the staged change.
 
 ## Implementation boundary
 

@@ -1,6 +1,7 @@
 //! Native macro editor. Device transactions run on worker threads.
 
 use std::{
+    num::NonZeroU16,
     path::PathBuf,
     sync::mpsc::{self, Receiver, Sender},
 };
@@ -10,7 +11,7 @@ use eframe::egui::{self, Color32, RichText};
 use crate::{
     device, layout,
     macro_file::{self, MacroFile},
-    macro_recorder::Recorder,
+    macro_recorder::{DelayPolicy, Recorder},
     macro_state::MacroState,
     macros::{self, Macro, MacroEvent},
 };
@@ -224,6 +225,8 @@ pub struct MacroEditor {
     status: String,
     error: bool,
     recording: Option<Recording>,
+    record_fixed_delay: bool,
+    record_delay_ms: NonZeroU16,
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
 }
@@ -244,6 +247,8 @@ impl MacroEditor {
             status: "Choose a slot, then load it from the keyboard.".into(),
             error: false,
             recording: None,
+            record_fixed_delay: false,
+            record_delay_ms: NonZeroU16::MIN,
             tx,
             rx,
         }
@@ -473,7 +478,14 @@ impl MacroEditor {
             return false;
         }
         self.recording = Some(Recording {
-            core: Recorder::new(now),
+            core: Recorder::new(
+                now,
+                if self.record_fixed_delay {
+                    DelayPolicy::Fixed(self.record_delay_ms)
+                } else {
+                    DelayPolicy::Measured
+                },
+            ),
             modifiers: egui::Modifiers::NONE,
             skip_start_frame: true,
         });
@@ -488,7 +500,7 @@ impl MacroEditor {
         let now = ctx.input(|input| input.time);
         let outcome = recording.core.stop(self.state.draft_mut(), now);
         let suffix = if outcome == crate::macro_recorder::StopOutcome::PauseTooLong {
-            " A pause exceeded 65,535 ms; final release delay was set to zero."
+            " A pause exceeded 65,535 ms; the final held interval was set to zero."
         } else {
             ""
         };
@@ -868,6 +880,12 @@ impl MacroEditor {
                     if ui.button("+ MOVE").clicked() {
                         self.state.draft_mut().events.push(EventKind::Move.default_event());
                     }
+                    if ui.add_enabled(!self.state.draft().events.is_empty(), egui::Button::new("CLEAR DRAFT")).clicked() {
+                        match self.state.clear_draft() {
+                            Ok(()) => self.set_status("Draft events cleared. Revert to undo, or Save to keyboard to apply."),
+                            Err(error) => self.set_error(error),
+                        }
+                    }
                 });
             });
             let encoded = macros::encode(self.state.draft());
@@ -878,6 +896,18 @@ impl MacroEditor {
             };
             ui.add_space(8.0);
             ui.label(RichText::new("FOCUSED KEYBOARD / MOUSE RECORDER").small().strong().color(MUTED));
+            ui.horizontal(|ui| {
+                ui.add_enabled(can_work, egui::Checkbox::new(&mut self.record_fixed_delay, "Fixed delay"));
+                let mut milliseconds = self.record_delay_ms.get();
+                if ui.add_enabled(can_work && self.record_fixed_delay,
+                    egui::DragValue::new(&mut milliseconds).range(1..=u16::MAX).suffix(" ms")).changed()
+                    && let Some(delay) = NonZeroU16::new(milliseconds)
+                {
+                    self.record_delay_ms = delay;
+                }
+                let tail = if self.record_fixed_delay { self.record_delay_ms.get() } else { 50 };
+                ui.label(RichText::new(format!("New recordings · final wait {tail} ms · existing events unchanged")).small().color(MUTED));
+            });
             let mut just_started = false;
             ui.horizontal(|ui| {
                 if self.recording.is_some() {
@@ -1118,9 +1148,44 @@ fn mouse_usage(button: egui::PointerButton) -> Option<u8> {
 #[cfg(test)]
 mod recording_tests {
     use super::{MacroEditor, Recording, key_usage};
-    use crate::macro_recorder::Recorder;
+    use crate::macro_recorder::{DelayPolicy, Recorder};
     use crate::macros::{self, MacroEvent};
     use eframe::egui::Key;
+
+    #[test]
+    fn editor_passes_fixed_delay_policy_to_the_recording_session() {
+        let ctx = eframe::egui::Context::default();
+        let mut editor = MacroEditor::new();
+        editor.state.seed_verified(editor.state.draft().clone());
+        editor.record_fixed_delay = true;
+        editor.record_delay_ms = std::num::NonZeroU16::new(10).unwrap();
+        assert!(editor.start_recording(&ctx));
+        let recording = editor.recording.as_mut().unwrap();
+        recording
+            .core
+            .transition(editor.state.draft_mut(), 4, true, 1.0)
+            .unwrap();
+        recording
+            .core
+            .transition(editor.state.draft_mut(), 4, false, 1.15)
+            .unwrap();
+        editor.stop_recording(&ctx, "Stopped", false);
+        assert_eq!(
+            editor.state.draft().events,
+            vec![
+                MacroEvent::Key {
+                    usage: 4,
+                    down: true,
+                    delay_ms: 10
+                },
+                MacroEvent::Key {
+                    usage: 4,
+                    down: false,
+                    delay_ms: 10
+                },
+            ]
+        );
+    }
 
     #[test]
     fn egui_recording_tracks_physical_keys_and_releases_on_focus_loss() {
@@ -1327,7 +1392,7 @@ mod recording_tests {
         let ctx = egui::Context::default();
         let mut editor = MacroEditor::new();
         editor.state.seed_verified(editor.state.draft().clone());
-        let mut core = Recorder::new(1.0);
+        let mut core = Recorder::new(1.0, DelayPolicy::Measured);
         core.transition(editor.state.draft_mut(), 242, true, 1.0)
             .unwrap();
         editor.recording = Some(Recording {

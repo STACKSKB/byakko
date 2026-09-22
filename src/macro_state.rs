@@ -143,7 +143,9 @@ impl MacroState {
     ) -> Result<(), String> {
         if self.operation != Operation::Reading(slot) || slot != self.slot {
             self.mark_unverified();
-            return Err("Unexpected macro operation or slot in worker result; draft preserved.".into());
+            return Err(
+                "Unexpected macro operation or slot in worker result; draft preserved.".into(),
+            );
         }
         self.operation = Operation::Idle;
         let bytes = result.map_err(|error| {
@@ -169,7 +171,9 @@ impl MacroState {
     ) -> Result<(), String> {
         if self.operation != Operation::Applying(slot) || slot != self.slot {
             self.mark_unverified();
-            return Err("Unexpected macro operation or slot in worker result; draft preserved.".into());
+            return Err(
+                "Unexpected macro operation or slot in worker result; draft preserved.".into(),
+            );
         }
         self.operation = Operation::Idle;
         let bytes = result.map_err(|error| {
@@ -222,6 +226,16 @@ impl MacroState {
         Ok(())
     }
 
+    pub(crate) fn clear_draft(&mut self) -> Result<(), String> {
+        if self.busy() || !self.loaded() {
+            return Err(
+                "Load a macro slot and finish its operation before clearing the draft.".into(),
+            );
+        }
+        self.draft.events.clear();
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(crate) fn seed_verified(&mut self, macro_data: Macro) {
         let raw = macros::encode(&macro_data).unwrap();
@@ -250,6 +264,25 @@ mod tests {
             down: true,
             delay_ms: 0,
         });
+    }
+
+    #[test]
+    fn clear_is_reversible_and_cannot_replace_a_pending_operation() {
+        let mut state = MacroState::new();
+        assert!(state.clear_draft().is_err());
+        changed(&mut state);
+        state.draft_mut().repeat_count = 3;
+        let original = state.draft().clone();
+        state.seed_verified(original.clone());
+        state.clear_draft().unwrap();
+        assert!(state.draft().events.is_empty());
+        assert_eq!(state.draft().repeat_count, 3);
+        assert!(state.dirty() && state.trusted());
+        assert!(state.revert());
+        assert_eq!(state.draft(), &original);
+        state.begin_read().unwrap();
+        assert!(state.clear_draft().is_err());
+        assert_eq!(state.draft(), &original);
     }
 
     #[test]
