@@ -58,8 +58,11 @@ from4 to3 and changed debounce from1 to2 in one archive application. It applied
 the original archive afterward. Both applications passed complete repeated
 readback of every archive section. No key was physically pressed and the macro
 was never bound or played. This normal round trip does not test a failed setter
-or unplugged-device recovery. The revised best-effort recovery path has been
-reviewed and cross-compiled but still needs injected-failure verification.
+or unplugged-device recovery. The first injected post-delivery error test failed;
+unexpected macro, picture and lighting differences were subsequently restored
+from the durable original archive and fully verified. See the
+[fault investigation](../Research/configuration-fault-verification.md).
+Automatic failure recovery is not yet accepted.
 
 Archive files may contain personal keyboard macros. They stay at the chosen
 local path; Byakko performs no upload or sharing.

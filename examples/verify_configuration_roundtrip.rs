@@ -7,6 +7,16 @@ use byakko::{
 };
 
 fn main() -> device::Result<()> {
+    let fault_opcode = match std::env::args().nth(2).as_deref() {
+        None => None,
+        Some("--fault-after-lighting") => Some(0x07),
+        Some("--fault-after-macro-page") => Some(0x16),
+        _ => return Err("Unknown verification option; no device access".into()),
+    };
+    #[cfg(not(feature = "research-tools"))]
+    if fault_opcode.is_some() {
+        return Err("Fault verification requires the research-tools feature".into());
+    }
     let path = std::env::args()
         .nth(1)
         .ok_or("Provide the baseline archive path")?;
@@ -51,6 +61,37 @@ fn main() -> device::Result<()> {
     replies[0][2] = 2;
     target.settings = Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3])?;
     let backups = std::path::Path::new("Research/captures/backups");
+    #[cfg(feature = "research-tools")]
+    if let Some(opcode) = fault_opcode {
+        let (result, fired) = byakko::research_fault::with_fault(opcode, true, || {
+            device::apply_configuration(&original, &target, backups, |s| {
+                println!("Fault test: {s}")
+            })
+        });
+        let message = result
+            .expect_err("injected error must be reported")
+            .to_string();
+        if !fired
+            || !message.contains("injected configuration fault")
+            || !message.contains("restore: verified;")
+        {
+            return Err(format!("Fault recovery did not verify: {message}").into());
+        }
+        // Independently read changed sections after the transaction released
+        // its lock; recovery itself compared every section and all50 macros.
+        if device::snapshot()? != original.keymaps
+            || device::read_macro(49)? != original.macros[49]
+            || device::read_picture()? != original.picture
+            || device::read_lighting()? != original.lighting
+            || device::read_settings()? != original.settings
+        {
+            return Err("Post-recovery independent readback mismatch".into());
+        }
+        println!(
+            "Delivered setter 0x{opcode:02x}, injected one error, and verified automatic full recovery plus independent section reads. {message}"
+        );
+        return Ok(());
+    }
     let applied =
         device::apply_configuration(&original, &target, backups, |s| println!("Apply: {s}"))?;
     let restored =

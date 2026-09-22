@@ -98,8 +98,14 @@ struct Workbench {
 
 impl Workbench {
     fn new(ctx: &egui::Context) -> Self {
+        let mut app = Self::without_read();
+        app.start_read(ctx);
+        app
+    }
+
+    fn without_read() -> Self {
         let (tx, rx) = mpsc::channel();
-        let mut app = Self {
+        Self {
             keys: layout::nia87_keys(),
             observed: None,
             base: Vec::new(),
@@ -129,9 +135,7 @@ impl Workbench {
             backup_dir: std::env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
                 .join("backups"),
-        };
-        app.start_read(ctx);
-        app
+        }
     }
 
     fn start_read(&mut self, ctx: &egui::Context) {
@@ -338,13 +342,20 @@ impl Workbench {
             }));
             let result = match result {
                 Ok(result) => result,
-                Err(_) => Err("Archive apply failed unexpectedly.".into()),
+                Err(_) => Err("Archive apply panicked; restoration is unverified. Inspect the backups directory before retrying.".into()),
             };
             let _ = tx.send(WorkerResult::ApplyReview(
                 result.map(|configuration| configuration.keymaps),
             ));
             repaint.request_repaint();
         });
+    }
+
+    fn handle_archive_close(&mut self, ctx: &egui::Context) {
+        if self.archive_apply_running && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.status = "Archive apply is still running; close is held until verification or recovery finishes.".into();
+        }
     }
 
     fn poll_worker(&mut self) {
@@ -1220,12 +1231,7 @@ impl eframe::App for Workbench {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Cancel a close while a stream is still owned, before processing its
         // completion. A restoration error in this frame must remain visible.
-        if self.archive_apply_running && ui.ctx().input(|input| input.viewport().close_requested())
-        {
-            ui.ctx()
-                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.status = "Archive apply is still running; close is held until verification or recovery finishes.".into();
-        }
+        self.handle_archive_close(ui.ctx());
         self.lighting_editor.handle_close(ui.ctx());
         self.poll_worker();
         if !self.device_busy() {
@@ -1329,6 +1335,119 @@ fn parse_bytes(input: &str) -> Option<[u8; 4]> {
         .collect::<Result<_, _>>()
         .ok()?;
     bytes.try_into().ok()
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod tests {
+    use super::*;
+
+    fn snapshot(fill: u8) -> Snapshot {
+        Snapshot {
+            format_version: 1,
+            firmware: 0x0100,
+            profile: 0,
+            base: vec![[fill, 0, 0, 0]; 128],
+            function: vec![[fill, 0, 0, 0]; 128],
+        }
+    }
+
+    fn configuration(fill: u8) -> crate::configuration::Configuration {
+        let mut settings = [[0u8; 64]; 4];
+        for (reply, opcode) in settings.iter_mut().zip([0x91, 0x97, 0x92, 0x86]) {
+            reply[0] = opcode;
+        }
+        crate::configuration::Configuration {
+            keymaps: snapshot(fill),
+            macros: vec![vec![0; 256]; 50],
+            lighting: crate::lighting::Lighting::decode(&[0x87; 64]).unwrap(),
+            picture: vec![[0; 3]; 128],
+            settings: crate::settings::Settings::decode(
+                &settings[0],
+                &settings[1],
+                &settings[2],
+                &settings[3],
+            )
+            .unwrap(),
+        }
+    }
+
+    fn staged_review() -> StagedReview {
+        let current = configuration(0);
+        let target = configuration(0);
+        let summary = crate::configuration_plan::plan(&current, &target).unwrap();
+        let reverse = crate::configuration_plan::plan(&target, &current).unwrap();
+        StagedReview {
+            current,
+            target,
+            summary,
+            reverse,
+        }
+    }
+
+    fn close_frame(app: &mut Workbench) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |ui| app.handle_archive_close(ui.ctx()));
+        output.textures_delta.clear();
+        output
+    }
+
+    #[test]
+    fn archive_apply_close_is_cancelled_even_when_error_completes_same_frame() {
+        let mut app = Workbench::without_read();
+        app.busy = true;
+        app.archive_apply_running = true;
+        app.tx
+            .send(WorkerResult::ApplyReview(Err("restore failed".into())))
+            .unwrap();
+        let output = close_frame(&mut app);
+        app.poll_worker();
+        let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!app.archive_apply_running);
+        assert!(!app.busy);
+        assert!(app.error);
+        assert_eq!(app.status, "restore failed");
+    }
+
+    #[test]
+    fn archive_apply_success_loads_keymaps_and_clears_staging() {
+        let mut app = Workbench::without_read();
+        app.busy = true;
+        app.archive_apply_running = true;
+        app.reviewed_archive = Some(staged_review());
+        app.tx
+            .send(WorkerResult::ApplyReview(Ok(snapshot(7))))
+            .unwrap();
+        app.poll_worker();
+        assert!(!app.busy);
+        assert!(!app.archive_apply_running);
+        assert!(app.reviewed_archive.is_none());
+        assert_eq!(app.base, vec![[7, 0, 0, 0]; 128]);
+    }
+
+    #[test]
+    fn archive_apply_progress_does_not_clear_busy_or_stage() {
+        let mut app = Workbench::without_read();
+        app.busy = true;
+        app.archive_apply_running = true;
+        app.reviewed_archive = Some(staged_review());
+        app.tx
+            .send(WorkerResult::ApplyReviewProgress("writing".into()))
+            .unwrap();
+        app.poll_worker();
+        assert!(app.busy);
+        assert!(app.archive_apply_running);
+        assert!(app.reviewed_archive.is_some());
+        assert_eq!(app.status, "writing");
+    }
 }
 
 pub fn run() -> eframe::Result {
