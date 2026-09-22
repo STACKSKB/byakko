@@ -1,0 +1,216 @@
+//! Read-only projections and widgets; no backend imports or report knowledge.
+use super::{Closing, Desktop, Message};
+use byakko_core::{
+    Action, Descriptor,
+    session::{Problem, Status},
+};
+use iced::{
+    Element, Fill,
+    widget::{button, column, container, row, scrollable, text, text_input},
+};
+
+pub(super) fn keymap(app: &Desktop) -> Element<'_, Message> {
+    let descriptor = app.session.descriptor();
+    let dirty = app.session.changes();
+    let ready = *app.session.status() == Status::Ready;
+    let layers = row(descriptor.layers.iter().map(|layer| {
+        button(text(&layer.label))
+            .style(if layer.id == app.layer {
+                button::primary
+            } else {
+                button::secondary
+            })
+            .on_press(Message::SelectLayer(layer.id.clone()))
+            .into()
+    }))
+    .spacing(6);
+    let toolbar = row![
+        text(&descriptor.device_name).size(24),
+        button("Read / reconnect").on_press_maybe((!app.busy()).then_some(Message::Read)),
+        button("Revert draft")
+            .on_press_maybe((!app.busy() && !dirty.is_empty()).then_some(Message::Revert)),
+        button("Apply & verify")
+            .on_press_maybe((ready && !dirty.is_empty()).then_some(Message::Apply)),
+        text(format!("{} staged", dirty.len())),
+    ]
+    .spacing(12)
+    .align_y(iced::Center);
+    let mut content = column![toolbar, text(status(app.session.status())), layers].spacing(12);
+    if let Some(notice) = &app.notice {
+        content = content.push(text(notice));
+    }
+    content = match app.closing {
+        Closing::Open => content,
+        Closing::Waiting => content.push(text("Waiting for the device operation before closing…")),
+        Closing::ConfirmDiscard => content.push(
+            row![
+                text("Discard the staged draft and close?"),
+                button("Keep editing").on_press(Message::KeepEditing),
+                button("Discard & close").on_press(Message::DiscardAndClose),
+            ]
+            .spacing(12),
+        ),
+    };
+    let edits = column(dirty.iter().map(|change| {
+        let key = descriptor
+            .keys
+            .iter()
+            .find(|key| key.id == change.key)
+            .map_or(change.key.as_str(), |key| key.label.as_str());
+        let layer = descriptor
+            .layers
+            .iter()
+            .find(|layer| layer.id == change.layer)
+            .map_or(change.layer.as_str(), |layer| layer.label.as_str());
+        let before = app
+            .session
+            .baseline()
+            .and_then(|state| state.bindings.get(&change.layer))
+            .and_then(|layer| layer.get(&change.key));
+        text(format!(
+            "{layer} / {key}: {} → {}",
+            before.map_or_else(
+                || "Unknown".into(),
+                |action| action_label(descriptor, action)
+            ),
+            action_label(descriptor, &change.action)
+        ))
+        .into()
+    }))
+    .spacing(5);
+    content = content.push(
+        row![
+            column![text("Keys"), scrollable(keys(app)).height(Fill)]
+                .width(250)
+                .spacing(8),
+            column![
+                text(selected_label(app)).size(20),
+                search(app),
+                text("Staged changes"),
+                scrollable(edits).height(150)
+            ]
+            .width(Fill)
+            .spacing(10),
+        ]
+        .spacing(20)
+        .height(Fill),
+    );
+    container(content)
+        .padding(20)
+        .height(Fill)
+        .width(Fill)
+        .into()
+}
+
+fn keys(app: &Desktop) -> Element<'_, Message> {
+    let descriptor = app.session.descriptor();
+    let mut keys: Vec<_> = descriptor.keys.iter().filter(|key| key.visible).collect();
+    keys.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
+    column(keys.into_iter().map(|key| {
+        let binding = app
+            .session
+            .draft()
+            .and_then(|draft| draft.get(&app.layer))
+            .and_then(|layer| layer.get(&key.id));
+        let label = format!(
+            "{}  ·  {}{}",
+            key.label,
+            binding.map_or_else(
+                || "Unread".into(),
+                |action| action_label(descriptor, action)
+            ),
+            if key.writable { "" } else { " (fixed)" }
+        );
+        button(text(label).size(14))
+            .width(Fill)
+            .style(if app.selected.as_ref() == Some(&key.id) {
+                button::primary
+            } else {
+                button::secondary
+            })
+            .on_press(Message::SelectKey(key.id.clone()))
+            .into()
+    }))
+    .spacing(3)
+    .into()
+}
+
+fn selected_label(app: &Desktop) -> String {
+    app.session
+        .descriptor()
+        .keys
+        .iter()
+        .find(|key| Some(&key.id) == app.selected.as_ref())
+        .map_or_else(
+            || "Select a key".into(),
+            |key| format!("Assign action · {}", key.label),
+        )
+}
+
+fn search(app: &Desktop) -> Element<'_, Message> {
+    let query = app.search.to_lowercase();
+    let editable = *app.session.status() == Status::Ready
+        && app
+            .session
+            .descriptor()
+            .keys
+            .iter()
+            .any(|key| key.writable && Some(&key.id) == app.selected.as_ref());
+    let actions = column(
+        app.session
+            .descriptor()
+            .actions
+            .iter()
+            .enumerate()
+            .filter(|(_, choice)| choice.label.to_lowercase().contains(&query))
+            .map(|(index, choice)| {
+                button(text(&choice.label))
+                    .width(Fill)
+                    .on_press_maybe(editable.then_some(Message::Stage(index)))
+                    .into()
+            }),
+    )
+    .spacing(3);
+    column![
+        text_input("Find an action…", &app.search).on_input(Message::Search),
+        scrollable(actions).height(Fill)
+    ]
+    .spacing(8)
+    .height(Fill)
+    .into()
+}
+
+fn action_label(descriptor: &Descriptor, action: &Action) -> String {
+    if let Some(choice) = descriptor
+        .actions
+        .iter()
+        .find(|choice| &choice.action == action)
+    {
+        return choice.label.clone();
+    }
+    match action {
+        Action::Key(usage) => format!("Key {usage}"),
+        Action::Disabled => "Disabled".into(),
+        Action::Macro { slot, mode } => format!("Macro {slot} · mode {mode}"),
+        Action::Shortcut { modifiers, key } => format!("Shortcut {modifiers:?} + {key}"),
+        Action::Named { id } => id.clone(),
+        Action::Opaque { label, .. } => label.clone(),
+    }
+}
+
+fn status(status: &Status) -> String {
+    match status {
+        Status::Disconnected => "Disconnected · draft retained".into(),
+        Status::Loading { .. } => "Reading device…".into(),
+        Status::Ready => "Readback verified · edits are staged until applied".into(),
+        Status::Applying { .. } => "Backing up, applying and verifying…".into(),
+        Status::Conflict { .. } => "Device changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
+        Status::Unverified { problem } => match problem {
+            Problem::ReadRequired => "Read the device before editing".into(),
+            Problem::Read(reason) => format!("Read failed: {reason}"),
+            Problem::Apply(failure) => format!("Apply failed ({:?} recovery): {}", failure.recovery, failure.message),
+            Problem::InvalidApplyResult(reason) => format!("Invalid readback: {reason}"),
+            Problem::ApplyReadbackMismatch => "Readback differs from the draft; state is unverified".into(),
+        },
+    }
+}

@@ -13,6 +13,8 @@ use std::{
     },
 };
 
+pub mod memory;
+
 /// Implementations must validate expected state, back up, write and verify.
 /// Success means verified device state, not merely successful transmission.
 pub trait KeymapDevice: Send + 'static {

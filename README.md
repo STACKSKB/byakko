@@ -4,6 +4,24 @@ A native, USB-first Menel Nia87 configurator under investigation. The intended a
 
 ## Current status
 
+The approved architecture migration uses **Iced**. Its first keymap slice is
+available separately from the retained research GUI:
+
+```console
+cargo run -p byakko-desktop --release --locked
+cargo run -p byakko-desktop --release --locked -- --demo
+```
+
+Normal startup reads the Nia87 automatically. The demo uses an in-memory,
+three-layer keyboard and performs no hardware or file writes. Both use the
+same portable session model and serialized executor. The Iced screen supports
+key/layer selection, action search, staged-change review, apply with readback,
+revert and explicit read/reconnect. Macros, lighting, archives and automatic
+hotplug discovery have not migrated yet. The following feature inventory and
+`gui` command describe the retained egui research application. See the
+[approved architecture](docs/pre-alpha-proposal.md) and
+[current boundary](docs/backend-architecture.md).
+
 A native keymap workbench is implemented, with automatic Nia87 TKL layout, base and Fn editing, staged changes, automatic backups and complete readback verification. Media, pointer and modifier combinations are available. The native macro editor supports event editing, saved-slot bindings and JSON import/export. Long macro storage, shorter replacement and empty restoration passed live readback checks. Global effect and per-key color panels are implemented; brightness and one per-key color passed reversible readback tests. Fn F24 and media writes now pass application readback and restoration. Mixed base/Fn changes now pass complete verification with one-second spacing between key writes. This is a development build, not yet feature complete. See [docs/live-evidence.md](docs/live-evidence.md) for the exact verification limits.
 
 ```console

@@ -21,6 +21,17 @@ class LicenseGateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 parse_tree(text)
 
+    def test_desktop_package_is_excluded_and_bsd_metadata_is_recognized(self):
+        rows = parse_tree(
+            "byakko-desktop v0.1.0 (C:\\project\\crates\\byakko-desktop)|\n"
+            "tiny-skia v0.11.4|BSD-3-Clause\n"
+            "arrayref v0.3.9|BSD-2-Clause\n"
+        )
+        self.assertEqual(
+            [(row["name"], row["selected"]) for row in rows],
+            [("arrayref", "BSD-2-Clause"), ("tiny-skia", "BSD-3-Clause")],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
