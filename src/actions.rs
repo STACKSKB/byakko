@@ -111,6 +111,56 @@ pub fn presets() -> Vec<ActionPreset> {
             label: "Fn",
             bytes: [10, 1, 0, 0],
         },
+        // Visible Nia87 actions; wire facts and limits are recorded in
+        // Research/action-coverage.md. Host behavior depends on the OS.
+        ActionPreset {
+            label: "Media Player",
+            bytes: [3, 0, 0x83, 1],
+        },
+        ActionPreset {
+            label: "Calculator",
+            bytes: [3, 0, 0x92, 1],
+        },
+        ActionPreset {
+            label: "Email",
+            bytes: [3, 0, 0x8a, 1],
+        },
+        ActionPreset {
+            label: "File Browser",
+            bytes: [3, 0, 0x94, 1],
+        },
+        ActionPreset {
+            label: "Search",
+            bytes: [3, 0, 0x21, 2],
+        },
+        ActionPreset {
+            label: "Browser Home",
+            bytes: [3, 0, 0x23, 2],
+        },
+        ActionPreset {
+            label: "Display Brightness Up",
+            bytes: [3, 0, 0x6f, 0],
+        },
+        ActionPreset {
+            label: "Display Brightness Down",
+            bytes: [3, 0, 0x70, 0],
+        },
+        ActionPreset {
+            label: "Browser Refresh",
+            bytes: [3, 0, 0x27, 2],
+        },
+        ActionPreset {
+            label: "Zoom Out",
+            bytes: [0, 0, 0xe3, 0x2d],
+        },
+        ActionPreset {
+            label: "Zoom In",
+            bytes: [0, 0, 0xe3, 0x2e],
+        },
+        ActionPreset {
+            label: "Microphone Toggle",
+            bytes: [6, 0x80, 0, 0],
+        },
         // Pointer actions (the AC mouse-action table).
         ActionPreset {
             label: "Mouse Left",

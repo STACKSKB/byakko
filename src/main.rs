@@ -4,7 +4,7 @@ fn run() -> byakko::device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.as_slice() == ["--help"] || args.as_slice() == ["-h"] {
         println!(
-            "Byakko — native Nia87 configurator\n\n  gui                         Open native workbench\n  devices                     Enumerate matching HID collections\n  inspect                     Read version/profile\n  inspect-lighting             Read global lighting\n  inspect-settings             Read debounce, auto OS, sleep and flags\n  export PATH                  Save raw keymap snapshot to new file\n  export-macro SLOT PATH       Save raw macro bytes to new file\n  export-picture PATH          Save RGB picture to new file\n  restore-keymaps BACKUP        Restore a verified keymap backup\n  restore-macro BACKUP          Restore a macro backup\n\nResearch round-trip checks (write, verify and restore):\n  verify-keymap-roundtrip\n  verify-fn-roundtrip\n  verify-bindings-roundtrip\n  verify-macro-roundtrip\n  verify-lighting-roundtrip\n  verify-picture-roundtrip\n  verify-settings-roundtrip\n\nSimultaneous changes to both layers of the same key are guarded."
+            "Byakko — native Nia87 configurator\n\n  gui                         Open native workbench\n  devices                     Enumerate matching HID collections\n  inspect                     Read version/profile\n  inspect-lighting             Read global lighting\n  inspect-settings             Read debounce, auto OS, sleep and flags\n  export PATH                  Save raw keymap snapshot to new file\n  export-macro SLOT PATH       Save raw macro bytes to new file\n  export-picture PATH          Save RGB picture to new file\n  restore-keymaps BACKUP        Restore a verified keymap backup\n  restore-macro BACKUP          Restore a macro backup\n\nResearch round-trip checks (write, verify and restore):\n  verify-keymap-roundtrip\n  verify-fn-roundtrip\n  verify-bindings-roundtrip\n  verify-fn-bindings-roundtrip\n  verify-macro-roundtrip\n  verify-lighting-roundtrip\n  verify-picture-roundtrip\n  verify-settings-roundtrip\n\nSimultaneous changes to both layers of the same key are guarded."
         );
         return Ok(());
     }
@@ -88,7 +88,10 @@ fn run() -> byakko::device::Result<()> {
         println!("Both keymaps restored and verified against backup.");
         return Ok(());
     }
-    if args.as_slice() == ["verify-bindings-roundtrip"] {
+    if args.as_slice() == ["verify-bindings-roundtrip"]
+        || args.as_slice() == ["verify-fn-bindings-roundtrip"]
+    {
+        let function_layer = args[0] == "verify-fn-bindings-roundtrip";
         let original = byakko::device::snapshot()?;
         if byakko::device::read_macro(49)?.iter().any(|b| *b != 0)
             || original
@@ -102,9 +105,13 @@ fn run() -> byakko::device::Result<()> {
         let backup_dir = std::path::Path::new("Research/captures/backups");
         for mode in 0..3 {
             let mut base = original.base.clone();
-            base[91] = [9, mode, 49, 0];
-            let changed =
-                byakko::device::apply_keymaps(&original, &base, &original.function, backup_dir)?;
+            let mut function = original.function.clone();
+            if function_layer {
+                function[91] = [9, mode, 49, 0];
+            } else {
+                base[91] = [9, mode, 49, 0];
+            }
+            let changed = byakko::device::apply_keymaps(&original, &base, &function, backup_dir)?;
             let restored = byakko::device::apply_keymaps(
                 &changed,
                 &original.base,
@@ -114,9 +121,12 @@ fn run() -> byakko::device::Result<()> {
             if restored != original {
                 return Err("Binding restoration mismatch".into());
             }
+            println!(
+                "Macro binding mode {mode}, Fn layer {function_layer}: full readback and restoration verified."
+            );
         }
         println!(
-            "All three base-layer macro binding modes passed complete readback and restoration. Physical playback remains unverified."
+            "All three macro binding modes passed complete readback and restoration. Physical playback remains unverified."
         );
         return Ok(());
     }

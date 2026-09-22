@@ -121,3 +121,29 @@ experimental workarounds were removed. The precise firmware/transport cause
 is unresolved; do not claim a proven timing or handle issue. The application
 now rejects simultaneous changes to both layers of the same physical slot
 before device access. `verify-fn-roundtrip` covers the supported Fn-only cases.
+
+## Fn macro bindings and transitional macro reads
+
+All three Fn macro binding modes (`09 00 31 00`, `09 01 31 00`,
+`09 02 31 00`) passed application transactions at Pause with complete-map
+restoration after each. Slot 49 was empty and unbound before testing; no
+playback was triggered. `verify-fn-bindings-roundtrip` reproduces this check.
+
+The macro writer now checks firmware `0100` and profile 0 on its actual write
+handle. Subsequent long/short/empty tests exposed a transitional macro read:
+the first 32 bytes of page zero reflected the new data, while bytes 32–63
+still reflected the previous contents. The next full read was current.
+Longer delays and using the same handle alone did not resolve this. Earlier
+two-read validation correctly rejected the differing copies; fresh standalone
+reads confirmed the rollback had restored the original empty macro.
+
+The reader now accepts only two **consecutive, identical, complete** 256-byte
+snapshots, within at most three reads. It does not accept a non-consecutive
+majority or ignore errors. A regression test covers transitional data,
+alternating copies, incomplete copies, and read failure. The original timing
+was retained. With this rule, the complete long → short → empty test passed
+byte-for-byte, including zero/long delays; both keymaps were unchanged.
+
+Twelve previously missing visible actions were added from independently
+recorded wire facts in `Research/action-coverage.md`. These expand the native
+catalog but do not establish physical host behavior for those actions.

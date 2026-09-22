@@ -8,9 +8,9 @@ This ledger separates implemented configuration storage from end-to-end behavior
 | Linux configuration | Original hidraw adapter and full GUI pass Linux cross-target checks | Linux link/build, native GUI launch, hidraw permissions, hardware transactions |
 | Plug-and-play Nia87 TKL | Attached device auto-loads built-in 87-key geometry and fixed slots | Stronger board/revision identification, reconnect and multiple-device behavior; clean-machine run |
 | Base and Fn keymaps | Both maps read twice; base remap/restore and captured native Fn media replay pass complete readback | Fn-only application transactions pass after USB recovery; mixed same-slot edits are guarded; broader action coverage, physical output and persistence remain |
-| Modifier, media and mouse actions | Pure codecs and catalogs implemented | Compare the Nia87-visible official action set, verify missing actions and physical output |
-| Macro storage | Long → short → empty replacement verified; stale-page regression fixed | Official replay comparison, other slots and boundary behavior |
-| Macro editor | Native event table, focused recorder, repeats/modes, import/export and saved-slot binding; three base binding modes read back and restored | Recorder GUI interaction validation, physical playback modes and timing |
+| Modifier, media and mouse actions | Pure codecs and catalog, including 12 previously missing visible media/system actions with documented wire facts | Physical output and modifier-combination coverage |
+| Macro storage | Long → short → empty replacement verified; stale-page clearing and transitional-read regression fixed; write-handle identity checked | Official replay comparison, other slots and boundary behavior |
+| Macro editor | Native event table, focused recorder, repeats/modes, import/export and saved-slot binding; all three base and Fn binding modes read back and restored | Recorder GUI interaction validation, physical playback modes and timing |
 | Global lighting | Native controls; brightness write/read/restore passes full settings comparison | Each applicable parameter family and visual validation |
 | Per-key colors | Native physical layout editor; single-color write/restore passes all 128 RGB values | GUI interaction coverage, picture-slot semantics and visual validation |
 | Host-driven lighting | Official catalog advertises screen and music modes | Determine actual required host processing; independently implement applicable behavior |
