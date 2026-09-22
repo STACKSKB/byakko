@@ -42,6 +42,24 @@ The supplied bundle is minified and has several hardware-family implementations.
 
 ## Offline comparison and macro editor lifecycle
 
+### Selected-path event audit (2026-09-22)
+
+A follow-up traced the current Nia87 factory to `Emt` (character offset
+21,329,355), extending `YHe`. Its simple `_setMacro` override is at 17,781,671,
+but event encoding comes from inherited `YY.setMacro` at 15,390,887. The getter
+at 15,450,241 uses `YY.buffToMacroEvents` at 15,392,264. These offsets refer to
+the ignored current web bundle named above, not the older supplied installer.
+
+The selected writer stores movement tag249, an unshifted short-delay byte,
+signed dx/dy, and an optional LE16 long delay. Its selected reader nevertheless
+shifts a nonzero movement short delay right by one. Thus this inconsistency
+does apply to Nia87; it is not solely an observation of the unrelated 20-slot
+class in the original audit. The writer also stores paired zero delays while
+the reader filters them. Byakko follows the writer's byte representation and
+preserves zero delays. This establishes encoding facts, not physical timing.
+The shared repeat-times UI uses 1–65,535, and forces repeat1 for other play modes;
+the wire's representable repeat0 remains semantically unverified.
+
 `cargo run --no-default-features --example compare_macro_capture -- Research/captures/macro-official-headers-1.log`
 parses the retained official HID log without accessing a device. It validates
 complete 67-byte debugger dumps, ordered macro pages, header length and checksum.
