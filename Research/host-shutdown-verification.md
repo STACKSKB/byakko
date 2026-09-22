@@ -25,3 +25,19 @@ promise rollback after arbitrary panics. Headless close/error tests exercise
 these panels without HID writes; direct panic tests cover the lighting and
 macro wrappers. OS-window close testing and hardware
 fault-recovery acceptance remain separate pending gates.
+
+## Native inspection retry
+
+The current debug native app was rebuilt and launched through the Windows
+computer-use API. Its `Byakko · Nia87` window was enumerated. Screenshot capture
+again failed with `SetIsBorderRequired failed: No such interface supported
+(0x80004002)`. Accessibility returned only window/title-bar controls, not the
+editor contents. A close-button action failed because input geometry was
+unavailable; after fresh window observation, Alt+F4 closed the app and a later
+window enumeration confirmed no Byakko windows remained. No Apply was invoked.
+This confirms launch/close only, not layout or configuration interaction.
+
+Source inspection found that the Keys page lacked an outer scroll area while
+its expandable archive and native-details sections could exceed the viewport.
+It now scrolls vertically, keeping lower controls reachable through scrolling.
+The actual OS-rendered layout still needs visual verification.

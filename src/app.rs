@@ -1408,7 +1408,11 @@ impl eframe::App for Workbench {
                 self.layer_bar(ui);
                 ui.add_space(12.0);
                 match self.tab {
-                    WorkbenchTab::Keys => self.keys_page(ui),
+                    WorkbenchTab::Keys => {
+                        egui::ScrollArea::vertical()
+                            .id_salt("keys_page_scroll")
+                            .show(ui, |ui| self.keys_page(ui));
+                    }
                     WorkbenchTab::Macros => self.macros_page(ui),
                     WorkbenchTab::Lighting => {
                         let blocked = self.busy || self.macro_editor.busy();
