@@ -122,7 +122,10 @@ impl SettingsEditor {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = device::read_settings().map_err(|error| error.to_string());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                device::read_settings().map_err(|error| error.to_string())
+            }))
+            .unwrap_or_else(|_| Err("Settings read panicked; device state is unverified.".into()));
             let _ = tx.send(WorkerResult::Read(result));
             ctx.request_repaint();
         });
@@ -153,8 +156,11 @@ impl SettingsEditor {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = device::apply_setting(&expected, setting, &backup_dir)
-                .map_err(|error| error.to_string());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                device::apply_setting(&expected, setting, &backup_dir)
+                    .map_err(|error| error.to_string())
+            }))
+            .unwrap_or_else(|_| Err("Settings apply panicked; restoration is unverified. Inspect the backup before retrying.".into()));
             let _ = tx.send(WorkerResult::Applied(setting, result));
             ctx.request_repaint();
         });
@@ -179,6 +185,12 @@ impl SettingsEditor {
         }
         self.observed = Some(updated);
         self.trusted = true;
+    }
+
+    pub fn handle_close(&self, ctx: &egui::Context) {
+        if self.busy && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
     }
 
     fn poll_worker(&mut self) {
@@ -213,6 +225,7 @@ impl SettingsEditor {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, blocked: bool) {
+        self.handle_close(ui.ctx());
         self.poll_worker();
         if !self.first_read_started && !blocked && !self.busy {
             self.start_read(ui.ctx());
@@ -385,11 +398,76 @@ impl SettingsEditor {
                 ui.add_space(8.0);
                 ui.label(RichText::new(&self.status).color(if self.error { ACCENT } else { INK }));
             });
+        self.handle_close(ui.ctx());
     }
 }
 
 impl Default for SettingsEditor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close_frame(editor: &mut SettingsEditor) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input
+            .viewports
+            .get_mut(&egui::ViewportId::ROOT)
+            .unwrap()
+            .events
+            .push(egui::ViewportEvent::Close);
+        let mut output = ctx.run_ui(input, |ui| editor.handle_close(ui.ctx()));
+        output.textures_delta.clear();
+        output
+    }
+
+    #[test]
+    fn close_is_cancelled_before_same_frame_error_completion() {
+        let mut editor = SettingsEditor::new();
+        let mut replies = [[0u8; 64]; 4];
+        for (reply, opcode) in replies.iter_mut().zip([0x91, 0x97, 0x92, 0x86]) {
+            reply[0] = opcode;
+        }
+        let settings =
+            Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3]).unwrap();
+        editor.observed = Some(settings);
+        editor.draft_debounce = Some(5);
+        editor.draft_auto = Some(true);
+        editor.draft_sleep = Some([60, 60, 600, 600]);
+        editor.draft_backlight = Some(true);
+        let drafts_before = (
+            editor.draft_debounce,
+            editor.draft_auto,
+            editor.draft_sleep,
+            editor.draft_backlight,
+        );
+        editor.busy = true;
+        editor
+            .tx
+            .send(WorkerResult::Applied(
+                Setting::Debounce(5),
+                Err("restore failed".into()),
+            ))
+            .unwrap();
+        let output = close_frame(&mut editor);
+        editor.poll_worker();
+        let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!editor.busy);
+        assert!(editor.error);
+        assert_eq!(
+            (
+                editor.draft_debounce,
+                editor.draft_auto,
+                editor.draft_sleep,
+                editor.draft_backlight
+            ),
+            drafts_before
+        );
     }
 }

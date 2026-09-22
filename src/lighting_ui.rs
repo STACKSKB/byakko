@@ -85,7 +85,7 @@ impl LightingEditor {
         );
         let (tx, ctx, backups) = (self.tx.clone(), ctx.clone(), self.backup_dir.clone());
         std::thread::spawn(move || {
-            let result = run_host_worker(|| {
+            let result = run_lighting_worker(|| {
                 crate::screen_stream::run(&expected, &backups, &stop).map_err(|e| e.to_string())
             });
             let _ = tx.send(WorkerResult::StreamStopped(result));
@@ -109,7 +109,7 @@ impl LightingEditor {
         self.set_status("Starting system playback lighting. Stop restores the previous effect.");
         let (tx, ctx, backups) = (self.tx.clone(), ctx.clone(), self.backup_dir.clone());
         std::thread::spawn(move || {
-            let result = run_host_worker(|| {
+            let result = run_lighting_worker(|| {
                 crate::audio_stream::run(&expected, &desired, &backups, &stop)
                     .map_err(|e| e.to_string())
             });
@@ -119,6 +119,9 @@ impl LightingEditor {
     }
 
     pub fn handle_close(&mut self, ctx: &egui::Context) {
+        if self.busy && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         if ctx.input(|input| input.viewport().close_requested()) && self.stream_stop.is_some() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.closing = true;
@@ -160,7 +163,8 @@ impl LightingEditor {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = device::read_lighting().map_err(|error| error.to_string());
+            let result =
+                run_lighting_worker(|| device::read_lighting().map_err(|error| error.to_string()));
             let _ = tx.send(WorkerResult::Read(result));
             ctx.request_repaint();
         });
@@ -183,8 +187,10 @@ impl LightingEditor {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let result = device::apply_lighting(&expected, &setting, &backup_dir)
-                .map_err(|error| error.to_string());
+            let result = run_lighting_worker(|| {
+                device::apply_lighting(&expected, &setting, &backup_dir)
+                    .map_err(|error| error.to_string())
+            });
             let _ = tx.send(WorkerResult::Applied(result));
             ctx.request_repaint();
         });
@@ -342,6 +348,7 @@ impl LightingEditor {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, blocked: bool) {
+        self.handle_close(ui.ctx());
         self.poll_worker();
         if !self.first_read_started && !blocked && !self.busy {
             self.start_read(ui.ctx());
@@ -447,11 +454,11 @@ impl Drop for LightingEditor {
     }
 }
 
-fn run_host_worker(
+fn run_lighting_worker(
     operation: impl FnOnce() -> Result<Lighting, String>,
 ) -> Result<Lighting, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation))
-        .unwrap_or_else(|_| Err("Host-lighting worker failed unexpectedly. Re-read the keyboard before further changes; restoration is unverified.".into()))
+        .unwrap_or_else(|_| Err("Lighting worker failed unexpectedly. Re-read the keyboard before further changes; restoration is unverified.".into()))
 }
 
 fn default_for(effect: &Effect, previous: Option<&LightingSetting>) -> LightingSetting {
@@ -527,6 +534,27 @@ fn summary(setting: &LightingSetting) -> String {
 mod lifecycle_tests {
     use super::*;
 
+    #[test]
+    fn ordinary_write_close_waits_and_keeps_failed_draft() {
+        let mut editor = LightingEditor::new();
+        let mut raw = [0; 64];
+        raw[..8].copy_from_slice(&[0x87, 5, 4, 4, 7, 8, 8, 8]);
+        editor.draft = Lighting::decode(&raw).unwrap().recognized_setting();
+        let draft = editor.draft.clone();
+        editor.busy = true;
+        editor
+            .tx
+            .send(WorkerResult::Applied(Err("readback failed".into())))
+            .unwrap();
+        let output = closing_frame(&mut editor);
+        let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+        assert!(commands.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!commands.contains(&egui::ViewportCommand::Close));
+        assert!(!editor.busy && editor.error && !editor.trusted);
+        assert_eq!(editor.draft, draft);
+        assert!(editor.status.contains("readback failed"));
+    }
+
     fn closing_frame(editor: &mut LightingEditor) -> egui::FullOutput {
         let ctx = egui::Context::default();
         let mut input = egui::RawInput::default();
@@ -600,7 +628,7 @@ mod lifecycle_tests {
     #[test]
     fn panic_becomes_a_completion_error_instead_of_sticking_busy() {
         assert!(
-            run_host_worker(|| panic!("simulated capture panic"))
+            run_lighting_worker(|| panic!("simulated capture panic"))
                 .unwrap_err()
                 .contains("restoration is unverified")
         );
