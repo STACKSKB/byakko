@@ -5,6 +5,7 @@ This ledger separates implemented configuration storage from end-to-end behavior
 | Requirement | Current evidence | Remaining acceptance work |
 | --- | --- | --- |
 | Native product without JS, Electron or IoT helper | Rust/egui application builds and launches; direct HID reads/writes work with OEM helper stopped | Target-specific dependency/license audit and distributable packaging |
+| Reusable frontend | Shared keymap editor with dynamic layout/layers, typed actions and Nia87 adapter; device-free 12-key/three-layer backend tests | Migrate discovery and remaining panels; implement and validate independent backends such as QMK/VIA |
 | Linux configuration | Original hidraw adapter and full GUI cross-link to ELF64 using Zig | Native Linux GUI launch, hidraw permissions, hardware transactions |
 | Plug-and-play Nia87 TKL | Attached device auto-loads built-in 87-key geometry and fixed slots | Stronger board/revision identification, reconnect and multiple-device behavior; clean-machine run |
 | Base and Fn keymaps | Both maps read twice; base, Fn-only and mixed same-slot application writes/restores pass with one-second setter spacing | Broader action coverage, physical output and persistence |
@@ -20,3 +21,4 @@ This ledger separates implemented configuration storage from end-to-end behavior
 | 2.4 GHz | Deferred by USB-first scope | Receiver identification, transport capability and separate verification when available |
 
 Firmware flashing, vendor account login and cloud sharing are outside the local stock-firmware configurator scope. OEM database metadata and UI arrangements are not product implementation sources. Physical tests remain explicitly pending while the user is AFK.
+

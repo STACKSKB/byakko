@@ -1,8 +1,14 @@
 # Reusable native frontend: backend boundary
 
-Byakko currently has a native egui frontend for the Nia87. It is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
+Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 
-## Current coupling
+## Implemented first slice
+
+`src/backend.rs` defines dynamic physical keys, layers, typed actions, opaque observed revisions and a keymap backend interface. `src/backend/nia87.rs` owns conversion to the existing stock-firmware protocol and delegates guarded writes to the established transaction implementation. `src/keymap_ui.rs` renders and edits those backend-provided models without importing Nia87 codecs or geometry. Unknown bindings remain opaque and lossless.
+
+Device-free tests render a separate 12-key, three-layer backend and exercise unsupported actions, read-only keys, stale state and incorrect readback. This is evidence for the keymap boundary, not a completed QMK/VIA implementation. Startup discovery, native profiles, macros, lighting, settings and archive orchestration still need migration. The Nia87 application bridge preserves existing native file formats.
+
+## Remaining coupling
 
 | UI module | Device-specific assumptions in the frontend today |
 | --- | --- |
@@ -29,3 +35,4 @@ Portable profiles should contain only actions and capabilities with defined cros
 First slice: extract a small model for `DeviceDescriptor`, dynamic `PhysicalKey`/`LayerId`, key bindings, keymap capability, observed state, and changes; define an injectable keymap session. Adapt the existing Nia87 `device` functions behind it, keeping their expected-state, backup, and readback behavior. Move `app.rs` keymap reading/applying and the key grid/layer selector to the descriptor and typed binding model. Keep Nia87 raw bytes behind the adapter, with a backend details affordance for expert inspection; preserve the existing profile/archive behavior during this slice. Do not move all tabs at once.
 
 Verify with a fake in-memory backend describing a non-87-key layout and at least three layers. Test layout rendering/selection, staged edits, unsupported actions, a stale expected-state conflict, and a failed readback; confirm that none invokes Nia87 mapping or packet code. Run existing Nia87 unit tests and device-free UI tests. Subsequently migrate macros, lighting/picture, settings, and archives one capability at a time, using fake-backend cases for absent or partially supported features. Future QMK/VIA integrations can implement the session independently; this plan does not require firmware flashing, JavaScript in the UI, or copying GPL code.
+
