@@ -7,10 +7,14 @@ use byakko_devices::KeymapDevice;
 
 #[path = "demo.rs"]
 mod demo;
+mod macro_workflow;
 
 fn ready() -> Desktop {
     let mut device = demo::device().unwrap();
-    let mut session = KeymapSession::new(device.descriptor().clone()).unwrap();
+    let mut session = Session::new(device.descriptor().clone())
+        .unwrap()
+        .with_macros(device.macro_capabilities().unwrap().clone())
+        .unwrap();
     let generation = session.connect().unwrap();
     let Command::Read { operation, .. } = session.request_read().unwrap() else {
         unreachable!()
@@ -20,9 +24,14 @@ fn ready() -> Desktop {
         operation,
         result: device.read(),
     });
+    let executor = Executor::spawn(device, Default::default()).unwrap();
+    executor.set_generation(generation);
     Desktop {
+        page: Page::Keys,
+        macro_form: Default::default(),
+        repeat_input: String::new(),
         session,
-        executor: Executor::spawn(device, Default::default()).unwrap(),
+        executor,
         layer: "Typing".into(),
         selected: Some("Alpha".into()),
         search: String::new(),

@@ -27,7 +27,7 @@ policy and bounded request validation; none is exposed by this change. No
 JavaScript or browser engine is introduced into the native application.
 
 The session model now drives the first Iced keymap screen in
-`crates/byakko-desktop`. Its library receives a descriptor and executor; only
+`crates/byakko-desktop`. Its library receives a configured core session and executor; only
 the binary composition root selects the Nia87 backend. Views own no
 firmware representation, file paths, baseline copies or device workers. The
 desktop now depends only on core, devices and Iced. The legacy root package
@@ -43,7 +43,8 @@ reconnect conflict blocks editing/apply and retains the draft: revert, then
 read to accept device values. There is no automatic hotplug monitor yet.
 
 `--demo` composes the same screen/executor with `MemoryDevice`: three keys,
-three named layers, one read-only opaque binding, no hardware/file effects.
+three named layers, one read-only opaque binding, two editable macro slots and
+one opaque macro slot, with no hardware/file effects.
 The memory backend validates expected state and advances opaque revisions.
 Tests cover stale writes, fixed-key rejection, retained opaque values, UI layer
 selection and close/failure transitions. Those tests do not establish physical
@@ -140,8 +141,19 @@ exact expected-state checks. Tests now exercise the complete session → worker 
 memory apply → completion → session path and verify rereads and retained opaque
 slots. Unsupported operations, stale commands, panics, conflicts and malformed
 readback remain explicit failures. No live macro writes were performed for this
-step. The Iced macro screen, recorder, binding and file/label workflows still
-need migration; the working legacy macro panel is not being ported wholesale.
+step. The Iced macro screen now uses this same session and executor. The view
+projects slot/action capabilities and the sole core draft. Widget-local text
+buffers hold only unsubmitted event/count inputs; explicit Stage actions parse
+and submit edits to core. Failed edits preserve input and program. Slot changes
+reject dirty drafts, sequence changes clear replacement targets, and failed
+reads retain form input. Successful saves are verified against the macro result
+when closing, even though they invalidate the keymap baseline's trust.
+
+The memory-backed desktop tests exercise event replacement, signed movement,
+zero wait/count preservation, readback, opaque-slot rejection, failure retention
+and close behavior with a separately dirty keymap. Recorder, binding and
+file/label workflows still need migration; the working legacy macro panel is
+not being ported wholesale. See `iced-macro-acceptance.md` for the current limits.
 
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 
