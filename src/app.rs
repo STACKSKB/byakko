@@ -13,7 +13,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Str
 
 use crate::{
     actions,
-    backend::{self, nia87::Nia87Adapter},
+    backend::{self, Change, nia87::Nia87Adapter},
     board,
     device::{self, Snapshot},
     keymap_ui::KeymapEditor,
@@ -55,7 +55,6 @@ impl Layer {
 
 enum WorkerResult {
     Read(Result<Snapshot, String>),
-    Applied(Result<Snapshot, String>),
     ArchiveProgress(usize, usize),
     Archive(Result<crate::configuration::Configuration, String>),
     ReviewProgress(String),
@@ -74,9 +73,6 @@ struct StagedReview {
 
 struct Workbench {
     keys: Vec<PhysicalKey>,
-    observed: Option<Snapshot>,
-    base: Vec<[u8; 4]>,
-    function: Vec<[u8; 4]>,
     selected: Option<u8>,
     layer: Layer,
     tab: WorkbenchTab,
@@ -87,6 +83,7 @@ struct Workbench {
     search: String,
     modifiers: [bool; 4],
     raw_editor: String,
+    raw_editor_source: Option<[u8; 4]>,
     test_input: String,
     profile_path: String,
     archive_path: String,
@@ -124,9 +121,6 @@ impl Workbench {
         let macro_editor = MacroEditor::new_with_backup_dir(backup_dir.clone());
         Self {
             keys: layout::nia87_keys(),
-            observed: None,
-            base: Vec::new(),
-            function: Vec::new(),
             selected: None,
             layer: Layer::Base,
             tab: WorkbenchTab::Keys,
@@ -143,6 +137,7 @@ impl Workbench {
             search: String::new(),
             modifiers: [false; 4],
             raw_editor: String::new(),
+            raw_editor_source: None,
             test_input: String::new(),
             profile_path: data_dir
                 .join("nia87-keymap.json")
@@ -187,36 +182,6 @@ impl Workbench {
             }))
             .unwrap_or_else(|_| Err("Device read failed unexpectedly.".into()));
             let _ = tx.send(WorkerResult::Read(result));
-            ctx.request_repaint();
-        });
-    }
-
-    fn start_apply(&mut self, ctx: &egui::Context) {
-        let Some(expected) = self.observed.clone() else {
-            return;
-        };
-        if self.device_busy() || self.dirty_count() == 0 {
-            return;
-        }
-        let base = self.base.clone();
-        let function = self.function.clone();
-        let backup_dir = self.backup_dir.clone();
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
-        self.busy = true;
-        self.reviewed_archive = None;
-        self.archive_apply_running = false;
-        self.error = false;
-        self.status = format!(
-            "Backing up and applying {} key changes; allow about one second per change plus verification…",
-            self.dirty_count()
-        );
-        std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                device::apply_keymaps(&expected, &base, &function, &backup_dir)
-                    .map_err(|error| error.to_string())
-            })).unwrap_or_else(|_| Err("Keymap apply panicked; device state and restoration are unverified. Inspect the backup before retrying.".into()));
-            let _ = tx.send(WorkerResult::Applied(result));
             ctx.request_repaint();
         });
     }
@@ -307,7 +272,7 @@ impl Workbench {
     }
 
     fn start_archive_review(&mut self, ctx: &egui::Context) {
-        if self.device_busy() || self.dirty_count() != 0 || self.keymap_editor.dirty_count() != 0 {
+        if self.device_busy() || self.dirty_count() != 0 {
             return;
         }
         let path = PathBuf::from(self.archive_path.trim());
@@ -354,7 +319,7 @@ impl Workbench {
         let Some(review) = self.reviewed_archive.clone() else {
             return;
         };
-        if self.device_busy() || self.dirty_count() != 0 || self.keymap_editor.dirty_count() != 0 {
+        if self.device_busy() || self.dirty_count() != 0 {
             return;
         }
         self.busy = true;
@@ -399,18 +364,14 @@ impl Workbench {
     }
 
     fn poll_worker(&mut self) {
-        if let Some(state) = self.keymap_editor.poll() {
-            match backend::nia87::to_snapshot(&state) {
-                Ok(snapshot) => {
-                    self.load(snapshot);
-                    self.status = "Keymap changes applied and verified.".into();
-                    self.error = false;
-                }
-                Err(error) => {
-                    self.status = format!("Applied keymap could not be converted: {error}");
-                    self.error = true;
-                }
-            }
+        let applying_keymap = self.keymap_editor.busy();
+        if self.keymap_editor.poll().is_some() {
+            self.sync_editor();
+        }
+        if applying_keymap && !self.keymap_editor.busy() {
+            let (status, error) = self.keymap_editor.status();
+            self.status = status.to_owned();
+            self.error = error;
         }
         while let Ok(message) = self.rx.try_recv() {
             match message {
@@ -426,8 +387,14 @@ impl Workbench {
                         }
                         Ok(_) => {
                             self.retry_schedule.succeeded();
-                            if self.dirty_count() > 0 || self.keymap_editor.dirty_count() > 0 {
-                                if self.observed.as_ref() == Some(&snapshot) {
+                            if self.dirty_count() > 0 {
+                                if self
+                                    .keymap_editor
+                                    .observed()
+                                    .and_then(|state| backend::nia87::to_snapshot(state).ok())
+                                    .as_ref()
+                                    == Some(&snapshot)
+                                {
                                     self.status = "Device read matched the loaded baseline. Staged key changes were retained.".into();
                                     self.error = false;
                                 } else {
@@ -444,26 +411,12 @@ impl Workbench {
                         }
                     }
                 }
-                WorkerResult::Applied(Ok(snapshot)) => {
-                    self.busy = false;
-                    self.load(snapshot);
-                    self.status = format!(
-                        "Changes applied and verified. Backup directory: {}",
-                        self.backup_dir.display()
-                    );
-                    self.error = false;
-                }
                 WorkerResult::Read(Err(error)) => {
                     self.busy = false;
                     self.retry_schedule.failed(Instant::now());
                     self.status = format!(
                         "{error} Waiting for a supported keyboard; retrying read automatically."
                     );
-                    self.error = true;
-                }
-                WorkerResult::Applied(Err(error)) => {
-                    self.busy = false;
-                    self.status = error;
                     self.error = true;
                 }
                 WorkerResult::ArchiveProgress(done, total) => {
@@ -553,34 +506,21 @@ impl Workbench {
     }
 
     fn load(&mut self, snapshot: Snapshot) {
-        self.base = snapshot.base.clone();
-        self.function = snapshot.function.clone();
-        self.observed = Some(snapshot);
-        if let Some(snapshot) = &self.observed {
-            match backend::nia87::from_snapshot(snapshot)
-                .and_then(|state| self.keymap_editor.load(state.clone()).map(|()| state))
-            {
-                Ok(_) => {}
-                Err(error) => {
-                    self.status = format!("Unable to load generic keymap editor: {error}");
-                    self.error = true;
-                }
+        match backend::nia87::from_snapshot(&snapshot)
+            .and_then(|state| self.keymap_editor.load(state))
+        {
+            Ok(()) => self.sync_editor(),
+            Err(error) => {
+                self.status = format!("Unable to load keymap editor: {error}");
+                self.error = true;
             }
         }
-        self.sync_editor();
     }
 
-    fn draft(&self, layer: Layer) -> &[[u8; 4]] {
+    fn layer_id(layer: Layer) -> &'static str {
         match layer {
-            Layer::Base => &self.base,
-            Layer::Function => &self.function,
-        }
-    }
-
-    fn draft_mut(&mut self, layer: Layer) -> &mut Vec<[u8; 4]> {
-        match layer {
-            Layer::Base => &mut self.base,
-            Layer::Function => &mut self.function,
+            Layer::Base => "base",
+            Layer::Function => "fn",
         }
     }
 
@@ -589,11 +529,15 @@ impl Workbench {
             return None;
         }
         let slot = board::slot_for_usage(usage)?;
-        (slot < self.base.len() && slot < self.function.len()).then_some(slot)
+        (slot < 128).then_some(slot)
     }
 
     fn binding(&self, layer: Layer, usage: u8) -> Option<[u8; 4]> {
-        self.slot(usage).map(|slot| self.draft(layer)[slot])
+        let slot = self.slot(usage)?;
+        let action = self
+            .keymap_editor
+            .action(Self::layer_id(layer), &backend::nia87::key_id(slot))?;
+        backend::nia87::raw_from_action(action).ok()
     }
 
     fn current_label(&self, layer: Layer, usage: u8) -> String {
@@ -642,20 +586,7 @@ impl Workbench {
     }
 
     fn dirty_count(&self) -> usize {
-        let Some(observed) = &self.observed else {
-            return 0;
-        };
-        self.base
-            .iter()
-            .zip(&observed.base)
-            .filter(|(a, b)| a != b)
-            .count()
-            + self
-                .function
-                .iter()
-                .zip(&observed.function)
-                .filter(|(a, b)| a != b)
-                .count()
+        self.keymap_editor.dirty_count()
     }
 
     fn device_busy(&self) -> bool {
@@ -668,16 +599,13 @@ impl Workbench {
     }
 
     fn changed(&self, layer: Layer, usage: u8) -> bool {
-        let (Some(observed), Some(slot)) = (&self.observed, self.slot(usage)) else {
+        let Some(slot) = self.slot(usage) else {
             return false;
         };
-        let before = match layer {
-            Layer::Base => &observed.base,
-            Layer::Function => &observed.function,
-        };
-        before
-            .get(slot)
-            .is_some_and(|value| *value != self.draft(layer)[slot])
+        let key = backend::nia87::key_id(slot);
+        self.keymap_editor
+            .observed_action(Self::layer_id(layer), &key)
+            != self.keymap_editor.action(Self::layer_id(layer), &key)
     }
 
     fn sync_editor(&mut self) {
@@ -685,6 +613,7 @@ impl Workbench {
             .selected
             .and_then(|usage| self.binding(self.layer, usage));
         self.raw_editor = binding.map(format_bytes).unwrap_or_default();
+        self.raw_editor_source = binding;
         self.modifiers = [false; 4];
         if let Some([0, first @ 224..=227, second, last]) = binding {
             self.modifiers[(first - 224) as usize] = true;
@@ -710,23 +639,17 @@ impl Workbench {
         if self.device_busy() {
             return;
         }
-        self.draft_mut(self.layer)[slot] = bytes;
-        self.sync_editor();
-        if let Some(observed) = &self.observed {
-            let mut snapshot = observed.clone();
-            snapshot.base = self.base.clone();
-            snapshot.function = self.function.clone();
-            match backend::nia87::from_snapshot(&snapshot)
-                .and_then(|state| self.keymap_editor.stage_state(state))
-            {
-                Ok(()) => {}
-                Err(error) => {
-                    self.status = format!("Unable to synchronize keymap draft: {error}");
-                    self.error = true;
-                    return;
-                }
-            }
+        let change = Change {
+            layer: Self::layer_id(self.layer).into(),
+            key: backend::nia87::key_id(slot),
+            action: backend::nia87::action_from_raw(bytes),
+        };
+        if let Err(error) = self.keymap_editor.stage_change(change) {
+            self.status = format!("Unable to stage keymap draft: {error}");
+            self.error = true;
+            return;
         }
+        self.sync_editor();
         self.error = false;
         self.status = "Binding staged. Review the change, then apply it explicitly.".into();
     }
@@ -753,22 +676,8 @@ impl Workbench {
         if self.device_busy() {
             return;
         }
-        if let Some(snapshot) = &self.observed {
-            self.base.clone_from(&snapshot.base);
-            self.function.clone_from(&snapshot.function);
-            let mut restored = snapshot.clone();
-            restored.base = self.base.clone();
-            restored.function = self.function.clone();
-            match backend::nia87::from_snapshot(&restored)
-                .and_then(|state| self.keymap_editor.stage_state(state))
-            {
-                Ok(()) => {}
-                Err(error) => {
-                    self.status = format!("Unable to synchronize reverted keymap: {error}");
-                    self.error = true;
-                    return;
-                }
-            }
+        if self.keymap_editor.observed().is_some() {
+            self.keymap_editor.revert();
             self.sync_editor();
             self.status = "Staged changes reverted to the last device read.".into();
             self.error = false;
@@ -793,7 +702,11 @@ impl Workbench {
                 {
                     self.start_read(ui.ctx());
                 }
-                if let Some(snapshot) = &self.observed {
+                if let Some(snapshot) = self
+                    .keymap_editor
+                    .observed()
+                    .and_then(|state| backend::nia87::to_snapshot(state).ok())
+                {
                     ui.label(format!(
                         "PROFILE {}  ·  FW {:04X}",
                         snapshot.profile, snapshot.firmware
@@ -1042,16 +955,19 @@ impl Workbench {
             egui::ScrollArea::vertical()
                 .max_height(130.0)
                 .show(ui, |ui| {
-                    ui.add_enabled_ui(!self.device_busy() && self.observed.is_some(), |ui| {
-                        for (label, usage) in options {
-                            if ui
-                                .selectable_label(false, format!("{}   {:02X}", label, usage))
-                                .clicked()
-                            {
-                                self.stage_key(usage);
+                    ui.add_enabled_ui(
+                        !self.device_busy() && self.keymap_editor.observed().is_some(),
+                        |ui| {
+                            for (label, usage) in options {
+                                if ui
+                                    .selectable_label(false, format!("{}   {:02X}", label, usage))
+                                    .clicked()
+                                {
+                                    self.stage_key(usage);
+                                }
                             }
-                        }
-                    });
+                        },
+                    );
                 });
             ui.add_space(8.0);
             ui.label(
@@ -1060,20 +976,23 @@ impl Workbench {
                     .strong()
                     .color(MUTED),
             );
-            ui.add_enabled_ui(!self.device_busy() && self.observed.is_some(), |ui| {
-                if ui.button("DISABLE KEY").clicked() {
-                    self.set_binding([0, 0, 0, 0]);
-                }
-                egui::ScrollArea::vertical()
-                    .max_height(110.0)
-                    .show(ui, |ui| {
-                        for preset in actions::presets() {
-                            if ui.selectable_label(false, preset.label).clicked() {
-                                self.set_binding(preset.bytes);
+            ui.add_enabled_ui(
+                !self.device_busy() && self.keymap_editor.observed().is_some(),
+                |ui| {
+                    if ui.button("DISABLE KEY").clicked() {
+                        self.set_binding([0, 0, 0, 0]);
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(110.0)
+                        .show(ui, |ui| {
+                            for preset in actions::presets() {
+                                if ui.selectable_label(false, preset.label).clicked() {
+                                    self.set_binding(preset.bytes);
+                                }
                             }
-                        }
-                    });
-            });
+                        });
+                },
+            );
             ui.add_space(8.0);
             ui.collapsing("Advanced · four raw bytes", |ui| {
                 ui.label("Hex bytes, separated by spaces. Editing replaces this binding only.");
@@ -1108,33 +1027,43 @@ impl Workbench {
                 .color(MUTED),
         );
         ui.separator();
-        let Some(observed) = &self.observed else {
+        let Some(observed) = self.keymap_editor.observed() else {
             ui.label("Waiting for a device read.");
             return;
         };
         let mut rows = Vec::new();
-        for layer in [Layer::Base, Layer::Function] {
-            let (before, after) = match layer {
-                Layer::Base => (&observed.base, &self.base),
-                Layer::Function => (&observed.function, &self.function),
+        for change in self.keymap_editor.changes() {
+            let Some(slot) = change
+                .key
+                .strip_prefix("slot-")
+                .and_then(|s| s.parse::<usize>().ok())
+            else {
+                continue;
             };
-            for (slot, (old, new)) in before.iter().zip(after).enumerate() {
-                if old != new {
-                    let key = self
-                        .keys
-                        .iter()
-                        .find(|key| board::slot_for_usage(key.usage) == Some(slot))
-                        .map_or("Unknown", |key| key.label);
-                    rows.push(format!(
-                        "{} · {} (slot {})   {}  →  {}",
-                        layer.name(),
-                        key,
-                        slot,
-                        format_bytes(*old),
-                        format_bytes(*new)
-                    ));
-                }
-            }
+            let Some(old) = observed
+                .bindings
+                .get(&change.layer)
+                .and_then(|bindings| bindings.get(&change.key))
+                .and_then(|action| backend::nia87::raw_from_action(action).ok())
+            else {
+                continue;
+            };
+            let Ok(new) = backend::nia87::raw_from_action(&change.action) else {
+                continue;
+            };
+            let key = self
+                .keys
+                .iter()
+                .find(|key| board::slot_for_usage(key.usage) == Some(slot))
+                .map_or("Unknown", |key| key.label);
+            rows.push(format!(
+                "{} · {} (slot {})   {}  →  {}",
+                change.layer.to_uppercase(),
+                key,
+                slot,
+                format_bytes(old),
+                format_bytes(new)
+            ));
         }
         if rows.is_empty() {
             ui.label("No changes staged.");
@@ -1152,13 +1081,14 @@ impl Workbench {
     fn footer(&mut self, ui: &mut egui::Ui) {
         ui.separator();
         ui.horizontal(|ui| {
-            let can_apply =
-                self.observed.is_some() && !self.device_busy() && self.dirty_count() > 0;
+            let can_apply = self.keymap_editor.observed().is_some()
+                && !self.device_busy()
+                && self.dirty_count() > 0;
             if ui
                 .add_enabled(can_apply, egui::Button::new("APPLY TO KEYBOARD  Ctrl+S"))
                 .clicked()
             {
-                self.start_apply(ui.ctx());
+                self.keymap_editor.start_apply(ui.ctx());
             }
             if ui
                 .add_enabled(
@@ -1183,7 +1113,7 @@ impl Workbench {
             ui.horizontal(|ui| {
                 ui.label("Path");
                 ui.text_edit_singleline(&mut self.profile_path);
-                if ui.add_enabled(!self.device_busy() && self.observed.is_some(), egui::Button::new("SAVE NEW FILE")).clicked() {
+                if ui.add_enabled(!self.device_busy() && self.keymap_editor.observed().is_some(), egui::Button::new("SAVE NEW FILE")).clicked() {
                     let result = self.keymap_editor.observed()
                         .ok_or_else(|| "Read the keyboard before exporting a keymap".to_owned())
                         .and_then(|observed| backend::nia87::draft_snapshot(observed, &self.keymap_editor.changes()))
@@ -1194,9 +1124,9 @@ impl Workbench {
                         Err(e) => { self.status = e; self.error = true; }
                     }
                 }
-                if ui.add_enabled(!self.device_busy() && self.observed.is_some() && self.dirty_count() == 0 && self.keymap_editor.dirty_count() == 0, egui::Button::new("IMPORT TO DRAFT")).clicked() {
-                    let current = self.observed.as_ref().expect("enabled when loaded");
-                    match crate::profiles::load_for_device(std::path::Path::new(&self.profile_path), current) {
+                if ui.add_enabled(!self.device_busy() && self.keymap_editor.observed().is_some() && self.dirty_count() == 0, egui::Button::new("IMPORT TO DRAFT")).clicked() {
+                    let current = backend::nia87::to_snapshot(self.keymap_editor.observed().expect("enabled when loaded"));
+                    match current.and_then(|current| crate::profiles::load_for_device(std::path::Path::new(&self.profile_path), &current).map_err(|e| e.to_string())) {
                         Ok(imported) => {
                             match backend::nia87::from_snapshot(&imported).and_then(|state| self.keymap_editor.stage_state(state)) {
                                 Ok(()) => { self.status = "Imported keymap to local draft. Review changes before Apply.".into(); self.error = false; }
@@ -1224,7 +1154,7 @@ impl Workbench {
                 if ui.add_enabled(!self.device_busy(), egui::Button::new("INSPECT FILE")).clicked() {
                     self.inspect_archive();
                 }
-                let can_review = !self.device_busy() && self.dirty_count() == 0 && self.keymap_editor.dirty_count() == 0;
+                let can_review = !self.device_busy() && self.dirty_count() == 0;
                 if ui.add_enabled(can_review, egui::Button::new("REVIEW RESTORE")).clicked() {
                     self.start_archive_review(ui.ctx());
                 }
@@ -1276,7 +1206,7 @@ impl Workbench {
                 egui::ScrollArea::vertical().max_height(120.0).show(ui, |ui| {
                     for detail in details { ui.monospace(detail); }
                 });
-                let can_apply = !self.device_busy() && self.dirty_count() == 0 && self.keymap_editor.dirty_count() == 0;
+                let can_apply = !self.device_busy() && self.dirty_count() == 0;
                 if ui.add_enabled(can_apply, egui::Button::new("APPLY REVIEWED ARCHIVE")).clicked() {
                     self.start_archive_apply(ui.ctx());
                 }
@@ -1290,20 +1220,12 @@ impl Workbench {
                 || self.picture_editor.busy()
                 || self.settings_editor.busy(),
         );
-        // The shared editor is authoritative on this page. Keep the optional
-        // native inspector on the same draft before it can stage another edit.
-        if let Some(observed) = self.keymap_editor.observed() {
-            match backend::nia87::draft_snapshot(observed, &self.keymap_editor.changes()) {
-                Ok(snapshot) => {
-                    self.base = snapshot.base;
-                    self.function = snapshot.function;
-                    self.sync_editor();
-                }
-                Err(error) => {
-                    self.status = format!("Unable to synchronize native inspector: {error}");
-                    self.error = true;
-                }
-            }
+        if self
+            .selected
+            .and_then(|usage| self.binding(self.layer, usage))
+            != self.raw_editor_source
+        {
+            self.sync_editor();
         }
         ui.collapsing("Nia87 keymap details", |ui| {
             ui.label(
@@ -1371,7 +1293,7 @@ impl Workbench {
                 self.selected_key_context(&mut columns[1]);
             });
             ui.add_space(12.0);
-            let blocked = self.busy;
+            let blocked = self.busy || self.keymap_editor.busy();
             if let Some(binding) = self.macro_editor.ui(ui, blocked) {
                 if self.selected.and_then(|usage| self.slot(usage)).is_some() {
                     self.set_binding(binding);
@@ -1418,8 +1340,6 @@ impl eframe::App for Workbench {
         let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
         if ctrl_s && self.tab == WorkbenchTab::Keys && !self.device_busy() {
             self.keymap_editor.start_apply(ui.ctx());
-        } else if ctrl_s && self.tab == WorkbenchTab::Macros {
-            self.start_apply(ui.ctx());
         }
         if escape && self.tab == WorkbenchTab::Keys && !self.device_busy() {
             self.select(None);
@@ -1441,19 +1361,23 @@ impl eframe::App for Workbench {
                     }
                     WorkbenchTab::Macros => self.macros_page(ui),
                     WorkbenchTab::Lighting => {
-                        let blocked = self.busy || self.macro_editor.busy();
+                        let blocked =
+                            self.busy || self.keymap_editor.busy() || self.macro_editor.busy();
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             self.lighting_editor.ui(ui, blocked);
                         });
                     }
                     WorkbenchTab::Picture => {
-                        let blocked =
-                            self.busy || self.macro_editor.busy() || self.lighting_editor.busy();
+                        let blocked = self.busy
+                            || self.keymap_editor.busy()
+                            || self.macro_editor.busy()
+                            || self.lighting_editor.busy();
                         egui::ScrollArea::vertical()
                             .show(ui, |ui| self.picture_editor.ui(ui, blocked));
                     }
                     WorkbenchTab::Settings => {
                         let blocked = self.busy
+                            || self.keymap_editor.busy()
                             || self.macro_editor.busy()
                             || self.lighting_editor.busy()
                             || self.picture_editor.busy();
@@ -1510,8 +1434,24 @@ fn parse_bytes(input: &str) -> Option<[u8; 4]> {
     bytes.try_into().ok()
 }
 
+pub fn run() -> eframe::Result {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1320.0, 760.0])
+            .with_min_inner_size([1000.0, 650.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Byakko · Nia87",
+        options,
+        Box::new(|cc| {
+            let data_dir = crate::storage::prepare_user_data_dir()?;
+            Ok(Box::new(Workbench::new(&cc.egui_ctx, data_dir)))
+        }),
+    )
+}
+
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -1538,6 +1478,20 @@ mod tests {
             base: vec![[fill, 0, 0, 0]; 128],
             function: vec![[fill, 0, 0, 0]; 128],
         }
+    }
+
+    fn observed_snapshot(app: &Workbench) -> Option<Snapshot> {
+        app.keymap_editor
+            .observed()
+            .map(|state| backend::nia87::to_snapshot(state).unwrap())
+    }
+
+    fn draft_snapshot(app: &Workbench) -> Snapshot {
+        backend::nia87::draft_snapshot(
+            app.keymap_editor.observed().unwrap(),
+            &app.keymap_editor.changes(),
+        )
+        .unwrap()
     }
 
     fn configuration(fill: u8) -> crate::configuration::Configuration {
@@ -1582,7 +1536,10 @@ mod tests {
             .unwrap()
             .events
             .push(egui::ViewportEvent::Close);
-        let mut output = ctx.run_ui(input, |ui| app.handle_archive_close(ui.ctx()));
+        let mut output = ctx.run_ui(input, |ui| {
+            app.handle_archive_close(ui.ctx());
+            app.keymap_editor.handle_close(ui.ctx());
+        });
         output.textures_delta.clear();
         output
     }
@@ -1618,7 +1575,7 @@ mod tests {
         assert!(!app.busy);
         assert!(!app.archive_apply_running);
         assert!(app.reviewed_archive.is_none());
-        assert_eq!(app.base, vec![[7, 0, 0, 0]; 128]);
+        assert_eq!(draft_snapshot(&app).base, vec![[7, 0, 0, 0]; 128]);
     }
 
     #[test]
@@ -1654,14 +1611,14 @@ mod tests {
         app.load(baseline.clone());
         app.selected = Some(4);
         app.set_binding([0, 0, 5, 0]);
-        let staged = app.base.clone();
+        let staged = draft_snapshot(&app);
         let generic_changes = app.keymap_editor.changes();
         app.tx
             .send(WorkerResult::Read(Ok(baseline.clone())))
             .unwrap();
         app.poll_worker();
-        assert_eq!(app.base, staged);
-        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(draft_snapshot(&app), staged);
+        assert_eq!(observed_snapshot(&app), Some(baseline));
         assert_eq!(app.keymap_editor.changes(), generic_changes);
         assert!(!app.error);
     }
@@ -1673,12 +1630,12 @@ mod tests {
         app.load(baseline.clone());
         app.selected = Some(4);
         app.set_binding([0, 0, 5, 0]);
-        let staged = app.base.clone();
+        let staged = draft_snapshot(&app);
         let generic_changes = app.keymap_editor.changes();
         app.tx.send(WorkerResult::Read(Ok(snapshot(1)))).unwrap();
         app.poll_worker();
-        assert_eq!(app.base, staged);
-        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(draft_snapshot(&app), staged);
+        assert_eq!(observed_snapshot(&app), Some(baseline));
         assert_eq!(app.keymap_editor.changes(), generic_changes);
         assert!(app.error && app.status.contains("Export the draft if needed"));
         assert!(app.retry_schedule.deadline().is_none());
@@ -1691,18 +1648,18 @@ mod tests {
         app.load(baseline.clone());
         app.selected = Some(4);
         app.set_binding([0, 0, 5, 0]);
-        let staged = app.base.clone();
+        let staged = draft_snapshot(&app);
         app.tx
             .send(WorkerResult::Read(Err("disconnected".into())))
             .unwrap();
         app.poll_worker();
-        assert_eq!(app.base, staged);
-        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(draft_snapshot(&app), staged);
+        assert_eq!(observed_snapshot(&app), Some(baseline));
         assert!(app.retry_schedule.deadline().is_some());
     }
 
     #[test]
-    fn differing_read_keeps_generic_only_draft() {
+    fn differing_read_keeps_shared_editor_draft() {
         let mut app = Workbench::without_read();
         let baseline = snapshot(0);
         app.load(baseline.clone());
@@ -1711,11 +1668,11 @@ mod tests {
         app.keymap_editor
             .stage_state(backend::nia87::from_snapshot(&desired).unwrap())
             .unwrap();
-        assert_eq!(app.dirty_count(), 0);
+        assert_eq!(app.dirty_count(), 1);
         let staged = app.keymap_editor.changes();
         app.tx.send(WorkerResult::Read(Ok(snapshot(1)))).unwrap();
         app.poll_worker();
-        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(observed_snapshot(&app), Some(baseline));
         assert_eq!(app.keymap_editor.changes(), staged);
         assert!(app.error && app.status.contains("revert it, then read again"));
     }
@@ -1729,14 +1686,12 @@ mod tests {
         invalid.format_version = 2;
         app.tx.send(WorkerResult::Read(Ok(invalid))).unwrap();
         app.poll_worker();
-        assert_eq!(app.observed, Some(baseline.clone()));
+        assert_eq!(observed_snapshot(&app), Some(baseline.clone()));
         assert!(app.retry_schedule.deadline().is_some());
         app.retry_schedule.succeeded();
-        app.tx
-            .send(WorkerResult::Applied(Err("write failed".into())))
-            .unwrap();
+        app.keymap_editor.inject_result(Err("write failed".into()));
         app.poll_worker();
-        assert_eq!(app.observed, Some(baseline));
+        assert_eq!(observed_snapshot(&app), Some(baseline));
         assert!(app.retry_schedule.deadline().is_none());
         assert_eq!(app.status, "write failed");
     }
@@ -1769,16 +1724,34 @@ mod tests {
         app.keymap_editor
             .stage_state(backend::nia87::from_snapshot(&imported).unwrap())
             .unwrap();
-        let ctx = egui::Context::default();
-        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| app.keys_page(ui));
-        output.textures_delta.clear();
-        assert_eq!(app.base[4], imported.base[4]);
+        assert_eq!(draft_snapshot(&app).base[4], imported.base[4]);
         app.selected = Some(4);
         app.set_binding([9, 0, 5, 0]);
         assert_eq!(app.keymap_editor.dirty_count(), 2);
         app.revert();
         assert_eq!(app.dirty_count(), 0);
         assert_eq!(app.keymap_editor.dirty_count(), 0);
+    }
+
+    #[test]
+    fn generic_edit_after_native_macro_binding_preserves_both_changes() {
+        let mut app = Workbench::without_read();
+        app.load(snapshot(0));
+        app.selected = Some(4);
+        app.set_binding([9, 0, 5, 0]);
+        let first = app.slot(4).unwrap();
+        let second = if first == 9 { 10 } else { 9 };
+        app.keymap_editor
+            .stage_change(Change {
+                layer: "base".into(),
+                key: backend::nia87::key_id(second),
+                action: backend::Action::Key(5),
+            })
+            .unwrap();
+        let draft = draft_snapshot(&app);
+        assert_eq!(draft.base[first], [9, 0, 5, 0]);
+        assert_eq!(draft.base[second], [0, 0, 5, 0]);
+        assert_eq!(app.dirty_count(), 2);
     }
 
     #[test]
@@ -1797,10 +1770,8 @@ mod tests {
         app.load(snapshot(0));
         app.selected = Some(4);
         app.set_binding([9, 0, 5, 0]);
-        app.busy = true;
-        app.tx
-            .send(WorkerResult::Applied(Err("readback failed".into())))
-            .unwrap();
+        app.keymap_editor
+            .inject_result(Err("readback failed".into()));
         let output = close_frame(&mut app);
         app.poll_worker();
         assert!(
@@ -1809,7 +1780,7 @@ mod tests {
                 .contains(&egui::ViewportCommand::CancelClose)
         );
         assert!(app.error && app.dirty_count() > 0);
-        assert!(!app.busy);
+        assert!(!app.keymap_editor.busy());
         assert_eq!(app.status, "readback failed");
     }
 
@@ -1819,7 +1790,7 @@ mod tests {
         app.retry_schedule.failed(Instant::now());
         app.tx.send(WorkerResult::Read(Ok(snapshot(0)))).unwrap();
         app.poll_worker();
-        assert!(app.observed.is_some());
+        assert!(app.keymap_editor.observed().is_some());
         assert!(app.retry_schedule.deadline().is_none());
     }
 
@@ -1833,27 +1804,8 @@ mod tests {
         app.poll_worker();
         assert!(app.retry_schedule.deadline().is_some());
         app.retry_schedule.succeeded();
-        app.tx
-            .send(WorkerResult::Applied(Err("write failed".into())))
-            .unwrap();
+        app.keymap_editor.inject_result(Err("write failed".into()));
         app.poll_worker();
         assert!(app.retry_schedule.deadline().is_none());
     }
-}
-
-pub fn run() -> eframe::Result {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1320.0, 760.0])
-            .with_min_inner_size([1000.0, 650.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "Byakko · Nia87",
-        options,
-        Box::new(|cc| {
-            let data_dir = crate::storage::prepare_user_data_dir()?;
-            Ok(Box::new(Workbench::new(&cc.egui_ctx, data_dir)))
-        }),
-    )
 }

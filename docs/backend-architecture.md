@@ -8,11 +8,48 @@ Byakko currently has a native egui frontend for the Nia87. The shared Keys edito
 
 Device-free tests render a separate 12-key, three-layer backend and exercise unsupported actions, read-only keys, stale state and incorrect readback. This is evidence for the keymap boundary, not a completed QMK/VIA implementation. Startup discovery, native profiles, macros, lighting, settings and archive orchestration still need migration. The Nia87 application bridge preserves existing native file formats.
 
-## Remaining coupling
+The shared keymap editor is now the sole owner of the loaded keymap baseline,
+staged actions and keymap apply worker. `Workbench` no longer retains separate
+raw base/Fn drafts or another loaded `Snapshot`. Its Nia87 inspector and macro
+binding controls project individual actions through the adapter and stage edits
+through the shared owner. Raw snapshots are derived at import/export, reconnect
+and archive boundaries. This removes the previous frame-dependent synchronization
+between two editable copies; it does not make the remaining Nia87 panels generic.
+
+## Implementation discipline
+
+Keep cyclomatic complexity low by simplifying the state model and separating
+decisions from effects. File splitting alone is not a complexity reduction.
+
+- Give each editable state one owner; derive projections instead of synchronizing
+  redundant mutable representations.
+- Express validation, protocol encoding, change planning and recorder transitions
+  as deterministic functions with explicit inputs and results. Pass time into
+  transitions rather than reading a clock inside the decision logic.
+- Use enums to represent mutually exclusive workflow states and typed outcomes
+  where callers must distinguish failure or recovery conditions. Avoid independent
+  booleans that admit impossible combinations and parsing error strings for control flow.
+- Keep transport, files, clocks and worker dispatch at narrow imperative boundaries.
+  Keep device write order, settling delays and recovery policy explicit and auditable.
+- Prefer exhaustive pattern matching and small composable transformations. Use
+  iterators where they clarify data flow; use straightforward loops for ordered I/O
+  and algorithms where an iterator chain would conceal the logic.
+- Introduce abstractions for actual shared behavior, not speculative generality.
+  Avoid blanket cloning, allocation and indirection merely to imitate immutability.
+- Test transition invariants, rejected changes, wire representations and failure
+  boundaries. Review branch count, nesting and state combinations as well as size;
+  do not move branches into tiny helpers just to improve a metric.
+
+The next structural work is to isolate the macro recorder from egui, extract
+archive workflow decisions, and separate device sessions, feature operations and
+transaction recovery. Preserve wire behavior during these changes. Feature
+expansion remains secondary to this cleanup.
+
+## Current frontend coupling
 
 | UI module | Device-specific assumptions in the frontend today |
 | --- | --- |
-| `app.rs` | Calls `device::snapshot`, `apply_keymaps`, `capture_configuration`, and `apply_configuration` directly from workers. Holds `Snapshot` and Nia87 `Configuration`; maps keys using `board::slot_for_usage`, loads `layout::nia87_keys()`, switches only `Base`/`Function`, and stores each binding as `[u8; 4]`. The raw-byte editor, decoding/labels, profile/archive names, 50-slot archive summary, and change review know Nia87 storage details. |
+| `app.rs` | Calls `device::snapshot`, `capture_configuration`, and `apply_configuration` from workers and holds Nia87 archive review state. Keymap baseline, draft and apply work belong to the shared editor. The Nia87 inspector/macro-binding view still uses `board::slot_for_usage`, `layout::nia87_keys()` and Base/Function layers, with adapter projections for raw actions. Profile/archive formats and the 50-slot archive summary remain Nia87-specific. |
 | `macro_ui.rs` | Calls `device::read_macro`/`apply_macro`; initializes 50 slots and `u8` slot IDs; validates drafts through Nia87 `macros::encode`, and stores the observed 256-byte representation. Macro event encoding, capacity, play modes, and import/export reflect that backend. |
 | `lighting_ui.rs` | Calls `device::read_lighting`/`apply_lighting`, `lighting::write_report` and the Nia87 effect catalog. Holds decoded settings alongside raw lighting reports; displays raw bytes. Screen/audio streaming invokes device-specific stream modules. |
 | `picture_ui.rs` | Uses `layout::nia87_keys()` and `board::slot_for_usage`, edits the Nia87 matrix color array (including nonphysical slots), and calls `device::read_picture`/`apply_picture`. The fixed slot bounds and initial Esc selection are layout assumptions. |

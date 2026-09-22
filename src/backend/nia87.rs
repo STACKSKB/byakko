@@ -20,7 +20,7 @@ pub fn key_id(slot: usize) -> String {
     format!("slot-{slot:03}")
 }
 
-fn decode(raw: [u8; 4]) -> Action {
+pub fn action_from_raw(raw: [u8; 4]) -> Action {
     if raw == [0; 4] {
         return Action::Disabled;
     }
@@ -59,7 +59,7 @@ fn decode(raw: [u8; 4]) -> Action {
     }
 }
 
-fn encode(action: &Action) -> Result<[u8; 4], String> {
+pub fn raw_from_action(action: &Action) -> Result<[u8; 4], String> {
     match action {
         Action::Key(usage) if *usage > 0 && *usage <= u8::MAX as u16 => {
             Ok(actions::key_binding(*usage as u8))
@@ -140,7 +140,7 @@ pub fn descriptor() -> Descriptor {
     }];
     choices.extend(actions::presets().into_iter().map(|preset| ActionChoice {
         label: preset.label.into(),
-        action: decode(preset.bytes),
+        action: action_from_raw(preset.bytes),
     }));
     let mut usages: Vec<u8> = layout::nia87_keys()
         .into_iter()
@@ -201,7 +201,7 @@ pub fn from_snapshot(snapshot: &Snapshot) -> Result<State, String> {
             records
                 .iter()
                 .enumerate()
-                .map(|(slot, &raw)| (key_id(slot), decode(raw)))
+                .map(|(slot, &raw)| (key_id(slot), action_from_raw(raw)))
                 .collect(),
         );
     }
@@ -229,7 +229,7 @@ pub fn to_snapshot(state: &State) -> Result<Snapshot, String> {
     ] {
         for (slot, raw) in records.iter_mut().enumerate() {
             let action = &state.bindings[layer][&key_id(slot)];
-            let encoded = encode(action)?;
+            let encoded = raw_from_action(action)?;
             if !descriptor.keys[slot].writable && encoded != *raw {
                 return Err(format!("Cannot modify reserved slot {slot}"));
             }
@@ -248,7 +248,7 @@ pub fn draft_snapshot(expected: &State, changes: &[Change]) -> Result<Snapshot, 
     }
     let mut draft = expected.clone();
     for change in changes {
-        encode(&change.action)?;
+        raw_from_action(&change.action)?;
         draft
             .bindings
             .get_mut(&change.layer)
@@ -380,7 +380,7 @@ mod tests {
     fn catalog_choices_match_decoded_bindings() {
         for choice in descriptor().actions {
             assert_eq!(
-                decode(encode(&choice.action).unwrap()),
+                action_from_raw(raw_from_action(&choice.action).unwrap()),
                 choice.action,
                 "{}",
                 choice.label
