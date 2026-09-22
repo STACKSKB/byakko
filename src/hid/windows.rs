@@ -16,8 +16,8 @@ use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
 };
 use windows_sys::Win32::Devices::HumanInterfaceDevice::{
     HIDD_ATTRIBUTES, HIDP_CAPS, HIDP_STATUS_SUCCESS, HidD_FreePreparsedData, HidD_GetAttributes,
-    HidD_GetFeature, HidD_GetHidGuid, HidD_GetManufacturerString, HidD_GetPreparsedData,
-    HidD_GetProductString, HidD_SetFeature, HidP_GetCaps, PHIDP_PREPARSED_DATA,
+    HidD_GetFeature, HidD_GetHidGuid, HidD_GetPreparsedData, HidD_SetFeature, HidP_GetCaps,
+    PHIDP_PREPARSED_DATA,
 };
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_MORE_ITEMS, GENERIC_READ, GENERIC_WRITE,
@@ -131,31 +131,6 @@ fn capabilities(handle: HANDLE) -> Result<HIDP_CAPS> {
         );
     }
     Ok(caps)
-}
-
-fn device_string(handle: HANDLE, manufacturer: bool) -> Option<String> {
-    let mut utf16 = [0u16; 256];
-    let buffer = utf16.as_mut_ptr().cast();
-    let length = size_of_val(&utf16) as u32;
-    // SAFETY: the buffer is writable and its byte length is passed. A failed
-    // optional string query simply yields None.
-    let ok = unsafe {
-        if manufacturer {
-            HidD_GetManufacturerString(handle, buffer, length)
-        } else {
-            HidD_GetProductString(handle, buffer, length)
-        }
-    };
-    if !ok {
-        return None;
-    }
-    let end = utf16
-        .iter()
-        .position(|&unit| unit == 0)
-        .unwrap_or(utf16.len());
-    String::from_utf16(&utf16[..end])
-        .ok()
-        .filter(|s| !s.is_empty())
 }
 
 fn interface_number(path: &str) -> i32 {
@@ -295,8 +270,11 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
             interface: interface_number(&lower),
             usage_page: caps.UsagePage,
             usage: caps.Usage,
-            manufacturer: device_string(device.handle, true),
-            product: device_string(device.handle, false),
+            // Descriptive USB strings are optional and can block a live HID
+            // transaction on this device. Identification uses attributes and
+            // collection capabilities above instead.
+            manufacturer: None,
+            product: None,
             release: attr.VersionNumber,
         });
     }
