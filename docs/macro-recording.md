@@ -36,6 +36,12 @@ manual/imported events, including explicit zero waits, remain unchanged.
 Clear draft removes events locally while retaining repeat count and metadata.
 Revert restores the loaded baseline; Save to keyboard applies the staged change.
 
+Binding mode is stored on the key; repeat count is stored in the shared macro
+slot. Toggle and hold modes require count 1 to match the official save policy.
+If the slot has another count, **Stage count 1** changes the draft explicitly;
+save it before binding. This count change affects every key using that slot.
+Switching modes or importing a file never silently rewrites its repeat count.
+
 ## Implementation boundary
 
 `macro_recorder` owns deterministic timing, held-input tracking, duplicate
