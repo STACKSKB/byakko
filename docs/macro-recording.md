@@ -28,6 +28,10 @@ hardware validation requirements.
 The [timing audit](../Research/macro-recorder-timing.md) explains the correction
 from the earlier recorder, which attached intervals one event late. Existing
 macro files are not rewritten automatically.
+The follow-up audit also identifies an outstanding save-time difference: the
+official timeline adds a final50ms delay when it ends in an action (or its fixed
+recording delay when enabled). Native recorded events currently end with zero
+wait. This remains a timing-parity gap, especially for repeated playback.
 
 ## Implementation boundary
 

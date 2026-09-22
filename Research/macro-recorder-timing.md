@@ -41,3 +41,34 @@ applied to incoming delay records near23,734,305. No distinct no-delay toggle,
 bulk modification of existing delays, or event-duplication action was established.
 Byakko's manual movement and focused keyboard/button recorder cover those
 event types; fixed-delay recording and Clear all remain implementation gaps.
+
+## Save-path follow-up
+
+A later read-only audit of the same bundle found a further timing distinction.
+Its SHA-256 is
+`3708db6c84edce9ca8a2424d744a9ee8a1ef66a267f6f3eca019711d9bf3feca`.
+No reference code is incorporated.
+
+- The recording-delay default near23,732,673 is1ms. The UI bounds the fixed
+  value to1–65,535ms. Incoming delay records use the configured fixed value when
+  enabled (near23,734,305). The option affects new recording delays; its setters
+  near23,740,871 do not rewrite existing timeline delays.
+- `uiSaveMacro` near23,744,730 appends a delay to a nonempty timeline whose last
+  record is an action:50ms normally, or the configured fixed value. An existing
+  terminal delay remains intact. It also forces repeat count1 outside repeat-count
+  mode. These are save-time rules beyond the transition-order correction above.
+- The clear action near25,194,960 empties the timeline and saves the selected
+  macro through `uiSaveMacro`. Persistence proceeds through the app macro-list
+  helper near23,735,629. A native clear control should stage the empty draft and
+  retain the application's explicit device-write boundary.
+
+For a newly recorded press at100ms and release at250ms, the observed reference
+pipeline therefore produces waits150ms and50ms after save. With a fixed10ms
+setting it produces waits10ms and10ms. The native recorder currently produces
+150ms and0ms in measured mode. The difference may matter between repetitions;
+physical timing remains unverified. The earlier correction established elapsed
+delay association, **not complete save-path timing parity**.
+
+Future recorder parity work must account for terminal-delay policy explicitly,
+preserve existing imported/manual delays (including explicit zero), and reserve
+capacity for the selected policy. Do not silently rewrite existing macro files.
