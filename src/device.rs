@@ -1,117 +1,14 @@
-use crate::hid::{HidApi, HidDevice};
+mod configuration;
+mod transport;
+
+use crate::hid::HidDevice;
 use serde::{Deserialize, Serialize};
 
+pub use configuration::{apply_configuration, capture_configuration};
+pub use transport::{Candidate, candidates, descriptor, inspect, open_unique};
+use transport::{FeatureSetter, Session, read_payload, transaction_lock};
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-// OS-held lock survives neither crashes nor process exit. The empty lock file
-// stays on disk; existence alone never means that a transaction is active.
-fn transaction_lock() -> Result<std::fs::File> {
-    let path = std::env::temp_dir().join("byakko-nia87-configuration.lock");
-    lock_file(&path)
-}
-
-fn lock_file(path: &std::path::Path) -> Result<std::fs::File> {
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)?;
-    file.try_lock()
-        .map_err(|_| "Another Byakko transaction is active; retry after it finishes")?;
-    Ok(file)
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Candidate {
-    pub path: String,
-    pub vid: u16,
-    pub pid: u16,
-    pub interface: i32,
-    pub usage_page: u16,
-    pub usage: u16,
-    pub manufacturer: Option<String>,
-    pub product: Option<String>,
-}
-
-pub fn candidates() -> Result<Vec<Candidate>> {
-    let api = HidApi::new()?;
-    Ok(api
-        .device_list()
-        .filter(|d| {
-            d.vendor_id() == 0x3151
-                && matches!(d.product_id(), 0x4011 | 0x4015)
-                && d.usage_page() == 0xffff
-                && d.usage() == 2
-        })
-        .map(|d| Candidate {
-            path: d.path().to_string_lossy().into_owned(),
-            vid: d.vendor_id(),
-            pid: d.product_id(),
-            interface: d.interface_number(),
-            usage_page: d.usage_page(),
-            usage: d.usage(),
-            manufacturer: d.manufacturer_string().map(str::to_owned),
-            product: d.product_string().map(str::to_owned),
-        })
-        .collect())
-}
-
-pub fn open_unique() -> Result<(Candidate, HidDevice)> {
-    let list = candidates()?;
-    if list.len() != 1 {
-        return Err(format!(
-            "Expected one Nia87 configuration collection; found {}. Connect one keyboard by USB.",
-            list.len()
-        )
-        .into());
-    }
-    let candidate = list.into_iter().next().unwrap();
-    let api = HidApi::new()?;
-    let path = std::ffi::CString::new(candidate.path.as_str())?;
-    let device = api.open_path(&path)?;
-    Ok((candidate, device))
-}
-
-pub fn descriptor() -> Result<serde_json::Value> {
-    let (candidate, device) = open_unique()?;
-    let mut bytes = [0u8; 4096];
-    let len = device.get_report_descriptor(&mut bytes)?;
-    Ok(
-        serde_json::json!({"candidate":candidate,"report_descriptor_hex":bytes[..len].iter().map(|b|format!("{b:02x}")).collect::<Vec<_>>().join(" "),"length":len}),
-    )
-}
-
-/// Two read-only requests verified against the Nia87-specific vendor call chain.
-/// Sending a feature report selects the read operation; it does not mutate settings.
-pub fn inspect() -> Result<serde_json::Value> {
-    let _lock = transaction_lock()?;
-    let (candidate, device) = open_unique()?;
-    let mut replies = Vec::new();
-    for opcode in [0x80u8, 0x85] {
-        let mut request = [0u8; 65];
-        request[1] = opcode;
-        // BIT7 framing hypothesis: complement of bytes 0..6 at payload offset 7.
-        // Restricted to known read-only opcodes until verified against the device.
-        request[8] = !opcode;
-        device.send_feature_report(&request)?;
-        std::thread::sleep(std::time::Duration::from_millis(30));
-        let mut reply = [0u8; 65];
-        let n = device.get_feature_report(&mut reply)?;
-        if n != 65 || reply[0] != 0 || reply[1] != opcode {
-            return Err(format!(
-                "Unexpected response to {opcode:02x}: length={n} bytes={:02x?}",
-                &reply[..n]
-            )
-            .into());
-        }
-        replies.push(
-            serde_json::json!({"opcode":opcode,"payload":&reply[1..],"request":&request[1..]}),
-        );
-    }
-    Ok(serde_json::json!({"candidate":candidate,"replies":replies}))
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Snapshot {
     pub format_version: u32,
@@ -119,41 +16,6 @@ pub struct Snapshot {
     pub profile: u8,
     pub base: Vec<[u8; 4]>,
     pub function: Vec<[u8; 4]>,
-}
-
-// Production forwards directly. The explicitly enabled research build can
-// simulate one transport failure while retaining a real device for recovery.
-trait FeatureSetter {
-    fn send_setter(&self, report: &[u8]) -> Result<()>;
-}
-
-impl FeatureSetter for HidDevice {
-    fn send_setter(&self, report: &[u8]) -> Result<()> {
-        #[cfg(feature = "research-tools")]
-        let result = crate::research_fault::send(report, || self.send_feature_report(report));
-        #[cfg(not(feature = "research-tools"))]
-        let result = self.send_feature_report(report);
-        // An error does not prove that the firmware did not receive the setter.
-        // Callers normally sleep only after success; retain the longest known
-        // setter interval before any recovery request on an uncertain result.
-        if result.is_err() {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
-        result
-    }
-}
-
-fn read_payload(device: &HidDevice, opcode: u8, index: u8, page: u8) -> Result<[u8; 64]> {
-    let mut request = [0u8; 65];
-    request[1..].copy_from_slice(&crate::protocol::read_request(opcode, index, page));
-    device.send_feature_report(&request)?;
-    std::thread::sleep(std::time::Duration::from_millis(30));
-    let mut reply = [0u8; 65];
-    let n = device.get_feature_report(&mut reply)?;
-    if n != 65 || reply[0] != 0 {
-        return Err(format!("Invalid HID response length/prefix: {n}").into());
-    }
-    Ok(reply[1..].try_into()?)
 }
 
 fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>> {
@@ -176,8 +38,8 @@ fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>
 }
 
 pub fn snapshot() -> Result<Snapshot> {
-    let _lock = transaction_lock()?;
-    snapshot_unlocked()
+    let session = Session::open()?;
+    snapshot_on_device(session.device())
 }
 
 fn snapshot_unlocked() -> Result<Snapshot> {
@@ -209,22 +71,19 @@ fn snapshot_on_device(device: &HidDevice) -> Result<Snapshot> {
 /// This only sends GET commands (0x80 and 0x87). A matching opcode echo and
 /// identical replies are required before returning the raw-preserving decode.
 pub fn read_lighting() -> Result<crate::lighting::Lighting> {
-    let _lock = transaction_lock()?;
-    let (_, device) = open_unique()?;
-    read_lighting_on_device(&device)
+    let session = Session::open()?;
+    read_lighting_on_device(session.device())
 }
 
 pub fn read_settings() -> Result<crate::settings::Settings> {
-    let _lock = transaction_lock()?;
-    let (_, device) = open_unique()?;
-    read_settings_on_device(&device)
+    let session = Session::open()?;
+    read_settings_on_device(session.device())
 }
 
 /// Exclusive host-lighting session. The lock covers setup, every frame, and
 /// restoration. Explicit finish reports restoration errors to the caller.
 pub struct HostLightingSession {
-    _lock: std::fs::File,
-    device: HidDevice,
+    session: Session,
     saved: crate::lighting::Lighting,
     active: crate::lighting::Lighting,
     backups: std::path::PathBuf,
@@ -254,16 +113,14 @@ impl HostLightingSession {
         if !matches!(desired.effect_id, 20..=22) {
             return Err("Host lighting requires screen or music mode".into());
         }
-        let lock = transaction_lock()?;
-        let (_, device) = open_unique()?;
-        if !read_settings_on_device(&device)?.backlight_enabled() {
+        let session = Session::open()?;
+        if !read_settings_on_device(session.device())?.backlight_enabled() {
             return Err("Enable the backlight in Settings before starting host lighting".into());
         }
         // apply_lighting performs identity and expected-state checks before mutation.
         let active = apply_lighting_unlocked(expected, desired, backups)?;
         Ok(Self {
-            _lock: lock,
-            device,
+            session,
             saved: expected.clone(),
             active,
             backups: backups.to_owned(),
@@ -277,7 +134,7 @@ impl HostLightingSession {
         }
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&crate::host_lighting::screen_report(rgb));
-        self.device.send_setter(&host)?;
+        self.session.device().send_setter(&host)?;
         Ok(())
     }
 
@@ -287,7 +144,7 @@ impl HostLightingSession {
         }
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&crate::host_lighting::music_report(bands));
-        self.device.send_setter(&host)?;
+        self.session.device().send_setter(&host)?;
         Ok(())
     }
 
@@ -345,17 +202,13 @@ pub fn apply_setting(
     setting: crate::settings::Setting,
     backup_dir: &std::path::Path,
 ) -> Result<crate::settings::Settings> {
-    use crate::settings::{Setting, Settings};
+    use crate::settings::{SettingPlan, Settings};
     let _lock = transaction_lock()?;
-    let target_options = match setting {
-        Setting::Backlight(enabled) => Some(expected.with_backlight(enabled)),
-        _ => None,
-    };
-    let report = if let Some(ref target) = target_options {
-        crate::settings::backlight_write_report(target.raw_reply(0x86).expect("options reply"))?
-    } else {
-        crate::settings::write_report(setting)?
-    };
+    let SettingPlan {
+        target,
+        report,
+        restore_report,
+    } = expected.plan_change(setting)?;
     let (_, device) = open_unique()?;
     let version = read_payload(&device, 0x80, 0, 0)?;
     let profile = read_payload(&device, 0x85, 0, 0)?;
@@ -365,41 +218,6 @@ pub fn apply_setting(
     if &read_settings_on_device(&device)? != expected {
         return Err("Settings changed since load; no write sent".into());
     }
-    let mut replies: Vec<Vec<u8>> = [0x91, 0x97, 0x92, 0x86]
-        .into_iter()
-        .map(|opcode| expected.raw_reply(opcode).expect("known opcode").to_vec())
-        .collect();
-    let restore = match setting {
-        Setting::Debounce(value) => {
-            replies[0][2] = value;
-            Setting::Debounce(expected.debounce())
-        }
-        Setting::AutoOs(value) => {
-            replies[1][1] = u8::from(value);
-            Setting::AutoOs(expected.auto_os())
-        }
-        Setting::Sleep(values) => {
-            for (index, seconds) in values.into_iter().enumerate() {
-                replies[2][1 + index * 2..3 + index * 2].copy_from_slice(&seconds.to_le_bytes());
-            }
-            Setting::Sleep(expected.sleep_seconds())
-        }
-        Setting::Backlight(_) => {
-            replies[3] = target_options
-                .as_ref()
-                .expect("backlight target")
-                .raw_reply(0x86)
-                .expect("options reply")
-                .to_vec();
-            Setting::Backlight(expected.backlight_enabled())
-        }
-    };
-    let restore_report = if matches!(setting, Setting::Backlight(_)) {
-        crate::settings::backlight_write_report(expected.raw_reply(0x86).expect("options reply"))?
-    } else {
-        crate::settings::write_report(restore)?
-    };
-    let target = Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3])?;
     if &target == expected {
         return Ok(target);
     }
@@ -606,8 +424,8 @@ fn apply_lighting_unlocked(
 }
 
 pub fn read_macro(slot: u8) -> Result<Vec<u8>> {
-    let _lock = transaction_lock()?;
-    read_macro_unlocked(slot)
+    let session = Session::open()?;
+    read_macro_on_device(session.device(), slot)
 }
 
 fn read_macro_unlocked(slot: u8) -> Result<Vec<u8>> {
@@ -654,8 +472,8 @@ fn stable_macro_reads(mut read: impl FnMut() -> Result<Vec<u8>>) -> Result<Vec<u
 
 /// Read the current custom lighting picture as 128 matrix-indexed RGB values.
 pub fn read_picture() -> Result<Vec<[u8; 3]>> {
-    let _lock = transaction_lock()?;
-    read_picture_unlocked()
+    let session = Session::open()?;
+    read_picture_on_device(session.device())
 }
 
 fn read_picture_unlocked() -> Result<Vec<[u8; 3]>> {
@@ -694,316 +512,6 @@ fn stable_picture_reads(mut read: impl FnMut() -> Result<Vec<[u8; 3]>>) -> Resul
         previous = Some(colors);
     }
     Err("Picture did not stabilize across three complete reads".into())
-}
-
-/// Capture all supported local configuration data without sending setters.
-/// One handle and lock cover both complete sweeps. Other Byakko processes cannot
-/// intervene; an external configurator must still be closed. Progress counts
-/// completed macro slots across the two sweeps, out of 100.
-pub fn capture_configuration(
-    progress: impl FnMut(usize, usize),
-) -> Result<crate::configuration::Configuration> {
-    let _lock = transaction_lock()?;
-    let (_, device) = open_unique()?;
-    capture_configuration_on_device(&device, progress)
-}
-
-fn capture_configuration_on_device(
-    device: &HidDevice,
-    mut progress: impl FnMut(usize, usize),
-) -> Result<crate::configuration::Configuration> {
-    let mut capture = |pass: usize| -> Result<crate::configuration::Configuration> {
-        let keymaps = snapshot_on_device(device)?;
-        if keymaps.firmware != 0x0100 || keymaps.profile != 0 {
-            return Err("Configuration capture requires firmware 0x0100, profile 0".into());
-        }
-        let lighting = read_lighting_on_device(device)?;
-        let settings = read_settings_on_device(device)?;
-        let picture = read_picture_on_device(device)?;
-        let mut macros = Vec::with_capacity(50);
-        for slot in 0..50 {
-            macros.push(read_macro_on_device(device, slot)?);
-            progress(pass * 50 + usize::from(slot) + 1, 100);
-        }
-        // Check identity and maps again after the longer macro sweep.
-        if snapshot_on_device(device)? != keymaps {
-            return Err("Keyboard identity or keymaps changed during configuration capture".into());
-        }
-        Ok(crate::configuration::Configuration {
-            keymaps,
-            macros,
-            lighting,
-            picture,
-            settings,
-        })
-    };
-    let first = capture(0)?;
-    let second = capture(1)?;
-    if first != second {
-        return Err("Configuration changed between complete captures; no archive saved".into());
-    }
-    crate::configuration::validate(&first)?;
-    Ok(first)
-}
-
-/// Apply a previously reviewed archive against an exact expected before-image.
-/// The OS lock and HID handle remain owned through validation, backup, writes,
-/// complete verification and any recovery attempt. Host capture is never started.
-pub fn apply_configuration(
-    expected: &crate::configuration::Configuration,
-    target: &crate::configuration::Configuration,
-    backup_dir: &std::path::Path,
-    mut progress: impl FnMut(&str),
-) -> Result<crate::configuration::Configuration> {
-    let plan = crate::configuration_plan::plan(expected, target)?;
-    // Recovery must be representable before the first setter is sent.
-    let reverse = crate::configuration_plan::plan(target, expected)?;
-    let _lock = transaction_lock()?;
-    let (_, device) = open_unique()?;
-    progress("Checking complete current configuration");
-    if &capture_configuration_on_device(&device, |_, _| {})? != expected {
-        return Err("Configuration changed since review; no writes sent".into());
-    }
-    if expected == target {
-        return Ok(expected.clone());
-    }
-    std::fs::create_dir_all(backup_dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let path = backup_dir.join(format!("configuration-before-{stamp}.json"));
-    crate::configuration::save_new(&path, expected)?;
-    let result = (|| -> Result<crate::configuration::Configuration> {
-        progress("Writing reviewed configuration changes");
-        write_configuration_changes(&device, expected, target, &plan)?;
-        progress("Verifying complete configuration");
-        let actual = capture_configuration_on_device(&device, |_, _| {})?;
-        if &actual != target {
-            return Err("Complete configuration readback mismatch".into());
-        }
-        Ok(actual)
-    })();
-    match result {
-        Ok(actual) => Ok(actual),
-        Err(error) => {
-            progress("Restoring original configuration after failure");
-            let restore = recover_configuration(&device, target, expected, &reverse);
-            Err(format!(
-                "Configuration apply failed: {error}; restore: {}; backup {}",
-                match restore {
-                    Ok(()) => "verified".into(),
-                    Err(e) => e.to_string(),
-                },
-                path.display()
-            )
-            .into())
-        }
-    }
-}
-
-fn recover_configuration(
-    device: &HidDevice,
-    attempted: &crate::configuration::Configuration,
-    original: &crate::configuration::Configuration,
-    reverse: &crate::configuration_plan::ChangeSummary,
-) -> Result<()> {
-    let version = read_payload(device, 0x80, 0, 0)?;
-    let profile = read_payload(device, 0x85, 0, 0)?;
-    if version[0..3] != [0x80, 0, 1] || profile[0..2] != [0x85, 0] {
-        return Err("Recovery identity check failed; durable archive retained".into());
-    }
-    let mut failures = Vec::new();
-    let mut attempt = |label: String, result: Result<()>| {
-        if let Err(error) = result {
-            failures.push(format!("{label}: {error}"));
-        }
-    };
-    // Remove new bindings first, then restore their macro contents. Reread
-    // between layers to detect a setter's unexpected effect on the other map.
-    for function in [true, false] {
-        let observed = match snapshot_on_device(device) {
-            Ok(snapshot) => Some(snapshot),
-            Err(error) => {
-                attempt(
-                    format!("keymap read {function}; recovery limited to planned slots"),
-                    Err(error),
-                );
-                None
-            }
-        };
-        let wanted = if function {
-            &original.keymaps.function
-        } else {
-            &original.keymaps.base
-        };
-        let attempted_map = if function {
-            &attempted.keymaps.function
-        } else {
-            &attempted.keymaps.base
-        };
-        let observed_map = observed.as_ref().map(|snapshot| {
-            if function {
-                snapshot.function.as_slice()
-            } else {
-                snapshot.base.as_slice()
-            }
-        });
-        let slots =
-            match crate::recovery_keymaps::slots_to_restore(observed_map, attempted_map, wanted) {
-                Ok(slots) => slots,
-                Err(error) => {
-                    attempt(
-                        format!("keymap recovery plan {function}"),
-                        Err(error.into()),
-                    );
-                    continue;
-                }
-            };
-        for slot in slots {
-            attempt(
-                format!("key {function}/{slot}"),
-                write_binding(device, function, 0, slot, wanted[slot]),
-            );
-        }
-    }
-    for &slot in &reverse.macro_slots {
-        attempt(
-            format!("macro {slot}"),
-            write_macro_bytes(device, slot, &original.macros[usize::from(slot)]),
-        );
-    }
-    for slot in 0..126 {
-        if attempted.picture[slot] != original.picture[slot] {
-            let result = (|| -> Result<()> {
-                let report =
-                    crate::lighting::per_key_color_report(0, slot as u8, original.picture[slot])?;
-                let mut host = [0u8; 65];
-                host[1..].copy_from_slice(&report);
-                device.send_setter(&host)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                Ok(())
-            })();
-            attempt(format!("picture {slot}"), result);
-        }
-    }
-    for &setting in &reverse.settings {
-        let result = (|| -> Result<()> {
-            let report = if matches!(setting, crate::settings::Setting::Backlight(_)) {
-                crate::settings::backlight_write_report(
-                    original
-                        .settings
-                        .raw_reply(0x86)
-                        .expect("validated options"),
-                )?
-            } else {
-                crate::settings::write_report(setting)?
-            };
-            let mut host = [0u8; 65];
-            host[1..].copy_from_slice(&report);
-            device.send_setter(&host)?;
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            Ok(())
-        })();
-        attempt(format!("setting {setting:?}"), result);
-    }
-    if reverse.lighting {
-        attempt(
-            "lighting".into(),
-            write_lighting_report(device, &lighting_restore_report(&original.lighting)),
-        );
-    }
-    // A transient write error may still have delivered its packet. Only full
-    // readback establishes recovery; do not skip it after an individual error.
-    let first = capture_configuration_on_device(device, |_, _| {}).map_err(|e| e.to_string());
-    let verified = crate::recovery_verification::verify(original, first, || {
-        // An aborted Windows feature request can leave this handle unusable.
-        // Reopen only for readback under the same lock, never to retry setters.
-        let (_, fresh) = open_unique().map_err(|e| e.to_string())?;
-        capture_configuration_on_device(&fresh, |_, _| {}).map_err(|e| e.to_string())
-    });
-    match verified {
-        Ok(()) => Ok(()),
-        Err(verification) => Err(format!(
-            "Recovery unverified: {verification}; section failures: {}",
-            failures.join("; ")
-        )
-        .into()),
-    }
-}
-
-fn write_configuration_changes(
-    device: &HidDevice,
-    before: &crate::configuration::Configuration,
-    target: &crate::configuration::Configuration,
-    plan: &crate::configuration_plan::ChangeSummary,
-) -> Result<()> {
-    // Revalidate identity on this same handle before apply or recovery.
-    let version = read_payload(device, 0x80, 0, 0)?;
-    let profile = read_payload(device, 0x85, 0, 0)?;
-    if version[0..3] != [0x80, 0, 1] || profile[0..2] != [0x85, 0] {
-        return Err("Configuration write identity check failed".into());
-    }
-    // Macro contents precede the key bindings that refer to them.
-    for &slot in &plan.macro_slots {
-        write_macro_bytes(device, slot, &target.macros[usize::from(slot)])?;
-        if read_macro_on_device(device, slot)? != target.macros[usize::from(slot)] {
-            return Err(format!("Macro {slot} readback mismatch").into());
-        }
-    }
-    for function in [false, true] {
-        let prior = &before.keymaps;
-        let (old, new) = if function {
-            (&prior.function, &target.keymaps.function)
-        } else {
-            (&prior.base, &target.keymaps.base)
-        };
-        for slot in 0..126 {
-            if old[slot] != new[slot] {
-                write_binding(device, function, 0, slot, new[slot])?;
-            }
-        }
-    }
-    if snapshot_on_device(device)? != target.keymaps {
-        return Err("Keymap section readback mismatch".into());
-    }
-    if plan.picture_keys > 0 {
-        for slot in 0..126 {
-            if before.picture[slot] != target.picture[slot] {
-                let report =
-                    crate::lighting::per_key_color_report(0, slot as u8, target.picture[slot])?;
-                let mut host = [0u8; 65];
-                host[1..].copy_from_slice(&report);
-                device.send_setter(&host)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-        }
-        if read_picture_on_device(device)? != target.picture {
-            return Err("Picture section readback mismatch".into());
-        }
-    }
-    for &setting in &plan.settings {
-        let report = if matches!(setting, crate::settings::Setting::Backlight(_)) {
-            crate::settings::backlight_write_report(
-                target.settings.raw_reply(0x86).expect("validated options"),
-            )?
-        } else {
-            crate::settings::write_report(setting)?
-        };
-        let mut host = [0u8; 65];
-        host[1..].copy_from_slice(&report);
-        device.send_setter(&host)?;
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
-    if !plan.settings.is_empty() && read_settings_on_device(device)? != target.settings {
-        return Err("Settings section readback mismatch".into());
-    }
-    if plan.lighting {
-        write_lighting_report(device, &lighting_restore_report(&target.lighting))?;
-        if read_lighting_on_device(device)? != target.lighting {
-            return Err("Lighting section readback mismatch".into());
-        }
-    }
-    Ok(())
 }
 
 /// Replace custom picture colors, preserving every unedited matrix slot.
@@ -1382,20 +890,6 @@ mod lighting_tests {
         assert!(error.to_string().contains("reserved padding"));
     }
 
-    #[test]
-    fn operating_system_lock_excludes_second_handle_and_releases_on_drop() {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("byakko-lock-test-{}-{stamp}", std::process::id()));
-        let first = super::lock_file(&path).unwrap();
-        assert!(super::lock_file(&path).is_err());
-        drop(first);
-        assert!(super::lock_file(&path).is_ok());
-        // Retain the empty test artifact in accordance with the no-deletion rule.
-    }
     use super::*;
 
     #[test]

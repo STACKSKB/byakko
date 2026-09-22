@@ -43,9 +43,31 @@ decisions from effects. File splitting alone is not a complexity reduction.
 The macro recorder now owns deterministic timing, held-input and capacity rules
 without egui or I/O. The archive controller owns its operation state and worker
 channel; the workbench coordinates it with the other editors. Remaining structural
-work includes macro file/device orchestration and separating device sessions,
-feature operations and transaction recovery. Preserve wire behavior during these
+work includes macro file/device orchestration and the remaining standalone device
+transactions. Preserve wire behavior during these
 changes. Feature expansion remains secondary to this cleanup.
+
+## Nia87 device internals
+
+`device/transport.rs` owns discovery, the process lock, HID framing and research
+setter instrumentation. Its concrete session owns a handle and lock together;
+the handle is dropped before the lock. Single-handle reads and complete archive
+transactions use this ownership boundary. Host lighting retains the session
+through restoration. Existing standalone transactions that deliberately reopen
+handles retain that behavior; this extraction does not establish a universal
+single-handle policy or resolve the recorded transport recovery failure.
+
+`device/configuration.rs` contains whole-archive capture, apply and recovery;
+`device.rs` retains feature reads and standalone feature transactions. The moved
+capture, recovery and section-writing bodies and setter instrumentation were
+compared with the preceding source and are unchanged apart from whitespace.
+Session adoption changes ownership, not report contents or settling intervals.
+
+`Settings::plan_change` prepares the raw-preserving target and forward/recovery
+reports without I/O. The device operation performs expected-state checks, saves
+the backup, executes the plan and verifies readback. Unencodable recovery values
+are now rejected during preflight, before device reads. Valid transactions retain
+their report order and settling delays.
 
 ## Current frontend coupling
 
