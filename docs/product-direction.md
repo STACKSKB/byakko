@@ -39,3 +39,5 @@ layers. Future QMK/VIA adapters should not need to emulate Nia87's raw format.
 
 See [backend architecture](backend-architecture.md) for the migration plan and
 [acceptance ledger](parity-status.md) for the current evidence and gaps.
+
+Initial discovery now retries failed startup reads at 5, 10, 20 and then 30-second intervals, stopping after the first successful read. It waits while another operation owns the device and never automatically retries writes. This is initial attachment support; detecting removal and safely reconnecting an already-loaded device remain separate work. Device-free scheduling and worker-result tests do not replace a physical hotplug test.
