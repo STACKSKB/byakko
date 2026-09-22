@@ -13,6 +13,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Str
 
 use crate::{
     actions,
+    archive_workflow::ArchiveWorkflow,
     backend::{self, Change, nia87::Nia87Adapter},
     board,
     device::{self, Snapshot},
@@ -55,20 +56,6 @@ impl Layer {
 
 enum WorkerResult {
     Read(Result<Snapshot, String>),
-    ArchiveProgress(usize, usize),
-    Archive(Result<crate::configuration::Configuration, String>),
-    ReviewProgress(String),
-    Review(Result<Box<StagedReview>, String>),
-    ApplyReviewProgress(String),
-    ApplyReview(Result<Snapshot, String>),
-}
-
-#[derive(Clone)]
-struct StagedReview {
-    current: crate::configuration::Configuration,
-    target: crate::configuration::Configuration,
-    summary: crate::configuration_plan::ChangeSummary,
-    reverse: crate::configuration_plan::ChangeSummary,
 }
 
 struct Workbench {
@@ -86,17 +73,12 @@ struct Workbench {
     raw_editor_source: Option<[u8; 4]>,
     test_input: String,
     profile_path: String,
-    archive_path: String,
-    archive_progress: Option<(usize, usize)>,
-    archive_summary: Option<String>,
-    reviewed_archive: Option<StagedReview>,
-    archive_apply_running: bool,
+    archive: ArchiveWorkflow,
     status: String,
     error: bool,
-    busy: bool,
+    reading: bool,
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
-    backup_dir: PathBuf,
     keymap_editor: KeymapEditor,
     retry_schedule: crate::discovery::RetrySchedule,
 }
@@ -143,21 +125,19 @@ impl Workbench {
                 .join("nia87-keymap.json")
                 .to_string_lossy()
                 .into_owned(),
-            archive_path: data_dir
-                .join("nia87-configuration.json")
-                .to_string_lossy()
-                .into_owned(),
-            archive_progress: None,
-            archive_summary: None,
-            reviewed_archive: None,
-            archive_apply_running: false,
+            archive: ArchiveWorkflow::new(
+                data_dir
+                    .join("nia87-configuration.json")
+                    .to_string_lossy()
+                    .into_owned(),
+                backup_dir.clone(),
+            ),
             status: "Reading connected keyboard…".into(),
             error: false,
-            busy: false,
+            reading: false,
             tx,
             rx,
             keymap_editor: KeymapEditor::new(Arc::new(Nia87Adapter), backup_dir.clone()),
-            backup_dir,
             retry_schedule: crate::discovery::RetrySchedule::new(),
         }
     }
@@ -166,10 +146,9 @@ impl Workbench {
         if self.device_busy() {
             return;
         }
-        self.busy = true;
+        self.reading = true;
         self.retry_schedule.started();
-        self.reviewed_archive = None;
-        self.archive_apply_running = false;
+        self.archive.invalidate_review();
         self.error = false;
         self.status = "Reading base and Fn keymaps…".into();
         let tx = self.tx.clone();
@@ -186,183 +165,52 @@ impl Workbench {
         });
     }
 
+    fn archive_message(&mut self) {
+        let (message, error) = self.archive.message();
+        self.status = message.to_owned();
+        self.error = error;
+    }
+
     fn start_archive_capture(&mut self, ctx: &egui::Context) {
         if self.device_busy() {
             return;
         }
-        let path = PathBuf::from(self.archive_path.trim());
-        if path.as_os_str().is_empty() {
-            self.status = "Choose a path for the configuration archive.".into();
-            self.error = true;
-            return;
-        }
-        if path.exists() {
-            self.status = format!("Archive path already exists: {}", path.display());
-            self.error = true;
-            return;
-        }
-        self.busy = true;
-        self.reviewed_archive = None;
-        self.archive_apply_running = false;
-        self.error = false;
-        self.archive_progress = Some((0, 100));
-        self.archive_summary = None;
-        self.status =
-            "Capturing complete device configuration; this may take a few minutes…".into();
-        let tx = self.tx.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let result: Result<crate::configuration::Configuration, String> =
-                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    device::capture_configuration(|done, total| {
-                        let _ = tx.send(WorkerResult::ArchiveProgress(done, total));
-                        ctx.request_repaint();
-                    })
-                    .map_err(|error| error.to_string())
-                    .and_then(|configuration| {
-                        crate::configuration::save_new(&path, &configuration)
-                            .map(|()| configuration)
-                            .map_err(|error| error.to_string())
-                    })
-                })) {
-                    Ok(result) => result,
-                    Err(_) => Err("Configuration capture failed unexpectedly.".into()),
-                };
-            let _ = tx.send(WorkerResult::Archive(result));
-            ctx.request_repaint();
-        });
+        self.archive.start_capture(ctx);
+        self.archive_message();
     }
 
     fn inspect_archive(&mut self) {
-        self.reviewed_archive = None;
-        self.archive_apply_running = false;
-        match crate::configuration::load(std::path::Path::new(self.archive_path.trim())) {
-            Ok(configuration) => {
-                let macro_nonempty = configuration
-                    .macros
-                    .iter()
-                    .filter(|slot| slot.iter().any(|byte| *byte != 0))
-                    .count();
-                let base_nonempty = configuration
-                    .keymaps
-                    .base
-                    .iter()
-                    .filter(|binding| **binding != [0; 4])
-                    .count();
-                let function_nonempty = configuration
-                    .keymaps
-                    .function
-                    .iter()
-                    .filter(|binding| **binding != [0; 4])
-                    .count();
-                self.archive_summary = Some(format!(
-                    "50 macro slots ({macro_nonempty} non-empty) · keymaps: {base_nonempty} base / {function_nonempty} Fn bindings · picture: {} RGB slots · lighting: {} bytes · settings: 4 raw replies",
-                    configuration.picture.len(),
-                    configuration.lighting.raw().len(),
-                ));
-                self.status = "Archive inspected; no device or draft state changed.".into();
-                self.error = false;
-            }
-            Err(error) => {
-                self.archive_summary = None;
-                self.status = error.to_string();
-                self.error = true;
-            }
+        if self.device_busy() {
+            return;
         }
+        self.archive.inspect();
+        self.archive_message();
     }
 
     fn start_archive_review(&mut self, ctx: &egui::Context) {
         if self.device_busy() || self.dirty_count() != 0 {
             return;
         }
-        let path = PathBuf::from(self.archive_path.trim());
-        if path.as_os_str().is_empty() {
-            self.status = "Choose an archive to review.".into();
-            self.error = true;
-            return;
-        }
-        self.busy = true;
-        self.error = false;
-        self.reviewed_archive = None;
-        self.status = "Loading archive and capturing the complete current configuration…".into();
-        let tx = self.tx.clone();
-        let repaint = ctx.clone();
-        std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let target = crate::configuration::load(&path).map_err(|e| e.to_string())?;
-                let current = device::capture_configuration(|done, total| {
-                    let _ = tx.send(WorkerResult::ReviewProgress(format!(
-                        "Capturing current configuration: {done}/{total} macro reads"
-                    )));
-                    repaint.request_repaint();
-                })
-                .map_err(|e| e.to_string())?;
-                let summary = crate::configuration_plan::plan(&current, &target)?;
-                let reverse = crate::configuration_plan::plan(&target, &current)?;
-                Ok(StagedReview {
-                    current,
-                    target,
-                    summary,
-                    reverse,
-                })
-            }));
-            let result = match result {
-                Ok(result) => result,
-                Err(_) => Err("Archive review failed unexpectedly.".into()),
-            };
-            let _ = tx.send(WorkerResult::Review(result.map(Box::new)));
-            repaint.request_repaint();
-        });
+        self.archive.start_review(ctx);
+        self.archive_message();
     }
 
     fn start_archive_apply(&mut self, ctx: &egui::Context) {
-        let Some(review) = self.reviewed_archive.clone() else {
-            return;
-        };
         if self.device_busy() || self.dirty_count() != 0 {
             return;
         }
-        self.busy = true;
-        self.archive_apply_running = true;
-        self.error = false;
-        self.status = "Applying reviewed archive; backup, verification, and recovery may take several minutes…".into();
-        let backup_dir = self.backup_dir.clone();
-        let tx = self.tx.clone();
-        let repaint = ctx.clone();
-        std::thread::spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                device::apply_configuration(
-                    &review.current,
-                    &review.target,
-                    &backup_dir,
-                    |message| {
-                        let _ = tx.send(WorkerResult::ApplyReviewProgress(message.to_owned()));
-                        repaint.request_repaint();
-                    },
-                )
-                .map_err(|e| e.to_string())
-            }));
-            let result = match result {
-                Ok(result) => result,
-                Err(_) => Err("Archive apply panicked; restoration is unverified. Inspect the backups directory before retrying.".into()),
-            };
-            let _ = tx.send(WorkerResult::ApplyReview(
-                result.map(|configuration| configuration.keymaps),
-            ));
-            repaint.request_repaint();
-        });
+        self.archive.start_apply(ctx);
+        self.archive_message();
     }
 
     fn handle_archive_close(&mut self, ctx: &egui::Context) {
-        if self.busy && ctx.input(|input| input.viewport().close_requested()) {
+        if self.reading && ctx.input(|input| input.viewport().close_requested()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
-        if self.archive_apply_running && ctx.input(|input| input.viewport().close_requested()) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.status = "Archive apply is still running; close is held until verification or recovery finishes.".into();
+        if self.archive.handle_close(ctx) {
+            self.archive_message();
         }
     }
-
     fn poll_worker(&mut self) {
         let applying_keymap = self.keymap_editor.busy();
         if self.keymap_editor.poll().is_some() {
@@ -376,7 +224,7 @@ impl Workbench {
         while let Ok(message) = self.rx.try_recv() {
             match message {
                 WorkerResult::Read(Ok(snapshot)) => {
-                    self.busy = false;
+                    self.reading = false;
                     match backend::nia87::from_snapshot(&snapshot) {
                         Err(error) => {
                             self.retry_schedule.failed(Instant::now());
@@ -412,80 +260,21 @@ impl Workbench {
                     }
                 }
                 WorkerResult::Read(Err(error)) => {
-                    self.busy = false;
+                    self.reading = false;
                     self.retry_schedule.failed(Instant::now());
                     self.status = format!(
                         "{error} Waiting for a supported keyboard; retrying read automatically."
                     );
                     self.error = true;
                 }
-                WorkerResult::ArchiveProgress(done, total) => {
-                    self.archive_progress = Some((done, total));
-                }
-                WorkerResult::Archive(Ok(_configuration)) => {
-                    self.busy = false;
-                    self.archive_progress = Some((100, 100));
-                    self.status = format!(
-                        "Configuration archive saved to {}. Captured device state only; drafts were not included.",
-                        self.archive_path
-                    );
-                    self.error = false;
-                }
-                WorkerResult::Archive(Err(error)) => {
-                    self.busy = false;
-                    self.archive_progress = None;
-                    self.status = error;
-                    self.error = true;
-                }
-                WorkerResult::ReviewProgress(message)
-                | WorkerResult::ApplyReviewProgress(message) => {
-                    self.status = message;
-                }
-                WorkerResult::Review(Ok(review)) => {
-                    self.busy = false;
-                    self.archive_summary = Some(format!(
-                        "Review ready: {} key bindings · {} macro slots · {} picture keys · lighting {} · {} settings",
-                        review.summary.key_bindings,
-                        review.summary.macro_slots.len(),
-                        review.summary.picture_keys,
-                        if review.summary.lighting {
-                            "changed"
-                        } else {
-                            "unchanged"
-                        },
-                        review.summary.settings.len()
-                    ));
-                    self.reviewed_archive = Some(*review);
-                    self.status =
-                        "Archive review complete. Apply only after checking the planned changes."
-                            .into();
-                    self.error = false;
-                }
-                WorkerResult::Review(Err(error)) => {
-                    self.busy = false;
-                    self.reviewed_archive = None;
-                    self.status = error;
-                    self.error = true;
-                }
-                WorkerResult::ApplyReview(Ok(snapshot)) => {
-                    self.busy = false;
-                    self.archive_apply_running = false;
-                    self.reviewed_archive = None;
-                    self.load(snapshot);
-                    self.status = format!(
-                        "Reviewed archive applied and verified. Other editor panels must reload. Backups: {}",
-                        self.backup_dir.display()
-                    );
-                    self.error = false;
-                }
-                WorkerResult::ApplyReview(Err(error)) => {
-                    self.busy = false;
-                    self.archive_apply_running = false;
-                    self.reviewed_archive = None;
-                    self.status = error;
-                    self.error = true;
-                }
             }
+        }
+        let archive = self.archive.poll();
+        if let Some(snapshot) = archive.applied {
+            self.load(snapshot);
+        }
+        if archive.changed {
+            self.archive_message();
         }
     }
 
@@ -590,7 +379,8 @@ impl Workbench {
     }
 
     fn device_busy(&self) -> bool {
-        self.busy
+        self.reading
+            || self.archive.busy()
             || self.keymap_editor.busy()
             || self.macro_editor.busy()
             || self.lighting_editor.busy()
@@ -1144,8 +934,9 @@ impl Workbench {
             ui.horizontal(|ui| {
                 ui.label("Path");
                 ui.add_enabled_ui(!self.device_busy(), |ui| {
-                    if ui.text_edit_singleline(&mut self.archive_path).changed() {
-                        self.reviewed_archive = None;
+                    let mut path = self.archive.path().to_owned();
+                    if ui.text_edit_singleline(&mut path).changed() {
+                        self.archive.set_path(path);
                     }
                 });
                 if ui.add_enabled(!self.device_busy(), egui::Button::new("CAPTURE TO NEW FILE")).clicked() {
@@ -1159,16 +950,16 @@ impl Workbench {
                     self.start_archive_review(ui.ctx());
                 }
             });
-            if let Some((done, total)) = self.archive_progress {
+            if let Some((done, total)) = self.archive.progress() {
                 ui.horizontal(|ui| {
                     ui.add(egui::ProgressBar::new(done as f32 / total.max(1) as f32).desired_width(180.0));
                     ui.label(format!("{done}/{total} macro reads"));
                 });
             }
-            if let Some(summary) = &self.archive_summary {
+            if let Some(summary) = self.archive.summary() {
                 ui.label(egui::RichText::new(summary).color(INK));
             }
-            if let Some(review) = &self.reviewed_archive {
+            if let Some(review) = self.archive.review() {
                 ui.separator();
                 ui.label(egui::RichText::new("REVIEWED RESTORE").small().strong().color(MUTED));
                 ui.label(format!(
@@ -1214,7 +1005,8 @@ impl Workbench {
         });
         self.keymap_editor.ui(
             ui,
-            self.busy
+            self.reading
+                || self.archive.busy()
                 || self.macro_editor.busy()
                 || self.lighting_editor.busy()
                 || self.picture_editor.busy()
@@ -1293,7 +1085,7 @@ impl Workbench {
                 self.selected_key_context(&mut columns[1]);
             });
             ui.add_space(12.0);
-            let blocked = self.busy || self.keymap_editor.busy();
+            let blocked = self.reading || self.archive.busy() || self.keymap_editor.busy();
             if let Some(binding) = self.macro_editor.ui(ui, blocked) {
                 if self.selected.and_then(|usage| self.slot(usage)).is_some() {
                     self.set_binding(binding);
@@ -1361,14 +1153,17 @@ impl eframe::App for Workbench {
                     }
                     WorkbenchTab::Macros => self.macros_page(ui),
                     WorkbenchTab::Lighting => {
-                        let blocked =
-                            self.busy || self.keymap_editor.busy() || self.macro_editor.busy();
+                        let blocked = self.reading
+                            || self.archive.busy()
+                            || self.keymap_editor.busy()
+                            || self.macro_editor.busy();
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             self.lighting_editor.ui(ui, blocked);
                         });
                     }
                     WorkbenchTab::Picture => {
-                        let blocked = self.busy
+                        let blocked = self.reading
+                            || self.archive.busy()
                             || self.keymap_editor.busy()
                             || self.macro_editor.busy()
                             || self.lighting_editor.busy();
@@ -1376,7 +1171,8 @@ impl eframe::App for Workbench {
                             .show(ui, |ui| self.picture_editor.ui(ui, blocked));
                     }
                     WorkbenchTab::Settings => {
-                        let blocked = self.busy
+                        let blocked = self.reading
+                            || self.archive.busy()
                             || self.keymap_editor.busy()
                             || self.macro_editor.busy()
                             || self.lighting_editor.busy()
@@ -1459,13 +1255,13 @@ mod tests {
     fn explicit_data_dir_controls_gui_default_paths() {
         let root = std::env::temp_dir().join("byakko-explicit-path-test");
         let app = Workbench::without_read_at(root.clone());
-        assert_eq!(app.backup_dir, root.join("backups"));
+        assert_eq!(app.archive.backup_dir(), root.join("backups"));
         assert_eq!(
             PathBuf::from(app.profile_path),
             root.join("nia87-keymap.json")
         );
         assert_eq!(
-            PathBuf::from(app.archive_path),
+            PathBuf::from(app.archive.path()),
             root.join("nia87-configuration.json")
         );
     }
@@ -1514,12 +1310,12 @@ mod tests {
         }
     }
 
-    fn staged_review() -> StagedReview {
+    fn staged_review() -> crate::archive_workflow::Review {
         let current = configuration(0);
         let target = configuration(0);
         let summary = crate::configuration_plan::plan(&current, &target).unwrap();
         let reverse = crate::configuration_plan::plan(&target, &current).unwrap();
-        StagedReview {
+        crate::archive_workflow::Review {
             current,
             target,
             summary,
@@ -1547,17 +1343,15 @@ mod tests {
     #[test]
     fn archive_apply_close_is_cancelled_even_when_error_completes_same_frame() {
         let mut app = Workbench::without_read();
-        app.busy = true;
-        app.archive_apply_running = true;
-        app.tx
-            .send(WorkerResult::ApplyReview(Err("restore failed".into())))
-            .unwrap();
+        app.archive.inject_review(staged_review());
+        app.archive
+            .inject_apply_result(Err("restore failed".into()));
         let output = close_frame(&mut app);
         app.poll_worker();
         let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
         assert!(commands.contains(&egui::ViewportCommand::CancelClose));
-        assert!(!app.archive_apply_running);
-        assert!(!app.busy);
+        assert!(!app.archive.applying());
+        assert!(!app.archive.busy());
         assert!(app.error);
         assert_eq!(app.status, "restore failed");
     }
@@ -1565,33 +1359,40 @@ mod tests {
     #[test]
     fn archive_apply_success_loads_keymaps_and_clears_staging() {
         let mut app = Workbench::without_read();
-        app.busy = true;
-        app.archive_apply_running = true;
-        app.reviewed_archive = Some(staged_review());
-        app.tx
-            .send(WorkerResult::ApplyReview(Ok(snapshot(7))))
-            .unwrap();
+        app.archive.inject_review(staged_review());
+        app.archive.inject_apply_result(Ok(snapshot(7)));
         app.poll_worker();
-        assert!(!app.busy);
-        assert!(!app.archive_apply_running);
-        assert!(app.reviewed_archive.is_none());
+        assert!(!app.reading);
+        assert!(!app.archive.applying());
+        assert!(app.archive.review().is_none());
         assert_eq!(draft_snapshot(&app).base, vec![[7, 0, 0, 0]; 128]);
     }
 
     #[test]
     fn archive_apply_progress_does_not_clear_busy_or_stage() {
         let mut app = Workbench::without_read();
-        app.busy = true;
-        app.archive_apply_running = true;
-        app.reviewed_archive = Some(staged_review());
-        app.tx
-            .send(WorkerResult::ApplyReviewProgress("writing".into()))
-            .unwrap();
+        app.archive.inject_review(staged_review());
+        app.archive.inject_apply_progress("writing");
         app.poll_worker();
-        assert!(app.busy);
-        assert!(app.archive_apply_running);
-        assert!(app.reviewed_archive.is_some());
+        assert!(app.archive.busy());
+        assert!(app.archive.applying());
+        assert!(app.archive.review().is_some());
         assert_eq!(app.status, "writing");
+    }
+
+    #[test]
+    fn archive_path_changes_invalidate_review_but_running_apply_keeps_its_path() {
+        let mut app = Workbench::without_read();
+        app.archive.inject_review(staged_review());
+        let original = app.archive.path().to_owned();
+        app.archive.set_path("another-archive.json".into());
+        assert!(app.archive.review().is_none());
+        app.archive.inject_review(staged_review());
+        app.archive.inject_apply_progress("writing");
+        app.archive.set_path("third-archive.json".into());
+        assert_eq!(app.archive.path(), "another-archive.json");
+        assert!(app.archive.review().is_some());
+        assert_ne!(app.archive.path(), original);
     }
 
     #[test]

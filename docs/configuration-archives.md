@@ -38,6 +38,16 @@ before-image is retained regardless. Normal window close is held while archive
 application is active. The existing keymap and macro import/export remain
 available separately.
 
+The native archive controller owns one explicit operation state: idle, capturing,
+captured, reviewing, ready to apply, or applying. A ready state owns the reviewed
+before/after configurations; applying retains an immutable reference for display.
+Changing the path or
+starting a device read invalidates a completed review. Path edits are refused
+while an archive operation runs. The workbench coordinates device access with
+the other editors and receives the verified keymap result after archive apply.
+These state transitions are tested without device access; they do not replace
+the outstanding hardware recovery tests.
+
 `plan-configuration CURRENT.json TARGET.json` checks both directions and prints
 change counts without device access. It does not establish that CURRENT still
 matches the keyboard; Apply always rechecks that itself.
