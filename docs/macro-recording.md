@@ -41,10 +41,14 @@ and has no egui, device, file or clock access. Rejected transitions leave the
 draft and recorder state unchanged. Stop consumes the recording session and
 releases held inputs in reverse order.
 
-The editor owns the draft and lends it to the recorder while recording; other
-draft edits are disabled during that session. The UI translates physical input,
-handles capture focus and presents typed recorder outcomes. Macro device workers
-and file/label controls still live in `macro_ui` and remain separate cleanup work.
+`MacroState` owns the slot, sole draft, paired raw/decoded baseline and explicit
+read/apply activity. A failed operation retains its prior baseline and draft
+while marking the baseline unverified. Matching readback restores trust; slot
+changes and imports cannot replace a pending operation's draft. The editor lends
+the draft to the recorder while recording and disables other edits during that
+session. The UI translates physical input, handles capture focus and presents
+recorder outcomes. Device worker dispatch and file/label controls remain in
+`macro_ui`; the model performs no egui, file or HID operations.
 
 ## Local macro files
 
