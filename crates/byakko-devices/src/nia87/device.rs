@@ -1,7 +1,9 @@
+mod apply_error;
 mod configuration;
 mod transport;
 
 use crate::hid::HidDevice;
+use apply_error::{detailed, keymap_apply_error, macro_apply_error};
 use serde::{Deserialize, Serialize};
 
 pub use configuration::{apply_configuration, capture_configuration};
@@ -612,6 +614,16 @@ fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// The existing macro transaction with explicit recovery status.
+pub fn apply_macro_detailed(
+    slot: u8,
+    expected: &[u8],
+    new_macro: &crate::nia87::macros::Macro,
+    backup_dir: &std::path::Path,
+) -> std::result::Result<Vec<u8>, byakko_core::session::ApplyFailure> {
+    detailed(apply_macro(slot, expected, new_macro, backup_dir))
+}
+
 pub fn apply_macro(
     slot: u8,
     expected: &[u8],
@@ -674,15 +686,7 @@ pub fn apply_macro(
                 }
                 Ok(())
             })();
-            Err(format!(
-                "{error}; restore: {}; backup {}",
-                match rollback {
-                    Ok(()) => "verified".to_owned(),
-                    Err(e) => e.to_string(),
-                },
-                path.display()
-            )
-            .into())
+            Err(macro_apply_error(error.as_ref(), rollback, &path).into())
         }
     }
 }
@@ -708,36 +712,6 @@ fn write_binding(
     Ok(())
 }
 
-#[derive(Debug)]
-struct KeymapApplyError(byakko_core::session::ApplyFailure);
-
-impl std::fmt::Display for KeymapApplyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0.message)
-    }
-}
-
-impl std::error::Error for KeymapApplyError {}
-
-fn keymap_apply_error(
-    error: &dyn std::fmt::Display,
-    rollback: Result<()>,
-    backup_path: &std::path::Path,
-) -> KeymapApplyError {
-    use byakko_core::session::{ApplyFailure, Recovery};
-    let (recovery, restore_message) = match rollback {
-        Ok(()) => (Recovery::Verified, "original keymaps verified".to_owned()),
-        Err(error) => (Recovery::Failed, format!("FAILED: {error}")),
-    };
-    KeymapApplyError(ApplyFailure {
-        message: format!(
-            "Apply failed: {error}. Restore result: {restore_message}. Backup: {}",
-            backup_path.display()
-        ),
-        recovery,
-    })
-}
-
 /// The same guarded transaction as `apply_keymaps`, with a typed recovery
 /// outcome for callers that must distinguish verified restore from failure.
 pub fn apply_keymaps_detailed(
@@ -746,16 +720,7 @@ pub fn apply_keymaps_detailed(
     function: &[[u8; 4]],
     backup_dir: &std::path::Path,
 ) -> std::result::Result<Snapshot, byakko_core::session::ApplyFailure> {
-    use byakko_core::session::{ApplyFailure, Recovery};
-    apply_keymaps(expected, base, function, backup_dir).map_err(|error| {
-        error
-            .downcast_ref::<KeymapApplyError>()
-            .map(|typed| typed.0.clone())
-            .unwrap_or_else(|| ApplyFailure {
-                message: error.to_string(),
-                recovery: Recovery::NotAttempted,
-            })
-    })
+    detailed(apply_keymaps(expected, base, function, backup_dir))
 }
 
 pub fn apply_keymaps(
