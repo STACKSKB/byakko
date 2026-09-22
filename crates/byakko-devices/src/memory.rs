@@ -2,7 +2,7 @@
 
 use crate::Device;
 use byakko_core::{
-    Change, Descriptor, State, macros,
+    Change, Descriptor, State, lighting, macros,
     session::{ApplyFailure, Recovery},
     validate_changes, validate_state,
 };
@@ -28,6 +28,14 @@ pub struct MemoryDevice {
     initial_revision: Vec<u8>,
     revision_number: u64,
     macros: Option<MacroStorage>,
+    lighting: Option<StoredLighting>,
+}
+
+struct StoredLighting {
+    capabilities: lighting::Capabilities,
+    initial_revision: Vec<u8>,
+    revision_number: u64,
+    snapshot: lighting::Snapshot,
 }
 
 impl MemoryDevice {
@@ -39,6 +47,7 @@ impl MemoryDevice {
             state,
             revision_number: 0,
             macros: None,
+            lighting: None,
         })
     }
 
@@ -90,6 +99,31 @@ impl MemoryDevice {
 
     pub fn descriptor(&self) -> &Descriptor {
         &self.descriptor
+    }
+
+    pub fn with_lighting(
+        mut self,
+        capabilities: lighting::Capabilities,
+        snapshot: lighting::Snapshot,
+    ) -> Result<Self, String> {
+        if self.lighting.is_some() {
+            return Err("Memory device lighting is already configured".into());
+        }
+        lighting::validate_snapshot(&capabilities, &snapshot)?;
+        if capabilities.backend_id != self.descriptor.backend_id {
+            return Err("Lighting capabilities belong to another backend".into());
+        }
+        self.lighting = Some(StoredLighting {
+            capabilities,
+            initial_revision: snapshot.revision.clone(),
+            revision_number: 0,
+            snapshot,
+        });
+        Ok(self)
+    }
+
+    pub fn lighting_capabilities(&self) -> Option<&lighting::Capabilities> {
+        self.lighting.as_ref().map(|stored| &stored.capabilities)
     }
 
     pub fn macro_capabilities(&self) -> Option<&macros::Capabilities> {
@@ -178,6 +212,47 @@ impl Device for MemoryDevice {
         next.revision = stored.initial_revision.clone();
         next.revision.extend_from_slice(&next_number.to_be_bytes());
         next.content = macros::Content::Editable(desired.clone());
+        stored.snapshot = next.clone();
+        stored.revision_number = next_number;
+        Ok(next)
+    }
+
+    fn read_lighting(&mut self) -> Result<lighting::Snapshot, String> {
+        self.lighting
+            .as_ref()
+            .map(|stored| stored.snapshot.clone())
+            .ok_or_else(|| "Lighting operations are unsupported by this device".into())
+    }
+
+    fn apply_lighting(
+        &mut self,
+        expected: &lighting::Snapshot,
+        desired: &lighting::Setting,
+        _backup_dir: &Path,
+    ) -> Result<lighting::Snapshot, ApplyFailure> {
+        let reject = |message| ApplyFailure {
+            message,
+            recovery: Recovery::NotAttempted,
+        };
+        let stored = self
+            .lighting
+            .as_mut()
+            .ok_or_else(|| reject("Lighting operations are unsupported by this device".into()))?;
+        if &stored.snapshot != expected {
+            return Err(reject("Stale expected lighting snapshot".into()));
+        }
+        if !matches!(stored.snapshot.content, lighting::Content::Editable(_)) {
+            return Err(reject("Opaque lighting cannot be edited".into()));
+        }
+        lighting::validate_setting(&stored.capabilities, desired).map_err(reject)?;
+        let next_number = stored
+            .revision_number
+            .checked_add(1)
+            .ok_or_else(|| reject("Memory lighting revision exhausted".into()))?;
+        let mut next = stored.snapshot.clone();
+        next.revision = stored.initial_revision.clone();
+        next.revision.extend_from_slice(&next_number.to_be_bytes());
+        next.content = lighting::Content::Editable(desired.clone());
         stored.snapshot = next.clone();
         stored.revision_number = next_number;
         Ok(next)
@@ -508,5 +583,77 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn lighting_conflict_invalid_edit_and_opaque_state_preserve_snapshot() {
+        let (descriptor, state) = fixture();
+        let caps = lighting::Capabilities {
+            backend_id: "memory".into(),
+            effects: vec![lighting::Effect {
+                id: "steady".into(),
+                label: "Steady".into(),
+                brightness: Some(0..=4),
+                speed: None,
+                options: vec![],
+                color: Some(lighting::ColorCapability::Fixed),
+            }],
+        };
+        let setting = lighting::Setting {
+            effect: "steady".into(),
+            brightness: Some(2),
+            speed: None,
+            option: None,
+            color: Some(lighting::Color::Rgb([1, 2, 3])),
+        };
+        let initial = lighting::Snapshot {
+            backend_id: "memory".into(),
+            revision: vec![9],
+            content: lighting::Content::Editable(setting.clone()),
+        };
+        let mut device = MemoryDevice::new(descriptor.clone(), state.clone())
+            .unwrap()
+            .with_lighting(caps.clone(), initial.clone())
+            .unwrap();
+        let mut stale = initial.clone();
+        stale.revision.push(0);
+        assert!(
+            device
+                .apply_lighting(&stale, &setting, Path::new("ignored"))
+                .is_err()
+        );
+        let mut invalid = setting.clone();
+        invalid.brightness = Some(5);
+        assert!(
+            device
+                .apply_lighting(&initial, &invalid, Path::new("ignored"))
+                .is_err()
+        );
+        assert_eq!(device.read_lighting().unwrap(), initial);
+        let next = device
+            .apply_lighting(&initial, &setting, Path::new("ignored"))
+            .unwrap();
+        assert_eq!(next.revision.len(), initial.revision.len() + 8);
+        assert!(
+            device
+                .apply_lighting(&initial, &setting, Path::new("ignored"))
+                .is_err()
+        );
+        let opaque = lighting::Snapshot {
+            content: lighting::Content::Opaque {
+                reason: "unknown".into(),
+            },
+            ..initial
+        };
+        let mut device = MemoryDevice::new(descriptor, state)
+            .unwrap()
+            .with_lighting(caps, opaque.clone())
+            .unwrap();
+        assert!(
+            device
+                .apply_lighting(&opaque, &setting, Path::new("ignored"))
+                .is_err()
+        );
+        assert_eq!(device.read_lighting().unwrap(), opaque);
     }
 }

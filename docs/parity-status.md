@@ -3,9 +3,11 @@
 This ledger separates implemented configuration storage from end-to-end behavior. Source observations live in `feature-inventory.md`; attached-device evidence lives in `live-evidence.md`. Neither a shared OEM encoder nor an advertised catalog proves that every feature works on this board.
 
 The table records the retained research application's feature evidence. The
-approved Iced migration currently has keymap and macro editing/read/save slices;
+approved Iced migration currently has keymap, macro and built-in global lighting
+editing/read/save slices;
 it has not yet inherited the remaining screens or feature parity. See
-`iced-keymap-acceptance.md` and `iced-macro-acceptance.md` for its exact scope.
+`iced-keymap-acceptance.md`, `iced-macro-acceptance.md` and
+`iced-lighting-acceptance.md` for its exact scope.
 
 | Requirement | Current evidence | Remaining acceptance work |
 | --- | --- | --- |

@@ -10,6 +10,7 @@ pub mod device;
 pub mod host_lighting;
 pub mod layout;
 pub mod lighting;
+pub mod lighting_adapter;
 pub mod macro_adapter;
 pub mod macro_file;
 pub mod macros;

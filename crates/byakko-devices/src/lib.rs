@@ -1,6 +1,6 @@
 //! Native effect boundary. One worker owns the backend; the UI owns no HID I/O.
 use byakko_core::{
-    Change, State, macros,
+    Change, State, lighting, macros,
     session::{ApplyFailure, Command, Completion, Recovery},
 };
 use std::{
@@ -46,6 +46,22 @@ pub trait Device: Send + 'static {
     ) -> Result<macros::Snapshot, ApplyFailure> {
         Err(ApplyFailure {
             message: "Macro operations are unsupported by this device".into(),
+            recovery: Recovery::NotAttempted,
+        })
+    }
+
+    fn read_lighting(&mut self) -> Result<lighting::Snapshot, String> {
+        Err("Lighting operations are unsupported by this device".into())
+    }
+
+    fn apply_lighting(
+        &mut self,
+        _expected: &lighting::Snapshot,
+        _desired: &lighting::Setting,
+        _backup_dir: &Path,
+    ) -> Result<lighting::Snapshot, ApplyFailure> {
+        Err(ApplyFailure {
+            message: "Lighting operations are unsupported by this device".into(),
             recovery: Recovery::NotAttempted,
         })
     }
@@ -147,6 +163,15 @@ fn token(command: &Command) -> (u64, u64) {
             generation,
             operation,
             ..
+        }
+        | Command::ReadLighting {
+            generation,
+            operation,
+        }
+        | Command::ApplyLighting {
+            generation,
+            operation,
+            ..
         } => (*generation, *operation),
     }
 }
@@ -174,6 +199,16 @@ fn failure(command: &Command, message: String, recovery: Recovery) -> Completion
             generation,
             operation,
             slot: expected.slot.clone(),
+            result: Err(ApplyFailure { message, recovery }),
+        },
+        Command::ReadLighting { .. } => Completion::ReadLighting {
+            generation,
+            operation,
+            result: Err(message),
+        },
+        Command::ApplyLighting { .. } => Completion::ApplyLighting {
+            generation,
+            operation,
             result: Err(ApplyFailure { message, recovery }),
         },
     }
@@ -207,6 +242,18 @@ fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Co
             operation,
             slot: expected.slot.clone(),
             result: device.apply_macro(expected, desired, backup_dir),
+        },
+        Command::ReadLighting { .. } => Completion::ReadLighting {
+            generation,
+            operation,
+            result: device.read_lighting(),
+        },
+        Command::ApplyLighting {
+            expected, desired, ..
+        } => Completion::ApplyLighting {
+            generation,
+            operation,
+            result: device.apply_lighting(expected, desired, backup_dir),
         },
     }))
     .unwrap_or_else(|_| {

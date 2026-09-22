@@ -4,7 +4,7 @@ A native, USB-first Menel Nia87 configurator under investigation. The intended a
 
 ## Current status
 
-The approved architecture migration uses **Iced**. Its keymap and macro slice is
+The approved architecture migration uses **Iced**. Its keymap, macro and global lighting slices are
 available separately from the retained research GUI:
 
 ```console
@@ -23,11 +23,18 @@ playback modes; Nia87 toggle/hold require an explicitly saved count of 1.
 Focused keyboard/mouse recording appends to the draft with measured or fixed
 waits and reserved release events. The demo includes editable and opaque macro
 slots. The Macro file panel imports into the current draft and exports a new
-JSON file; native version-1 files remain importable. Lighting, settings, archives and automatic
-hotplug discovery still need migration. The following feature inventory and
+JSON file; native version-1 files remain importable. Lighting offers the
+backend's built-in effects, option choices, brightness, speed and color when
+supported; edits use the same staged and verified save workflow. Host-driven
+lighting, per-key colors, settings, archives and automatic hotplug discovery
+still need migration. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and
-[current boundary](docs/backend-architecture.md).
+[current boundary](docs/backend-architecture.md). The
+[lighting acceptance notes](docs/iced-lighting-acceptance.md) distinguish
+headless verification from writes on the attached keyboard. The
+[desktop UI boundary](docs/desktop-ui-architecture.md) describes the shared
+style data and responsive panels.
 
 A native keymap workbench is implemented, with automatic Nia87 TKL layout, base and Fn editing, staged changes, automatic backups and complete readback verification. Media, pointer and modifier combinations are available. The native macro editor supports event editing, saved-slot bindings and JSON import/export. Long macro storage, shorter replacement and empty restoration passed live readback checks. Global effect and per-key color panels are implemented; brightness and one per-key color passed reversible readback tests. Fn F24 and media writes now pass application readback and restoration. Mixed base/Fn changes now pass complete verification with one-second spacing between key writes. This is a development build, not yet feature complete. See [docs/live-evidence.md](docs/live-evidence.md) for the exact verification limits.
 

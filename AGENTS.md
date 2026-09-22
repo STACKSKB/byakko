@@ -42,6 +42,11 @@ research baseline, not the structure to port.
 - Keep cyclomatic complexity low through better models, not helper proliferation
   or mechanical file splitting. Avoid giant reducers, generic event buses,
   speculative traits, gratuitous cloning and premature micro-optimizations.
+- Compose desktop pages from reusable panes, panel layouts, semantic controls
+  and a small set of central spacing/type tokens. Let backend capabilities and
+  pure projections determine which controls exist; views render those controls
+  and emit edits. Do not put protocol IDs, one-off fixed pane dimensions or
+  color literals in a feature view. Keep Iced layout concerns out of core.
 - Capabilities describe actual backend constraints. Shared UI must not assume
   Nia87 layer counts, matrix slots, report widths or effect IDs. Preserve opaque
   values losslessly and distinguish portable profiles from native backups.
@@ -54,16 +59,17 @@ research baseline, not the structure to port.
 
 ## Work sequence and evidence
 
-- Prioritize the approved pre-alpha vertical slice: pure model and memory
-  backend, Nia87 adapter/session, then one Iced keymap workflow. Migrate macros
-  and other features after that boundary is exercised. Do not pursue UI polish
-  or accessibility work before architecture review checkpoints.
+- The pure model, memory backend, Nia87 adapter, and Iced keymap, macro and
+  built-in global lighting workflows now exercise the approved boundary.
+  Continue per-key colors, settings, archives and discovery one capability at
+  a time. Do not pursue UI polish or accessibility work before architecture
+  review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; do not move whole screen controllers into new packages.
 - Test invariants and failure boundaries: stale results, conflicts, rejected
   edits, unchanged drafts on failure, exact encoding and verified readback.
   Headless tests do not prove physical playback or Linux hardware behavior.
-- Use bounded Sol/Luna subagents for independent tasks with explicit ownership.
+- Use bounded GPT-6 Sol/Luna subagents for independent tasks with explicit ownership.
   Review their changes. Avoid parallel edits to the same files.
 - Commit after major completed steps. No PRs, issues, messages to others,
   Firefox automation, or file deletion. Use Edge/Codex browser for research.

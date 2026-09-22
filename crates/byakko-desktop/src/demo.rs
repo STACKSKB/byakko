@@ -201,5 +201,54 @@ pub fn device() -> Result<MemoryDevice, String> {
             },
         ),
     ];
-    MemoryDevice::new(descriptor, state)?.with_macros(capabilities, snapshots)
+    let lighting = lighting_capabilities();
+    let initial = byakko_core::lighting::Snapshot {
+        backend_id: "memory".into(),
+        revision: vec![0xCB],
+        content: byakko_core::lighting::Content::Editable(byakko_core::lighting::default_setting(
+            &lighting, "steady",
+        )?),
+    };
+    MemoryDevice::new(descriptor, state)?
+        .with_macros(capabilities, snapshots)?
+        .with_lighting(lighting, initial)
+}
+
+fn lighting_capabilities() -> byakko_core::lighting::Capabilities {
+    use byakko_core::lighting::{Capabilities, Choice, ColorCapability, Effect};
+    Capabilities {
+        backend_id: "memory".into(),
+        effects: vec![
+            Effect {
+                id: "off".into(),
+                label: "Off".into(),
+                brightness: None,
+                speed: None,
+                options: vec![],
+                color: None,
+            },
+            Effect {
+                id: "steady".into(),
+                label: "Steady".into(),
+                brightness: Some(10..=100),
+                speed: None,
+                options: vec![],
+                color: Some(ColorCapability::Fixed),
+            },
+            Effect {
+                id: "sweep".into(),
+                label: "Sweep".into(),
+                brightness: Some(20..=80),
+                speed: Some(1..=10),
+                color: Some(ColorCapability::FixedOrRainbow),
+                options: [("out", "Outward"), ("in", "Inward")]
+                    .into_iter()
+                    .map(|(id, label)| Choice {
+                        id: id.into(),
+                        label: label.into(),
+                    })
+                    .collect(),
+            },
+        ],
+    }
 }

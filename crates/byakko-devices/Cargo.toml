@@ -12,6 +12,10 @@ research-tools = []
 name = "read_keymap"
 required-features = ["research-tools"]
 
+[[example]]
+name = "read_lighting"
+required-features = ["research-tools"]
+
 [dependencies]
 byakko-core = { path = "../byakko-core" }
 serde = { version = "1", features = ["derive"] }

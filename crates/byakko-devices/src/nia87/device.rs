@@ -3,7 +3,7 @@ mod configuration;
 mod transport;
 
 use crate::hid::HidDevice;
-use apply_error::{detailed, keymap_apply_error, macro_apply_error};
+use apply_error::{detailed, keymap_apply_error, lighting_apply_error, macro_apply_error};
 use serde::{Deserialize, Serialize};
 
 pub use configuration::{apply_configuration, capture_configuration};
@@ -348,6 +348,14 @@ pub fn apply_lighting(
     apply_lighting_unlocked(expected, setting, backup_dir)
 }
 
+pub fn apply_lighting_detailed(
+    expected: &crate::nia87::lighting::Lighting,
+    setting: &crate::nia87::lighting::LightingSetting,
+    backup_dir: &std::path::Path,
+) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::session::ApplyFailure> {
+    detailed(apply_lighting(expected, setting, backup_dir))
+}
+
 fn apply_lighting_unlocked(
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
@@ -419,15 +427,7 @@ fn apply_lighting_unlocked(
                 }
                 Ok(())
             })();
-            Err(format!(
-                "Lighting apply failed: {error}. Restore result: {}. Backup: {}",
-                match restore {
-                    Ok(()) => "original setting and reserved response bytes verified".to_owned(),
-                    Err(error) => format!("FAILED: {error}"),
-                },
-                path.display()
-            )
-            .into())
+            Err(lighting_apply_error(error.as_ref(), restore, &path).into())
         }
     }
 }

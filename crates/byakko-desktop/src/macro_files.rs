@@ -1,5 +1,5 @@
 //! Local paths and asynchronous file effects. Validation/staging remain in core.
-use super::{Closing, Desktop, Message as AppMessage};
+use super::{Closing, Desktop, Message as AppMessage, panels};
 use byakko_core::{
     macros::{
         Document,
@@ -236,12 +236,12 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppM
         return toggle.into();
     }
     let editable = !app.busy() && editor.draft().is_some();
-    column![
+    let content = column![
         row![
             toggle,
             text("Local file · import replaces the draft · export creates a new file")
         ]
-        .spacing(8),
+        .spacing(app.ui.spacing.s),
         text_input("Macro name (file metadata)", app.macro_files.name(editor))
             .on_input_maybe(editable.then_some(|value| AppMessage::File(Message::Name(value)))),
         row![
@@ -256,8 +256,8 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppM
                 editable.then_some(AppMessage::File(Message::Begin(FileOperation::Export)))
             ),
         ]
-        .spacing(8),
+        .spacing(app.ui.spacing.s),
     ]
-    .spacing(6)
-    .into()
+    .spacing(app.ui.spacing.s);
+    panels::panel(&app.ui, "Macro file", content.into())
 }
