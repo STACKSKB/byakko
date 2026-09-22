@@ -72,3 +72,15 @@ delay association, **not complete save-path timing parity**.
 Future recorder parity work must account for terminal-delay policy explicitly,
 preserve existing imported/manual delays (including explicit zero), and reserve
 capacity for the selected policy. Do not silently rewrite existing macro files.
+
+## Native implementation follow-up
+
+The recorder now applies a 50 ms terminal wait for measured sessions or the
+selected nonzero fixed wait for fixed sessions. This updates only newly recorded
+events; imported/manual delays and events preceding the session are preserved.
+Capacity checks reserve the terminal wait and reverse-order held releases before
+accepting each transition. Synthetic releases have zero intermediate waits.
+Measured pauses beyond 65,535 ms remain explicit errors rather than silently
+clamping. Clear draft stages removal with Revert available; it does not write HID.
+Pure and headless integration tests cover these rules. Physical playback timing
+and repeat behavior remain unverified.
