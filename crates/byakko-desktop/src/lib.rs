@@ -1,11 +1,14 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
+mod macro_editor;
+mod macro_form;
+mod macro_view;
 #[cfg(test)]
 mod tests;
 mod view;
 
 use byakko_core::{
-    Change, Descriptor,
-    session::{Command, Completion, KeymapSession, Status},
+    Change,
+    session::{Acceptance, Command, Completion, Session, Status},
 };
 use byakko_devices::Executor;
 use iced::{Element, Subscription, Task, Theme, window};
@@ -13,6 +16,8 @@ use std::{sync::mpsc::TryRecvError, time::Duration};
 
 #[derive(Clone, Debug)]
 enum Message {
+    Page(Page),
+    Macro(macro_editor::Message),
     SelectLayer(String),
     SelectKey(String),
     Search(String),
@@ -27,6 +32,12 @@ enum Message {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+enum Page {
+    Keys,
+    Macros,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Closing {
     Open,
     Waiting,
@@ -34,7 +45,10 @@ enum Closing {
 }
 
 struct Desktop {
-    session: KeymapSession,
+    page: Page,
+    macro_form: macro_form::Form,
+    repeat_input: String,
+    session: Session,
     executor: Executor,
     layer: String,
     selected: Option<String>,
@@ -43,12 +57,14 @@ struct Desktop {
     closing: Closing,
 }
 
-/// The composition root supplies a descriptor and its executor together.
-pub fn run(descriptor: Descriptor, executor: Executor) -> Result<(), Box<dyn std::error::Error>> {
-    let session = KeymapSession::new(descriptor)?;
+/// The composition root supplies a configured session and its executor together.
+pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::error::Error>> {
     let layer = session.descriptor().layers[0].id.clone();
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
+        page: Page::Keys,
+        macro_form: Default::default(),
+        repeat_input: String::new(),
         session,
         executor,
         layer,
@@ -66,7 +82,7 @@ pub fn run(descriptor: Descriptor, executor: Executor) -> Result<(), Box<dyn std
         Desktop::update,
         Desktop::view,
     )
-    .title("Byakko · Keymap")
+    .title("Byakko")
     .theme(Theme::Dark)
     .subscription(Desktop::subscription)
     .exit_on_close_request(false)
@@ -137,10 +153,27 @@ impl Desktop {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
-        self.session.accept(completion);
+        let macro_result = matches!(
+            completion,
+            Completion::ReadMacro { .. } | Completion::ApplyMacro { .. }
+        );
+        if self.session.accept(completion) == Acceptance::IgnoredStale {
+            return Task::none();
+        }
+        let verified = if macro_result {
+            let verified = self.session.macros().is_some_and(|editor| {
+                *editor.status() == byakko_core::macros::editor::Status::Ready
+            });
+            if verified {
+                self.reset_macro_inputs();
+            }
+            verified
+        } else {
+            *self.session.status() == Status::Ready
+        };
         if self.closing == Closing::Waiting && !self.busy() {
             // Keep failures visible; a close request must not hide an uncertain write.
-            if *self.session.status() != Status::Ready {
+            if !verified {
                 self.closing = Closing::Open;
             } else {
                 return self.close();
@@ -170,6 +203,8 @@ impl Desktop {
             self.closing = Closing::Open;
         }
         match message {
+            Message::Page(page) => self.page = page,
+            Message::Macro(message) => self.update_macro(message),
             Message::SelectLayer(layer) => self.layer = layer,
             Message::SelectKey(key) => self.selected = Some(key),
             Message::Search(search) => self.search = search,
@@ -202,6 +237,6 @@ impl Desktop {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        view::keymap(self)
+        view::shell(self)
     }
 }

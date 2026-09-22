@@ -1,5 +1,5 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
-use super::{Closing, Desktop, Message};
+use super::{Closing, Desktop, Message, Page};
 use byakko_core::{
     Action, Descriptor,
     session::{Problem, Status},
@@ -9,7 +9,43 @@ use iced::{
     widget::{button, column, container, row, scrollable, text, text_input},
 };
 
-pub(super) fn keymap(app: &Desktop) -> Element<'_, Message> {
+pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
+    let mut navigation = row![button("Keys").on_press(Message::Page(Page::Keys))].spacing(8);
+    if app.session.macros().is_some() {
+        navigation = navigation.push(button("Macros").on_press(Message::Page(Page::Macros)));
+    }
+    let mut content = column![
+        text(&app.session.descriptor().device_name).size(24),
+        navigation
+    ]
+    .spacing(12);
+    if let Some(notice) = &app.notice {
+        content = content.push(text(notice));
+    }
+    content = match app.closing {
+        Closing::Open => content,
+        Closing::Waiting => content.push(text("Waiting for the device operation before closing…")),
+        Closing::ConfirmDiscard => content.push(
+            row![
+                text("Discard all staged drafts and close?"),
+                button("Keep editing").on_press(Message::KeepEditing),
+                button("Discard & close").on_press(Message::DiscardAndClose),
+            ]
+            .spacing(12),
+        ),
+    };
+    content = content.push(match app.page {
+        Page::Keys => keymap(app),
+        Page::Macros => super::macro_view::view(app),
+    });
+    container(content)
+        .padding(20)
+        .height(Fill)
+        .width(Fill)
+        .into()
+}
+
+fn keymap(app: &Desktop) -> Element<'_, Message> {
     let descriptor = app.session.descriptor();
     let dirty = app.session.changes();
     let ready = !app.busy() && *app.session.status() == Status::Ready;
@@ -25,7 +61,6 @@ pub(super) fn keymap(app: &Desktop) -> Element<'_, Message> {
     }))
     .spacing(6);
     let toolbar = row![
-        text(&descriptor.device_name).size(24),
         button("Read / reconnect").on_press_maybe((!app.busy()).then_some(Message::Read)),
         button("Revert draft")
             .on_press_maybe((!app.busy() && !dirty.is_empty()).then_some(Message::Revert)),
@@ -36,21 +71,6 @@ pub(super) fn keymap(app: &Desktop) -> Element<'_, Message> {
     .spacing(12)
     .align_y(iced::Center);
     let mut content = column![toolbar, text(status(app)), layers].spacing(12);
-    if let Some(notice) = &app.notice {
-        content = content.push(text(notice));
-    }
-    content = match app.closing {
-        Closing::Open => content,
-        Closing::Waiting => content.push(text("Waiting for the device operation before closing…")),
-        Closing::ConfirmDiscard => content.push(
-            row![
-                text("Discard the staged draft and close?"),
-                button("Keep editing").on_press(Message::KeepEditing),
-                button("Discard & close").on_press(Message::DiscardAndClose),
-            ]
-            .spacing(12),
-        ),
-    };
     let edits = column(dirty.iter().map(|change| {
         let key = descriptor
             .keys
@@ -95,11 +115,7 @@ pub(super) fn keymap(app: &Desktop) -> Element<'_, Message> {
         .spacing(20)
         .height(Fill),
     );
-    container(content)
-        .padding(20)
-        .height(Fill)
-        .width(Fill)
-        .into()
+    content.height(Fill).into()
 }
 
 fn keys(app: &Desktop) -> Element<'_, Message> {
@@ -199,7 +215,7 @@ fn action_label(descriptor: &Descriptor, action: &Action) -> String {
     }
 }
 
-fn status(app: &Desktop) -> String {
+pub(super) fn status(app: &Desktop) -> String {
     use byakko_core::session::Activity;
     match app.session.activity() {
         Activity::Read { .. } | Activity::ReadMacro { .. } => return "Reading device…".into(),
@@ -212,12 +228,21 @@ fn status(app: &Desktop) -> String {
         Status::Disconnected => "Disconnected · draft retained".into(),
         Status::Ready => "Readback verified · edits are staged until applied".into(),
         Status::Conflict { .. } => "Device changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
-        Status::Unverified { problem } => match problem {
-            Problem::ReadRequired => "Read the device before editing".into(),
-            Problem::Read(reason) => format!("Read failed: {reason}"),
-            Problem::Apply(failure) => format!("Apply failed ({:?} recovery): {}", failure.recovery, failure.message),
-            Problem::InvalidApplyResult(reason) => format!("Invalid readback: {reason}"),
-            Problem::ApplyReadbackMismatch => "Readback differs from the draft; state is unverified".into(),
-        },
+        Status::Unverified { problem } => problem_label(problem),
+    }
+}
+
+pub(super) fn problem_label(problem: &Problem) -> String {
+    match problem {
+        Problem::ReadRequired => "Read the device before editing".into(),
+        Problem::Read(reason) => format!("Read failed: {reason}"),
+        Problem::Apply(failure) => format!(
+            "Apply failed ({:?} recovery): {}",
+            failure.recovery, failure.message
+        ),
+        Problem::InvalidApplyResult(reason) => format!("Invalid readback: {reason}"),
+        Problem::ApplyReadbackMismatch => {
+            "Readback differs from the draft; state is unverified".into()
+        }
     }
 }
