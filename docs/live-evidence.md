@@ -202,3 +202,27 @@ one second after each setter, including recovery writes, and the mixed-layer
 guard is removed. This establishes a verified interval, not a measured
 minimum or an explanation of the firmware internals. Physical output remains
 untested. `verify-mixed-roundtrip` reproduces the application checks.
+
+## Mixed macro event storage (2026-09-22)
+
+`verify_macro_events` passed on firmware0100/profile0 using empty, unbound slot49.
+Its 33 events cover keyboard up/down at 0, 1, 127, 128 and 65,535 ms; movement
+with signed coordinates -128/+127 at all five delays; and both event directions
+for every mouse action byte240–248, distributed across those delay boundaries.
+All 256 stored bytes matched the native encoding and decoded to the original
+event list. The slot was restored to empty. A complete two-sweep configuration
+capture after restoration matched the before archive, including both keymaps,
+all50 macros, picture colors, lighting and settings. No macro was bound or played.
+
+The before archive `Research/captures/configuration-before-macro-events.json`
+has SHA-256 `2137480f0ba425bf06c9ef9a37881096834c928f6d4c21208ed65daf210ba4d4`,
+identical to the earlier restored baseline. The ignored local trace
+`Research/captures/backups/macro-events-setters-1790059585362888900.json`
+contains exactly ten successful setter API calls: slot49 pages0–4 to write,
+then pages0–4 to restore; no dropped entries. The trace is not a USB bus capture.
+
+Reproduce with `cargo run --features research-tools --example verify_macro_events -- BASELINE.json`.
+This command requires a matching full baseline and performs actual reversible
+device writes. It does not establish physical timing, mouse behavior, repeat
+modes, power-cycle persistence or fault recovery. The selected official reader's
+movement-delay inconsistency is documented in `Research/macro-boundary-audit.md`.
