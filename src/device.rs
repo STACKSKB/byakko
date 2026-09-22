@@ -453,27 +453,44 @@ pub fn read_macro(slot: u8) -> Result<Vec<u8>> {
 
 fn read_macro_unlocked(slot: u8) -> Result<Vec<u8>> {
     let (_, device) = open_unique()?;
-    let mut copies = Vec::new();
-    for _ in 0..2 {
+    read_macro_on_device(&device, slot)
+}
+
+fn read_macro_on_device(device: &HidDevice, slot: u8) -> Result<Vec<u8>> {
+    stable_macro_reads(|| {
         let mut bytes = Vec::with_capacity(256);
         for page in 0..4 {
             crate::macros::read_request(slot, page)?;
-            let barrier = read_payload(&device, 0x80, 0, 0)?;
+            let barrier = read_payload(device, 0x80, 0, 0)?;
             if barrier[0] != 0x80 {
                 return Err("Macro read identity barrier failed".into());
             }
-            let data = read_payload(&device, 0x8b, slot, page)?;
+            let data = read_payload(device, 0x8b, slot, page)?;
             if data == barrier {
                 return Err("Macro read returned stale identity data".into());
             }
             bytes.extend_from_slice(&data);
         }
-        copies.push(bytes);
+        Ok(bytes)
+    })
+}
+
+fn stable_macro_reads(mut read: impl FnMut() -> Result<Vec<u8>>) -> Result<Vec<u8>> {
+    // Immediately after a write the first page can contain its new first
+    // 32 bytes and old remaining bytes. Require two consecutive full matching
+    // snapshots, allowing one initial transitional snapshot, never a majority.
+    let mut previous = None;
+    for _ in 0..3 {
+        let bytes = read()?;
+        if bytes.len() != 256 {
+            return Err("Incomplete macro snapshot".into());
+        }
+        if previous.as_ref() == Some(&bytes) {
+            return Ok(bytes);
+        }
+        previous = Some(bytes);
     }
-    if copies[0] != copies[1] {
-        return Err("Macro changed between reads".into());
-    }
-    Ok(copies.remove(0))
+    Err("Macro did not stabilize across three complete reads".into())
 }
 
 /// Read the current custom lighting picture as 128 matrix-indexed RGB values.
@@ -630,9 +647,23 @@ pub fn apply_macro(
     )?;
     backup.sync_all()?;
     let (_, device) = open_unique()?;
+    // The write handle may differ from the one used for the initial read.
+    // Validate it before sending any macro reports, including restoration.
+    let version = read_payload(&device, 0x80, 0, 0)?;
+    let profile = read_payload(&device, 0x85, 0, 0)?;
+    if version[0] != 0x80
+        || u16::from_le_bytes([version[1], version[2]]) != 0x0100
+        || profile[0] != 0x85
+        || profile[1] != 0
+    {
+        return Err(
+            "Write handle is not validated Nia87 firmware 0x0100/profile 0; no macro writes sent"
+                .into(),
+        );
+    }
     let result = (|| -> Result<Vec<u8>> {
         write_macro_bytes(&device, slot, &target)?;
-        let actual = read_macro_unlocked(slot)?;
+        let actual = read_macro_on_device(&device, slot)?;
         if actual != target {
             return Err("Macro readback mismatch".into());
         }
@@ -643,7 +674,7 @@ pub fn apply_macro(
         Err(error) => {
             let rollback = (|| -> Result<()> {
                 write_macro_bytes(&device, slot, expected)?;
-                if read_macro_unlocked(slot)? != expected {
+                if read_macro_on_device(&device, slot)? != expected {
                     return Err("macro restoration mismatch".into());
                 }
                 Ok(())
@@ -831,6 +862,22 @@ pub fn apply_keymaps(
 
 #[cfg(test)]
 mod lighting_tests {
+    #[test]
+    fn macro_stability_requires_consecutive_complete_copies() {
+        let mut transitional = vec![0; 256];
+        transitional[..32].fill(1);
+        let complete = vec![1; 256];
+        let mut samples = [transitional.clone(), complete.clone(), complete.clone()].into_iter();
+        assert_eq!(
+            super::stable_macro_reads(|| Ok(samples.next().unwrap())).unwrap(),
+            complete
+        );
+        let mut alternating = [transitional.clone(), complete, transitional].into_iter();
+        assert!(super::stable_macro_reads(|| Ok(alternating.next().unwrap())).is_err());
+        assert!(super::stable_macro_reads(|| Ok(vec![0; 32])).is_err());
+        assert!(super::stable_macro_reads(|| Err("Disconnected".into())).is_err());
+    }
+
     #[test]
     fn mixed_layer_same_slot_is_rejected_before_device_access() {
         let expected = super::Snapshot {
