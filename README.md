@@ -17,6 +17,8 @@ Validated on the attached Windows keyboard: `3151:4015`, configuration collectio
 
 The built-in Nia87 slot profile comes from our observed default map, independently checked against the supplied vendor fixture. It does not depend on current key assignments or require repeated layout setup. 2.4 GHz configuration is deferred until USB works and receiver capability is measured.
 
+The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a focused keyboard macro recorder. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Sleep timers and keyboard options are currently read-only. The current official web app successfully writes Fn bindings; the mismatch in our direct path is under investigation, so Fn edits remain guarded.
+
 ## Research and provenance
 
 The product uses original Windows HID and Linux hidraw adapters with permissively licensed OS bindings. HIDAPI was removed after an audit found a GPL header in its build script despite MIT package metadata. Target-specific dependency and distribution notice audits remain necessary before releases.

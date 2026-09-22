@@ -78,3 +78,15 @@ An isolated base-only test subsequently passed all three macro binding modes (`0
 HIDAPI was removed from the manifest and resolved lockfile after its build-script licensing discrepancy was found. The original Windows adapter enumerated the same seven collections and selected `FFFF:0002`. It successfully performed the explicit keymap recovery, the complete long/short/empty macro test and all three base macro-binding tests. Windows raw descriptor retrieval now reports unsupported rather than reconstructing a descriptor.
 
 The original Linux hidraw adapter and full GUI pass `cargo check --target x86_64-unknown-linux-gnu --offline`; this is a cross-target type check, not Linux linking, execution or hardware validation. An OS-held file lock serializes Byakko transactions across processes; a test verifies exclusion and release on handle drop. The OEM helper does not participate in that lock and still must be closed.
+
+## Scalar settings and native UI checks
+
+Repeated native reads matched the official captures: debounce 1, auto OS false, sleep timers `[120,120,600,600]` seconds, options flags `0x10`, Fn-matrix flag false and power-save value 1. Backed-up debounce `1 -> 2 -> 1` and auto OS `false -> true -> false` passed complete settings readback. Both keymaps and global lighting matched afterward. Sleep and option writes were not attempted.
+
+The native GUI launched and loaded the keyboard without the official helper. Ctrl+3 opened lighting and displayed the verified ripple/brightness4/speed0/RGB8 state; Ctrl+4 opened the physical color layout and reported matching picture reads; Ctrl+2 exposed the native macro editor. An event-modifier shortcut fix was necessary for fast press/release batches. Screenshot capture for native windows remains unavailable in this session; accessibility state establishes these controls and values, not full visual layout quality.
+
+## Current official web Fn comparison
+
+With a fresh native backup and the supplied helper, the current official web app selected `FN Settings`, Pause, Play/Pause, then Confirm. After stopping the helper, complete native reads showed exactly one change: **function** slot 91, from zero to `03 00 cd 00`. The base map was untouched. Reopening the helper and choosing “No feature set” restored both complete snapshots byte-for-byte. Files are `keymaps-before-official-fn.json`, `keymaps-after-official-fn.json`, and `keymaps-restored-official-fn.json` under private captures.
+
+This proves Fn configuration works through the current official interface. It contradicts any broad claim that this firmware lacks Fn writes. The unresolved difference is between our direct packet path and the successful current app/helper path. Native Fn writes remain guarded while that difference is traced; do not infer a different index or toggle undocumented flags.

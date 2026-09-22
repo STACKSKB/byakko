@@ -13,4 +13,8 @@ pub mod macro_ui;
 pub mod macros;
 #[cfg(feature = "gui")]
 pub mod picture_ui;
+pub mod profiles;
 pub mod protocol;
+pub mod settings;
+#[cfg(feature = "gui")]
+pub mod settings_ui;

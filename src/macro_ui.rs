@@ -92,6 +92,13 @@ enum RowAction {
     Remove(usize),
 }
 
+struct Recording {
+    last_at: f64,
+    modifiers: egui::Modifiers,
+    held: Vec<u8>,
+    skip_start_frame: bool,
+}
+
 pub struct MacroEditor {
     slot: u8,
     draft: Macro,
@@ -104,6 +111,7 @@ pub struct MacroEditor {
     status: String,
     error: bool,
     busy: bool,
+    recording: Option<Recording>,
     trusted: bool,
     tx: Sender<WorkerResult>,
     rx: Receiver<WorkerResult>,
@@ -129,6 +137,7 @@ impl MacroEditor {
             status: "Choose a slot, then load it from the keyboard.".into(),
             error: false,
             busy: false,
+            recording: None,
             trusted: false,
             tx,
             rx,
@@ -136,7 +145,7 @@ impl MacroEditor {
     }
 
     pub fn busy(&self) -> bool {
-        self.busy
+        self.busy || self.recording.is_some()
     }
 
     fn dirty(&self) -> bool {
@@ -175,7 +184,7 @@ impl MacroEditor {
     }
 
     fn load(&mut self, ctx: &egui::Context) {
-        if self.busy || self.dirty() {
+        if self.busy() || self.dirty() {
             return;
         }
         let slot = self.slot;
@@ -191,7 +200,7 @@ impl MacroEditor {
     }
 
     fn apply(&mut self, ctx: &egui::Context) {
-        if self.busy || !self.dirty() {
+        if self.busy() || !self.dirty() {
             return;
         }
         let Some(expected) = self.observed.clone() else {
@@ -345,6 +354,228 @@ impl MacroEditor {
         }
     }
 
+    fn start_recording(&mut self, ctx: &egui::Context) -> bool {
+        if self.busy() || self.loaded.is_none() {
+            self.set_error("Load a slot and finish other work before recording.");
+            return false;
+        }
+        if let Err(error) = macros::encode(&self.draft) {
+            self.set_error(format!("Cannot append recording to this draft: {error}"));
+            return false;
+        }
+        let (now, modifiers) = ctx.input(|input| (input.time, input.modifiers));
+        if modifiers.ctrl
+            || modifiers.shift
+            || modifiers.alt
+            || modifiers.command
+            || modifiers.mac_cmd
+        {
+            self.set_error("Release modifier keys before starting the recorder.");
+            return false;
+        }
+        self.recording = Some(Recording {
+            last_at: now,
+            modifiers: egui::Modifiers::NONE,
+            held: Vec::new(),
+            skip_start_frame: true,
+        });
+        self.set_status("Recording keyboard events into the draft. Click STOP or leave the capture pad to finish.");
+        true
+    }
+
+    fn stop_recording(&mut self, ctx: &egui::Context, reason: &str, is_error: bool) {
+        let Some(recording) = self.recording.take() else {
+            return;
+        };
+        let now = ctx.input(|input| input.time);
+        let mut delay = recording_delay_ms(now, recording.last_at).unwrap_or(0);
+        let long_gap = recording_delay_ms(now, recording.last_at).is_none();
+        for usage in recording.held.into_iter().rev() {
+            self.draft.events.push(MacroEvent::Key {
+                usage,
+                down: false,
+                delay_ms: delay,
+            });
+            delay = 0;
+        }
+        debug_assert!(
+            macros::encode(&self.draft).is_ok(),
+            "release space was reserved"
+        );
+        let suffix = if long_gap {
+            " A pause exceeded 65,535 ms; final release delay was set to zero."
+        } else {
+            ""
+        };
+        if is_error || long_gap {
+            self.set_error(format!("{reason}{suffix}"));
+        } else {
+            self.set_status(format!("{reason}{suffix}"));
+        }
+    }
+
+    fn record_transition(
+        &mut self,
+        recording: &mut Recording,
+        usage: u8,
+        down: bool,
+        now: f64,
+    ) -> Result<(), String> {
+        let was_held = recording.held.contains(&usage);
+        if was_held == down {
+            return Ok(());
+        }
+        let delay_ms = recording_delay_ms(now, recording.last_at)
+            .ok_or("A recording pause exceeded the 65,535 ms delay limit")?;
+        let mut next_held = recording.held.clone();
+        if down {
+            next_held.push(usage);
+        } else {
+            next_held.retain(|held| *held != usage);
+        }
+        self.draft.events.push(MacroEvent::Key {
+            usage,
+            down,
+            delay_ms,
+        });
+        let mut capacity_probe = self.draft.clone();
+        capacity_probe
+            .events
+            .extend(next_held.iter().map(|usage| MacroEvent::Key {
+                usage: *usage,
+                down: false,
+                delay_ms: 0,
+            }));
+        if macros::encode(&capacity_probe).is_err() {
+            self.draft.events.pop();
+            return Err(
+                "Recording reached the 248-byte safe limit; held keys were released".into(),
+            );
+        }
+        recording.held = next_held;
+        recording.last_at = now;
+        Ok(())
+    }
+
+    fn sync_modifiers(
+        &mut self,
+        recording: &mut Recording,
+        modifiers: egui::Modifiers,
+        now: f64,
+    ) -> Result<(), String> {
+        let before = recording.modifiers;
+        let before_win = before.mac_cmd || (before.command && !before.ctrl);
+        let after_win = modifiers.mac_cmd || (modifiers.command && !modifiers.ctrl);
+        for (old, new, usage) in [
+            (before.ctrl, modifiers.ctrl, 224),
+            (before.shift, modifiers.shift, 225),
+            (before.alt, modifiers.alt, 226),
+            (before_win, after_win, 227),
+        ] {
+            if old != new {
+                self.record_transition(recording, usage, new, now)?;
+            }
+        }
+        recording.modifiers = modifiers;
+        Ok(())
+    }
+
+    fn process_recording(&mut self, ctx: &egui::Context, capture_id: egui::Id) {
+        let Some(mut recording) = self.recording.take() else {
+            return;
+        };
+        let (focused, now, events) =
+            ctx.input(|input| (input.focused, input.time, input.events.clone()));
+        if !focused {
+            self.recording = Some(recording);
+            self.stop_recording(
+                ctx,
+                "Recording stopped when the capture pad lost focus.",
+                false,
+            );
+            return;
+        }
+        if !ctx.memory(|memory| memory.has_focus(capture_id)) {
+            // egui uses Tab to move focus before this panel sees the frame.
+            // Preserve that physical press, then release it as recording stops.
+            if !recording.skip_start_frame
+                && let Some(egui::Event::Key {
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                    ..
+                }) = events.iter().find(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key {
+                            key: egui::Key::Tab,
+                            pressed: true,
+                            repeat: false,
+                            ..
+                        }
+                    )
+                })
+                && let Err(error) = self
+                    .sync_modifiers(&mut recording, *modifiers, now)
+                    .and_then(|()| self.record_transition(&mut recording, 43, true, now))
+            {
+                self.recording = Some(recording);
+                self.stop_recording(ctx, &error, true);
+                return;
+            }
+            self.recording = Some(recording);
+            self.stop_recording(
+                ctx,
+                "Recording stopped when the capture pad lost focus.",
+                false,
+            );
+            return;
+        }
+        if recording.skip_start_frame {
+            recording.skip_start_frame = false;
+            self.recording = Some(recording);
+            return;
+        }
+        for event in events {
+            let result = match event {
+                egui::Event::ModifiersChanged(modifiers) => {
+                    self.sync_modifiers(&mut recording, modifiers, now)
+                }
+                egui::Event::Key {
+                    key,
+                    physical_key,
+                    pressed,
+                    repeat,
+                    modifiers,
+                } => {
+                    if let Err(error) = self.sync_modifiers(&mut recording, modifiers, now) {
+                        Err(error)
+                    } else if is_modifier_key(physical_key.unwrap_or(key)) || (pressed && repeat) {
+                        Ok(())
+                    } else if let Some(usage) = key_usage(physical_key.unwrap_or(key)) {
+                        self.record_transition(&mut recording, usage, pressed, now)
+                    } else {
+                        Err(format!("Unsupported key {key:?}; recording stopped"))
+                    }
+                }
+                egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) if !text.is_empty() => {
+                    Err("IME composition cannot be recorded as physical key events".into())
+                }
+                egui::Event::Ime(egui::ImeEvent::Commit(_))
+                | egui::Event::Ime(egui::ImeEvent::DeleteSurrounding { .. }) => {
+                    Err("IME input cannot be recorded as physical key events".into())
+                }
+                _ => Ok(()),
+            };
+            if let Err(error) = result {
+                self.recording = Some(recording);
+                self.stop_recording(ctx, &error, true);
+                return;
+            }
+        }
+        self.recording = Some(recording);
+    }
+
     fn event_grid(&mut self, ui: &mut egui::Ui) {
         let mut action = None;
         egui::ScrollArea::vertical()
@@ -460,8 +691,18 @@ impl MacroEditor {
     /// loaded, verified slot to the key selected in the surrounding workbench.
     pub fn ui(&mut self, ui: &mut egui::Ui, blocked: bool) -> Option<[u8; 4]> {
         self.poll_worker();
+        let load_shortcut = ui.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(event,
+                    egui::Event::Key { key: egui::Key::L, pressed: true, repeat: false, modifiers, .. }
+                    if modifiers.ctrl)
+            })
+        });
+        if load_shortcut && !blocked && !self.busy() && !self.dirty() {
+            self.load(ui.ctx());
+        }
         let mut binding = None;
-        let can_work = !blocked && !self.busy;
+        let can_work = !blocked && !self.busy();
         egui::Frame::NONE.fill(PANEL).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
             ui.label(RichText::new("MACRO STUDIO").size(17.0).strong().color(INK));
             ui.label(RichText::new("Build an event stream, save it to a slot, then bind that slot to the selected key.").color(MUTED));
@@ -475,7 +716,7 @@ impl MacroEditor {
                     self.switch_slot(candidate);
                 }
                 let load_enabled = can_work && !self.dirty();
-                if ui.add_enabled(load_enabled, egui::Button::new("LOAD SELECTED")).clicked() {
+                if ui.add_enabled(load_enabled, egui::Button::new("LOAD SELECTED · Ctrl+L")).clicked() {
                     self.load(ui.ctx());
                 }
                 if self.busy {
@@ -531,6 +772,40 @@ impl MacroEditor {
                 Ok(_) => ui.label(RichText::new(format!("{} event(s) · {encoded_size}/248 encoded bytes", self.draft.events.len())).color(MUTED)),
                 Err(error) => ui.label(RichText::new(format!("{encoded_size}/248 encoded bytes · Cannot save: {error}")).color(ACCENT)),
             };
+            ui.add_space(8.0);
+            ui.label(RichText::new("KEYBOARD RECORDER").small().strong().color(MUTED));
+            let mut just_started = false;
+            ui.horizontal(|ui| {
+                if self.recording.is_some() {
+                    if ui.button("STOP RECORDING").clicked() {
+                        self.stop_recording(ui.ctx(), "Recording stopped; held keys were released in the draft.", false);
+                    }
+                } else {
+                    let label = if self.draft.events.is_empty() {
+                        "START INTO EMPTY DRAFT"
+                    } else {
+                        "APPEND RECORDING"
+                    };
+                    if ui.add_enabled(can_work && self.loaded.is_some() && encoded.is_ok(), egui::Button::new(label)).clicked() {
+                        just_started = self.start_recording(ui.ctx());
+                    }
+                }
+                ui.label(RichText::new("Window-focused keys only · no device write").small().color(MUTED));
+            });
+            if self.recording.is_some() {
+                let capture_id = ui.make_persistent_id("macro_keyboard_capture");
+                let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), 34.0));
+                let response = ui.interact(rect, capture_id, egui::Sense::click());
+                if just_started || response.clicked() {
+                    response.request_focus();
+                }
+                ui.painter().rect_filled(rect, 3.0, Color32::from_rgb(236, 239, 230));
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER,
+                    "RECORDING · keep this pad focused · click STOP to finish",
+                    egui::FontId::proportional(12.0), INK);
+                self.process_recording(ui.ctx(), capture_id);
+            }
+            ui.label(RichText::new("Delays use egui frame time (millisecond rounding); events in one frame share a timestamp. Keypad and left/right modifier identity may be unavailable.").small().color(MUTED));
             ui.add_space(9.0);
             ui.horizontal_wrapped(|ui| {
                 if ui.add_enabled(can_work && self.dirty() && encoded.is_ok(), egui::Button::new("SAVE TO KEYBOARD")).clicked() {
@@ -613,4 +888,192 @@ fn encoded_size(macro_data: &Macro) -> usize {
             }
         })
         .sum::<usize>()
+}
+
+fn recording_delay_ms(now: f64, previous: f64) -> Option<u16> {
+    if !now.is_finite() || !previous.is_finite() {
+        return None;
+    }
+    let milliseconds = ((now - previous).max(0.0) * 1000.0).round();
+    (milliseconds <= f64::from(u16::MAX)).then_some(milliseconds as u16)
+}
+
+fn is_modifier_key(key: egui::Key) -> bool {
+    matches!(
+        key,
+        egui::Key::ControlLeft
+            | egui::Key::ControlRight
+            | egui::Key::ShiftLeft
+            | egui::Key::ShiftRight
+            | egui::Key::AltLeft
+            | egui::Key::AltRight
+            | egui::Key::SuperLeft
+            | egui::Key::SuperRight
+    )
+}
+
+/// HID keyboard usages for egui's supported physical keys. The modifier
+/// variants are handled separately from `egui::Modifiers` transitions.
+fn key_usage(key: egui::Key) -> Option<u8> {
+    use egui::Key::*;
+    Some(match key {
+        A => 4,
+        B => 5,
+        C => 6,
+        D => 7,
+        E => 8,
+        F => 9,
+        G => 10,
+        H => 11,
+        I => 12,
+        J => 13,
+        K => 14,
+        L => 15,
+        M => 16,
+        N => 17,
+        O => 18,
+        P => 19,
+        Q => 20,
+        R => 21,
+        S => 22,
+        T => 23,
+        U => 24,
+        V => 25,
+        W => 26,
+        X => 27,
+        Y => 28,
+        Z => 29,
+        Num1 | Exclamationmark => 30,
+        Num2 => 31,
+        Num3 => 32,
+        Num4 => 33,
+        Num5 => 34,
+        Num6 => 35,
+        Num7 => 36,
+        Num8 => 37,
+        Num9 => 38,
+        Num0 => 39,
+        Enter => 40,
+        Escape => 41,
+        Backspace => 42,
+        Tab => 43,
+        Space => 44,
+        Minus => 45,
+        Equals | Plus => 46,
+        OpenBracket | OpenCurlyBracket => 47,
+        CloseBracket | CloseCurlyBracket => 48,
+        Backslash | Pipe => 49,
+        Semicolon | Colon => 51,
+        Quote => 52,
+        Backtick => 53,
+        Comma => 54,
+        Period => 55,
+        Slash | Questionmark => 56,
+        IntlBackslash => 100,
+        F1 => 58,
+        F2 => 59,
+        F3 => 60,
+        F4 => 61,
+        F5 => 62,
+        F6 => 63,
+        F7 => 64,
+        F8 => 65,
+        F9 => 66,
+        F10 => 67,
+        F11 => 68,
+        F12 => 69,
+        F13 => 104,
+        F14 => 105,
+        F15 => 106,
+        F16 => 107,
+        F17 => 108,
+        F18 => 109,
+        F19 => 110,
+        F20 => 111,
+        F21 => 112,
+        F22 => 113,
+        F23 => 114,
+        F24 => 115,
+        Insert => 73,
+        Home => 74,
+        PageUp => 75,
+        Delete => 76,
+        End => 77,
+        PageDown => 78,
+        ArrowRight => 79,
+        ArrowLeft => 80,
+        ArrowDown => 81,
+        ArrowUp => 82,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
+mod recording_tests {
+    use super::{MacroEditor, Recording, key_usage, recording_delay_ms};
+    use crate::macros::{self, MacroEvent};
+    use eframe::egui::Key;
+
+    #[test]
+    fn maps_physical_keys_and_rejects_unavailable_usages() {
+        assert_eq!(key_usage(Key::A), Some(4));
+        assert_eq!(key_usage(Key::F24), Some(115));
+        assert_eq!(key_usage(Key::ArrowLeft), Some(80));
+        assert_eq!(key_usage(Key::F25), None);
+        assert_eq!(key_usage(Key::BrowserBack), None);
+    }
+
+    #[test]
+    fn rounds_frame_time_and_rejects_unrepresentable_pause() {
+        assert_eq!(recording_delay_ms(1.0504, 1.0), Some(50));
+        assert_eq!(recording_delay_ms(1.0, 1.0), Some(0));
+        assert_eq!(recording_delay_ms(70.0, 0.0), None);
+    }
+
+    #[test]
+    fn reserves_room_to_release_held_keys_at_capacity() {
+        let mut editor = MacroEditor::new();
+        for _ in 0..60 {
+            editor.draft.events.extend([
+                MacroEvent::Key {
+                    usage: 4,
+                    down: true,
+                    delay_ms: 1,
+                },
+                MacroEvent::Key {
+                    usage: 4,
+                    down: false,
+                    delay_ms: 1,
+                },
+            ]);
+        }
+        let mut recording = Recording {
+            last_at: 0.0,
+            modifiers: eframe::egui::Modifiers::NONE,
+            held: Vec::new(),
+            skip_start_frame: false,
+        };
+        assert!(
+            editor
+                .record_transition(&mut recording, 5, true, 0.001)
+                .is_ok()
+        );
+        assert!(
+            editor
+                .record_transition(&mut recording, 6, true, 0.002)
+                .is_err()
+        );
+        assert_eq!(recording.held, [5]);
+        editor.recording = Some(recording);
+        editor.stop_recording(&eframe::egui::Context::default(), "Stopped", false);
+        assert!(macros::encode(&editor.draft).is_ok());
+        assert!(matches!(
+            editor.draft.events.last(),
+            Some(MacroEvent::Key {
+                usage: 5,
+                down: false,
+                ..
+            })
+        ));
+    }
 }

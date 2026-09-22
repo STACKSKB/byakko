@@ -106,3 +106,28 @@ unsupported or behave differently on the tested firmware, or the full writer
 may require a stock-style content image or other state not visible in this
 trace. Keep Fn editing blocked; further work needs exact before/after bytes
 for **both** maps and a separately designed safe probe, not a guessed index.
+
+## Keyboard-option flag lead
+
+A read-only `GET_KBOPTION` response was captured as
+`86 00 10 00 01 00 00 79` in its first eight bytes. In the inherited
+Nia87 keyboard-option reader at approximately `7,731,298`, command `0x86`
+returns `keyboardFnKeyMatrix` from response byte 3 bit 0 and
+`powerSaveMode` from byte 4. Thus this capture decodes the named Fn-matrix
+flag as false and power-save as true. The setter at approximately
+`7,730,602` uses command `0x06`, profile byte 1, the ordinary option bits
+in byte 2, the supplied `keyboardFnKeyMatrix` value in byte 3, and
+`powerSaveMode` in byte 4, with BIT7 checksum. The name and byte position
+alone do not establish that the flag enables Fn-map writes.
+
+The frontend calls the getter during device loading near `15,663,337` and
+stores the result for settings and lighting behavior. A full-bundle search
+found the `keyboardFnKeyMatrix` property only in two generic keyboard-option
+getter/setter pairs, and found no frontend call to generic
+`setKeyboardOption(...)`. In particular, `setIsFnMode` near `15,696,900`
+changes local UI state and reloads a configuration; `setFnIndex` near
+`15,697,100` changes its local zero-based index and reloads. The latter
+sends a different keyboard-option command only for the separate
+`keyboard3123` device class, which is not Nia87. The Nia87 Fn-settings UI
+therefore provides no source evidence for setting byte 3 before a Fn edit.
+No write to this flag is justified by the trace or the captured value.
