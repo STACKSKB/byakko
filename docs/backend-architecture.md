@@ -151,9 +151,19 @@ when closing, even though they invalidate the keymap baseline's trust.
 
 The memory-backed desktop tests exercise event replacement, signed movement,
 zero wait/count preservation, readback, opaque-slot rejection, failure retention
-and close behavior with a separately dirty keymap. Recorder, binding and
+and close behavior with a separately dirty keymap. Recorder and
 file/label workflows still need migration; the working legacy macro panel is
 not being ported wholesale. See `iced-macro-acceptance.md` for the current limits.
+
+Macro capabilities advertise each slot's binding choices as typed keymap
+actions, with an optional required saved repeat count. The desktop does not
+construct numeric slot/mode codes. Nia87 supplies counted/toggle/hold choices;
+the memory backend supplies named actions for nonnumeric slot IDs. Core checks
+macro trust, clean saved contents, count policy and keymap readiness/writability
+before staging a binding. Mode selection never rewrites the macro count. The
+same staged-change review and serialized keymap apply perform the later write.
+This policy check occurs at staging; keymap expected-state checks cover keymaps,
+and do not make macro content and bindings one atomic transaction.
 
 Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
 

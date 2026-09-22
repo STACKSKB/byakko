@@ -1,7 +1,7 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
 use super::{Closing, Desktop, Message, Page};
 use byakko_core::{
-    Action, Descriptor,
+    Action,
     session::{Problem, Status},
 };
 use iced::{
@@ -89,11 +89,8 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
             .and_then(|layer| layer.get(&change.key));
         text(format!(
             "{layer} / {key}: {} → {}",
-            before.map_or_else(
-                || "Unknown".into(),
-                |action| action_label(descriptor, action)
-            ),
-            action_label(descriptor, &change.action)
+            before.map_or_else(|| "Unknown".into(), |action| action_label(app, action)),
+            action_label(app, &change.action)
         ))
         .into()
     }))
@@ -131,10 +128,7 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
         let label = format!(
             "{}  ·  {}{}",
             key.label,
-            binding.map_or_else(
-                || "Unread".into(),
-                |action| action_label(descriptor, action)
-            ),
+            binding.map_or_else(|| "Unread".into(), |action| action_label(app, action)),
             if key.writable { "" } else { " (fixed)" }
         );
         button(text(label).size(14))
@@ -197,7 +191,23 @@ fn search(app: &Desktop) -> Element<'_, Message> {
     .into()
 }
 
-fn action_label(descriptor: &Descriptor, action: &Action) -> String {
+fn action_label(app: &Desktop, action: &Action) -> String {
+    if let Some(editor) = app.session.macros()
+        && let Some(binding) = editor
+            .capabilities()
+            .bindings
+            .iter()
+            .find(|binding| &binding.action == action)
+    {
+        let slot = editor
+            .capabilities()
+            .slots
+            .iter()
+            .find(|slot| slot.id == binding.slot)
+            .map_or(binding.slot.as_str(), |slot| slot.label.as_str());
+        return format!("{slot} · {}", binding.label);
+    }
+    let descriptor = app.session.descriptor();
     if let Some(choice) = descriptor
         .actions
         .iter()

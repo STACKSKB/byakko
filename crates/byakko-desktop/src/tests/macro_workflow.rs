@@ -57,6 +57,76 @@ fn loaded() -> Desktop {
 }
 
 #[test]
+fn binding_policy_is_explicit_and_saved_binding_uses_backend_action() {
+    let mut app = loaded();
+    send(&mut app, Macro::Select("pointer".into()));
+    settle(&mut app);
+    send(&mut app, Macro::Bind("hold".into()));
+    assert!(app.notice.is_some());
+    assert!(app.session.changes().is_empty());
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        2
+    );
+    let _ = app.update(Message::SelectLayer("Studio".into()));
+    let _ = app.update(Message::SelectKey("Fixed".into()));
+    send(&mut app, Macro::Bind("play".into()));
+    assert!(app.notice.is_some());
+    assert!(app.session.changes().is_empty());
+    let _ = app.update(Message::SelectKey("Beta".into()));
+    send(&mut app, Macro::Bind("play".into()));
+    let staged = app.session.changes();
+    assert_eq!(
+        staged,
+        vec![Change {
+            layer: "Studio".into(),
+            key: "Beta".into(),
+            action: Action::Named {
+                id: "sequence/pointer/play".into()
+            },
+        }]
+    );
+    send(&mut app, Macro::Edit(Edit::Repeat(1)));
+    send(&mut app, Macro::Bind("hold".into()));
+    assert!(
+        app.notice.is_some(),
+        "an unsaved count must not authorize binding"
+    );
+    assert_eq!(app.session.changes(), staged);
+    send(&mut app, Macro::Apply);
+    settle(&mut app);
+    send(&mut app, Macro::Bind("hold".into()));
+    assert!(
+        app.notice.is_some(),
+        "keymap must be reread after a macro write"
+    );
+    let _ = app.update(Message::Read);
+    settle(&mut app);
+    send(&mut app, Macro::Read);
+    settle(&mut app);
+    send(&mut app, Macro::Bind("hold".into()));
+    assert!(app.notice.is_none());
+    assert_eq!(app.page, Page::Keys);
+    let action = Action::Named {
+        id: "sequence/pointer/hold".into(),
+    };
+    assert_eq!(app.session.changes()[0].action, action);
+    let _ = app.update(Message::Apply);
+    settle(&mut app);
+    assert_eq!(
+        app.session.baseline().unwrap().bindings["Studio"]["Beta"],
+        action
+    );
+    assert!(app.session.changes().is_empty());
+    send(&mut app, Macro::Read);
+    settle(&mut app);
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        1
+    );
+}
+
+#[test]
 fn form_projection_preserves_every_demo_action_and_wait() {
     let mut device = demo::device().unwrap();
     let caps = device.macro_capabilities().unwrap().clone();

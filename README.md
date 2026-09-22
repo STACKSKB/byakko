@@ -18,8 +18,10 @@ same portable session model and serialized executor. The Iced screen supports
 key/layer selection, action search, staged-change review, apply with readback,
 revert and explicit read/reconnect. The Macros page supports capability-driven
 slot reads, event editing/reordering, stored repeat counts, revert and verified
-save. The demo includes editable and opaque macro slots. Macro recording,
-binding controls, import/export, lighting, settings, archives and automatic
+save. Saved macros can be staged onto the selected key/layer using advertised
+playback modes; Nia87 toggle/hold require an explicitly saved count of 1.
+The demo includes editable and opaque macro slots. Macro recording,
+import/export, lighting, settings, archives and automatic
 hotplug discovery still need migration. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and

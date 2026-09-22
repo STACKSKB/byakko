@@ -16,6 +16,7 @@ fn caps() -> Capabilities {
         buttons: vec![],
         movement: None,
         backend_actions: vec![],
+        bindings: vec![],
     }
 }
 fn program(usage: u16) -> Program {
@@ -152,4 +153,50 @@ fn rejected_edits_are_atomic_and_dirty_slot_change_is_rejected() {
             problem: Problem::ReadRequired
         }
     );
+}
+
+#[test]
+fn binding_requires_ready_clean_editable_program_and_advertised_count() {
+    let mut capabilities = caps();
+    capabilities.bindings.push(crate::macros::Binding {
+        slot: "one".into(),
+        id: "play".into(),
+        label: "Play".into(),
+        action: crate::Action::Macro { slot: 2, mode: 1 },
+        required_repeat_count: Some(1),
+    });
+    let mut editor = Editor::new(capabilities).unwrap();
+    assert!(editor.binding_action("play").is_err());
+    editor.accept_read(Ok(snapshot(
+        1,
+        Content::Editable(Program {
+            repeat_count: 2,
+            events: vec![],
+        }),
+    )));
+    assert!(editor.binding_action("play").is_err());
+    editor.accept_read(Ok(snapshot(
+        2,
+        Content::Editable(Program {
+            repeat_count: 1,
+            events: vec![],
+        }),
+    )));
+    assert_eq!(
+        editor.binding_action("play").unwrap(),
+        crate::Action::Macro { slot: 2, mode: 1 }
+    );
+    assert!(editor.binding_action("absent").is_err());
+    editor.edit(Edit::Repeat(2)).unwrap();
+    assert!(editor.binding_action("play").is_err());
+    editor.revert().unwrap();
+    editor.invalidate();
+    assert!(editor.binding_action("play").is_err());
+    editor.accept_read(Ok(snapshot(
+        3,
+        Content::Opaque {
+            reason: "unknown".into(),
+        },
+    )));
+    assert!(editor.binding_action("play").is_err());
 }

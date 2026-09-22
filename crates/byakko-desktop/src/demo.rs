@@ -2,8 +2,8 @@
 use byakko_core::{
     Action, ActionChoice, Descriptor, Layer, PhysicalKey, State,
     macros::{
-        Action as MacroAction, ButtonChoice, Capabilities, Choice, Content, Event, Program,
-        Snapshot,
+        Action as MacroAction, Binding, ButtonChoice, Capabilities, Choice, Content, Event,
+        Program, Snapshot,
     },
 };
 use byakko_devices::memory::MemoryDevice;
@@ -79,6 +79,25 @@ pub fn device() -> Result<MemoryDevice, String> {
             .collect(),
     };
     let capabilities = Capabilities {
+        bindings: ["intro", "pointer"]
+            .into_iter()
+            .flat_map(|slot| {
+                [
+                    ("play", "Play sequence", None),
+                    ("hold", "Hold sequence", Some(1)),
+                ]
+                .into_iter()
+                .map(move |(id, label, required_repeat_count)| Binding {
+                    slot: slot.into(),
+                    id: id.into(),
+                    label: label.into(),
+                    action: Action::Named {
+                        id: format!("sequence/{slot}/{id}"),
+                    },
+                    required_repeat_count,
+                })
+            })
+            .collect(),
         backend_id: "memory".into(),
         slots: [
             ("intro", "Intro sequence"),

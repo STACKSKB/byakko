@@ -61,6 +61,29 @@ impl Editor {
         }
     }
 
+    pub fn binding_action(&self, id: &str) -> Result<crate::Action, String> {
+        if self.status != Status::Ready {
+            return Err("Read and verify the macro before binding".into());
+        }
+        if self.dirty() {
+            return Err("Apply or revert macro changes before binding".into());
+        }
+        let program = self.draft.as_ref().ok_or("Macro is not editable")?;
+        let binding = self
+            .capabilities
+            .bindings
+            .iter()
+            .find(|binding| binding.slot == self.slot && binding.id == id)
+            .ok_or("Unknown macro binding")?;
+        if binding
+            .required_repeat_count
+            .is_some_and(|count| count != program.repeat_count)
+        {
+            return Err("Macro repeat count does not match this binding".into());
+        }
+        Ok(binding.action.clone())
+    }
+
     pub fn select(&mut self, slot: &str) -> Result<(), String> {
         if !self
             .capabilities

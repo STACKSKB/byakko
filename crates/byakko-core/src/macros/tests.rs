@@ -13,6 +13,7 @@ fn capabilities() -> Capabilities {
         buttons: vec![],
         movement: None,
         backend_actions: vec![],
+        bindings: vec![],
     }
 }
 
@@ -102,4 +103,52 @@ fn opaque_snapshot_round_trips_without_a_decodable_program() {
     let mut caps = capabilities();
     caps.slots.push(caps.slots[0].clone());
     assert!(validate_capabilities(&caps).is_err());
+}
+
+#[test]
+fn binding_catalog_checks_identity_slot_and_repeat_policy() {
+    let binding = Binding {
+        slot: "scene-a".into(),
+        id: "play".into(),
+        label: "Play".into(),
+        action: crate::Action::Macro { slot: 7, mode: 2 },
+        required_repeat_count: Some(1),
+    };
+    let mut caps = capabilities();
+    caps.bindings.push(binding.clone());
+    assert!(validate_capabilities(&caps).is_ok());
+    let json = serde_json::to_value(&caps).unwrap();
+    assert_eq!(serde_json::from_value::<Capabilities>(json).unwrap(), caps);
+    caps.bindings.push(binding.clone());
+    assert!(validate_capabilities(&caps).is_err());
+    caps.bindings.pop();
+    for invalid in [
+        Binding {
+            slot: "absent".into(),
+            ..binding.clone()
+        },
+        Binding {
+            id: "".into(),
+            ..binding.clone()
+        },
+        Binding {
+            label: "".into(),
+            ..binding.clone()
+        },
+        Binding {
+            required_repeat_count: Some(0),
+            ..binding
+        },
+    ] {
+        caps.bindings[0] = invalid;
+        assert!(validate_capabilities(&caps).is_err());
+    }
+    let mut old_json = serde_json::to_value(capabilities()).unwrap();
+    old_json.as_object_mut().unwrap().remove("bindings");
+    assert!(
+        serde_json::from_value::<Capabilities>(old_json)
+            .unwrap()
+            .bindings
+            .is_empty()
+    );
 }

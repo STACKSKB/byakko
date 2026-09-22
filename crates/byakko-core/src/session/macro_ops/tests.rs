@@ -37,6 +37,13 @@ fn ready() -> Session {
         buttons: vec![],
         movement: None,
         backend_actions: vec![],
+        bindings: vec![macros::Binding {
+            slot: "scene".into(),
+            id: "play".into(),
+            label: "Play scene".into(),
+            action: Action::Macro { slot: 3, mode: 1 },
+            required_repeat_count: Some(1),
+        }],
     };
     let mut session = Session::new(descriptor)
         .unwrap()
@@ -225,4 +232,48 @@ fn apply_failure_retains_macro_and_keymap_drafts_but_neither_is_writable() {
     assert!(!session.busy());
     read(&mut session, snapshot(1, 1));
     assert_eq!(session.macros().unwrap().draft().unwrap().repeat_count, 2);
+}
+
+#[test]
+fn binding_uses_advertised_action_and_preserves_drafts_on_rejection() {
+    let mut session = ready();
+    let action = Action::Macro { slot: 3, mode: 1 };
+    assert!(
+        session
+            .stage_macro_binding("layer", "key", "unknown")
+            .is_err()
+    );
+    assert!(session.changes().is_empty());
+    session.stage_macro_binding("layer", "key", "play").unwrap();
+    assert_eq!(session.changes()[0].action, action);
+    assert_eq!(session.macros().unwrap().draft().unwrap().repeat_count, 1);
+    session.edit_macro(Edit::Repeat(2)).unwrap();
+    let before = session.changes();
+    assert!(session.stage_macro_binding("layer", "key", "play").is_err());
+    assert_eq!(session.changes(), before);
+    session.revert_macro().unwrap();
+    let Command::Read {
+        generation,
+        operation,
+    } = session.request_read().unwrap()
+    else {
+        unreachable!()
+    };
+    assert!(session.stage_macro_binding("layer", "key", "play").is_err());
+    session.accept(Completion::Read {
+        generation,
+        operation,
+        result: Ok(State {
+            revision: vec![1],
+            bindings: BTreeMap::from([(
+                "layer".into(),
+                BTreeMap::from([("key".into(), Action::Key(4))]),
+            )]),
+        }),
+    });
+    // A keymap read invalidates macro trust until its own read completes.
+    assert!(session.stage_macro_binding("layer", "key", "play").is_err());
+    assert_eq!(session.changes(), before);
+    read(&mut session, snapshot(1, 1));
+    session.stage_macro_binding("layer", "key", "play").unwrap();
 }

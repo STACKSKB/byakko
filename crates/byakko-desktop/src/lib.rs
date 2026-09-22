@@ -1,4 +1,5 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
+mod macro_binding_view;
 mod macro_editor;
 mod macro_form;
 mod macro_view;
