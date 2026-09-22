@@ -147,3 +147,23 @@ byte-for-byte, including zero/long delays; both keymaps were unchanged.
 Twelve previously missing visible actions were added from independently
 recorded wire facts in `Research/action-coverage.md`. These expand the native
 catalog but do not establish physical host behavior for those actions.
+
+## Sleep timers and further mixed-layer investigation
+
+Requiring two consecutive matching reads of each individual keymap page did
+not fix the mixed-layer transaction. Its failed test restored both original
+maps. That experimental reader was removed; the same-slot mixed-edit guard
+remains, and its cause remains unresolved.
+
+The current web bundle's selected sleep setter was retraced separately from
+the old installer: command `12`, BIT7 checksum, four little-endian values at
+payload bytes 8–15. The response still stores those values at bytes 1–8.
+A native probe changed Bluetooth normal sleep from 120 to 180 seconds and
+restored it; complete settings and keymaps matched afterward.
+
+The application transaction then changed all four timers from
+`[120,120,600,600]` to `[180,180,660,660]` and restored the originals.
+Complete raw settings and both maps matched. The native settings page now
+supports those timers in minutes, including zero to disable. Bounds follow
+the current descriptor: normal 1–60 minutes, deep 10–60 minutes. Physical
+idle/sleep behavior and wireless transport remain untested.

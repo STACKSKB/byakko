@@ -17,7 +17,7 @@ Validated on the attached Windows keyboard: `3151:4015`, configuration collectio
 
 The built-in Nia87 slot profile comes from our observed default map, independently checked against the supplied vendor fixture. It does not depend on current key assignments or require repeated layout setup. 2.4 GHz configuration is deferred until USB works and receiver capability is measured.
 
-The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a focused keyboard macro recorder. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Sleep timers and keyboard options are currently read-only. A captured official Fn media binding now passes native write/readback/restoration. USB access recovered after a replug; the pending test binding was restored, and Fn editing is enabled. Mixed edits to both layers of the same slot remain guarded.
+The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a focused keyboard macro recorder. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Four wireless sleep timers have native controls and passed complete write/readback/restoration tests. Keyboard options remain read-only. A captured official Fn media binding now passes native write/readback/restoration. USB access recovered after a replug; the pending test binding was restored, and Fn editing is enabled. Mixed edits to both layers of the same slot remain guarded.
 
 ## Research and provenance
 

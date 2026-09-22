@@ -246,6 +246,12 @@ pub fn apply_setting(
             replies[1][1] = u8::from(value);
             Setting::AutoOs(expected.auto_os())
         }
+        Setting::Sleep(values) => {
+            for (index, seconds) in values.into_iter().enumerate() {
+                replies[2][1 + index * 2..3 + index * 2].copy_from_slice(&seconds.to_le_bytes());
+            }
+            Setting::Sleep(expected.sleep_seconds())
+        }
     };
     let restore_report = crate::settings::write_report(restore)?;
     let target = Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3])?;

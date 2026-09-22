@@ -1,5 +1,11 @@
 # Nia87 settings protocol notes
 
+> Current sleep setter correction: the selected current web path uses payload
+> bytes 8–15, with BIT7 checksum at byte 7. Native probe and application
+> transactions changed/restored all four timers successfully. The getter's
+> values remain at bytes 1–8. See `Research/sleep-selected-path.md` and
+> `docs/live-evidence.md`; the older sleep layout below is historical.
+
 This is a bounded static comparison of the shipped renderer bundle and the
 closed RPC capture in `Research/captures/rpc-analysis-v4.json`. It describes
 the 64-byte HID payload passed through the helper. It does not send commands
@@ -54,8 +60,8 @@ power-save value to byte 4:
 * byte 3 bit 0: Fn-key matrix
 * byte 4: power-save value
 
-The Nia87 capture therefore describes the main LED-off flag and Fn-key matrix
-as enabled. The method passes checksum mode `0` to the common feature writer,
+The Nia87 capture therefore describes the main LED-off flag as enabled and the
+Fn-key matrix flag as disabled. The method passes checksum mode `0` to the common feature writer,
 which the bundle's `CheckSumType` enum labels `BIT7`.
 
 ### Lighting, `0x04` / `0x84`

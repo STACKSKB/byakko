@@ -14,7 +14,7 @@ This ledger separates implemented configuration storage from end-to-end behavior
 | Global lighting | Native controls; brightness write/read/restore passes full settings comparison | Each applicable parameter family and visual validation |
 | Per-key colors | Native physical layout editor; single-color write/restore passes all 128 RGB values | GUI interaction coverage, picture-slot semantics and visual validation |
 | Host-driven lighting | Official catalog advertises screen and music modes | Determine actual required host processing; independently implement applicable behavior |
-| Other settings | Native debounce and auto-OS controls, reversible complete settings readback; sleep/options read-only | Verify sleep setter and option semantics; resolve report-rate support |
+| Other settings | Native debounce, auto-OS and four sleep timers; all pass reversible complete settings readback; options read-only | Physical sleep behavior, option semantics and report-rate support |
 | Local configurations | Versioned raw-preserving keymap import/export with board/firmware/padding validation; macro JSON | Full settings/macro bundle semantics and GUI interaction coverage |
 | Robust device transactions | Expected-state checks, disk backups, readback/rollback and OS-held interprocess lock; optional blocking Windows USB string reads removed | USB error recovery, disconnect/reconnect and partial failure tests |
 | 2.4 GHz | Deferred by USB-first scope | Receiver identification, transport capability and separate verification when available |

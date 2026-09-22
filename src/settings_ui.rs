@@ -27,6 +27,7 @@ pub struct SettingsEditor {
     observed: Option<Settings>,
     draft_debounce: Option<u8>,
     draft_auto: Option<bool>,
+    draft_sleep: Option<[u16; 4]>,
     backup_dir: PathBuf,
     status: String,
     error: bool,
@@ -44,6 +45,7 @@ impl SettingsEditor {
             observed: None,
             draft_debounce: None,
             draft_auto: None,
+            draft_sleep: None,
             backup_dir: std::env::current_dir()
                 .unwrap_or_else(|_| PathBuf::from("."))
                 .join("backups"),
@@ -75,6 +77,22 @@ impl SettingsEditor {
             .is_some_and(|(current, draft)| current.auto_os() != draft)
     }
 
+    fn sleep_dirty(&self) -> bool {
+        self.observed
+            .as_ref()
+            .zip(self.draft_sleep)
+            .is_some_and(|(current, draft)| current.sleep_seconds() != draft)
+    }
+
+    fn valid_sleep(sleep: [u16; 4]) -> bool {
+        sleep.iter().enumerate().all(|(index, &seconds)| {
+            seconds == 0
+                || (seconds % 60 == 0
+                    && seconds <= 3600
+                    && seconds >= if index < 2 { 60 } else { 600 })
+        })
+    }
+
     fn set_status(&mut self, message: impl Into<String>) {
         self.status = message.into();
         self.error = false;
@@ -91,7 +109,7 @@ impl SettingsEditor {
         }
         self.first_read_started = true;
         self.busy = true;
-        self.set_status("Reading four settings twice with identity barriers…");
+        self.set_status("Reading settings twice with identity barriers…");
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
@@ -108,6 +126,7 @@ impl SettingsEditor {
         let dirty = match setting {
             Setting::Debounce(_) => self.debounce_dirty(),
             Setting::AutoOs(_) => self.auto_dirty(),
+            Setting::Sleep(value) => self.sleep_dirty() && Self::valid_sleep(value),
         };
         if !dirty || settings::write_report(setting).is_err() {
             return;
@@ -131,11 +150,15 @@ impl SettingsEditor {
     fn accept_read(&mut self, updated: Settings, applied: Option<Setting>) {
         let debounce_clean = !self.debounce_dirty();
         let auto_clean = !self.auto_dirty();
+        let sleep_clean = !self.sleep_dirty();
         if debounce_clean || matches!(applied, Some(Setting::Debounce(_))) {
             self.draft_debounce = Some(updated.debounce());
         }
         if auto_clean || matches!(applied, Some(Setting::AutoOs(_))) {
             self.draft_auto = Some(updated.auto_os());
+        }
+        if sleep_clean || matches!(applied, Some(Setting::Sleep(_))) {
+            self.draft_sleep = Some(updated.sleep_seconds());
         }
         self.observed = Some(updated);
         self.trusted = true;
@@ -197,6 +220,7 @@ impl SettingsEditor {
                 if let Some(observed) = self.observed.clone() {
                     let device_debounce = observed.debounce();
                     let device_auto = observed.auto_os();
+                    let device_sleep = observed.sleep_seconds();
                     ui.label(RichText::new("WRITABLE / EACH CHANGE IS SEPARATE").small().strong().color(MUTED));
                     egui::Grid::new("settings_writable")
                         .num_columns(4)
@@ -239,22 +263,62 @@ impl SettingsEditor {
                             ui.end_row();
                         });
                     ui.add_space(8.0);
+                    ui.label(RichText::new("SLEEP TIMERS / MINUTES").small().strong().color(MUTED));
+                    egui::Grid::new("settings_sleep")
+                        .num_columns(4)
+                        .spacing([12.0, 6.0])
+                        .show(ui, |ui| {
+                            for (index, label) in ["Bluetooth sleep", "2.4 GHz sleep", "Bluetooth deep sleep", "2.4 GHz deep sleep"].into_iter().enumerate() {
+                                let seconds = device_sleep[index];
+                                ui.label(label);
+                                ui.label(if seconds == 0 { "Device disabled".into() } else { format!("Device {seconds} s") });
+                                if let Some(draft) = self.draft_sleep.as_mut() {
+                                    let raw = draft[index];
+                                    let valid = raw == 0 || (raw % 60 == 0 && raw <= 3600 && raw >= if index < 2 { 60 } else { 600 });
+                                    ui.add_enabled_ui(can_work && self.trusted, |ui| {
+                                        ui.horizontal(|ui| {
+                                            if ui.selectable_label(raw == 0 && valid, "Disabled (0)").clicked() {
+                                                draft[index] = 0;
+                                            }
+                                            let minimum = if index < 2 { 1 } else { 10 };
+                                            if ui.selectable_label(valid && raw != 0, "Timed").clicked() && (raw == 0 || !valid) {
+                                                draft[index] = minimum * 60;
+                                            }
+                                            let mut minutes = if valid && raw != 0 { raw / 60 } else { minimum };
+                                            if ui.add(egui::DragValue::new(&mut minutes).range(minimum..=60).suffix(" min").speed(1.0)).changed() {
+                                                draft[index] = minutes * 60;
+                                            }
+                                        });
+                                    });
+                                    if !valid {
+                                        ui.label(RichText::new(format!("Unrecognized draft: {raw} s; choose a valid value")).color(ACCENT));
+                                    } else {
+                                        ui.label("");
+                                    }
+                                } else {
+                                    ui.label("");
+                                    ui.label("");
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    ui.horizontal(|ui| {
+                        let valid = self.draft_sleep.is_some_and(Self::valid_sleep);
+                        if ui.add_enabled(can_work && self.trusted && self.sleep_dirty() && valid, egui::Button::new("APPLY SLEEP TIMERS")).clicked()
+                            && let Some(value) = self.draft_sleep
+                        {
+                            self.start_apply(ui.ctx(), Setting::Sleep(value));
+                        }
+                        if ui.add_enabled(can_work && self.sleep_dirty(), egui::Button::new("REVERT SLEEP TIMERS")).clicked() {
+                            self.draft_sleep = Some(device_sleep);
+                        }
+                    });
+                    ui.add_space(8.0);
                     ui.label(RichText::new("READ-ONLY / STORED VALUES").small().strong().color(MUTED));
-                    let sleep = observed.sleep_seconds();
                     egui::Grid::new("settings_read_only")
                         .num_columns(2)
                         .spacing([20.0, 4.0])
                         .show(ui, |ui| {
-                            for (label, seconds) in [
-                                ("Bluetooth sleep", sleep[0]),
-                                ("2.4 GHz sleep", sleep[1]),
-                                ("Bluetooth deep sleep", sleep[2]),
-                                ("2.4 GHz deep sleep", sleep[3]),
-                            ] {
-                                ui.label(label);
-                                ui.label(if seconds == 0 { "Disabled".into() } else { format!("{seconds} s") });
-                                ui.end_row();
-                            }
                             ui.label("Keyboard options");
                             ui.monospace(format!("profile {} · flags {:02X} · Fn matrix {} · power save {}",
                                 observed.option_profile(), observed.option_flags(),
@@ -262,7 +326,7 @@ impl SettingsEditor {
                                 observed.power_save_value()));
                             ui.end_row();
                         });
-                    ui.label(RichText::new("Debounce and Auto OS writes passed reversible readback tests on the attached Nia87. Sleep and keyboard-option writes remain unavailable; the sleep setter's checksum placement is unresolved.").small().color(MUTED));
+                    ui.label(RichText::new("Sleep timer values are stored in seconds. Each timer accepts 0 to disable it; active normal timers use 1–60 minutes and deep sleep timers use 10–60 minutes.").small().color(MUTED));
                     ui.add_space(8.0);
                     ui.collapsing("RAW SETTINGS REPLIES · read-only", |ui| {
                         for (name, opcode) in [
