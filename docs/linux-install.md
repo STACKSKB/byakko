@@ -45,6 +45,12 @@ not yet been measured. A legitimate but different Linux descriptor will fail
 closed until independently verified. Do not broaden the rule to every hidraw
 device to work around a mismatch.
 
+The application also checks the opened collection itself. It requires the
+vendor Application Collection to contain exactly one unnumbered Feature report
+with 8-bit fields and a count of 64; a matching VID/PID and usage alone cannot
+authorize a 65-byte host transaction. This parser check compiles on Linux, but
+the actual hidraw representation and I/O still need a Linux hardware test.
+
 For diagnosis, identify the candidate `hidrawN` with the optional research
 command `cargo run --locked -p byakko --no-default-features -- devices`, then
 inspect:

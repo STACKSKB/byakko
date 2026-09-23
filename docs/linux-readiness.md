@@ -13,6 +13,12 @@ The core also checks for `wasm32-unknown-unknown`. These are build checks;
 Linux startup, graphics libraries, hidraw permissions and physical USB
 transactions remain untested.
 
+The Linux transport now rejects a matching vendor collection unless its
+target Feature item has the observed unnumbered 8-bit × 64 shape. Global
+Push/Pop and unrelated collections are covered by parser fixtures. The
+Linux-target test code compiles, but this Windows host cannot execute those
+tests; actual hidraw behavior is still an acceptance gate.
+
 ## Iced desktop cross-link (2026-09-23)
 
 At source commit `f228533`, the `byakko-desktop` release executable and the root package's
