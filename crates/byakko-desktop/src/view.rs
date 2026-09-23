@@ -4,7 +4,7 @@ use crate::control_widgets;
 use crate::panels;
 use byakko_core::{
     Action,
-    session::{Problem, Status},
+    session::{Problem, ReconnectCause, ReconnectCaution, ReconnectSurface, Status},
 };
 use iced::{
     Element, Fill,
@@ -343,4 +343,24 @@ pub(super) fn apply_failure_label(failure: &byakko_core::session::ApplyFailure) 
         "Apply failed ({:?} recovery): {}",
         failure.recovery, failure.message
     )
+}
+
+pub(super) fn reconnect_caution_label(caution: ReconnectCaution<'_>) -> String {
+    let surface = match caution.surface {
+        ReconnectSurface::Keymap => "Keys",
+        ReconnectSurface::Macro => "Macros",
+        ReconnectSurface::Lighting => "Lighting",
+        ReconnectSurface::Picture => "Per-key colors",
+        ReconnectSurface::Settings => "Settings",
+        ReconnectSurface::Archive => "Local configuration",
+    };
+    let reason = match caution.cause {
+        ReconnectCause::Conflict => "Device values conflict with a retained draft".into(),
+        ReconnectCause::Apply(failure) => apply_failure_label(failure),
+        ReconnectCause::InvalidApplyResult(reason) => format!("Invalid readback: {reason}"),
+        ReconnectCause::ApplyReadbackMismatch => {
+            "Readback differs from the draft; state is unverified".into()
+        }
+    };
+    format!("{surface}: {reason} · Read manually after reconnecting.")
 }

@@ -96,6 +96,39 @@ fn failed_archive_apply_retains_review_and_keeps_close_open() {
 }
 
 #[test]
+fn failed_archive_apply_requires_manual_reconnect() {
+    let (mut app, _, _) = reviewed();
+    let Command::ApplyArchive {
+        generation,
+        operation,
+        ..
+    } = app.session.request_archive_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    let _ = app.complete(Completion::ApplyArchive {
+        generation,
+        operation,
+        result: Err(ApplyFailure {
+            message: "archive recovery uncertain".into(),
+            recovery: Recovery::Unverified,
+        }),
+    });
+    app.accept_availability(Availability::Missing);
+    assert_eq!(app.auto_read, AutoRead::ManualOnly);
+    app.accept_availability(Availability::Ready {
+        id: "demo-2".into(),
+    });
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert!(!app.session.busy());
+    assert!(
+        app.notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("archive recovery uncertain"))
+    );
+}
+
+#[test]
 fn failed_local_file_task_keeps_close_open_and_reports_error() {
     let mut app = ready();
     let state = FileState::Importing {

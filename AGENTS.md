@@ -92,7 +92,10 @@ research baseline, not the structure to port.
   discovery worker and an idle reconnect flow. Each desktop executor holds an
   immutable Nia87 HID target, including recovery opens; never fall back to an
   arbitrary unique match after a target check fails. Physical unplug/replug
-  and Linux runtime acceptance remain open. Iced screen-average lighting now
+  and Linux runtime acceptance remain open. Before an automatic reconnect,
+  preserve feature-specific conflict or failed-write diagnostics and require
+  a deliberate manual read; keymap status alone does not cover other editors.
+  Iced screen-average lighting now
   has a pure session lifecycle, a bounded frame path through the selected
   device executor, and a separate OS sampler. It advertises Start only from a
   verified editable lighting baseline and requires verified restoration on
