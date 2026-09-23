@@ -2,10 +2,10 @@
 
 ## Current Iced desktop metadata gate (2026-09-23)
 
-`python tools/check_dependency_licenses.py --package byakko-desktop`
+`python tools/check_dependency_licenses.py` (defaulting to `byakko-desktop`)
 passes for the locked, offline Windows MSVC and Linux GNU normal/build graphs:
 126 and 175 third-party package/version entries respectively. The matching
-four checker unit tests pass. No selected package metadata requires a
+five checker unit tests pass. No selected package metadata requires a
 copyleft-only license. `self_cell 1.3.0` offers Apache-2.0 in addition to GPL,
 and the Iced desktop graph has no legacy eframe or bundled
 `epaint_default_fonts` asset. Its dependency choices include MIT, Apache-2.0,
@@ -13,6 +13,10 @@ BSD, Zlib, BSL, ISC, and Unicode-3.0 obligations; this is a metadata result,
 not a complete source-header, native-library, or distribution-notice audit.
 The release bundle must include required third-party license and attribution
 texts. The project owner's own license choice is still open.
+
+The independent `byakko-cli` graph also passes the same gate with
+`--package byakko-cli`: 13 Windows and 12 Linux third-party package/version
+entries. The checker excludes Byakko's own workspace crates from both counts.
 
 The historical audit below describes the retained root research package,
 which has a different dependency graph. Do not use its counts or font notices
@@ -28,14 +32,15 @@ The scan deliberately distinguishes license statements from words such as `impl`
 
 ## Repeatable metadata check
 
-Run `python tools/check_dependency_licenses.py` from any directory. It uses the
+For the retained root research package, run
+`python tools/check_dependency_licenses.py --package byakko`. The checker uses
 locked, offline default-feature graphs for both targets, including normal and
 build edges. Unknown or unapproved expressions fail for review. It explicitly
 selects Apache-2.0 for `self_cell`; it does not accept arbitrary expressions just
-because they contain the word MIT. The counts exclude Byakko itself: **123**
-Windows dependencies and **209** Linux dependencies, corresponding to the graph
-counts above including the project. Cross-target build dependencies reflect the
-current build host; rerun on the actual release host.
+because they contain the word MIT. The historical root counts exclude Byakko
+itself: **123** Windows dependencies and **209** Linux dependencies, corresponding
+to the graph counts above including the project. Cross-target build dependencies
+reflect the current build host; rerun on the actual release host.
 
 Use `--output NEW_PATH.json` to create a new inventory without overwriting an
 existing file. `python -m unittest discover -s tools -p test_dependency_licenses.py`

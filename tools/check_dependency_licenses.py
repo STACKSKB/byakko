@@ -57,7 +57,7 @@ def parse_tree(text):
             raise ValueError(f"Unexpected cargo tree row: {line!r}")
         name, version = match.groups()
         expression = expression.removesuffix(" (*)").strip()
-        if name in {"byakko", "byakko-core", "byakko-devices", "byakko-desktop"}:
+        if name in {"byakko", "byakko-core", "byakko-devices", "byakko-desktop", "byakko-cli"}:
             continue  # Project license remains the owner's decision.
         row = {"name": name, "version": version, "declared": expression,
                "selected": selection(name, expression)}
@@ -72,7 +72,7 @@ def parse_tree(text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--package", default="byakko", help="Workspace application package to audit")
+    parser.add_argument("--package", default="byakko-desktop", help="Workspace application package to audit")
     parser.add_argument("--output", type=Path, help="Create a new JSON inventory; never overwrite")
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
