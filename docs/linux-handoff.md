@@ -236,6 +236,17 @@ other panel reads, GUI/runtime behavior, and live writes remain separate gates.
 The adapter accepts both complete reply shapes, including the observed
 65-byte form with a leading zero.
 
+## Additional Linux read-only checks (2026-09-23, source `cc03b34`)
+
+As user `three`, `byakko-cli list-macros` completed with
+`{"capacity":50,"configured":[],"next_free":"slot-00"}`. The separate
+`read-lighting`, `read-settings`, `read-colors`, and `read-macro slot-49`
+commands all exited successfully. Two full `capture-archive` reads each
+produced a 419,201-byte archive with SHA-256
+`6bbc238f9b2e2bda6703f361168c68394c71b4e3e1c367187aa38fc4f77c7cf6`;
+`compare-archives` returned `[]`. These read-only checks sent no setters and
+changed no permissions. The two local archive files remain in `/tmp`.
+
 ## Linux device-crate verification (2026-09-23, source `26554e0`)
 
 On Linux at `26554e0919cd73c018db67e5b9c5b99af183883d`,
@@ -263,9 +274,10 @@ framing.
 ## Known limits to carry forward
 
 Linux release builds and X11 demo startup have been verified. On 2026-09-23,
-Linux hidraw access and the read-only identity/keymap path were verified, but
-other panel reads, GUI/runtime behavior, physical output, and live writes with
-readback/restoration have **not** been verified. The USB keyboard has firmware
+Linux hidraw access and read-only identity, keymap, lighting, settings, colors,
+macro and archive reads were verified, but GUI/runtime behavior, physical
+output, and live writes with readback/restoration have **not** been verified.
+The USB keyboard has firmware
 `0x0100`, profile 0 on the
 observed Windows configuration collection `3151:4015`, interface 2,
 `FFFF:0002`; a matching VID/PID alone does not authorize writes. A prior
