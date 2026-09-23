@@ -71,6 +71,10 @@ research baseline, not the structure to port.
 - Recording is an exclusive local session activity. Feed explicit timestamps
   into core, reserve held-input releases, and finish before close or focus loss.
   Do not poll the device worker while only recording, or capture global input.
+- Macro storage limits and editor policy can differ. Nia87 can decode a stored
+  repeat count of zero, but the observed counted-mode editor admits 1–65,535.
+  Preserve raw zero snapshots; do not stage, save, or bind zero through the
+  editor without new physical playback evidence.
 
 ## Work sequence and evidence
 

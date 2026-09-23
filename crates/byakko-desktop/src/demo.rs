@@ -112,6 +112,7 @@ pub fn device() -> Result<MemoryDevice, String> {
         })
         .collect(),
         repeat_counts: 0..=12,
+        editable_repeat_counts: 0..=12,
         delays_ms: 0..=2_000,
         keys: Some(4..=40),
         buttons: vec![

@@ -118,6 +118,13 @@ impl Editor {
             return Err("Apply or revert macro changes before binding".into());
         }
         let program = self.draft.as_ref().ok_or("Macro is not editable")?;
+        if !self
+            .capabilities
+            .editable_repeat_counts
+            .contains(&program.repeat_count)
+        {
+            return Err("Stored macro count is outside the editable range".into());
+        }
         let binding = self
             .capabilities
             .bindings
@@ -166,6 +173,10 @@ impl Editor {
             return Err("Read and verify the macro before editing".into());
         }
         let current = self.draft.as_ref().ok_or("Macro is not editable")?;
+        if matches!(&change, Edit::Repeat(count) if !self.capabilities.editable_repeat_counts.contains(count))
+        {
+            return Err("Macro repeat count is outside editor limits".into());
+        }
         self.draft = Some(edit(&self.capabilities, current, change)?);
         Ok(())
     }
@@ -186,12 +197,17 @@ impl Editor {
         if !self.dirty() {
             return Err("No macro changes are staged".into());
         }
+        let draft = self.draft.as_ref().ok_or("No editable macro draft")?;
+        if !self
+            .capabilities
+            .editable_repeat_counts
+            .contains(&draft.repeat_count)
+        {
+            return Err("Stage a supported repeat count before saving".into());
+        }
         Ok((
             self.baseline.as_ref().ok_or("No macro baseline")?.clone(),
-            self.draft
-                .as_ref()
-                .ok_or("No editable macro draft")?
-                .clone(),
+            draft.clone(),
         ))
     }
 

@@ -35,6 +35,7 @@ fn session() -> Session {
             })
             .into(),
         repeat_counts: 1..=4,
+        editable_repeat_counts: 1..=4,
         delays_ms: 0..=100,
         keys: Some(1..=10),
         buttons: vec![],

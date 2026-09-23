@@ -33,6 +33,7 @@ fn ready() -> Session {
             label: "Scene".into(),
         }],
         repeat_counts: 1..=10,
+        editable_repeat_counts: 1..=10,
         delays_ms: 0..=100_000,
         keys: Some(4..=300),
         buttons: vec![],

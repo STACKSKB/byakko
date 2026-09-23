@@ -11,8 +11,10 @@ stage a saved macro binding onto the selected key/layer, focused recording,
 and bounded local JSON import/export.
 Action choices and ranges come from capabilities. Keyboard usages and pointer
 movement are numeric inputs in this pre-alpha; pointer buttons and backend
-actions use supplied labels. Wait is after the event. Zero remains an explicit
-value; the UI does not claim zero repeats means infinite playback.
+actions use supplied labels. Wait is after the event. Zero waits remain
+explicit. A stored zero repeat count is preserved, but the Nia87 editor now
+requires 1–65,535 before a new save or binding; zero playback semantics remain
+unknown.
 
 The core owns baseline/draft, validation and trust. The desktop only owns
 unsubmitted field text and an optional replacement index, cleared when the
@@ -36,6 +38,14 @@ preserves other drafts, explicitly saves the required count, rereads, stages
 a third-layer binding, applies it through the memory executor and verifies
 the resulting keymap and macro. Native capability fixtures check the known
 four-byte bindings and count policy at the first and last slots.
+
+The repeat-count storage range and editable range are separate capabilities.
+For Nia87, the wire can retain count zero while the counted-playback editor
+admits only 1–65,535, matching the observed official editor policy. Loading
+an existing zero does not rewrite the raw macro or invalidate its snapshot;
+staging count zero, saving other edits with zero, and binding it are blocked.
+The saved official HID replay has count one and no movement event, so this
+policy does not establish repeat-zero or movement timing on firmware.
 
 Recording uses a dedicated capture view, physical keyboard codes and five
 pointer buttons. Measured timing uses host event timestamps in milliseconds;

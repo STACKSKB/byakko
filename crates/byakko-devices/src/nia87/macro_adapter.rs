@@ -87,6 +87,7 @@ pub fn capabilities() -> Capabilities {
             })
             .collect(),
         repeat_counts: 0..=u16::MAX as u32,
+        editable_repeat_counts: 1..=u16::MAX as u32,
         delays_ms: 0..=u16::MAX as u32,
         keys: Some(4..=239),
         buttons: ["Left", "Right", "Middle", "Back", "Forward"]
@@ -365,6 +366,9 @@ mod tests {
     fn binding_capabilities_retain_wire_modes_and_explicit_count_policy() {
         let caps = capabilities();
         macros::validate_capabilities(&caps).unwrap();
+        assert!(caps.repeat_counts.contains(&0));
+        assert!(!caps.editable_repeat_counts.contains(&0));
+        assert!(caps.editable_repeat_counts.contains(&1));
         assert_eq!(caps.bindings.len(), 150);
         for (slot, id, raw, required) in [
             ("slot-00", "counted", [9, 0, 0, 0], None),
