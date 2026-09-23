@@ -1,5 +1,6 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
 use super::{Closing, Desktop, Message, Page};
+use crate::control_widgets;
 use crate::panels;
 use byakko_core::{
     Action,
@@ -106,16 +107,14 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
         )
     }))
     .spacing(app.ui.spacing.s);
-    let toolbar = row![
-        button("Read / reconnect").on_press_maybe((!app.busy()).then_some(Message::Read)),
-        button("Revert draft")
-            .on_press_maybe((!app.busy() && !dirty.is_empty()).then_some(Message::Revert)),
-        button("Apply & verify")
-            .on_press_maybe((ready && !dirty.is_empty()).then_some(Message::Apply)),
-        text(format!("{} staged", dirty.len())),
-    ]
-    .spacing(app.ui.spacing.m)
-    .align_y(iced::Center);
+    let toolbar = control_widgets::transaction_toolbar(
+        &app.ui,
+        "Read / reconnect",
+        (!app.busy()).then_some(Message::Read),
+        (!app.busy() && !dirty.is_empty()).then_some(Message::Revert),
+        (ready && !dirty.is_empty()).then_some(Message::Apply),
+        format!("{} staged", dirty.len()),
+    );
     let content = column![toolbar, text(status(app)), layers]
         .spacing(app.ui.spacing.m)
         .push(panels::split(
