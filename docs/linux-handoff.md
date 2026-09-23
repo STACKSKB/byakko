@@ -188,18 +188,32 @@ The ACL was rechecked after the failure and remained present. Because the first
 read failed, the repeat read, other section reads, and archive stability
 comparison were not run. No device setters were run.
 
-Removing the helper/rule was requested after testing, but this shell's
-noninteractive `sudo` requires a password. At the end of the run, the root-owned
-helper and rule remained installed and the ACL was still present; complete
-cleanup with the user's authenticated system terminal. The user also wants the
-eventual application image to avoid manual udev setup.
+The user asked for the helper/rule to be removed after testing. The user later
+ran the cleanup commands in an authenticated terminal. A follow-up check
+confirmed `/usr/local/libexec/byakko-hidraw-access` and
+`/etc/udev/rules.d/70-byakko-nia87.rules` are absent. At that check there were
+no `/dev/hidraw*` nodes, so no live node ACL could be inspected; the previous
+node's ACL does not survive node removal, and the removed rule cannot recreate
+it. The user wants the eventual application image to avoid manual udev setup.
 
 **Note for the Windows agent:** the updated exact-descriptor helper works on the
 Linux descriptor and accepts only the configuration node. Linux permissions
-were granted by the narrow rule, but the first read reaches the HID transport
-and fails on the unnumbered feature-reply length. Do not change transport code
-or try a setter without reviewing this exact failure. The temporary rule still
-needs cleanup from an authenticated system terminal.
+were granted temporarily by the narrow rule, but the first read reaches the HID
+transport and fails on the unnumbered feature-reply length. The temporary
+helper/rule have since been removed. Do not change transport code or try a
+setter without resolving the feature-reply framing with read-only evidence.
+
+## Raw feature framing diagnostic blocked (2026-09-23)
+
+A requested strictly read-only `HIDIOCGFEATURE` diagnostic was to send only the
+known `0x80` identity request, using 65-byte and, if needed, 66-byte buffers,
+and record the returned byte count plus the first and last eight response
+bytes. It could not be run: the current environment has no `/dev/hidraw*`
+nodes, and `lsusb` reports `unable to initialize libusb: -99`. The temporary
+helper and udev rule are absent. No ioctl was issued, so there is no returned
+count or response data; no permissions were changed. Repeat the diagnostic only
+when the already validated Nia87 configuration collection is present, and keep
+it read-only.
 
 ## Known limits to carry forward
 
