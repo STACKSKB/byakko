@@ -76,7 +76,7 @@ pub fn macro_binding(slot: u8, mode: u8) -> Result<[u8; 4], String> {
 /// Conservative keyboard-oriented choices from the vendor action tables.
 /// Mouse DPI, profile switching, launch slots, and other shared mouse/app
 /// actions are omitted because the Nia87 descriptor does not prove support.
-pub fn presets() -> Vec<ActionPreset> {
+pub fn presets() -> &'static [ActionPreset] {
     const PRESETS: &[ActionPreset] = &[
         // Media and system functions (the AF/RF function tables).
         ActionPreset {
@@ -227,7 +227,7 @@ pub fn presets() -> Vec<ActionPreset> {
             bytes: [1, 0, 246, 0],
         },
     ];
-    PRESETS.to_vec()
+    PRESETS
 }
 
 #[cfg(test)]
