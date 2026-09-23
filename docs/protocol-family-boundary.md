@@ -1,34 +1,52 @@
 # Protocol family and board boundary
 
-The Nia87 is one observed Rongyuan-family board. Other Rongyuan PCBs may share
-its HID framing and operations, but that is a hypothesis until a second board
-is measured. We will extract the verified wire mechanics into a Rongyuan driver
-and supply the Nia87's identity, layout and capabilities as data. A new board
-profile must state its observed differences; it must not inherit Nia87 setter
-support merely because its VID or GUI looks familiar.
+The Nia87's own official-app captures and read-only USB replies use a
+`yc500`-shaped command set: `0x85` reads the active profile, `0x89` reads a
+matrix page, and `0x91`/`0x92`/`0x86` read debounce, sleep and options.
+Its selected official-app code uses `0x13`/`0x15` for individual key writes.
+These observations establish the Nia87 path implemented here. They do not
+establish that every Rongyuan PCB accepts those writes.
 
-The portable boundary remains `byakko-core`'s descriptors, drafts, commands and
-typed outcomes plus `byakko-devices::Device`. Iced renders capabilities and
-never branches on Rongyuan, Nia87 or VIA opcodes. A later QMK/VIA backend will
-implement the same portable contract independently of the Rongyuan driver.
-Opaque native values remain scoped to their backend, and native archives do
-not silently become portable profiles.
+[Sharkfin's independently published protocol notes](https://github.com/dniminenn/sharkfin/blob/master/docs/PROTOCOL.md)
+describe at least two command families, `yc500` and `gen2`. Several opcode
+numbers collide while their meaning or payload shape differs. In particular,
+a `yc500` matrix write opcode is a `gen2` options write opcode. The notes also
+describe boards within one family that lack the individual-key setter. This
+document uses those findings to draw boundaries; implementation and test
+vectors must come from our own captures or independently constructed cases.
+No Sharkfin source or UX is incorporated.
 
-The Rongyuan driver owns feature-report framing, selected HID collection
-access, family codecs, read stabilization, and the ordered effect transactions.
-Each feature module owns its complete read → expected-state check → durable
-backup → setter → readback → recovery sequence. Shared helpers may own the OS
-lock, target selection, exact same-handle guard, backup file mechanics and
-typed recovery envelope. They must not hide feature-specific write order or
-turn uncertain recovery into success. The Nia87 profile owns only observed
-data: collection matcher, firmware/profile constraints, matrix geometry and
-reserved slots, physical layout, action/effect catalogs, and supported
-capabilities. Its `device.rs` should be a compact profile/facade, with no HID
-transaction bodies or `read_macro_on_device`-style sequencing.
+| Owner | Responsibility |
+| --- | --- |
+| `byakko-core` | Device-neutral capabilities, drafts, commands, transitions and typed outcomes. |
+| `byakko-devices::rongyuan::report` | Shared, observed 64-byte framing and checksum mechanics. No write opcode selection. |
+| `byakko-devices::rongyuan::yc500` | `yc500`-shaped codecs and, when verified, ordered feature transactions. `gen2` will have a distinct namespace and codec. |
+| Nia87 profile | Collection identity, accepted firmware/profile, matrix dimensions and reserved slots, physical layout, action and effect catalogs, and capabilities proven on this board. |
+| HID/session infrastructure | Target-pinned open, lock, pacing, backup mechanics and typed recovery envelope; it does not choose feature-specific write order. |
+| QMK/VIA backend | Independent protocol adapter implementing the portable device contract; it never emulates Rongyuan reports. |
 
-This is a small, typed driver API, not a report-language interpreter. Values
-that are not proven variable remain named constants near their codec. We will
-first preserve Nia87 output and safety tests while moving behavior. A second
-Rongyuan board can then confirm which operations and profile fields are truly
-shared. QMK/VIA support follows Nia87 through its own protocol adapter and
-capability catalog; it does not emulate Rongyuan packets.
+A board profile must identify its command family and supported write strategy
+before a setter can be constructed. A USB VID/PID or a common reply opcode alone
+is insufficient. Discovery and classification remain read-only. Unknown boards,
+firmware revisions and unsupported setter variants may be displayed as
+unconfigured or read-only; they cannot inherit Nia87 write capability. A
+`gen2` device must never be passed to a `yc500` writer even though both may
+use the same HID collection and checksum. The physical key-to-slot mapping is
+board data; the command layout is family behavior.
+
+Within each feature, keep the ordered read -> expected-state check -> durable
+backup -> write -> complete readback -> recovery sequence explicit. Shared
+helpers can supply a session and typed failure envelope. They must not hide
+which reports are written, invent a fallback write strategy, or report
+uncertain recovery as success. Move feature transactions from Nia87 into the
+family driver only after their shape and safety rules are supported by
+independent evidence; do not turn the profile into a report-language
+interpreter. Geometry and capability values can be data while protocol control
+flow stays small, typed code.
+
+The Iced desktop composes views from portable capabilities and projections; it
+does not branch on Rongyuan, Nia87 or VIA opcodes. A future browser frontend
+may consume the same core model or call a native service adapter. Native
+archives remain backend-specific, distinct from portable profiles. QMK/VIA
+support follows Nia87 through the device contract rather than sharing this
+OEM's packet representation.

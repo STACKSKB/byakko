@@ -3,32 +3,28 @@
 //! Reports here are 64-byte device payloads. A host HID API may require a
 //! separate leading report-ID byte when sending or receiving them.
 
+use crate::rongyuan::{report, yc500::matrix::Yc500MatrixGeometry};
+
 pub type Matrix = Vec<[u8; 4]>;
 
-const REPORT_LEN: usize = 64;
+const REPORT_LEN: usize = report::REPORT_LEN;
 const READ_PAGES: usize = 8;
+#[cfg(test)]
 const WRITE_PAGES: usize = 9;
+#[cfg(test)]
 const MATRIX_SLOTS: usize = 128;
 const WRITABLE_SLOTS: usize = 126;
-const SLOTS_PER_WRITE_PAGE: usize = 14;
 
-fn set_bit7_checksum(report: &mut [u8; REPORT_LEN]) {
-    let sum = report[..7]
-        .iter()
-        .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
-    report[7] = 0xffu8.wrapping_sub(sum);
-}
+const NIA87_MATRIX: Yc500MatrixGeometry = Yc500MatrixGeometry {
+    read_pages: READ_PAGES as u8,
+    writable_slots: WRITABLE_SLOTS as u8,
+};
 
 /// Build a page or identity read request with the Nia87 BIT7 header checksum.
 ///
 /// Callers select the opcode; this function only supplies the common framing.
 pub fn read_request(opcode: u8, index: u8, page: u8) -> [u8; REPORT_LEN] {
-    let mut report = [0u8; REPORT_LEN];
-    report[0] = opcode;
-    report[1] = index;
-    report[2] = page;
-    set_bit7_checksum(&mut report);
-    report
+    report::read_request(opcode, index, page)
 }
 
 /// Convert exactly eight raw 64-byte page responses into 128 four-byte slots.
@@ -36,20 +32,7 @@ pub fn read_request(opcode: u8, index: u8, page: u8) -> [u8; REPORT_LEN] {
 /// The stock read method treats every response byte as matrix data, including
 /// all-zero and special-key entries.
 pub fn matrix_from_pages(pages: &[[u8; REPORT_LEN]]) -> Result<Matrix, String> {
-    if pages.len() != READ_PAGES {
-        return Err(format!(
-            "expected {READ_PAGES} matrix pages, got {}",
-            pages.len()
-        ));
-    }
-
-    let mut matrix = Vec::with_capacity(MATRIX_SLOTS);
-    for page in pages {
-        for slot in page.as_chunks::<4>().0 {
-            matrix.push([slot[0], slot[1], slot[2], slot[3]]);
-        }
-    }
-    Ok(matrix)
+    NIA87_MATRIX.matrix_from_pages(pages)
 }
 
 /// Build the nine full-matrix write reports used by the stock Nia87 method.
@@ -61,34 +44,7 @@ pub fn full_matrix_reports(
     index: u8,
     matrix: &[[u8; 4]],
 ) -> Result<Vec<[u8; REPORT_LEN]>, String> {
-    if matrix.len() != MATRIX_SLOTS {
-        return Err(format!(
-            "expected {MATRIX_SLOTS} matrix slots, got {}",
-            matrix.len()
-        ));
-    }
-    if matrix[WRITABLE_SLOTS..].iter().any(|slot| *slot != [0; 4]) {
-        return Err("matrix slots 126 and 127 cannot be written".to_owned());
-    }
-
-    let mut reports = Vec::with_capacity(WRITE_PAGES);
-    for page in 0..WRITE_PAGES {
-        let mut report = [0u8; REPORT_LEN];
-        report[0] = if fn_layer { 0x10 } else { 0x09 };
-        report[1] = index;
-        report[2] = 0xf8;
-        report[3] = 0x01;
-        report[4] = page as u8;
-        set_bit7_checksum(&mut report);
-
-        for slot_on_page in 0..SLOTS_PER_WRITE_PAGE {
-            let matrix_slot = page * SLOTS_PER_WRITE_PAGE + slot_on_page;
-            let payload_offset = 8 + 4 * slot_on_page;
-            report[payload_offset..payload_offset + 4].copy_from_slice(&matrix[matrix_slot]);
-        }
-        reports.push(report);
-    }
-    Ok(reports)
+    NIA87_MATRIX.full_matrix_reports(fn_layer, index, matrix)
 }
 
 /// Build the stock single-key write for a physical matrix slot.
@@ -98,19 +54,7 @@ pub fn single_key_report(
     slot: usize,
     binding: [u8; 4],
 ) -> Result<[u8; REPORT_LEN], String> {
-    if slot >= WRITABLE_SLOTS {
-        return Err(format!(
-            "slot {slot} is outside the {WRITABLE_SLOTS} writable matrix slots"
-        ));
-    }
-
-    let mut report = [0u8; REPORT_LEN];
-    report[0] = if fn_layer { 0x15 } else { 0x13 };
-    report[1] = index;
-    report[2] = slot as u8;
-    report[8..12].copy_from_slice(&binding);
-    set_bit7_checksum(&mut report);
-    Ok(report)
+    NIA87_MATRIX.single_key_report(fn_layer, index, slot, binding)
 }
 
 #[cfg(test)]
@@ -190,5 +134,31 @@ mod tests {
         assert_eq!(&function[8..12], &binding);
         assert!(single_key_report(false, 0, 126, binding).is_err());
         assert!(single_key_report(false, 0, usize::MAX, binding).is_err());
+    }
+
+    #[test]
+    fn complete_reports_match_independent_nia87_vectors() {
+        let mut matrix = vec![[0; 4]; MATRIX_SLOTS];
+        matrix[0] = [1, 2, 3, 4];
+        matrix[125] = [5, 6, 7, 8];
+        let actual = full_matrix_reports(false, 0, &matrix).unwrap();
+        let mut expected = Vec::new();
+        for page in 0..9 {
+            let mut report = [0; REPORT_LEN];
+            report[..8].copy_from_slice(&[0x09, 0, 0xf8, 1, page, 0, 0, 0xfd - page]);
+            if page == 0 {
+                report[8..12].copy_from_slice(&[1, 2, 3, 4]);
+            }
+            if page == 8 {
+                report[60..64].copy_from_slice(&[5, 6, 7, 8]);
+            }
+            expected.push(report);
+        }
+        assert_eq!(actual, expected);
+
+        let mut single = [0; REPORT_LEN];
+        single[..8].copy_from_slice(&[0x15, 0, 0, 0, 0, 0, 0, 0xea]);
+        single[8..12].copy_from_slice(&[9, 8, 7, 6]);
+        assert_eq!(single_key_report(true, 0, 0, [9, 8, 7, 6]).unwrap(), single);
     }
 }
