@@ -94,7 +94,10 @@ research baseline, not the structure to port.
   verified editable lighting baseline and requires verified restoration on
   Stop/close. This is headless-verified only: physical Iced streaming, focus
   loss, disconnect behavior and Linux capture/runtime acceptance remain open.
-  Music playback lighting and 2.4 GHz remain later capabilities. Do not pursue
+  Iced playback music now uses the same host lifecycle with 32-band OS audio
+  sampling and Nia87-only fixed green/upright effect presets; it is headless
+  verified, with physical and Linux runtime acceptance still open. Editable
+  music parameters and 2.4 GHz remain later capabilities. Do not pursue
   UI polish or accessibility work before architecture review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and

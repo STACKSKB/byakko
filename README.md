@@ -41,9 +41,10 @@ reviews a chosen archive against a fresh device capture. A changed review can
 be applied with a durable backup, complete readback and typed recovery result;
 this Iced path has not had a live archive write. Iced screen-average lighting
 now streams through the same selected-device executor with a bounded frame
-queue and verified restore on Stop or close. Its lifecycle has headless tests,
-but this Iced path has not had a live stream; playback music remains in the
-retained research GUI. The following feature inventory and
+queue and verified restore on Stop or close. Iced playback music uses the same
+path with separate OS audio sampling and two fixed green/upright Nia87 presets.
+These Iced lifecycles have headless tests but have not had a live stream or
+music parameter editing. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and
 [current boundary](docs/backend-architecture.md). The
