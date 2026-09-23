@@ -19,7 +19,7 @@ captures and vendor fixtures under ignored paths are not in Git.
   cargo clippy --locked -p byakko --no-default-features --bin byakko-hidraw-access -- -D warnings
   ```
 
-- [ ] After pulling newer `master` commits, rerun the commands above and record
+- [x] After pulling newer `master` commits, rerun the commands above and record
   the verified commit ID before hardware acceptance. The record below is a
   point-in-time check, not validation of every later Windows commit.
 
@@ -119,6 +119,34 @@ Wayland startup remain unverified.
 at `4af1877`. The disconnected-device result is expected and does not indicate
 a discovery regression. The in-memory demo starts on X11. No physical-device
 behavior was assessed here.
+
+## Linux verification update (2026-09-23, commit `69a987e`)
+
+After pulling the newer `master`, the desktop/CLI release build, helper release
+build, workspace tests, and both Clippy commands above passed again. `ldd`
+reported no unresolved shared libraries, and the X11 demo remained running for
+the 15-second smoke-test interval.
+
+The connected USB device enumerated as VID/PID `3151:4015`; its configuration
+collection is `/dev/hidraw2`, interface `02`. The native helper rejected
+`hidraw2`: its Linux descriptor orders the final global items as `95 40 75 08`,
+while the helper's exact expected bytes order them `75 08 95 40`. The helper
+and udev rule were left unchanged pending review of this descriptor difference.
+The other two collections did not match the helper either.
+
+`/dev/hidraw2` was `root:root` mode `0600` with no active-user ACL. The read-only
+CLI `devices` command identified it as the Nia87 configuration interface, but
+`read` failed with `Permission denied`. Lighting, settings, colors, macro and
+archive reads therefore could not be performed. No udev rules or permissions
+were changed, and no device writes were attempted. Resolve the descriptor
+allowlist mismatch and establish the narrow active-seat ACL before resuming the
+read-only CLI and archive-stability checks.
+
+**Note for the Windows agent:** Linux builds, tests, Clippy, and X11 demo
+startup pass at `69a987e`. The connected board's Linux helper check fails only
+the exact descriptor comparison shown above; preserve the fail-closed rule
+until the Linux descriptor difference is reviewed. The current node has no
+active-user ACL, so device reads are blocked.
 
 ## Known limits to carry forward
 
