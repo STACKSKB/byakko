@@ -22,6 +22,7 @@ pub mod nia87;
 pub mod research_fault;
 #[cfg(feature = "research-tools")]
 pub mod research_trace;
+pub mod rongyuan;
 pub mod storage;
 
 /// Implementations must validate expected state, back up, write and verify.

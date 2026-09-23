@@ -23,16 +23,21 @@ research baseline, not the structure to port.
 - Three boundaries: `core` owns domain values and deterministic transitions;
   `devices` executes effects and owns firmware/OS details; `desktop` renders
   state and emits messages. Core imports neither outer layer.
-- Within `devices`, put reusable observed Rongyuan wire/transaction behavior
-  in a protocol-family driver and Nia87 identity/layout/capabilities in a
-  declarative profile. Treat cross-board compatibility as unverified until a
-  second PCB supplies evidence. QMK/VIA is the next independent backend and
-  should reuse the portable contract, not emulate Rongyuan reports. Follow
-  `docs/protocol-family-boundary.md`; do not build a general report interpreter.
+- Within `devices`, put shared observed HID framing in a Rongyuan report
+  module, but separate `yc500` and `gen2` command families: some write opcodes
+  collide and have different effects. The Nia87 uses a `yc500`-shaped path;
+  its identity/layout/capabilities are board data. Never infer write support
+  from VID/PID or a common GET alone. Treat compatibility within one family as
+  unverified until another PCB supplies evidence. QMK/VIA is the next
+  independent backend and should reuse the portable contract, not emulate
+  Rongyuan reports. Follow `docs/protocol-family-boundary.md`; do not build a
+  general report interpreter.
 - Implement in `crates/byakko-{core,devices,desktop}`. The legacy root package
   may depend on these packages; the new desktop must not depend on the legacy
-  package. Nia87 implementations belong under `byakko-devices::nia87`, with
-  root re-exports only for compatibility. Do not maintain duplicate codecs.
+  package. Board-specific Nia87 behavior and data belong under
+  `byakko-devices::nia87`; proven shared codecs and effects belong in their
+  exact Rongyuan protocol-family module. Root re-exports are compatibility
+  only. Do not maintain duplicate codecs.
 - Core has no GUI types, filesystem paths, HID handles, threads, clocks,
   networking, environment reads or platform conditionals. Supply inputs such
   as timestamps explicitly. Transport-facing commands/results use owned,

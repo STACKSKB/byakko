@@ -59,9 +59,12 @@ These are selection tradeoffs, not a release dependency-license clearance.
    filesystem, threads or clocks. Feature transitions are separate small
    functions; a top-level dispatcher delegates rather than becoming a giant
    match containing all behavior.
-2. **devices**: backend implementations and the effect executor. Nia87 owns
-   framing, geometry mapping, codecs, pacing, identity checks, backup formats,
-   expected-state checks and recovery. Platform HID code lives here. One worker
+2. **devices**: backend implementations and the effect executor. Shared
+   Rongyuan report framing and family-specific codecs sit below Nia87's board
+   profile, while selected HID access, pacing, identity checks, backup formats,
+   expected-state checks and recovery remain explicit. `yc500` and `gen2`
+   commands must not share a write dispatcher because some opcodes collide.
+   Platform HID code lives here. One worker
    owns each connected session and serializes its commands through a bounded
    queue. File effects and discovery also live outside core. Research commands
    remain separate entry points, excluded from the normal desktop interface.
