@@ -28,6 +28,8 @@ impl Session {
     pub fn clear_archive_review(&mut self) {
         if let ArchiveState::Ready(review) = &self.archive_state {
             self.archive_state = ArchiveState::Captured(review.before.clone());
+        } else if let ArchiveState::Unverified { review, .. } = &mut self.archive_state {
+            *review = None;
         }
     }
     pub fn request_archive_capture(&mut self) -> Result<Command, String> {
@@ -42,6 +44,7 @@ impl Session {
         self.activity = Activity::CaptureArchive { operation };
         self.archive_state = ArchiveState::Unverified {
             problem: ArchiveProblem::ReadRequired,
+            review: None,
         };
         Ok(Command::CaptureArchive {
             generation: self.generation,
@@ -65,6 +68,7 @@ impl Session {
         };
         self.archive_state = ArchiveState::Unverified {
             problem: ArchiveProblem::ReadRequired,
+            review: None,
         };
         Ok(Command::ReviewArchive {
             generation: self.generation,
@@ -72,12 +76,49 @@ impl Session {
             target,
         })
     }
-    pub(super) fn invalidate_archive(&mut self) {
-        if matches!(self.archive_state, ArchiveState::Ready(_)) {
-            self.archive_state = ArchiveState::Unverified {
-                problem: ArchiveProblem::ReadRequired,
-            };
+    pub fn request_archive_apply(&mut self) -> Result<Command, String> {
+        self.require_idle()?;
+        if self.status == Status::Disconnected {
+            return Err("Device is disconnected".into());
         }
+        let ArchiveState::Ready(review) = &self.archive_state else {
+            return Err("Review a fresh native archive before applying".into());
+        };
+        let caps = self
+            .archive_capabilities
+            .as_ref()
+            .expect("ready archive capability");
+        archive::validate_review(caps, review)?;
+        if review.changes.is_empty() || review.before == review.target {
+            return Err("Reviewed archive has no changes to apply".into());
+        }
+        let expected = review.before.clone();
+        let target = review.target.clone();
+        let operation = self.operation()?;
+        self.activity = Activity::ApplyArchive { operation };
+        self.status = Status::Unverified {
+            problem: super::Problem::ReadRequired,
+        };
+        self.invalidate_macros();
+        self.invalidate_lighting();
+        self.invalidate_picture();
+        self.invalidate_settings();
+        Ok(Command::ApplyArchive {
+            generation: self.generation,
+            operation,
+            expected,
+            target,
+        })
+    }
+    pub(super) fn invalidate_archive(&mut self) {
+        let previous = std::mem::replace(&mut self.archive_state, ArchiveState::Idle);
+        self.archive_state = match previous {
+            ArchiveState::Ready(review) => ArchiveState::Unverified {
+                problem: ArchiveProblem::ReadRequired,
+                review: Some(review),
+            },
+            other => other,
+        };
     }
     pub(super) fn accept_archive_capture(&mut self, result: Result<NativeArchive, String>) {
         let caps = self
@@ -87,11 +128,13 @@ impl Session {
         self.archive_state = match result {
             Err(reason) => ArchiveState::Unverified {
                 problem: ArchiveProblem::Capture(reason),
+                review: None,
             },
             Ok(captured) => match archive::validate_archive(caps, &captured) {
                 Ok(()) => ArchiveState::Captured(captured),
                 Err(reason) => ArchiveState::Unverified {
                     problem: ArchiveProblem::InvalidResult(reason),
+                    review: None,
                 },
             },
         };
@@ -108,17 +151,50 @@ impl Session {
         self.archive_state = match result {
             Err(reason) => ArchiveState::Unverified {
                 problem: ArchiveProblem::Review(reason),
+                review: None,
             },
             Ok(review) => match archive::validate_review(caps, &review) {
                 Err(reason) => ArchiveState::Unverified {
                     problem: ArchiveProblem::InvalidResult(reason),
+                    review: None,
                 },
                 Ok(()) if review.target != target => ArchiveState::Unverified {
                     problem: ArchiveProblem::InvalidResult(
                         "Reviewed archive differs from requested target".into(),
                     ),
+                    review: None,
                 },
                 Ok(()) => ArchiveState::Ready(review),
+            },
+        };
+    }
+    pub(super) fn accept_archive_apply(
+        &mut self,
+        result: Result<NativeArchive, super::ApplyFailure>,
+    ) {
+        let previous = std::mem::replace(&mut self.archive_state, ArchiveState::Idle);
+        let ArchiveState::Ready(review) = previous else {
+            unreachable!("pending archive review")
+        };
+        let caps = self
+            .archive_capabilities
+            .as_ref()
+            .expect("pending archive capability");
+        self.archive_state = match result {
+            Err(failure) => ArchiveState::Unverified {
+                problem: ArchiveProblem::Apply(failure),
+                review: Some(review),
+            },
+            Ok(actual) => match archive::validate_archive(caps, &actual) {
+                Err(reason) => ArchiveState::Unverified {
+                    problem: ArchiveProblem::InvalidResult(reason),
+                    review: Some(review),
+                },
+                Ok(()) if actual != review.target => ArchiveState::Unverified {
+                    problem: ArchiveProblem::ApplyReadbackMismatch,
+                    review: Some(review),
+                },
+                Ok(()) => ArchiveState::Captured(actual),
             },
         };
     }
@@ -129,7 +205,7 @@ mod tests {
     use super::*;
     use crate::{
         Action, Change, Descriptor, Layer, PhysicalKey, State,
-        session::{Acceptance, Completion},
+        session::{Acceptance, ApplyFailure, Completion, Recovery},
     };
     use std::collections::BTreeMap;
 
@@ -185,6 +261,21 @@ mod tests {
             }],
         }
     }
+    fn ready(session: &mut Session) {
+        let Command::ReviewArchive {
+            generation,
+            operation,
+            ..
+        } = session.request_archive_review(archive(&[2])).unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ReviewArchive {
+            generation,
+            operation,
+            result: Ok(review(&[1], &[2])),
+        });
+    }
     #[test]
     fn rejects_invalid_target_and_invalid_capture_without_losing_operation_guard() {
         let mut session = session();
@@ -222,7 +313,8 @@ mod tests {
         assert!(matches!(
             session.archive(),
             Some(ArchiveState::Unverified {
-                problem: ArchiveProblem::InvalidResult(_)
+                problem: ArchiveProblem::InvalidResult(_),
+                ..
             })
         ));
         let Command::CaptureArchive {
@@ -275,7 +367,8 @@ mod tests {
         assert!(matches!(
             session.archive(),
             Some(ArchiveState::Unverified {
-                problem: ArchiveProblem::InvalidResult(_)
+                problem: ArchiveProblem::InvalidResult(_),
+                ..
             })
         ));
         let Command::ReviewArchive {
@@ -304,7 +397,8 @@ mod tests {
         assert!(matches!(
             session.archive(),
             Some(ArchiveState::Unverified {
-                problem: ArchiveProblem::ReadRequired
+                problem: ArchiveProblem::ReadRequired,
+                ..
             })
         ));
     }
@@ -356,8 +450,139 @@ mod tests {
         assert!(matches!(
             session.archive(),
             Some(ArchiveState::Unverified {
-                problem: ArchiveProblem::ReadRequired
+                problem: ArchiveProblem::ReadRequired,
+                ..
             })
         ));
+    }
+    #[test]
+    fn archive_apply_requires_change_and_checks_stale_and_readback() {
+        let mut session = session();
+        session.connect().unwrap();
+        let Command::ReviewArchive {
+            generation,
+            operation,
+            ..
+        } = session.request_archive_review(archive(&[1])).unwrap()
+        else {
+            unreachable!()
+        };
+        let mut unchanged = review(&[1], &[1]);
+        unchanged.changes.clear();
+        session.accept(Completion::ReviewArchive {
+            generation,
+            operation,
+            result: Ok(unchanged),
+        });
+        assert!(session.request_archive_apply().is_err());
+        ready(&mut session);
+        let command = session.request_archive_apply().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Command>(&serde_json::to_vec(&command).unwrap()).unwrap(),
+            command
+        );
+        let Command::ApplyArchive {
+            generation,
+            operation,
+            expected,
+            target,
+        } = command
+        else {
+            unreachable!()
+        };
+        assert_eq!(expected, archive(&[1]));
+        assert_eq!(target, archive(&[2]));
+        assert_eq!(
+            session.accept(Completion::CaptureArchive {
+                generation,
+                operation,
+                result: Ok(target.clone())
+            }),
+            Acceptance::IgnoredStale
+        );
+        assert_eq!(
+            session.accept(Completion::ApplyArchive {
+                generation: generation + 1,
+                operation,
+                result: Ok(target.clone())
+            }),
+            Acceptance::IgnoredStale
+        );
+        assert!(session.busy());
+        let mismatch = Completion::ApplyArchive {
+            generation,
+            operation,
+            result: Ok(archive(&[3])),
+        };
+        assert_eq!(
+            serde_json::from_slice::<Completion>(&serde_json::to_vec(&mismatch).unwrap()).unwrap(),
+            mismatch
+        );
+        assert_eq!(session.accept(mismatch), Acceptance::Accepted);
+        assert!(matches!(
+            session.archive(),
+            Some(ArchiveState::Unverified {
+                problem: ArchiveProblem::ApplyReadbackMismatch,
+                review: Some(_)
+            })
+        ));
+        assert!(session.request_archive_apply().is_err());
+        ready(&mut session);
+        let Command::ApplyArchive {
+            generation,
+            operation,
+            ..
+        } = session.request_archive_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ApplyArchive {
+            generation,
+            operation,
+            result: Ok(archive(&[2])),
+        });
+        assert_eq!(
+            session.archive(),
+            Some(&ArchiveState::Captured(archive(&[2])))
+        );
+    }
+    #[test]
+    fn failed_apply_retains_review_but_path_change_clears_intent() {
+        let mut session = session();
+        session.connect().unwrap();
+        ready(&mut session);
+        let Command::ApplyArchive {
+            generation,
+            operation,
+            ..
+        } = session.request_archive_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        let failure = ApplyFailure {
+            message: "recovery failed".into(),
+            recovery: Recovery::Failed,
+        };
+        session.accept(Completion::ApplyArchive {
+            generation,
+            operation,
+            result: Err(failure.clone()),
+        });
+        assert_eq!(
+            session.archive(),
+            Some(&ArchiveState::Unverified {
+                problem: ArchiveProblem::Apply(failure.clone()),
+                review: Some(review(&[1], &[2]))
+            })
+        );
+        assert!(session.request_archive_apply().is_err());
+        session.clear_archive_review();
+        assert_eq!(
+            session.archive(),
+            Some(&ArchiveState::Unverified {
+                problem: ArchiveProblem::Apply(failure),
+                review: None
+            })
+        );
     }
 }

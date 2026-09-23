@@ -1,4 +1,5 @@
 //! Opaque, backend-owned native configuration archives.
+use crate::session::ApplyFailure;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -36,6 +37,8 @@ pub enum ArchiveProblem {
     Capture(String),
     Review(String),
     InvalidResult(String),
+    Apply(ApplyFailure),
+    ApplyReadbackMismatch,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -43,7 +46,10 @@ pub enum ArchiveState {
     Idle,
     Captured(NativeArchive),
     Ready(Review),
-    Unverified { problem: ArchiveProblem },
+    Unverified {
+        problem: ArchiveProblem,
+        review: Option<Review>,
+    },
 }
 
 pub fn validate_capabilities(caps: &ArchiveCapabilities) -> Result<(), String> {

@@ -485,6 +485,28 @@ impl Device for MemoryDevice {
             changes,
         })
     }
+
+    fn apply_archive(
+        &mut self,
+        expected: &archive::NativeArchive,
+        target: &archive::NativeArchive,
+        _backup_dir: &Path,
+    ) -> Result<archive::NativeArchive, ApplyFailure> {
+        let reject = |message| ApplyFailure {
+            message,
+            recovery: Recovery::NotAttempted,
+        };
+        let stored = self.archive.as_mut().ok_or_else(|| {
+            reject("Native archive operations are unsupported by this device".into())
+        })?;
+        archive::validate_archive(&stored.capabilities, expected).map_err(reject)?;
+        archive::validate_archive(&stored.capabilities, target).map_err(reject)?;
+        if &stored.snapshot != expected {
+            return Err(reject("Stale expected native archive".into()));
+        }
+        stored.snapshot = target.clone();
+        Ok(target.clone())
+    }
 }
 
 #[cfg(test)]
@@ -1185,13 +1207,25 @@ mod tests {
             session.archive(),
             Some(&archive::ArchiveState::Ready(archive::Review {
                 before,
-                target,
+                target: target.clone(),
                 changes: vec![archive::SectionChange {
                     id: "archive".into(),
                     label: "Native archive".into(),
                     count: None
                 }],
             }))
+        );
+        worker
+            .try_submit(session.request_archive_apply().unwrap())
+            .unwrap();
+        let completion = worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(session.accept(completion), Acceptance::Accepted);
+        assert_eq!(
+            session.archive(),
+            Some(&archive::ArchiveState::Captured(target))
         );
     }
 }

@@ -76,6 +76,12 @@ pub enum Command {
         operation: u64,
         target: crate::archive::NativeArchive,
     },
+    ApplyArchive {
+        generation: u64,
+        operation: u64,
+        expected: crate::archive::NativeArchive,
+        target: crate::archive::NativeArchive,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -141,6 +147,11 @@ pub enum Completion {
         generation: u64,
         operation: u64,
         result: Result<crate::archive::Review, String>,
+    },
+    ApplyArchive {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::archive::NativeArchive, ApplyFailure>,
     },
 }
 
@@ -224,6 +235,9 @@ pub enum Activity {
     ReviewArchive {
         operation: u64,
         target: crate::archive::NativeArchive,
+    },
+    ApplyArchive {
+        operation: u64,
     },
 }
 
@@ -611,6 +625,16 @@ impl Session {
                     operation: *operation,
                 },
             ),
+            Completion::ApplyArchive {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ApplyArchive {
+                    operation: *operation,
+                },
+            ),
             Completion::ReviewArchive { .. } => unreachable!(),
         };
         if generation != self.generation || expected != self.activity {
@@ -661,6 +685,7 @@ impl Session {
                 .expect("pending settings capability")
                 .accept_apply(result),
             Completion::CaptureArchive { result, .. } => self.accept_archive_capture(result),
+            Completion::ApplyArchive { result, .. } => self.accept_archive_apply(result),
             Completion::ReviewArchive { .. } => unreachable!(),
         }
         Acceptance::Accepted

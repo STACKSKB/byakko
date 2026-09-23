@@ -7,8 +7,7 @@ fn send(app: &mut Desktop, message: Archive) {
     let _ = app.update(Message::Archive(message));
 }
 
-#[test]
-fn native_archive_capture_and_review_use_owned_memory_backend_values() {
+fn reviewed() -> (Desktop, NativeArchive, NativeArchive) {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Archive));
     send(&mut app, Archive::Capture);
@@ -23,6 +22,12 @@ fn native_archive_capture_and_review_use_owned_memory_backend_values() {
     app.submit(request);
     assert!(app.busy());
     settle(&mut app);
+    (app, before, target)
+}
+
+#[test]
+fn native_archive_capture_review_and_apply_use_owned_memory_backend_values() {
+    let (mut app, before, target) = reviewed();
     let ArchiveState::Ready(review) = app.session.archive().unwrap() else {
         panic!("expected archive review")
     };
@@ -30,19 +35,64 @@ fn native_archive_capture_and_review_use_owned_memory_backend_values() {
     assert_eq!(review.target, target);
     assert!(!review.changes.is_empty());
     drop(app.view());
-    send(&mut app, Archive::Path("another-file.json".into()));
-    assert!(matches!(
-        app.session.archive(),
-        Some(ArchiveState::Captured(_))
-    ));
     assert!(
         app.session
             .request_archive_review(NativeArchive {
                 bytes: vec![0; 5000],
-                ..target
+                ..target.clone()
             })
             .is_err()
     );
+    send(&mut app, Archive::Apply);
+    assert!(app.busy());
+    settle(&mut app);
+    assert_eq!(app.session.archive(), Some(&ArchiveState::Captured(target)));
+}
+
+#[test]
+fn changing_archive_path_clears_a_previous_review() {
+    let (mut app, before, _) = reviewed();
+    send(&mut app, Archive::Path("another-file.json".into()));
+    assert_eq!(app.session.archive(), Some(&ArchiveState::Captured(before)));
+}
+
+#[test]
+fn failed_archive_apply_retains_review_and_keeps_close_open() {
+    let (mut app, before, target) = reviewed();
+    let Command::ApplyArchive {
+        generation,
+        operation,
+        ..
+    } = app.session.request_archive_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+    let _ = app.complete(Completion::CaptureArchive {
+        generation,
+        operation,
+        result: Ok(before),
+    });
+    assert!(app.busy());
+    let failure = ApplyFailure {
+        message: "restore unreadable".into(),
+        recovery: Recovery::Unverified,
+    };
+    let _ = app.complete(Completion::ApplyArchive {
+        generation,
+        operation,
+        result: Err(failure.clone()),
+    });
+    assert_eq!(app.closing, Closing::Open);
+    assert!(matches!(
+        app.session.archive(),
+        Some(ArchiveState::Unverified {
+            problem: byakko_core::archive::ArchiveProblem::Apply(actual),
+            review: Some(review),
+        }) if actual == &failure && review.target == target
+    ));
+    assert!(app.session.request_archive_apply().is_err());
 }
 
 #[test]

@@ -188,6 +188,7 @@ impl Desktop {
                 | Activity::ApplySetting { .. }
                 | Activity::CaptureArchive { .. }
                 | Activity::ReviewArchive { .. }
+                | Activity::ApplyArchive { .. }
         ) {
             return Task::none();
         }
@@ -209,7 +210,9 @@ impl Desktop {
     fn complete(&mut self, completion: Completion) -> Task<Message> {
         let archive_result = matches!(
             completion,
-            Completion::CaptureArchive { .. } | Completion::ReviewArchive { .. }
+            Completion::CaptureArchive { .. }
+                | Completion::ReviewArchive { .. }
+                | Completion::ApplyArchive { .. }
         );
         let lighting_result = matches!(
             completion,

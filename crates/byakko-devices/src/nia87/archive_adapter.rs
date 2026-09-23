@@ -1,6 +1,8 @@
 //! Capture and preflight review for complete native Nia87 configuration archives.
 use super::configuration::{self, Configuration};
 use byakko_core::archive::{ArchiveCapabilities, NativeArchive, Review, SectionChange};
+use byakko_core::session::{ApplyFailure, Recovery};
+use std::path::Path;
 
 const BACKEND_ID: &str = "nia87";
 
@@ -42,6 +44,37 @@ pub fn review(target: &NativeArchive) -> Result<Review, String> {
     let before_config =
         super::device::capture_configuration(|_, _| {}).map_err(|error| error.to_string())?;
     review_captured(&before_config, target, &target_config)
+}
+
+pub fn apply(
+    expected: &NativeArchive,
+    target: &NativeArchive,
+    backup_dir: &Path,
+) -> Result<NativeArchive, ApplyFailure> {
+    let expected_config = decode(expected).map_err(not_attempted)?;
+    let target_config = decode(target).map_err(not_attempted)?;
+    let actual = super::device::apply_configuration_detailed(
+        &expected_config,
+        &target_config,
+        backup_dir,
+        |_| {},
+    )?;
+    if actual != target_config {
+        return Err(ApplyFailure {
+            message: "Complete configuration apply returned a mismatched readback".into(),
+            recovery: Recovery::Unverified,
+        });
+    }
+    // Keep the exact imported JSON bytes; device success is established against
+    // the decoded configuration, while these are the bytes the core reviewed.
+    Ok(target.clone())
+}
+
+fn not_attempted(message: String) -> ApplyFailure {
+    ApplyFailure {
+        message,
+        recovery: Recovery::NotAttempted,
+    }
 }
 
 fn review_captured(
@@ -208,5 +241,21 @@ mod tests {
                 .unwrap_err()
                 .contains("cannot be restored")
         );
+    }
+
+    #[test]
+    fn apply_preflight_rejections_are_typed_not_attempted() {
+        let before = encode(&fixture()).unwrap();
+        let mut malformed = before.clone();
+        malformed.bytes.truncate(24);
+        let error = apply(&before, &malformed, Path::new("unused-backups")).unwrap_err();
+        assert_eq!(error.recovery, Recovery::NotAttempted);
+
+        let mut invalid_target = fixture();
+        invalid_target.macros[0][2] = 250;
+        let invalid_target = encode(&invalid_target).unwrap();
+        let error = apply(&before, &invalid_target, Path::new("unused-backups")).unwrap_err();
+        assert_eq!(error.recovery, Recovery::NotAttempted);
+        assert!(error.message.contains("macro slot"));
     }
 }
