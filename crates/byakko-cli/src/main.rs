@@ -4,6 +4,7 @@ use byakko_core::{
     archive::NativeArchive,
     lighting::Snapshot as LightingSnapshot,
     macros::{Content as MacroContent, Snapshot as MacroSnapshot},
+    picture::Snapshot as PictureSnapshot,
     settings::Snapshot as SettingsSnapshot,
 };
 use byakko_devices::{
@@ -14,7 +15,7 @@ use std::io::Write;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>|plan-settings <snapshot-file>|apply-settings <snapshot-file>|plan-lighting <snapshot-file>|apply-lighting <snapshot-file>|plan-macro <snapshot-file>|apply-macro <snapshot-file>>";
+    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>|plan-settings <snapshot-file>|apply-settings <snapshot-file>|plan-lighting <snapshot-file>|apply-lighting <snapshot-file>|plan-macro <snapshot-file>|apply-macro <snapshot-file>|plan-colors <snapshot-file>|apply-colors <snapshot-file>>";
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments
         .first()
@@ -51,6 +52,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let macro_file = arguments
         .first()
         .is_some_and(|command| command == "plan-macro" || command == "apply-macro");
+    let color_file = arguments
+        .first()
+        .is_some_and(|command| command == "plan-colors" || command == "apply-colors");
     if arguments.len() > 2
         || (arguments.len() == 2
             && !(macro_read
@@ -59,14 +63,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 || keymap_file
                 || settings_file
                 || lighting_file
-                || macro_file))
+                || macro_file
+                || color_file))
         || ((macro_read
             || archive_capture
             || archive_review
             || keymap_file
             || settings_file
             || lighting_file
-            || macro_file)
+            || macro_file
+            || color_file)
             && arguments.len() != 2)
     {
         return Err(USAGE.into());
@@ -77,7 +83,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match arguments.first().map(String::as_str) {
         None | Some("--help") => {
             println!(
-                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. To edit keys, one setting, global lighting, or a macro slot, save the matching read output, change its editable value, run the matching plan command, then explicitly run apply. Apply writes to the device with a durable backup and complete readback."
+                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. To edit keys, one setting, global lighting, a macro slot, or per-key colors, save the matching read output, change its editable value, run the matching plan command, then explicitly run apply. Apply writes to the device with a durable backup and complete readback."
             );
         }
         Some("devices") => match nia87::device::availability() {
@@ -99,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "read" | "read-colors" | "read-lighting" | "read-settings" | "read-macro"
             | "capture-archive" | "review-archive" | "plan-keymap" | "apply-keymap"
             | "plan-settings" | "apply-settings" | "plan-lighting" | "apply-lighting"
-            | "plan-macro" | "apply-macro",
+            | "plan-macro" | "apply-macro" | "plan-colors" | "apply-colors",
         ) => {
             let candidate = match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => candidate,
@@ -145,6 +151,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let macro_target = if macro_file {
                 Some(load_macro(&arguments[1])?)
+            } else {
+                None
+            };
+            let color_target = if color_file {
+                Some(load_colors(&arguments[1])?)
             } else {
                 None
             };
@@ -319,6 +330,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )?)?
                     }
                 }
+                "plan-colors" | "apply-colors" => {
+                    byakko_cli::read_colors(&mut session, &executor, Duration::from_secs(30))?;
+                    let target = color_target.as_ref().expect("loaded above");
+                    let changes = byakko_cli::plan_colors(&session, target)?;
+                    if arguments[0] == "plan-colors" {
+                        serde_json::to_string_pretty(&changes)?
+                    } else {
+                        if changes.is_empty() {
+                            return Err("Color file contains no changes".into());
+                        }
+                        eprintln!(
+                            "Applying {} key colors to {}",
+                            changes.len(),
+                            candidate.path
+                        );
+                        eprintln!("Before-image backup directory: {}", backups.display());
+                        serde_json::to_string_pretty(&byakko_cli::apply_colors(
+                            &mut session,
+                            &executor,
+                            target,
+                        )?)?
+                    }
+                }
                 _ => unreachable!("read command matched above"),
             };
             println!("{json}");
@@ -356,6 +390,14 @@ fn load_macro(path: &str) -> Result<MacroSnapshot, Box<dyn std::error::Error>> {
     const MAX_MACRO_JSON: u64 = 64 * 1024;
     if std::fs::metadata(path)?.len() > MAX_MACRO_JSON {
         return Err("Macro snapshot file exceeds the 64 KiB JSON limit".into());
+    }
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
+fn load_colors(path: &str) -> Result<PictureSnapshot, Box<dyn std::error::Error>> {
+    const MAX_COLOR_JSON: u64 = 1024 * 1024;
+    if std::fs::metadata(path)?.len() > MAX_COLOR_JSON {
+        return Err("Color snapshot file exceeds the 1 MiB JSON limit".into());
     }
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }

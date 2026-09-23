@@ -115,6 +115,10 @@ read-only-first device acceptance sequence there.
   confuse that backend snapshot with a portable macro document; changed
   programs with stored repeat count zero remain unwritable pending playback
   evidence.
+  The per-key color file workflow requires a complete advertised map and fresh
+  raw picture revision; it stages changed colors through one session command.
+  Keep physical color writes pending until the earlier recovery concern and
+  Iced picture-write acceptance gate can be addressed with user interaction.
   Read-only CLI commands remain appropriate for unattended Linux smoke tests.
 
 ## Work sequence and evidence

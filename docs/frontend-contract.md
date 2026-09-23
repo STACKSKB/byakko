@@ -83,6 +83,14 @@ is distinct from the portable macro document format, whose source slot is
 descriptive rather than an expected-state token. Physical CLI macro apply and
 playback remain open.
 
+`read-colors` output is a complete per-key color snapshot with a raw revision.
+`plan-colors <snapshot-file>` freshly reads the keymap and picture, rejects
+missing or extra advertised keys, and lists only changed colors. The explicit
+`apply-colors <snapshot-file>` stages those edits through the shared session
+and one guarded backend transaction with complete picture readback. The CLI
+does not duplicate the Nia87 matrix mapping. The attached board has exercised
+planning only; physical CLI color apply remains open.
+
 Later CLI work can expose archive apply workflows. It should
 show the target identity and operation result, preserve opaque values, and use
 the same expected-state check, durable backup, readback and typed recovery

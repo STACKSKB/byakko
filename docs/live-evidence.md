@@ -491,3 +491,14 @@ transaction has memory-backend write/readback tests. Ignored files:
 `Research/captures/cli-macro-plan-smoke-20260923.json`,
 `Research/captures/cli-macro-plan-proposal-20260923.json`, and
 `Research/captures/cli-macro-plan-zero-rejected-20260923.json`.
+
+## CLI per-key color plan smoke check (2026-09-23)
+
+The release CLI freshly read all 87 mapped per-key colors from the attached
+Nia87 into an ignored snapshot file. `plan-colors` returned `[]` for the
+unchanged file. A second file changed only `slot-000` from `(0,0,0)` to
+`(8,16,24)` and planning reported exactly that one edit. Both commands used
+fresh keymap and picture reads and sent no setter. `apply-colors` was not run
+on hardware; memory-backend tests cover a two-color transaction and full
+reread. Ignored files: `Research/captures/cli-colors-plan-smoke-20260923.json`
+and `Research/captures/cli-colors-plan-proposal-20260923.json`.
