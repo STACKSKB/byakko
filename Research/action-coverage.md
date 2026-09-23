@@ -1,7 +1,7 @@
 # Nia87 visible action coverage
 
 This note records action entries visible in the supplied official Nia87
-configurator catalog. All twelve entries in the table are now represented in
+configurator catalog. All thirteen entries in the table are now represented in
 `crates/byakko-devices/src/nia87/actions.rs`. This is a static research record;
 no vendor source code, table asset, or UI implementation is copied into Byakko.
 
@@ -36,6 +36,7 @@ report.
 | My Computer | `我的电脑` | `03 00 94 01` | High |
 | Search | `搜索` | `03 00 21 02` | High |
 | Homepage | `主页` | `03 00 23 02` | High |
+| Browser Back | `返回` | `03 00 24 02` | High |
 | Brightness+ | `亮度加` | `03 00 6F 00` | High |
 | Brightness- | `亮度减` | `03 00 70 00` | High |
 | Refresh | `刷新` | `03 00 27 02` | High |
@@ -44,7 +45,7 @@ report.
 | Microphone switch | `麦克风开关` | `06 80 00 00` | High |
 
 The decimal source arrays are, respectively, `[3,0,131,1]`, `[3,0,146,1]`,
-`[3,0,138,1]`, `[3,0,148,1]`, `[3,0,33,2]`, `[3,0,35,2]`,
+`[3,0,138,1]`, `[3,0,148,1]`, `[3,0,33,2]`, `[3,0,35,2]`, `[3,0,36,2]`,
 `[3,0,111,0]`, `[3,0,112,0]`, `[3,0,39,2]`, `[0,0,227,45]`,
 `[0,0,227,46]`, and `[6,128,0,0]`.
 
@@ -63,7 +64,7 @@ Nia87 encoder would place in a keymap binding. They do not prove that every
 firmware revision performs the corresponding host operation, nor do they prove
 physical output. In particular, the supplied live evidence verifies keymap
 readback and selected media bindings, while application launch, browser
-navigation, brightness, zoom, refresh, and microphone behavior remain
+navigation (including Back), brightness, zoom, refresh, and microphone behavior remain
 untested on the attached keyboard. The native implementation should preserve
 unknown four-byte values and should not label these actions end-to-end
 validated until reversible device tests and host-side behavior checks exist.
@@ -75,18 +76,20 @@ and its before/after map captures contain a single newly selected binding,
 Play/Pause (`03 00 CD 00`) at Fn slot 91. The replay and mixed-map captures add
 ordinary F23/F24 key usages; the other non-ordinary records already occur in
 the stock Fn baseline. Play/Pause, Fn, the observed media actions, and the
-twelve catalog entries above already have matching presets or codecs. The
+thirteen catalog entries above now have matching presets or codecs. The
 stock Fn map also contains other `0A` records and `0D`/`0E` records whose exact
 Nia87 behavior is not established by these captures. A stored raw record alone
 does not identify a safe, named action to offer for editing. There is therefore
-no additional verified preset to add from the current replay fixtures.
+no further verified preset to add from the current replay fixtures. Browser
+Back was found in the selected official keyboard catalog at UTF-16 offset
+7,541,407.
 Preserve those records as opaque bindings until an official selected-action
 trace or physical behavior check establishes their meaning.
 
 ## Trace references
 
 - Function catalog (`AF`, `RF`, merged `FF`): official bundle near offset
-  7,542,000.
+  7,542,000; Browser Back at UTF-16 offset 7,541,407.
 - Shared function/action encoding and decode classification: official bundle
   near offsets 7,563,446 and 15,737,075; summarized in
   `docs/feature-inventory.md`.
