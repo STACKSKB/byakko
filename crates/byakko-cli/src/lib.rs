@@ -1,5 +1,6 @@
 //! Synchronous CLI adapter for the same owned session commands used by Iced.
 mod keymap;
+mod lighting;
 mod settings;
 use byakko_core::{
     State,
@@ -12,6 +13,7 @@ use byakko_core::{
 };
 use byakko_devices::Executor;
 pub use keymap::{apply_keymap, plan_keymap};
+pub use lighting::{apply_lighting, plan_lighting};
 pub use settings::{apply_settings, plan_settings};
 use std::{
     sync::mpsc::TryRecvError,

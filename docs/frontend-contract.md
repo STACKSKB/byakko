@@ -63,7 +63,15 @@ the complete native settings readback and keeps a durable before-image.
 Memory-device tests cover the write, reread and rejection paths. The attached
 Nia87 has exercised planning only; physical CLI settings apply remains open.
 
-Later CLI work can expose macro, lighting and archive apply workflows. It should
+`read-lighting` output can be edited as a complete global-lighting snapshot.
+`plan-lighting <snapshot-file>` reads the device again, checks the exact raw
+revision and backend, validates the desired effect through the portable
+catalog and Nia87 preflight, then prints the desired setting or `null` for no
+change. `apply-lighting <snapshot-file>` requires a change and uses the same
+guarded session/executor transaction as Iced. The attached board has exercised
+planning only; physical CLI lighting apply remains open.
+
+Later CLI work can expose macro and archive apply workflows. It should
 show the target identity and operation result, preserve opaque values, and use
 the same expected-state check, durable backup, readback and typed recovery
 outcome as the desktop. CLI flags are presentation; they must not grow a second
