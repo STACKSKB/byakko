@@ -2,12 +2,12 @@
 
 ## Iced desktop cross-link (2026-09-23)
 
-The current `byakko-desktop` release executable and the root package's
+At source commit `f228533`, the `byakko-desktop` release executable and the root package's
 `byakko-hidraw-access` helper both cross-linked for
 `x86_64-unknown-linux-gnu` using the locally retained Zig 0.15.2 and
 `cargo-zigbuild 0.23.4`, with `--locked --offline`. Their ELF headers are
-`7F 45 4C 46`. The 9,771,040-byte desktop SHA-256 is
-`4137DA66CB9EF92AD2D2BFCF9A4196EF9E0348F29A5FA2203BCEC11170E36DF7`;
+`7F 45 4C 46`. The 9,768,608-byte desktop SHA-256 is
+`662149E6014A47F2A01A9B667FD25BE1D001EEEBBC4AD469810B04835960B285`;
 the 381,640-byte helper SHA-256 is
 `38C872B4C5BFA8004ECB1D97DBC99585357ED062BE341A955D5DC2C2A5BEA4E2`.
 This proves linking only. Neither binary has launched on Linux, and linked
