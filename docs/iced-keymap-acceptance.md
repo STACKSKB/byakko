@@ -55,6 +55,12 @@ encoded before-image with the revision before a write. A read-only run of the
 current CLI on 2026-09-23 decoded the attached board with the new IDs (for
 example `nia87:0A010000` and `nia87:03007000`) and sent no setters.
 
+The selected official decoder also treats `00 00 03 00` as a disabled binding.
+Byakko displays that form as disabled but retains it as an opaque raw value, so
+an unchanged snapshot round-trips byte for byte. Explicitly selecting Disabled
+uses the normal `00 00 00 00` setter. A pure adapter test covers both paths;
+the stored alternate form has not been observed on the attached Nia87.
+
 ## Remaining acceptance
 
 - The user confirmed the Iced TKL board and key selection after a physical
