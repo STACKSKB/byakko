@@ -2,7 +2,7 @@
 //! A plan contains intent only; constructing one never contacts a device.
 
 use crate::nia87::{
-    actions,
+    actions, board,
     configuration::{self, Configuration},
     macros, profiles,
     settings::{self, Setting},
@@ -73,6 +73,10 @@ pub fn plan(current: &Configuration, target: &Configuration) -> Result<ChangeSum
 
     if current.picture[126..] != target.picture[126..] {
         return Err("reserved user-picture slots 126 and 127 cannot be written".into());
+    }
+    let physical_slots = board::physical_slot_mask();
+    if (0..126).any(|slot| current.picture[slot] != target.picture[slot] && !physical_slots[slot]) {
+        return Err("unmapped user-picture slot cannot be written".into());
     }
     let picture_keys = current
         .picture
@@ -297,6 +301,22 @@ mod tests {
                     .contains("Reserved keymap")
             );
         }
+    }
+
+    #[test]
+    fn unmapped_picture_slots_are_archival_but_not_writable() {
+        let before = fixture();
+        let mask = board::physical_slot_mask();
+        assert_eq!(mask.iter().filter(|&&mapped| mapped).count(), 87);
+        let slot = (0..126).find(|&slot| !mask[slot]).unwrap();
+        let mut after = before.clone();
+        after.picture[slot] = [1, 2, 3];
+        assert!(
+            plan(&before, &after)
+                .unwrap_err()
+                .contains("unmapped user-picture")
+        );
+        assert_eq!(plan(&before, &before).unwrap().picture_keys, 0);
     }
 
     #[test]

@@ -94,3 +94,15 @@ pub fn slot_for_usage(usage: u8) -> Option<usize> {
         _ => None,
     }
 }
+
+/// Writable picture slots for the observed physical Nia87 layout. Other
+/// matrix entries are retained in snapshots but are not editable colors.
+pub fn physical_slot_mask() -> [bool; 128] {
+    let mut mask = [false; 128];
+    for key in super::layout::nia87_keys() {
+        if let Some(slot) = slot_for_usage(key.usage) {
+            mask[slot] = true;
+        }
+    }
+    mask
+}

@@ -66,10 +66,14 @@ pub(super) fn apply_picture_with(
     desired: &[[u8; 3]],
     backup_dir: &std::path::Path,
 ) -> Result<Vec<[u8; 3]>> {
-    let _lock = transaction_lock()?;
     if expected.len() != 128 || desired.len() != 128 || expected[126..] != desired[126..] {
         return Err("Invalid picture size or reserved-slot modification".into());
     }
+    let physical_slots = crate::nia87::board::physical_slot_mask();
+    if (0..126).any(|slot| expected[slot] != desired[slot] && !physical_slots[slot]) {
+        return Err("Picture edit changes an unmapped matrix slot".into());
+    }
+    let _lock = transaction_lock()?;
     let identity = snapshot_unlocked(selection)?;
     if identity.firmware != 0x0100 || identity.profile != 0 {
         return Err("Unverified firmware/profile; no picture writes sent".into());
@@ -148,4 +152,27 @@ pub fn apply_picture_detailed(
     backup_dir: &std::path::Path,
 ) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
     detailed(apply_picture(expected, desired, backup_dir))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use byakko_core::session::Recovery;
+
+    #[test]
+    fn unmapped_picture_slot_is_rejected_before_device_access() {
+        let physical = crate::nia87::board::physical_slot_mask();
+        let unmapped = (0..126).find(|&slot| !physical[slot]).unwrap();
+        let expected = vec![[0; 3]; 128];
+        let mut desired = expected.clone();
+        desired[unmapped] = [1, 2, 3];
+        let failure = apply_picture_detailed(
+            &expected,
+            &desired,
+            std::path::Path::new("unused-backup-path"),
+        )
+        .unwrap_err();
+        assert_eq!(failure.recovery, Recovery::NotAttempted);
+        assert!(failure.message.contains("unmapped matrix slot"));
+    }
 }
