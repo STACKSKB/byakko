@@ -182,7 +182,8 @@ matching configuration collection. `/dev/hidraw2` then had a `user:three:rw-`
 ACL; the other collections remained rejected by the helper.
 
 The latest `byakko-cli devices` identified `/dev/hidraw2` as the Nia87
-configuration interface. The first normal-user `read` failed with:
+configuration interface. The first normal-user `read` on the pre-framing-fix
+code failed with:
 `Error: "Device read failed: Unverified { problem: Read(\"unnumbered feature reply does not fit host buffer\") }"`.
 The ACL was rechecked after the failure and remained present. Because the first
 read failed, the repeat read, other section reads, and archive stability
@@ -197,32 +198,43 @@ node's ACL does not survive node removal, and the removed rule cannot recreate
 it. The user wants the eventual application image to avoid manual udev setup.
 
 **Note for the Windows agent:** the updated exact-descriptor helper works on the
-Linux descriptor and accepts only the configuration node. Linux permissions
-were granted temporarily by the narrow rule, but the first read reaches the HID
-transport and fails on the unnumbered feature-reply length. The temporary
-helper/rule have since been removed. Do not change transport code or try a
-setter without resolving the feature-reply framing with read-only evidence.
+Linux descriptor and accepts only the configuration node. The earlier
+pre-fix read failed on feature-reply framing; the updated adapter has now passed
+a raw `0x80` identity exchange and stable CLI keymap reads on Linux. The
+temporary helper/rule have since been removed. No setters were run. Other
+panel reads and physical writes remain unverified.
 
-## Raw feature framing diagnostic blocked (2026-09-23)
+## Raw feature framing diagnostic and Linux read (2026-09-23)
 
-A requested strictly read-only `HIDIOCGFEATURE` diagnostic was to send only the
-known `0x80` identity request, using 65-byte and, if needed, 66-byte buffers,
-and record the returned byte count plus the first and last eight response
-bytes. It could not be run: the current environment has no `/dev/hidraw*`
-nodes, and `lsusb` reports `unable to initialize libusb: -99`. The temporary
-helper and udev rule are absent. No ioctl was issued, so there is no returned
-count or response data; no permissions were changed. Repeat the diagnostic only
-when the already validated Nia87 configuration collection is present, and keep
-it read-only.
+The first non-elevated shell check could see the sysfs HID collection but not
+the host's `/dev/hidraw*` nodes; `lsusb` there failed with
+`unable to initialize libusb: -99`. A read-only host inspection then confirmed
+that the node was present. This was shell device-node visibility, not a missing
+keyboard. As user `three`, `/dev/hidraw2` was `root:root` mode `0660` with
+`user:three:rw-`; udev reported `TAGS=:seat:uaccess:` and
+`CURRENT_TAGS=:seat:uaccess:`. Its sysfs parent identifies `3151:4015`,
+interface `1.2`; the 20-byte descriptor was
+`06 ff ff 09 02 a1 01 09 02 15 80 25 7f 95 40 75 08 b1 02 c0`.
 
-The earlier adapter error proves the first reply count was 65, because its
-65-byte buffer rejects that count at the final fit check. The bytes were not
-recorded. The adapter now handles both complete shapes for the descriptor's
-64-byte payload: 64 payload bytes without a report ID, or 65 bytes with a
-leading zero report ID. It rejects a 65-byte reply without that zero and all
-partial lengths. Cross-target compilation and Clippy passed on Windows; the
-new path still needs a Linux runtime read and full identity validation before
-any write acceptance.
+On source `bf639cd6c32ae916ce89f3088e6cedfe39343bf2`, a raw read-only
+identity exchange sent one 65-byte host report: report ID `00`, payload command
+`80 00 00 00 00 00 00 7f` followed by zero padding. `HIDIOCSFEATURE` returned
+65. `HIDIOCGFEATURE` with a 65-byte buffer returned **65**; response first 8
+bytes were `00 80 00 01 00 00 00 00`, and last 8 were
+`00 00 00 00 00 00 00 00`. The response includes the leading zero report ID,
+followed by the `0x80` identity reply (`firmware 0x0100`). A 66-byte buffer was
+not needed. Only the identity request was sent; no setters or permission
+changes were made.
+
+`byakko-cli devices` identified `/dev/hidraw2`. The CLI read-only snapshot
+succeeded as user `three`, identifying firmware `0x0100`, profile 0. Two
+successive captured `byakko-cli read` outputs both exited 0 and were byte-for-byte
+identical: 36,186 bytes each, SHA-256
+`75b94b74a58f5f012ada73b19763469eba22a8cab50b2ec1ded9278de8d8952f`.
+This verifies Linux identity and keymap-read stability on the tested source;
+other panel reads, GUI/runtime behavior, and live writes remain separate gates.
+The adapter accepts both complete reply shapes, including the observed
+65-byte form with a leading zero.
 
 ## Linux device-crate verification (2026-09-23, source `26554e0`)
 
@@ -231,7 +243,7 @@ On Linux at `26554e0919cd73c018db67e5b9c5b99af183883d`,
 integration test passed, with no doc tests. `cargo clippy --locked
 -p byakko-devices --all-targets -- -D warnings` also passed. The working tree
 was clean after verification. No device access or permission changes were
-made; these results do not replace the pending read-only hardware diagnostic.
+made at that verification point; the later hardware result is recorded above.
 
 ## Linux CLI and device verification (2026-09-23, source `3ed3f3e`)
 
@@ -250,9 +262,11 @@ framing.
 
 ## Known limits to carry forward
 
-Linux release builds and X11 demo startup have been verified, but hidraw
-permissions, 65-byte feature-report I/O and on-device behavior have **not**
-been verified. The USB keyboard has firmware `0x0100`, profile 0 on the
+Linux release builds and X11 demo startup have been verified. On 2026-09-23,
+Linux hidraw access and the read-only identity/keymap path were verified, but
+other panel reads, GUI/runtime behavior, physical output, and live writes with
+readback/restoration have **not** been verified. The USB keyboard has firmware
+`0x0100`, profile 0 on the
 observed Windows configuration collection `3151:4015`, interface 2,
 `FFFF:0002`; a matching VID/PID alone does not authorize writes. A prior
 fault-injected whole-archive apply caused unexplained collateral changes and
