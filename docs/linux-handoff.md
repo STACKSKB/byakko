@@ -224,6 +224,15 @@ partial lengths. Cross-target compilation and Clippy passed on Windows; the
 new path still needs a Linux runtime read and full identity validation before
 any write acceptance.
 
+## Linux device-crate verification (2026-09-23, source `26554e0`)
+
+On Linux at `26554e0919cd73c018db67e5b9c5b99af183883d`,
+`cargo test --locked -p byakko-devices` passed: 180 unit tests and one
+integration test passed, with no doc tests. `cargo clippy --locked
+-p byakko-devices --all-targets -- -D warnings` also passed. The working tree
+was clean after verification. No device access or permission changes were
+made; these results do not replace the pending read-only hardware diagnostic.
+
 ## Known limits to carry forward
 
 Linux release builds and X11 demo startup have been verified, but hidraw
