@@ -377,7 +377,7 @@ impl Workbench {
                 format!("Macro {index} · {play}")
             }
             Some(bytes) => actions::presets()
-                .into_iter()
+                .iter()
                 .find(|preset| preset.bytes == bytes)
                 .map(|preset| preset.label.to_owned())
                 .unwrap_or_else(|| format!("Raw {}", format_bytes(bytes))),

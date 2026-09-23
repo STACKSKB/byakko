@@ -46,7 +46,7 @@ pub fn action_from_raw(raw: [u8; 4]) -> Action {
             mode: raw[1],
         };
     }
-    if let Some(preset) = actions::presets().into_iter().find(|p| p.bytes == raw) {
+    if let Some(preset) = actions::presets().iter().find(|p| p.bytes == raw) {
         return Action::Named {
             id: preset.label.to_owned(),
         };
@@ -105,7 +105,7 @@ pub fn raw_from_action(action: &Action) -> Result<[u8; 4], String> {
             }
         }
         Action::Named { id } => actions::presets()
-            .into_iter()
+            .iter()
             .find(|preset| preset.label == id)
             .map(|preset| preset.bytes)
             .ok_or_else(|| format!("Unknown Nia87 action: {id}")),
@@ -151,7 +151,7 @@ pub fn descriptor() -> Descriptor {
         label: "Disabled".into(),
         action: Action::Disabled,
     }];
-    choices.extend(actions::presets().into_iter().map(|preset| ActionChoice {
+    choices.extend(actions::presets().iter().map(|preset| ActionChoice {
         label: preset.label.into(),
         action: action_from_raw(preset.bytes),
     }));
