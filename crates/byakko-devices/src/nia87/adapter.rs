@@ -161,6 +161,10 @@ pub fn descriptor() -> Descriptor {
         .map(|key| key.usage)
         .collect();
     usages.extend(0x68..=0x73); // F13 through F24.
+    // Standard keyboard-page outputs absent from the physical TKL board.
+    // These use the ordinary four-byte key action, not a new firmware opcode.
+    usages.extend(0x53..=0x63); // Numeric keypad through decimal.
+    usages.extend([0x32, 0x64, 0x67, 0xe7]); // ISO keys, keypad equals, right Win.
     usages.sort_unstable();
     usages.dedup();
     choices.extend(usages.into_iter().map(|usage| ActionChoice {
@@ -701,6 +705,30 @@ mod tests {
             let action = Action::Shortcut { modifiers, key: 6 };
             assert_eq!(action_from_raw(raw_from_action(&action).unwrap()), action);
         }
+    }
+    #[test]
+    fn standard_non_tkl_key_choices_use_ordinary_action_encoding() {
+        let descriptor = descriptor();
+        for (label, usage) in [
+            ("Non-US #", 0x32),
+            ("Numpad 1", 0x59),
+            ("Numpad 0", 0x62),
+            ("Numpad =", 0x67),
+            ("RWin", 0xe7),
+        ] {
+            let choice = descriptor
+                .actions
+                .iter()
+                .find(|choice| choice.label == label)
+                .expect("assignable standard keyboard usage");
+            assert_eq!(choice.action, Action::Key(usage));
+            assert_eq!(
+                raw_from_action(&choice.action).unwrap(),
+                [0, 0, usage as u8, 0]
+            );
+            assert_eq!(action_from_raw([0, 0, usage as u8, 0]), choice.action);
+        }
+        assert_eq!(descriptor.keys.iter().filter(|key| key.visible).count(), 87);
     }
     #[test]
     fn rejects_unvalidated_identity() {
