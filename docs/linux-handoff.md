@@ -6,9 +6,10 @@ research application. Use `AGENTS.md` for architecture and safety rules, and
 `docs/linux-install.md` for the maintained installation procedure. Windows
 captures and vendor fixtures under ignored paths are not in Git.
 
-## TODO on a real Linux host
+## Remaining TODO on Linux
 
-- [ ] Build and run the selected native packages and their tests from `master`:
+- [x] Build the selected native packages, run their tests, and pass Clippy from
+  `master`:
 
   ```sh
   cargo build --release --locked -p byakko-desktop -p byakko-cli
@@ -18,11 +19,12 @@ captures and vendor fixtures under ignored paths are not in Git.
   cargo clippy --locked -p byakko --no-default-features --bin byakko-hidraw-access -- -D warnings
   ```
 
-- [ ] Record the distribution, display server, Rust version, build failures,
+- [x] Record the distribution, display server, Rust version, build failures,
   and `ldd target/release/byakko-desktop` output. Launch
   `target/release/byakko-desktop --demo` in an X11 or Wayland desktop session;
-  check the other display server if available. The demo uses an in-memory
-  keyboard and does not need USB access.
+  check the other display server if available. Verified on X11; Wayland was not
+  available in this session. The demo uses an in-memory keyboard and does not
+  need USB access.
 
 - [ ] If an Nia87 is attached, enumerate its hidraw collections and compare
   the configuration collection's report descriptor with the exact 20-byte
@@ -48,9 +50,39 @@ captures and vendor fixtures under ignored paths are not in Git.
   Physical key output, macro playback/timing, RGB visual behavior and Linux
   write/readback/restoration remain separate acceptance gates.
 
+## Linux verification record (2026-09-23)
+
+Checked on Debian 13 (Trixie), x86_64, kernel `6.12.107-1`, Rust `1.98.0`,
+Cargo `1.98.0`, at source commit `4af1877` (`Validate host lighting frames
+against selected source`). The following passed:
+
+- Release builds for `byakko-desktop`, `byakko-cli`, and
+  `byakko-hidraw-access` with `--locked`.
+- `cargo test --locked -p byakko-core -p byakko-devices -p byakko-desktop -p byakko-cli`:
+  271 tests passed, none failed.
+- Clippy for the core, devices, desktop and CLI workspace packages with
+  `--all-targets -- -D warnings`, and Clippy for `byakko-hidraw-access` with
+  `-D warnings`.
+- `ldd target/release/byakko-desktop`: all listed shared libraries resolved.
+
+The CLI discovery check printed `Nia87 not connected`. The user confirmed the
+keyboard is not connected to this machine, so that result is expected. No
+hidraw node was available; descriptor matching, udev ACLs, and hardware reads
+were not attempted.
+
+The X11 server at `DISPLAY=:1` responded to `xdpyinfo` when run with display
+access. The demo ran for 15 seconds without errors and was stopped by the
+verification timeout. GUI startup is verified on X11; visual behavior and
+Wayland startup remain unverified.
+
+**Note for the Windows agent:** Linux release builds, tests, and Clippy all pass
+at `4af1877`. The disconnected-device result is expected and does not indicate
+a discovery regression. The in-memory demo starts on X11. No physical-device
+behavior was assessed here.
+
 ## Known limits to carry forward
 
-Windows cross-linking produced Linux ELF binaries, but Linux launch, hidraw
+Linux release builds and X11 demo startup have been verified, but hidraw
 permissions, 65-byte feature-report I/O and on-device behavior have **not**
 been verified. The USB keyboard has firmware `0x0100`, profile 0 on the
 observed Windows configuration collection `3151:4015`, interface 2,
