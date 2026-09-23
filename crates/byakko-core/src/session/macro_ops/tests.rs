@@ -24,6 +24,7 @@ fn ready() -> Session {
             label: "Layer".into(),
         }],
         actions: vec![],
+        shortcuts: None,
     };
     let capabilities = macros::Capabilities {
         byte_budget: None,

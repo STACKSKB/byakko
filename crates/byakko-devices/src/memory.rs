@@ -537,6 +537,7 @@ mod tests {
                 label: "Base".into(),
             }],
             actions: vec![],
+            shortcuts: None,
         };
         let state = State {
             revision: vec![0xff, 0x01],

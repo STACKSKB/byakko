@@ -28,12 +28,25 @@ This confirms successful repeated device reads, backend translation, executor
 delivery and core validation after the move. It does not reread other archive
 sections or establish their current state.
 
+## General shortcut assignment (2026-09-23)
+
+The Iced Keys page now composes a shortcut from the backend descriptor's
+advertised modifier and target-key choices, rather than only the four fixed
+`modifier+A` entries. Nia87 advertises its supported left Ctrl/Shift/Alt/Win
+modifiers, ordinary keys and one- or two-modifier bounds. The portable core
+validates the choice set and constructs `Action::Shortcut`; the existing
+Nia87 adapter encodes it through the normal guarded keymap apply path. A
+separate three-layer memory keyboard stages Ctrl+C and Ctrl+Shift+C through
+Iced messages, applies the latter through the shared executor and verifies its
+readback; changing the selected physical key clears the unsubmitted
+shortcut form. Nia87 codec tests round-trip those forms without USB writes.
+Physical host output remains unverified.
+
 ## Remaining acceptance
 
-- Iced mouse/keyboard interaction and rendered layout: screenshot helper still
-  fails with `SetIsBorderRequired` / `0x80004002`; no accessibility expansion is
-  being pursued. Window launch/normal close and resource observations are in
-  `performance-baseline.md`.
+- The user confirmed the Iced TKL board and key selection after a physical
+  reconnect. The new shortcut editor still needs rendered interaction checks;
+  the screenshot helper fails with `SetIsBorderRequired` / `0x80004002`.
 - Write/readback/restoration through the new executor: existing transaction
   source and prior hardware evidence remain relevant, but this specific new
   path has only been exercised read-only on hardware.
@@ -41,5 +54,5 @@ sections or establish their current state.
   behavior still need their respective acceptance checks.
 - The earlier whole-archive injected-failure recovery problem is unresolved;
   relocating the implementation does not repair or reaccept it.
-- Iced persistent macro labels, lighting/settings/archive surfaces, discovery/hotplug lifecycle
-  and the remaining official configurator parity are still migration work.
+- Broader functional parity and physical acceptance are tracked in
+  `parity-status.md`.

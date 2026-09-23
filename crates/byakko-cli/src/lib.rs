@@ -220,6 +220,7 @@ mod tests {
                 label: "A".into(),
                 action: Action::Key(4),
             }],
+            shortcuts: None,
         };
         let state = State {
             revision: vec![1],
@@ -367,6 +368,7 @@ mod tests {
                 label: "A".into(),
                 action: Action::Key(4),
             }],
+            shortcuts: None,
         };
         let state = State {
             revision: vec![1],

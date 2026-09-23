@@ -16,6 +16,7 @@ mod recording;
 mod recording_input;
 mod screen_stream;
 mod settings;
+mod shortcut;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -35,6 +36,7 @@ enum Message {
     Lighting(lighting::Message),
     Picture(picture::Message),
     Settings(settings::Message),
+    Shortcut(shortcut::Message),
     File(macro_files::Message),
     Record(recording::Message),
     Page(Page),
@@ -101,6 +103,7 @@ struct Desktop {
     layer: String,
     selected: Option<String>,
     search: String,
+    shortcut: shortcut::Form,
     notice: Option<String>,
     closing: Closing,
 }
@@ -139,6 +142,7 @@ pub fn run(
         layer,
         selected: None,
         search: String::new(),
+        shortcut: shortcut::Form::default(),
         notice: None,
         closing: Closing::Open,
     }));
@@ -219,10 +223,14 @@ impl Desktop {
     }
 
     fn stage(&mut self, index: usize) {
-        let Some(key) = self.selected.as_ref() else {
+        let Some(choice) = self.session.descriptor().actions.get(index) else {
             return;
         };
-        let Some(choice) = self.session.descriptor().actions.get(index) else {
+        self.stage_action(choice.action.clone());
+    }
+
+    fn stage_action(&mut self, action: byakko_core::Action) {
+        let Some(key) = self.selected.as_ref() else {
             return;
         };
         self.notice = self
@@ -230,9 +238,42 @@ impl Desktop {
             .stage(Change {
                 layer: self.layer.clone(),
                 key: key.clone(),
-                action: choice.action.clone(),
+                action,
             })
             .err();
+        if self.notice.is_none() {
+            self.sync_shortcut();
+        }
+    }
+
+    fn sync_shortcut(&mut self) {
+        let action = self
+            .selected
+            .as_ref()
+            .and_then(|key| self.session.draft()?.get(&self.layer)?.get(key));
+        self.shortcut
+            .load(action, self.session.descriptor().shortcuts.as_ref());
+    }
+
+    fn update_shortcut(&mut self, message: shortcut::Message) {
+        let Some(caps) = self.session.descriptor().shortcuts.as_ref() else {
+            return;
+        };
+        if self.busy() || *self.session.status() != Status::Ready {
+            return;
+        }
+        match message {
+            shortcut::Message::ToggleModifier(usage) => {
+                self.notice = self.shortcut.toggle_modifier(caps, usage).err();
+            }
+            shortcut::Message::SelectKey(usage) => {
+                self.notice = self.shortcut.select_key(caps, usage).err();
+            }
+            shortcut::Message::Stage => match self.shortcut.action(caps) {
+                Ok(action) => self.stage_action(action),
+                Err(reason) => self.notice = Some(reason),
+            },
+        }
     }
 
     fn read_page_on_entry(&mut self) {
@@ -397,6 +438,10 @@ impl Desktop {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        let keymap_result = matches!(
+            &completion,
+            Completion::Read { .. } | Completion::Apply { .. }
+        );
         let archive_result = matches!(
             completion,
             Completion::CaptureArchive { .. }
@@ -421,6 +466,9 @@ impl Desktop {
         );
         if self.session.accept(completion) == Acceptance::IgnoredStale {
             return Task::none();
+        }
+        if keymap_result && *self.session.status() == Status::Ready {
+            self.sync_shortcut();
         }
         let verified = if archive_result {
             self.session.archive().is_some_and(|state| {
@@ -510,8 +558,15 @@ impl Desktop {
                 self.read_page_on_entry();
             }
             Message::Macro(message) => self.update_macro(message),
-            Message::SelectLayer(layer) => self.layer = layer,
-            Message::SelectKey(key) => self.selected = Some(key),
+            Message::Shortcut(message) => self.update_shortcut(message),
+            Message::SelectLayer(layer) => {
+                self.layer = layer;
+                self.sync_shortcut();
+            }
+            Message::SelectKey(key) => {
+                self.selected = Some(key);
+                self.sync_shortcut();
+            }
             Message::Search(search) => self.search = search,
             Message::Stage(index) => self.stage(index),
             Message::Read => {
@@ -522,7 +577,12 @@ impl Desktop {
                 let request = self.session.request_apply();
                 self.submit(request);
             }
-            Message::Revert => self.notice = self.session.revert().err(),
+            Message::Revert => {
+                self.notice = self.session.revert().err();
+                if self.notice.is_none() {
+                    self.sync_shortcut();
+                }
+            }
             Message::Poll => return self.poll(),
             Message::Scan if self.closing == Closing::ConfirmDiscard => {}
             Message::Scan => self.scan(),

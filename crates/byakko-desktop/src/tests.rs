@@ -64,9 +64,71 @@ fn ready() -> Desktop {
         layer: "Typing".into(),
         selected: Some("Alpha".into()),
         search: String::new(),
+        shortcut: shortcut::Form::default(),
         notice: None,
         closing: Closing::Open,
     }
+}
+
+#[test]
+fn stages_general_one_and_two_modifier_shortcuts_from_device_choices() {
+    let mut app = ready();
+    let _ = app.update(Message::Shortcut(shortcut::Message::ToggleModifier(224)));
+    let _ = app.update(Message::Shortcut(shortcut::Message::SelectKey(6)));
+    let _ = app.update(Message::Shortcut(shortcut::Message::Stage));
+    assert_eq!(
+        app.session.changes()[0].action,
+        Action::Shortcut {
+            modifiers: vec![224],
+            key: 6,
+        }
+    );
+    assert_eq!(
+        shortcut::label(
+            app.session.descriptor().shortcuts.as_ref().unwrap(),
+            &[224],
+            6
+        ),
+        Some("Ctrl+C".into())
+    );
+
+    let _ = app.update(Message::Shortcut(shortcut::Message::ToggleModifier(225)));
+    let _ = app.update(Message::Shortcut(shortcut::Message::Stage));
+    assert_eq!(
+        app.session.changes()[0].action,
+        Action::Shortcut {
+            modifiers: vec![224, 225],
+            key: 6,
+        }
+    );
+    assert_eq!(
+        shortcut::label(
+            app.session.descriptor().shortcuts.as_ref().unwrap(),
+            &[224, 225],
+            6
+        ),
+        Some("Ctrl+Shift+C".into())
+    );
+
+    let _ = app.update(Message::SelectKey("Beta".into()));
+    assert!(app.shortcut.modifiers.is_empty());
+    assert_eq!(app.shortcut.key, None);
+    let _ = app.update(Message::Shortcut(shortcut::Message::Stage));
+    assert_eq!(app.session.changes().len(), 1);
+    assert_eq!(app.session.changes()[0].key, "Alpha");
+
+    let _ = app.update(Message::SelectKey("Alpha".into()));
+    let _ = app.update(Message::Apply);
+    macro_workflow::settle(&mut app);
+    assert_eq!(app.session.status(), &Status::Ready);
+    assert!(app.session.changes().is_empty());
+    assert_eq!(
+        app.session.baseline().unwrap().bindings["Typing"]["Alpha"],
+        Action::Shortcut {
+            modifiers: vec![224, 225],
+            key: 6,
+        }
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 //! Deliberately different from the Nia87: three keys, three named layers.
 use byakko_core::{
-    Action, ActionChoice, Descriptor, Layer, PhysicalKey, State,
+    Action, ActionChoice, Descriptor, Layer, PhysicalKey, ShortcutCapabilities, State, UsageChoice,
     macros::{
         Action as MacroAction, Binding, ButtonChoice, Capabilities, Choice, Content, Event,
         Program, Snapshot,
@@ -47,6 +47,30 @@ pub fn device() -> Result<MemoryDevice, String> {
                 action: Action::Disabled,
             },
         ],
+        shortcuts: Some(ShortcutCapabilities {
+            modifiers: vec![
+                UsageChoice {
+                    label: "Ctrl".into(),
+                    usage: 224,
+                },
+                UsageChoice {
+                    label: "Shift".into(),
+                    usage: 225,
+                },
+            ],
+            keys: vec![
+                UsageChoice {
+                    label: "A".into(),
+                    usage: 4,
+                },
+                UsageChoice {
+                    label: "C".into(),
+                    usage: 6,
+                },
+            ],
+            min_modifiers: 1,
+            max_modifiers: 2,
+        }),
     };
     let state = State {
         revision: vec![1],

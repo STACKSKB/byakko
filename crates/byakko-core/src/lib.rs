@@ -60,6 +60,66 @@ pub struct ActionChoice {
     pub action: Action,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct UsageChoice {
+    pub label: String,
+    pub usage: u16,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ShortcutCapabilities {
+    pub modifiers: Vec<UsageChoice>,
+    pub keys: Vec<UsageChoice>,
+    pub min_modifiers: usize,
+    pub max_modifiers: usize,
+}
+
+impl ShortcutCapabilities {
+    pub fn validate(&self) -> Result<(), String> {
+        fn valid_choices(choices: &[UsageChoice]) -> bool {
+            let mut usages = BTreeSet::new();
+            let mut labels = BTreeSet::new();
+            !choices.is_empty()
+                && choices.iter().all(|choice| {
+                    choice.usage != 0
+                        && !choice.label.trim().is_empty()
+                        && usages.insert(choice.usage)
+                        && labels.insert(choice.label.as_str())
+                })
+        }
+        if !valid_choices(&self.modifiers) || !valid_choices(&self.keys) {
+            return Err("Shortcut choices must be nonempty with unique usages and labels".into());
+        }
+        if self.min_modifiers == 0
+            || self.max_modifiers < self.min_modifiers
+            || self.max_modifiers > self.modifiers.len()
+        {
+            return Err("Shortcut modifier bounds are invalid".into());
+        }
+        Ok(())
+    }
+
+    pub fn compose(&self, modifiers: &[u16], key: u16) -> Result<Action, String> {
+        self.validate()?;
+        if modifiers.len() < self.min_modifiers || modifiers.len() > self.max_modifiers {
+            return Err("Shortcut modifier count is outside the advertised range".into());
+        }
+        let mut seen = BTreeSet::new();
+        if modifiers.iter().any(|usage| {
+            !seen.insert(*usage) || !self.modifiers.iter().any(|choice| choice.usage == *usage)
+        }) {
+            return Err("Shortcut has a duplicate or unadvertised modifier".into());
+        }
+        if !self.keys.iter().any(|choice| choice.usage == key) {
+            return Err("Shortcut target key is not advertised".into());
+        }
+        Ok(Action::Shortcut {
+            modifiers: modifiers.to_vec(),
+            key,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Descriptor {
     pub backend_id: String,
@@ -67,6 +127,8 @@ pub struct Descriptor {
     pub keys: Vec<PhysicalKey>,
     pub layers: Vec<Layer>,
     pub actions: Vec<ActionChoice>,
+    #[serde(default)]
+    pub shortcuts: Option<ShortcutCapabilities>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -85,6 +147,9 @@ pub struct Change {
 
 /// Check the identity and shape of a complete state before presenting or editing it.
 pub fn validate_state(descriptor: &Descriptor, state: &State) -> Result<(), String> {
+    if let Some(shortcuts) = &descriptor.shortcuts {
+        shortcuts.validate()?;
+    }
     let layers: BTreeSet<_> = descriptor.layers.iter().map(|l| l.id.as_str()).collect();
     let keys: BTreeSet<_> = descriptor.keys.iter().map(|k| k.id.as_str()).collect();
     if descriptor.backend_id.is_empty()

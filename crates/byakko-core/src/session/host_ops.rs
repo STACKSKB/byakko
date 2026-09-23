@@ -274,6 +274,7 @@ mod tests {
                 label: "Base".into(),
             }],
             actions: vec![],
+            shortcuts: None,
         })
         .unwrap()
         .with_lighting(Capabilities {
