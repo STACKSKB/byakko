@@ -154,7 +154,11 @@ read-only-first device acceptance sequence there.
   sampling. Its temporary brightness, option and color controls come from a
   portable host-mode schema; the Nia87 adapter alone translates these into
   firmware reports. This is headless verified, with physical and Linux runtime
-  acceptance still open. 2.4 GHz remains a later capability. Do not pursue
+  acceptance still open. A recognized host mode left stored after a crash can
+  be replaced only by an explicit onboard-effect choice through the normal
+  guarded lighting transaction; unknown responses remain opaque, and startup
+  sends no automatic reset. Physical acceptance of this exit path is open.
+  2.4 GHz remains a later capability. Do not pursue
   speculative UI polish or accessibility work before architecture review
   checkpoints. The physical-coordinate key selector is now shared by keymap
   and per-key color views; keep future selectors device-neutral and styled by

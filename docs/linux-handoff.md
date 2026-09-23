@@ -74,6 +74,12 @@ captures and vendor fixtures under ignored paths are not in Git.
   `plan-lighting` and explicit `apply-lighting`; check visible output,
   before-image, full readback and restoration.
 
+- [ ] If `read-lighting` finds a recognized stored host mode after a crashed
+  streamer, verify that the GUI and CLI offer only an explicit onboard-effect
+  exit. Plan against a fresh exact revision and retain the durable backup;
+  physical exit/readback/restoration is not yet accepted. Do not auto-reset
+  lighting on connect.
+
 - [ ] With physical playback access, exercise one changed macro snapshot with
   `plan-macro` and explicit `apply-macro`; verify the backup, full slot readback,
   playback, and restoration. The currently observed empty slot 49 has stored
