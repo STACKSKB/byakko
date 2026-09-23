@@ -10,8 +10,11 @@ use byakko_core::macros::{
     editor::{Editor, Status},
 };
 use iced::{
-    Element, Fill,
-    widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input},
+    Element, Fill, Size,
+    widget::{
+        button, checkbox, column, container, pick_list, responsive, row, scrollable, text,
+        text_input,
+    },
 };
 
 pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
@@ -22,18 +25,40 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
 }
 
 fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
-    let choices = column(editor.capabilities().slots.iter().map(|choice| {
-        panels::selectable_button(
-            &app.ui,
-            app.macro_files
-                .slot_label(&choice.id, &choice.label)
-                .to_owned(),
-            choice.id == editor.slot(),
-            (!app.busy()).then(|| Message::Macro(Macro::Select(choice.id.clone()))),
-        )
-    }))
-    .spacing(app.ui.spacing.xs);
-    panels::panel(&app.ui, "Slots", scrollable(choices).height(Fill).into())
+    let style = &app.ui;
+    let slots = &editor.capabilities().slots;
+    let slot_id = editor.slot();
+    let can_select = !app.busy();
+    let min_cell_width = style.choice_grid_min_cell_width;
+    let gap = style.spacing.xs;
+    let inset = style.scrollbar_inset;
+    let choices = responsive(move |size: Size| {
+        let inner_width = (size.width - f32::from(inset) * 2.0).max(0.0);
+        let columns =
+            (((inner_width + gap as f32) / (min_cell_width + gap as f32)).floor() as usize).max(1);
+        let rows = slots.chunks(columns).map(|choices| {
+            row(choices.iter().map(|choice| {
+                panels::selectable_button_fill_width(
+                    style,
+                    app.macro_files
+                        .slot_label(&choice.id, &choice.label)
+                        .to_owned(),
+                    choice.id == slot_id,
+                    can_select.then(|| Message::Macro(Macro::Select(choice.id.clone()))),
+                )
+            }))
+            .spacing(gap)
+            .width(Fill)
+            .into()
+        });
+        let grid = column(rows).spacing(gap).width(Fill);
+        container(scrollable(grid).width(Fill).height(Fill))
+            .padding([0.0, f32::from(inset)])
+            .width(Fill)
+            .height(Fill)
+            .into()
+    });
+    panels::panel(style, "Slots", choices.into())
 }
 
 fn detail<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {

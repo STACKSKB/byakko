@@ -25,6 +25,10 @@ name = "verify_macro_events"
 required-features = ["research-tools"]
 
 [[example]]
+name = "probe_macro_slot50"
+required-features = ["research-tools"]
+
+[[example]]
 name = "capture_configuration_trace"
 required-features = ["research-tools"]
 
