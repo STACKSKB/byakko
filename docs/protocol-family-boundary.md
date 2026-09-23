@@ -14,7 +14,8 @@ a `yc500` matrix write opcode is a `gen2` options write opcode. The notes also
 describe boards within one family that lack the individual-key setter. Their
 macro notes suggest a shared page shape with different family write opcodes;
 we keep our present codec scoped to the captured Nia87/`yc500` path until a
-second board can validate a wider interface. This
+second board can validate a wider interface. A shared lighting opcode likewise
+does not imply identical speed interpretation or effect availability. This
 document uses those findings to draw boundaries; implementation and test
 vectors must come from our own captures or independently constructed cases.
 No Sharkfin source or UX is incorporated.
@@ -36,6 +37,14 @@ unconfigured or read-only; they cannot inherit Nia87 write capability. A
 `gen2` device must never be passed to a `yc500` writer even though both may
 use the same HID collection and checksum. The physical key-to-slot mapping is
 board data; the command layout is family behavior.
+
+The OS HID inventory is device-neutral. A read-only smoke run on 2026-09-23
+on this Windows host found eleven Wacom Intuos Pro collections and seven from the
+Nia OEM device through the same enumerator and exact-target selector. The
+Nia87 adapter then selected only its `FFFF:0002` configuration collection.
+Opening a feature-report handle still performs Nia87-specific identity and
+report-length checks. This external-target check proves the discovery boundary,
+not tablet button/ring decoding or generic write support.
 
 Within each feature, keep the ordered read -> expected-state check -> durable
 backup -> write -> complete readback -> recovery sequence explicit. Shared

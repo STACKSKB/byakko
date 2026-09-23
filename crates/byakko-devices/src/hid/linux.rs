@@ -1,4 +1,4 @@
-//! Linux hidraw transport for the Nia87 configuration collection.
+//! Linux hidraw enumeration and Nia87 configuration transport.
 //!
 //! ABI constants and report framing follow Linux's hidraw UAPI and hidraw
 //! documentation. This is an independent implementation, not vendor code.
@@ -161,21 +161,10 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
         else {
             continue;
         };
-        if vid != 0x3151 || !matches!(pid, 0x4011 | 0x4015) {
-            continue;
-        }
-        let Ok(descriptor) = fs::read(sys_device.join("report_descriptor")) else {
-            continue;
-        };
-        if descriptor.is_empty() || descriptor.len() > MAX_DESCRIPTOR {
-            continue;
-        }
-        let Some(parsed) = parse_descriptor(&descriptor) else {
-            continue;
-        };
-        if !parsed.target {
-            continue;
-        }
+        let parsed = fs::read(sys_device.join("report_descriptor"))
+            .ok()
+            .filter(|descriptor| !descriptor.is_empty() && descriptor.len() <= MAX_DESCRIPTOR)
+            .and_then(|descriptor| parse_descriptor(&descriptor));
         let canonical = fs::canonicalize(&sys_device).unwrap_or(sys_device.clone());
         let interface = ancestor_hex(&canonical, "bInterfaceNumber").map_or(-1, i32::from);
         let release = ancestor_hex(&canonical, "bcdDevice").unwrap_or(0);
@@ -195,8 +184,12 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
             vid,
             pid,
             interface,
-            usage_page: 0xffff,
-            usage: 2,
+            usage_page: parsed
+                .and_then(|parsed| parsed.application_usage)
+                .map_or(0, |usage| usage.0),
+            usage: parsed
+                .and_then(|parsed| parsed.application_usage)
+                .map_or(0, |usage| usage.1),
             manufacturer,
             product,
             release,
@@ -278,6 +271,7 @@ fn descriptor_from_fd(fd: libc::c_int) -> Result<Vec<u8>> {
 struct DescriptorInfo {
     target: bool,
     numbered_feature_reports: bool,
+    application_usage: Option<(u16, u16)>,
 }
 
 /// Parse HID items and inspect only top-level Application Collections. Usage
@@ -291,6 +285,7 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
     let mut depth = 0usize;
     let mut target = false;
     let mut numbered_feature_reports = false;
+    let mut application_usage = None;
     while position < bytes.len() {
         let prefix = bytes[position];
         position += 1;
@@ -330,8 +325,20 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
             (0, 10) => {
                 // Main: Collection
                 let usage = local_usage.or(local_minimum);
-                if depth == 0 && value == 1 && usage == Some(0xffff_0002) {
-                    target = true;
+                if depth == 0
+                    && value == 1
+                    && let Some(usage) = usage
+                {
+                    let page = (usage >> 16) as u16;
+                    let usage = usage as u16;
+                    if page == 0xffff && usage == 2 {
+                        target = true;
+                        // Keep the Nia collection discoverable even if a
+                        // descriptor has another application collection first.
+                        application_usage = Some((page, usage));
+                    } else if application_usage.is_none() {
+                        application_usage = Some((page, usage));
+                    }
                 }
                 depth += 1;
                 local_usage = None;
@@ -356,6 +363,7 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
     (depth == 0 && global_stack.is_empty()).then_some(DescriptorInfo {
         target,
         numbered_feature_reports,
+        application_usage,
     })
 }
 
@@ -391,6 +399,30 @@ mod tests {
         let plain = [0x06, 0xff, 0xff, 0x09, 0x02, 0xb1, 0x02];
         assert!(!parse_descriptor(&nested).unwrap().target);
         assert!(!parse_descriptor(&plain).unwrap().target);
+    }
+
+    #[test]
+    fn parser_reports_non_nia_top_level_application_usages() {
+        let keyboard = [0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0xc0];
+        let parsed = parse_descriptor(&keyboard).unwrap();
+        assert_eq!(parsed.application_usage, Some((0x0001, 0x0006)));
+        assert!(!parsed.target);
+
+        let consumer = [0x05, 0x0c, 0x09, 0x01, 0xa1, 0x01, 0xc0];
+        let parsed = parse_descriptor(&consumer).unwrap();
+        assert_eq!(parsed.application_usage, Some((0x000c, 0x0001)));
+        assert!(!parsed.target);
+    }
+
+    #[test]
+    fn nia_target_usage_is_preferred_if_another_application_comes_first() {
+        let mixed = [
+            0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0xc0, 0x06, 0xff, 0xff, 0x09, 0x02, 0xa1, 0x01,
+            0xc0,
+        ];
+        let parsed = parse_descriptor(&mixed).unwrap();
+        assert!(parsed.target);
+        assert_eq!(parsed.application_usage, Some((0xffff, 0x0002)));
     }
 
     #[test]

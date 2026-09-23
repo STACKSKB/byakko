@@ -1,8 +1,8 @@
-//! Windows HID collection access for the Nia87 vendor interface.
+//! Windows HID collection inventory and guarded Nia87 feature access.
 //!
 //! This module uses the documented Windows HID and SetupAPI interfaces. It
-//! contains no HIDAPI code and does not inspect the keyboard outside the
-//! collection metadata and feature reports explicitly requested by callers.
+//! contains no HIDAPI code. Inventory reads collection metadata only; feature
+//! reports require the separate Nia87-validated `open` path.
 
 use std::ffi::{CStr, CString};
 use std::io;
@@ -143,6 +143,11 @@ fn interface_number(path: &str) -> i32 {
         .unwrap_or(-1)
 }
 
+fn nia_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.contains("vid_3151") && (lower.contains("pid_4011") || lower.contains("pid_4015"))
+}
+
 fn interface_path(set: HDEVINFO, interface: &SP_DEVICE_INTERFACE_DATA) -> Result<CString> {
     let mut needed = 0u32;
     // SAFETY: this sizing call intentionally passes a null output buffer.
@@ -231,35 +236,31 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
             Ok(path) => path,
             Err(_) => continue,
         };
-        // This cheap path filter avoids opening unrelated HID devices. Actual
-        // identity is then verified from HidD_GetAttributes, not the path.
         let lower = path.to_string_lossy().to_ascii_lowercase();
-        if !lower.contains("vid_3151")
-            || !(lower.contains("pid_4011") || lower.contains("pid_4015"))
-        {
-            continue;
-        }
         let device = match open_handle(&path, 0) {
             Ok(device) => device,
-            Err(err) => {
-                target_error.get_or_insert_with(|| err.to_string());
+            Err(error) => {
+                if nia_path(&lower) {
+                    target_error.get_or_insert_with(|| error.to_string());
+                }
                 continue;
             }
         };
         let attr = match attributes(device.handle) {
             Ok(attr) => attr,
-            Err(err) => {
-                target_error.get_or_insert_with(|| err.to_string());
+            Err(error) => {
+                if nia_path(&lower) {
+                    target_error.get_or_insert_with(|| error.to_string());
+                }
                 continue;
             }
         };
-        if attr.VendorID != 0x3151 || !matches!(attr.ProductID, 0x4011 | 0x4015) {
-            continue;
-        }
         let caps = match capabilities(device.handle) {
             Ok(caps) => caps,
-            Err(err) => {
-                target_error.get_or_insert_with(|| err.to_string());
+            Err(error) => {
+                if attr.VendorID == 0x3151 && matches!(attr.ProductID, 0x4011 | 0x4015) {
+                    target_error.get_or_insert_with(|| error.to_string());
+                }
                 continue;
             }
         };
@@ -278,10 +279,15 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
             release: attr.VersionNumber,
         });
     }
-    if found.is_empty()
-        && let Some(err) = target_error
+    if let Some(error) = target_error
+        && !found.iter().any(|device| {
+            device.vid == 0x3151
+                && matches!(device.pid, 0x4011 | 0x4015)
+                && device.usage_page == 0xffff
+                && device.usage == 2
+        })
     {
-        return Err(format!("Could not inspect a Nia87 HID collection: {err}").into());
+        return Err(format!("Could not inspect a Nia87 HID collection: {error}").into());
     }
     Ok(found)
 }
@@ -336,11 +342,18 @@ impl Device {
 
 #[cfg(test)]
 mod tests {
-    use super::interface_number;
+    use super::{interface_number, nia_path};
 
     #[test]
     fn parses_windows_interface_number() {
         assert_eq!(interface_number(r"\\?\hid#vid_3151&pid_4015&mi_02#..."), 2);
         assert_eq!(interface_number(r"\\?\hid#vid_3151&pid_4015#..."), -1);
+    }
+
+    #[test]
+    fn identifies_nia_paths_only_for_partial_inventory_errors() {
+        assert!(nia_path(r"\\?\hid#vid_3151&pid_4015&mi_02#..."));
+        assert!(nia_path(r"\\?\hid#VID_3151&PID_4011#..."));
+        assert!(!nia_path(r"\\?\hid#vid_056a&pid_03f7#..."));
     }
 }

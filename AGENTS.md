@@ -64,6 +64,10 @@ research baseline, not the structure to port.
 - One serialized executor owns each connected device session. Keep backups,
   pacing, expected-state checks, verification and recovery outcomes explicit.
   Failed or unknown recovery is never reported as a successful save.
+- HID collection enumeration and exact-target selection are backend-neutral.
+  A matching inventory entry does not authorize feature reports: Nia87 opens
+  must still verify the board collection and report shape. Keep tablet/other
+  input-report semantics separate from the keyboard configuration protocol.
 - Recording is an exclusive local session activity. Feed explicit timestamps
   into core, reserve held-input releases, and finish before close or focus loss.
   Do not poll the device worker while only recording, or capture global input.
