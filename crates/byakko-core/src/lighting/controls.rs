@@ -59,17 +59,20 @@ pub fn controls(caps: &Capabilities, setting: &Setting) -> Result<Controls, Stri
         .find(|effect| effect.id == setting.effect)
         .ok_or("Unknown lighting effect")?;
 
-    let effects = caps
-        .effects
-        .iter()
-        .map(|candidate| ChoiceEdit {
-            label: candidate.label.clone(),
-            selected: candidate.id == setting.effect,
-            edit: Edit::Effect(candidate.id.clone()),
-        })
-        .collect();
+    let effects = effect_choices(caps, Some(&setting.effect));
     let settings = parameter_controls(effect, setting)?;
     Ok(Controls { effects, settings })
+}
+
+pub fn effect_choices(caps: &Capabilities, selected: Option<&str>) -> Vec<ChoiceEdit> {
+    caps.effects
+        .iter()
+        .map(|effect| ChoiceEdit {
+            label: effect.label.clone(),
+            selected: selected == Some(effect.id.as_str()),
+            edit: Edit::Effect(effect.id.clone()),
+        })
+        .collect()
 }
 
 pub fn parameter_controls(effect: &Effect, setting: &Setting) -> Result<Vec<Control>, String> {

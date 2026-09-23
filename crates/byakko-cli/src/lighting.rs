@@ -28,11 +28,14 @@ pub fn plan_lighting(session: &Session, target: &Snapshot) -> Result<Option<Sett
         );
     }
     lighting::validate_snapshot(editor.capabilities(), target)?;
-    let (Content::Editable(before), Content::Editable(after)) = (&current.content, &target.content)
-    else {
-        return Err("Opaque lighting is available only as a raw backup".into());
+    let Content::Editable(after) = &target.content else {
+        return Err("Lighting target must be an onboard effect".into());
     };
-    Ok((before != after).then(|| after.clone()))
+    match &current.content {
+        Content::Editable(before) => Ok((before != after).then(|| after.clone())),
+        Content::HostActive { .. } => Ok(Some(after.clone())),
+        Content::Opaque { .. } => Err("Opaque lighting is available only as a raw backup".into()),
+    }
 }
 
 /// Stage the reviewed effect and await backup, write, and complete readback.
@@ -63,12 +66,22 @@ mod tests {
     use crate::{read_keymap, read_lighting};
     use byakko_core::{
         Action, Descriptor, Layer, PhysicalKey, State,
-        lighting::{Capabilities, Color, ColorCapability, Effect},
+        lighting::{Capabilities, Color, ColorCapability, Effect, HostMode, HostSource},
     };
     use byakko_devices::memory::MemoryDevice;
     use std::{collections::BTreeMap, path::PathBuf, time::Duration};
 
     fn ready() -> (Session, Executor, Snapshot) {
+        ready_with(Content::Editable(Setting {
+            effect: "steady".into(),
+            brightness: Some(4),
+            speed: None,
+            option: None,
+            color: Some(Color::Rgb([10, 20, 30])),
+        }))
+    }
+
+    fn ready_with(content: Content) -> (Session, Executor, Snapshot) {
         let descriptor = Descriptor {
             backend_id: "memory".into(),
             device_name: "One key".into(),
@@ -106,18 +119,17 @@ mod tests {
                 options: vec![],
                 color: Some(ColorCapability::Fixed),
             }],
-            host_modes: vec![],
+            host_modes: vec![HostMode {
+                id: "screen".into(),
+                label: "Screen".into(),
+                source: HostSource::ScreenAverage,
+                parameters: None,
+            }],
         };
         let snapshot = Snapshot {
             backend_id: "memory".into(),
             revision: vec![2],
-            content: Content::Editable(Setting {
-                effect: "steady".into(),
-                brightness: Some(4),
-                speed: None,
-                option: None,
-                color: Some(Color::Rgb([10, 20, 30])),
-            }),
+            content,
         };
         let device = MemoryDevice::new(descriptor.clone(), state)
             .unwrap()
@@ -131,6 +143,27 @@ mod tests {
         read_keymap(&mut session, &executor, Duration::from_secs(1)).unwrap();
         let current = read_lighting(&mut session, &executor, Duration::from_secs(1)).unwrap();
         (session, executor, current)
+    }
+
+    #[test]
+    fn known_host_mode_exit_uses_the_same_revision_checked_apply() {
+        let (mut session, executor, current) = ready_with(Content::HostActive {
+            mode_id: "screen".into(),
+        });
+        assert!(plan_lighting(&session, &current).is_err());
+        let mut target = current.clone();
+        target.content = Content::Editable(Setting {
+            effect: "steady".into(),
+            brightness: Some(4),
+            speed: None,
+            option: None,
+            color: Some(Color::Rgb([10, 20, 30])),
+        });
+        assert!(plan_lighting(&session, &target).unwrap().is_some());
+        let applied = apply_lighting(&mut session, &executor, &target).unwrap();
+        assert_eq!(applied.content, target.content);
+        assert_ne!(applied.revision, current.revision);
+        assert!(plan_lighting(&session, &target).is_err());
     }
 
     #[test]

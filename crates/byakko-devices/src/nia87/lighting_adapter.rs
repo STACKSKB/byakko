@@ -10,6 +10,18 @@ use byakko_core::{
 use std::path::Path;
 
 pub const BACKEND_ID: &str = "nia87";
+const MUSIC_FOLLOW_3: &str = "music-follow-3";
+const SCREEN_AVERAGE: &str = "screen-average";
+const MUSIC_FOLLOW_2: &str = "music-follow-2";
+
+fn host_mode_id(effect_id: u8) -> Option<&'static str> {
+    match effect_id {
+        20 => Some(MUSIC_FOLLOW_3),
+        21 => Some(SCREEN_AVERAGE),
+        22 => Some(MUSIC_FOLLOW_2),
+        _ => None,
+    }
+}
 
 fn effect_schema(id: String, effect: &native::Effect) -> Effect {
     Effect {
@@ -63,13 +75,13 @@ pub fn capabilities() -> Capabilities {
             .collect(),
         host_modes: vec![
             HostMode {
-                id: "screen-average".into(),
+                id: SCREEN_AVERAGE.into(),
                 label: "Screen average".into(),
                 source: HostSource::ScreenAverage,
                 parameters: None,
             },
-            music_mode("music-follow-2", "Music follow 2", 22),
-            music_mode("music-follow-3", "Music follow 3", 20),
+            music_mode(MUSIC_FOLLOW_2, "Music follow 2", 22),
+            music_mode(MUSIC_FOLLOW_3, "Music follow 3", 20),
         ],
     }
 }
@@ -127,13 +139,18 @@ fn to_native(value: &Setting) -> Result<native::LightingSetting, String> {
 }
 
 pub fn from_native(value: &native::Lighting) -> Snapshot {
-    let content = if value.raw()[0] != native::LED_READ_COMMAND || value.effect_id() > 19 {
+    let content = if value.raw()[0] != native::LED_READ_COMMAND {
         Content::Opaque {
-            reason: "Unsupported Nia87 lighting response or host effect".into(),
+            reason: "Unsupported Nia87 lighting response".into(),
         }
     } else if let Some(setting) = value.recognized_setting() {
-        let projected = from_native_setting(&setting);
-        Content::Editable(projected)
+        if let Some(mode_id) = host_mode_id(value.effect_id()) {
+            Content::HostActive {
+                mode_id: mode_id.into(),
+            }
+        } else {
+            Content::Editable(from_native_setting(&setting))
+        }
     } else {
         Content::Opaque {
             reason: "Unrecognized Nia87 lighting fields".into(),
@@ -158,7 +175,7 @@ pub fn draft(expected: &Snapshot, desired: &Setting) -> Result<native::LightingS
     if &projected != expected {
         return Err("Lighting snapshot differs from its revision; reload before editing".into());
     }
-    if !matches!(expected.content, Content::Editable(_)) {
+    if matches!(expected.content, Content::Opaque { .. }) {
         return Err("Unrecognized Nia87 lighting is available only as a raw backup".into());
     }
     let mut target = to_native(desired)?;
@@ -269,6 +286,47 @@ mod tests {
             from_bytes(&raw).unwrap().content,
             Content::Opaque { .. }
         ));
+    }
+
+    #[test]
+    fn recognized_stored_host_mode_can_exit_to_an_onboard_effect() {
+        let desired = lighting::default_setting(&capabilities(), "1").unwrap();
+        for (effect_id, mode_id) in [
+            (20, MUSIC_FOLLOW_3),
+            (21, SCREEN_AVERAGE),
+            (22, MUSIC_FOLLOW_2),
+        ] {
+            let music = effect_id != 21;
+            let host_setting = native::LightingSetting {
+                effect_id,
+                value: music.then_some(4),
+                speed: None,
+                option: music.then_some(0),
+                rgb: music.then_some([0, 255, 0]),
+                dazzle: false,
+            };
+            let mut response = native::write_report(&host_setting).unwrap();
+            response[0] = native::LED_READ_COMMAND;
+            let baseline = from_bytes(&response).unwrap();
+            assert_eq!(
+                baseline.content,
+                Content::HostActive {
+                    mode_id: mode_id.into()
+                }
+            );
+            assert_eq!(draft(&baseline, &desired).unwrap().effect_id, 1);
+
+            let mut forged = baseline.clone();
+            forged.content = Content::HostActive {
+                mode_id: "wrong-mode".into(),
+            };
+            assert!(draft(&forged, &desired).is_err());
+            response[4] = 9;
+            assert!(matches!(
+                from_bytes(&response).unwrap().content,
+                Content::Opaque { .. }
+            ));
+        }
     }
 
     #[test]

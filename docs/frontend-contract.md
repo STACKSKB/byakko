@@ -70,6 +70,10 @@ catalog and Nia87 preflight, then prints the desired setting or `null` for no
 change. `apply-lighting <snapshot-file>` requires a change and uses the same
 guarded session/executor transaction as Iced. The attached board has exercised
 planning only; physical CLI lighting apply remains open.
+If `read-lighting` reports a recognized stored host mode, a file with the same
+raw revision and a desired onboard setting can plan and explicitly apply a
+return to local lighting. Unknown raw modes remain read-only; no startup action
+changes the board.
 
 `read-macro <slot-id>` output is a backend snapshot with the complete raw
 before-image. `plan-macro <snapshot-file>` freshly reads that exact slot,

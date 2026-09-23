@@ -125,7 +125,14 @@ pub fn edit_parameters(
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Content {
     Editable(Setting),
-    Opaque { reason: String },
+    /// A known host-driven mode remains stored. This session does not own its
+    /// stream; choosing an onboard effect is an explicit, guarded replacement.
+    HostActive {
+        mode_id: String,
+    },
+    Opaque {
+        reason: String,
+    },
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -225,8 +232,12 @@ pub fn validate_snapshot(caps: &Capabilities, snapshot: &Snapshot) -> Result<(),
     if snapshot.backend_id != caps.backend_id {
         return Err("Lighting result belongs to a different backend".into());
     }
-    if let Content::Editable(setting) = &snapshot.content {
-        validate_setting(caps, setting)?;
+    match &snapshot.content {
+        Content::Editable(setting) => validate_setting(caps, setting)?,
+        Content::HostActive { mode_id }
+            if caps.host_modes.iter().any(|mode| &mode.id == mode_id) => {}
+        Content::HostActive { .. } => return Err("Unknown active host lighting mode".into()),
+        Content::Opaque { .. } => {}
     }
     Ok(())
 }

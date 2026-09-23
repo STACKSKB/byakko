@@ -343,7 +343,7 @@ impl Device for MemoryDevice {
         if &stored.snapshot != expected {
             return Err(reject("Stale expected lighting snapshot".into()));
         }
-        if !matches!(stored.snapshot.content, lighting::Content::Editable(_)) {
+        if matches!(stored.snapshot.content, lighting::Content::Opaque { .. }) {
             return Err(reject("Opaque lighting cannot be edited".into()));
         }
         lighting::validate_setting(&stored.capabilities, desired).map_err(reject)?;

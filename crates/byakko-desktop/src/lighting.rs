@@ -63,10 +63,24 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         content = content.push(host_controls(app, editor));
     }
     let Some(draft) = editor.draft() else {
-        if let Some(snapshot) = editor.baseline()
-            && let Content::Opaque { reason } = &snapshot.content
-        {
-            content = content.push(text(reason));
+        if let Some(snapshot) = editor.baseline() {
+            match &snapshot.content {
+                Content::HostActive { .. } => {
+                    content = content.push(panels::panel(
+                        &app.ui,
+                        "Choose an onboard effect",
+                        scrollable(choice_buttons(
+                            &app.ui,
+                            &controls::effect_choices(editor.capabilities(), None),
+                            !app.busy() && *editor.status() == Status::Ready,
+                        ))
+                        .height(Fill)
+                        .into(),
+                    ));
+                }
+                Content::Opaque { reason } => content = content.push(text(reason)),
+                Content::Editable(_) => {}
+            }
         }
         return content.into();
     };
@@ -116,6 +130,9 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
     let can_start = !app.busy()
         && app.session.status() == &SessionStatus::Ready
         && editor.status() == &Status::Ready
+        && editor
+            .baseline()
+            .is_some_and(|snapshot| matches!(snapshot.content, Content::Editable(_)))
         && !editor.dirty();
     let modes = control_widgets::choices(
         &app.ui,
@@ -185,6 +202,14 @@ fn status(app: &Desktop, editor: &Editor) -> String {
     }
     match editor.status() {
         Status::Unloaded => "Read lighting to begin".into(),
+        Status::Ready
+            if matches!(
+                editor.baseline().map(|snapshot| &snapshot.content),
+                Some(Content::HostActive { .. })
+            ) && editor.draft().is_none() =>
+        {
+            "Host lighting is active · select an onboard effect to return to local lighting".into()
+        }
         Status::Ready => "Readback verified · edits are staged until applied".into(),
         Status::Conflict { .. } => "Lighting changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => super::view::problem_label(problem),

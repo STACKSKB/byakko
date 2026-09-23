@@ -24,6 +24,14 @@ rejects stale or wrong-kind completions and keeps only one device operation
 active. Commands and completions use owned serializable values for a future
 browser or service adapter.
 
+If a previous process left a recognized host-driven mode stored, the read is
+shown as an active host mode rather than an editable onboard effect. The user
+can explicitly choose an advertised onboard effect and apply it through the
+same revision check, backup, readback and recovery transaction. Unknown host
+responses stay opaque. No effect is written automatically on startup. Core,
+Nia87 preflight and memory-backend CLI tests cover this path without hardware;
+physical Iced exit from a leftover host mode remains unverified.
+
 The 2026-09-23 read-only probe on the attached Nia87 traversed the core
 session, executor and native adapter. It read effect 5 (Ripple), brightness 4,
 speed 0 and RGB `[8, 8, 8]`, matching the earlier full configuration capture.
