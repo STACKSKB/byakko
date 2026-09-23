@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Byakko
+Comment=Native keyboard configurator
+Exec=/usr/local/bin/byakko-desktop
+Terminal=false
+Categories=Settings;HardwareSettings;
