@@ -23,6 +23,12 @@ stream and restoration transaction.
    restoration in order. It must accept Stop while the stream loop runs, and
    reject other device commands until restoration completes. Do not create a
    second worker or let a frame loop reopen an arbitrary unique device.
+   The screen/audio sampler stays above `devices` and sends owned RGB or band
+   frames through a bounded input slot. Band count is a backend capability;
+   only the Nia87 adapter assumes 32 bands. A full slot may drop a frame; it must
+   not delay Stop. The device-side host session only sends frames and restores
+   its verified baseline. Do not make a device backend pull screen or audio
+   samples in a `step` callback.
 3. Route host activity through `Access::start_host_lighting` using the
    executor's immutable target. The retained stream's setup and restore are
    now target-bound, but the Iced executor does not yet own that stream and its
