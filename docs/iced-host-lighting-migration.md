@@ -5,20 +5,21 @@ threads (`src/screen_stream.rs` and `src/audio_stream.rs`). Those loops open a
 `HostLightingSession`, send frames, and explicitly restore the saved effect.
 That session now captures the selected Nia87 HID target and checks it on both
 setup and restoration, including the legacy unique-device entry point.
-The Iced desktop currently exposes only finite lighting read/apply commands.
-The Nia87 adapter intentionally excludes host effects 20–22 from its editable
-catalog. Iced must not present Start until its executor can own the complete
-stream and restoration transaction.
+Iced now exposes screen-average streaming as a host mode advertised separately
+from editable firmware effects. Its pure session owns the baseline and operation
+ticket; the selected-device executor owns setup, frames and restoration; the OS
+sampler owns screen capture and never opens HID. This is an implementation
+record, not physical acceptance of the Iced path.
 
 ## Required ownership change
 
-1. Add a host activity to the portable session contract with explicit
+1. The portable session contract has explicit
    `Starting`, `Streaming`, `Stopping`, and `Unverified` outcomes. Start requires
    a verified lighting baseline and a backend-advertised host mode. A Stop
    request during Starting must be remembered and run restoration as soon as
    setup finishes. Every completion carries the connection generation and
    stream operation ID; stale UI completions cannot replace current state.
-2. Extend the existing bounded device executor with a control path for Stop.
+2. The bounded device executor has a control path for Stop.
    The same worker that owns the selected device executes setup, frames, and
    restoration in order. It must accept Stop while the stream loop runs, and
    reject other device commands until restoration completes. Do not create a
@@ -31,32 +32,33 @@ stream and restoration transaction.
    not delay Stop. The device-side host session only sends frames and restores
    its verified baseline. Do not make a device backend pull screen or audio
    samples in a `step` callback.
-3. Route host activity through `Access::start_host_lighting` using the
-   executor's immutable target. The retained stream's setup and restore are
-   now target-bound, but the Iced executor does not yet own that stream and its
-   Stop/recovery control path. Complete that ownership change before exposing
-   the action.
-4. Return a typed restoration result. A verified restored snapshot may refresh
+3. The Nia87 adapter routes host activity through
+   `Access::start_host_lighting_detailed` using the executor's immutable target.
+   The adapter maps the portable screen mode to Nia87 effect 21. The same worker
+   owns Stop and recovery; it never opens an arbitrary matching collection.
+4. Restoration returns a typed result. A verified restored snapshot may refresh
    the lighting baseline. Failed or uncertain restoration leaves lighting
    unverified, keeps the backup path visible, and blocks another write until a
    deliberate read. A capture or stream failure after setup still runs restore.
 
 ## Desktop behavior
 
-The host controls should be projected from backend capabilities and a verified
-lighting baseline. Screen color and system playback are opt-in Starts. The
-active view has Stop/Restore. A close request, focus loss, or selected-target
-disconnect requests Stop and waits for restoration; it does not discard the
-worker or accept a new connection while restoration is unresolved. Sampling is
-local and no captured image or playback sample is stored. The existing
-platform capture limits remain visible where a mode is offered.
+Iced offers screen Start from backend capabilities only with a verified,
+editable, clean lighting baseline. The active view has Stop & restore. A close
+request asks for Stop and waits for a verified restoration result. The stream
+sampler is local, drops frames if its slot is full, and stores no captured image.
+Focus-loss Stop and selected-target disconnect acceptance remain open; the
+legacy playback sampler is not yet connected to this lifecycle. Platform
+capture limits remain to be validated on Linux, including X11 disconnect and
+Wayland.
 
 ## Acceptance gates
 
-- Memory-executor tests: Start/Stop ordering; Stop during Starting; duplicate
-  Stop; other commands rejected while streaming; stale generation and operation
-  completions ignored; close waits for restoration; failed restoration remains
-  unverified and retains the backup reference.
+- Headless tests cover Start/Stop ordering, Stop during Starting, duplicate
+  Stop, finite commands rejected while streaming, generation-change restore,
+  bounded frames, and failed restoration. Pure session tests reject stale
+  tickets and invalidate lighting on uncertain restore. The Iced close path
+  waits for restoration, but needs GUI interaction acceptance.
 - Nia87 transport tests: selected-target change fails before opening any other
   collection, both on setup and on recovery; exact frame encodings remain the
   existing protocol fixtures. Tests use fakes and never drive the keyboard.
