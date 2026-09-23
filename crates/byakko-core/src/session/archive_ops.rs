@@ -577,11 +577,11 @@ mod tests {
             })
         );
         assert_eq!(
-            session.reconnect_caution(),
-            Some(super::super::ReconnectCaution {
+            session.reconnect_cautions(),
+            vec![super::super::ReconnectCaution {
                 surface: super::super::ReconnectSurface::Archive,
                 cause: super::super::ReconnectCause::Apply(&failure),
-            })
+            }]
         );
         assert!(session.request_archive_apply().is_err());
         session.clear_archive_review();

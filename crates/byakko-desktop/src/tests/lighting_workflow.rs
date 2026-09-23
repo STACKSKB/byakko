@@ -47,6 +47,58 @@ fn lighting_page_reads_once_on_entry_and_after_pending_keymap() {
 }
 
 #[test]
+fn reconnect_keeps_both_keymap_and_lighting_conflict_diagnostics() {
+    let mut app = loaded();
+    app.stage(1);
+    app.session.edit_lighting(Edit::Brightness(63)).unwrap();
+
+    let mut changed_keys = app.session.baseline().unwrap().clone();
+    changed_keys.revision.push(2);
+    let Command::Read {
+        generation,
+        operation,
+    } = app.session.request_read().unwrap()
+    else {
+        unreachable!()
+    };
+    app.session.accept(Completion::Read {
+        generation,
+        operation,
+        result: Ok(changed_keys),
+    });
+    assert!(matches!(app.session.status(), Status::Conflict { .. }));
+
+    let mut changed_lighting = app.session.lighting().unwrap().baseline().unwrap().clone();
+    changed_lighting.revision.push(2);
+    let Command::ReadLighting {
+        generation,
+        operation,
+    } = app.session.request_lighting_read().unwrap()
+    else {
+        unreachable!()
+    };
+    app.session.accept(Completion::ReadLighting {
+        generation,
+        operation,
+        result: Ok(changed_lighting),
+    });
+    assert!(matches!(
+        app.session.lighting().unwrap().status(),
+        LightingStatus::Conflict { .. }
+    ));
+
+    app.accept_availability(Availability::Missing);
+    assert_eq!(app.auto_read, AutoRead::ManualOnly);
+    let notice = app.notice.as_deref().unwrap();
+    assert!(notice.contains("Keys: Device values conflict"));
+    assert!(notice.contains("Lighting: Device values conflict"));
+    app.accept_availability(Availability::Ready {
+        id: "demo-2".into(),
+    });
+    assert_eq!(app.session.status(), &Status::Disconnected);
+}
+
+#[test]
 fn lighting_uses_capabilities_and_memory_executor_without_losing_other_drafts() {
     let mut app = loaded();
     app.stage(1);

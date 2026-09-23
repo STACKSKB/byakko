@@ -381,5 +381,5 @@ pub(super) fn reconnect_caution_label(caution: ReconnectCaution<'_>) -> String {
             "Readback differs from the draft; state is unverified".into()
         }
     };
-    format!("{surface}: {reason} · Read manually after reconnecting.")
+    format!("{surface}: {reason}")
 }

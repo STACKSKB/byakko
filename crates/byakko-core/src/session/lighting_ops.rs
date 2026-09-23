@@ -192,11 +192,11 @@ mod tests {
             lighting::editor::Status::Conflict { .. }
         ));
         assert_eq!(
-            session.reconnect_caution(),
-            Some(super::super::ReconnectCaution {
+            session.reconnect_cautions(),
+            vec![super::super::ReconnectCaution {
                 surface: super::super::ReconnectSurface::Lighting,
                 cause: super::super::ReconnectCause::Conflict,
-            })
+            }]
         );
         assert_eq!(session.lighting().unwrap().draft(), Some(&setting(5)));
         read(&mut session, Ok(snapshot(1, 10)));
@@ -251,11 +251,11 @@ mod tests {
             }
         ));
         assert_eq!(
-            session.reconnect_caution(),
-            Some(super::super::ReconnectCaution {
+            session.reconnect_cautions(),
+            vec![super::super::ReconnectCaution {
                 surface: super::super::ReconnectSurface::Lighting,
                 cause: super::super::ReconnectCause::ApplyReadbackMismatch,
-            })
+            }]
         );
         assert_eq!(session.lighting().unwrap().draft(), Some(&setting(5)));
     }
@@ -297,7 +297,7 @@ mod tests {
                 problem: Problem::ReadRequired
             }
         ));
-        assert_eq!(session.reconnect_caution(), None);
+        assert!(session.reconnect_cautions().is_empty());
         assert_eq!(
             session.accept(Completion::ApplyLighting {
                 generation,
@@ -311,14 +311,14 @@ mod tests {
         );
         assert_eq!(session.lighting().unwrap().draft(), Some(&setting(5)));
         assert_eq!(
-            session.reconnect_caution(),
-            Some(super::super::ReconnectCaution {
+            session.reconnect_cautions(),
+            vec![super::super::ReconnectCaution {
                 surface: super::super::ReconnectSurface::Lighting,
                 cause: super::super::ReconnectCause::Apply(&ApplyFailure {
                     message: "failed".into(),
                     recovery: Recovery::Unverified,
                 }),
-            })
+            }]
         );
     }
 }
