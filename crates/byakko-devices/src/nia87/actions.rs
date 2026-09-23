@@ -142,6 +142,30 @@ pub fn presets() -> Vec<ActionPreset> {
             bytes: [3, 0, 0x24, 2],
         },
         ActionPreset {
+            label: "(",
+            bytes: [0, 0, 0xe5, 0x26],
+        },
+        ActionPreset {
+            label: ")",
+            bytes: [0, 0, 0xe5, 0x27],
+        },
+        ActionPreset {
+            label: "Win+E",
+            bytes: [0, 0, 0xe3, 0x08],
+        },
+        ActionPreset {
+            label: "Win+Tab",
+            bytes: [0, 0, 0xe3, 0x2b],
+        },
+        ActionPreset {
+            label: "Win+D",
+            bytes: [0, 0, 0xe3, 0x07],
+        },
+        ActionPreset {
+            label: "Lock Screen",
+            bytes: [0, 0, 0xe3, 0x0f],
+        },
+        ActionPreset {
             label: "Display Brightness Up",
             bytes: [3, 0, 0x6f, 0],
         },
