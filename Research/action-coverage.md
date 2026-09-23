@@ -1,9 +1,9 @@
 # Nia87 visible action coverage
 
-This note records the action entries that are visible in the supplied official
-Nia87 configurator catalog but are not currently represented by the native
-`src/actions.rs` preset list. It is a static research record only. No vendor
-source code, table asset, or UI implementation is copied into Byakko.
+This note records action entries visible in the supplied official Nia87
+configurator catalog. All twelve entries in the table are now represented in
+`crates/byakko-devices/src/nia87/actions.rs`. This is a static research record;
+no vendor source code, table asset, or UI implementation is copied into Byakko.
 
 ## Scope and selected path
 
@@ -68,6 +68,21 @@ untested on the attached keyboard. The native implementation should preserve
 unknown four-byte values and should not label these actions end-to-end
 validated until reversible device tests and host-side behavior checks exist.
 
+## Fixture audit, 2026-09-23
+
+The saved official Fn HID trace (`Research/captures/official-fn-hid-20260922.log`)
+and its before/after map captures contain a single newly selected binding,
+Play/Pause (`03 00 CD 00`) at Fn slot 91. The replay and mixed-map captures add
+ordinary F23/F24 key usages; the other non-ordinary records already occur in
+the stock Fn baseline. Play/Pause, Fn, the observed media actions, and the
+twelve catalog entries above already have matching presets or codecs. The
+stock Fn map also contains other `0A` records and `0D`/`0E` records whose exact
+Nia87 behavior is not established by these captures. A stored raw record alone
+does not identify a safe, named action to offer for editing. There is therefore
+no additional verified preset to add from the current replay fixtures.
+Preserve those records as opaque bindings until an official selected-action
+trace or physical behavior check establishes their meaning.
+
 ## Trace references
 
 - Function catalog (`AF`, `RF`, merged `FF`): official bundle near offset
@@ -77,4 +92,3 @@ validated until reversible device tests and host-side behavior checks exist.
   `docs/feature-inventory.md`.
 - Nia87 simple base/Fn binding writes: official bundle near offsets 9,984,500
   and 9,985,250; summarized in `Research/protocol-keymap-research.md`.
-

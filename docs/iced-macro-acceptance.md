@@ -86,9 +86,9 @@ validation before creating output, stale completion rejection, cross-backend
 metadata, draft retention and close handling. Four legacy codec tests moved
 from the root package into devices; they are not duplicated in the total.
 
-This is not full acceptance. Persistent local slot labels remain in the legacy
-application; Iced file names are session metadata and document contents.
-No hardware writes were performed for this UI step. Rendered interaction,
+This is not full acceptance. Iced stores local slot labels separately from
+keyboard macro bytes; file names also travel as document metadata. No hardware
+writes were performed for this UI step. Rendered interaction,
 physical playback, Linux runtime and power-cycle persistence remain unverified;
 the screenshot helper failure documented in `iced-keymap-acceptance.md` remains
 open. The earlier injected-failure recovery problem is also still open.

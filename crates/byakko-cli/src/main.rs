@@ -3,19 +3,26 @@ use byakko_devices::{
     Executor,
     nia87::{self, BoundNia87Adapter},
 };
+use std::io::Write;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>>";
+    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>>";
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let macro_read = arguments
         .first()
         .is_some_and(|command| command == "read-macro");
+    let archive_capture = arguments
+        .first()
+        .is_some_and(|command| command == "capture-archive");
     if arguments.len() > 2
-        || (arguments.len() == 2 && !macro_read)
-        || (macro_read && arguments.len() != 2)
+        || (arguments.len() == 2 && !(macro_read || archive_capture))
+        || ((macro_read || archive_capture) && arguments.len() != 2)
     {
         return Err(USAGE.into());
+    }
+    if archive_capture && std::path::Path::new(&arguments[1]).exists() {
+        return Err("Archive output already exists; choose a new file".into());
     }
     match arguments.first().map(String::as_str) {
         None | Some("--help") => {
@@ -38,7 +45,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             nia87::device::Availability::EnumerationFailed(reason) => return Err(reason.into()),
         },
         Some("describe") => println!("{}", serde_json::to_string_pretty(&nia87::descriptor())?),
-        Some("read" | "read-colors" | "read-lighting" | "read-settings" | "read-macro") => {
+        Some(
+            "read" | "read-colors" | "read-lighting" | "read-settings" | "read-macro"
+            | "capture-archive",
+        ) => {
             let candidate = match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => candidate,
                 nia87::device::Availability::Unavailable => {
@@ -89,6 +99,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     &arguments[1],
                     Duration::from_secs(30),
                 )?)?,
+                "capture-archive" => {
+                    let archive = byakko_cli::capture_archive(
+                        &mut session,
+                        &executor,
+                        Duration::from_secs(180),
+                    )?;
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&arguments[1])?;
+                    file.write_all(&serde_json::to_vec(&archive)?)?;
+                    file.write_all(b"\n")?;
+                    file.sync_all()?;
+                    eprintln!("Verified archive saved to {}", arguments[1]);
+                    return Ok(());
+                }
                 _ => unreachable!("read command matched above"),
             };
             println!("{json}");

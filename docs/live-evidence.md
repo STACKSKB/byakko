@@ -308,8 +308,8 @@ The current Iced desktop and read-only CLI cross-linked for
 After the subsequent CLI, page-read and Windows entry-point changes, the
 refreshed desktop is 10,087,840 bytes (SHA-256
 `7CB12DC19791E02F7CEA6C7C5CC558C23DE1A6860B8296808448E049D5294663`);
-the CLI is 1,496,240 bytes (SHA-256
-`377A89D908E8F7A5F44E6964D9580709329DFAF9F5F3A943C69C7D70D76B8E04`).
+the CLI, refreshed after archive capture support, is 1,506,008 bytes (SHA-256
+`375172917BFD13BEAAD9E3CA9B0D7AE221DBA1B2C1A784FC0214E8B1A9732012`).
 This proves linking, not Linux startup or HID access.
 
 The user located the installed Sharkfin at
@@ -389,3 +389,19 @@ The updated Windows release launched again as one GUI-subsystem process, with
 no `conhost.exe` child. A read-only lighting CLI check after this launch still
 returned effect 1 and the same first eight raw bytes. This shows no further
 change on that launch; it does not identify the cause of the earlier `5 -> 1`.
+
+## Independent full-archive capture (2026-09-23)
+
+`byakko-cli capture-archive <new-file>` drove the core archive command through the same
+serialized Nia87 executor as Iced. The backend performed two complete matching
+configuration sweeps without setters. Its native archive contains 139,657
+bytes. The command rejected an existing output path before USB I/O, then wrote
+and synced a fresh path only after successful capture. The ignored outer JSON
+export is `Research/captures/cli-archive-file-20260923.json` (SHA-256
+`74EA2CDB64822AEDEAA3CE8FB5E8F3F638B71FBA6C16F77A54F83D9ACA9688D6`);
+the embedded native bytes have SHA-256
+`31C9B1C5CBF8E41A7018355E114361FC967C54732A4D5DA88E5A690506FAD3C8`,
+exactly matching the preceding full read-only archive after the lighting-effect
+change. This independently validates a complete backup path through the
+frontend contract and continued state stability. It does not prove archive
+apply or recovery.
