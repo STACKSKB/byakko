@@ -5,9 +5,12 @@ picture capability and serialized device executor. The backend supplies the
 key IDs; Nia87 maps its physical keys to matrix slots. Its native revision
 retains all 128 RGB triples, including reserved and unmapped slots, while the
 editable catalog covers mapped physical keys including Fn. Reserved slots
-remain unchanged. Opaque or forged snapshots and stale baselines are rejected
-before a write is attempted. Device apply uses the existing backup, readback
-and restore transaction and reports recovery with a typed outcome.
+remain unchanged. Direct picture writes and native archive review now also
+reject changes to unmapped matrix slots before any setter; unchanged
+unmapped values remain in backups. Opaque or forged snapshots and stale
+baselines are rejected before a write is attempted. Device apply uses the
+existing backup, readback and restore transaction and reports recovery with a
+typed outcome.
 
 This RGB storage feature is separate from the global lighting control that
 selects a built-in picture effect. Host-driven effects use a separate stream
