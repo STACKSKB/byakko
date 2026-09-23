@@ -1,13 +1,9 @@
 use super::apply_error::{detailed, macro_apply_error};
 use super::transport::FeatureSetter;
-use super::{HidDevice, Result, Selection, Session, Target, read_payload, transaction_lock};
+use super::{HidDevice, Result, Selection, Session, read_payload, transaction_lock};
 use serde_json;
 pub fn read_macro(slot: u8) -> Result<Vec<u8>> {
     read_macro_with(Selection::Unique, slot)
-}
-
-pub fn read_macro_for(target: &Target, slot: u8) -> Result<Vec<u8>> {
-    read_macro_with(Selection::Expected(target), slot)
 }
 
 pub(super) fn read_macro_with(selection: Selection<'_>, slot: u8) -> Result<Vec<u8>> {
@@ -52,18 +48,6 @@ pub fn apply_macro_detailed(
     detailed(apply_macro(slot, expected, new_macro, backup_dir))
 }
 
-pub fn apply_macro_detailed_for(
-    target: &Target,
-    slot: u8,
-    expected: &[u8],
-    new_macro: &crate::nia87::macros::Macro,
-    backup_dir: &std::path::Path,
-) -> std::result::Result<Vec<u8>, byakko_core::session::ApplyFailure> {
-    detailed(apply_macro_for(
-        target, slot, expected, new_macro, backup_dir,
-    ))
-}
-
 pub fn apply_macro(
     slot: u8,
     expected: &[u8],
@@ -71,22 +55,6 @@ pub fn apply_macro(
     backup_dir: &std::path::Path,
 ) -> Result<Vec<u8>> {
     apply_macro_with(Selection::Unique, slot, expected, new_macro, backup_dir)
-}
-
-pub fn apply_macro_for(
-    target: &Target,
-    slot: u8,
-    expected: &[u8],
-    new_macro: &crate::nia87::macros::Macro,
-    backup_dir: &std::path::Path,
-) -> Result<Vec<u8>> {
-    apply_macro_with(
-        Selection::Expected(target),
-        slot,
-        expected,
-        new_macro,
-        backup_dir,
-    )
 }
 
 pub(super) fn apply_macro_with(

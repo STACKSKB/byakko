@@ -5,10 +5,6 @@ pub fn read_settings() -> Result<crate::nia87::settings::Settings> {
     read_settings_with(Selection::Unique)
 }
 
-pub fn read_settings_for(target: &Target) -> Result<crate::nia87::settings::Settings> {
-    read_settings_with(Selection::Expected(target))
-}
-
 pub(super) fn read_settings_with(
     selection: Selection<'_>,
 ) -> Result<crate::nia87::settings::Settings> {
@@ -50,15 +46,6 @@ pub fn apply_setting(
     backup_dir: &std::path::Path,
 ) -> Result<crate::nia87::settings::Settings> {
     apply_setting_with(Selection::Unique, expected, setting, backup_dir)
-}
-
-pub fn apply_setting_for(
-    target: &Target,
-    expected: &crate::nia87::settings::Settings,
-    setting: crate::nia87::settings::Setting,
-    backup_dir: &std::path::Path,
-) -> Result<crate::nia87::settings::Settings> {
-    apply_setting_with(Selection::Expected(target), expected, setting, backup_dir)
 }
 
 pub(super) fn apply_setting_with(
@@ -137,13 +124,4 @@ pub fn apply_setting_detailed(
     backup_dir: &std::path::Path,
 ) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::session::ApplyFailure> {
     detailed(apply_setting(expected, setting, backup_dir))
-}
-
-pub fn apply_setting_detailed_for(
-    target: &Target,
-    expected: &crate::nia87::settings::Settings,
-    setting: crate::nia87::settings::Setting,
-    backup_dir: &std::path::Path,
-) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::session::ApplyFailure> {
-    detailed(apply_setting_for(target, expected, setting, backup_dir))
 }

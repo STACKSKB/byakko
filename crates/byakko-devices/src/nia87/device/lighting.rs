@@ -8,10 +8,6 @@ pub fn read_lighting() -> Result<crate::nia87::lighting::Lighting> {
     read_lighting_with(Selection::Unique)
 }
 
-pub fn read_lighting_for(target: &Target) -> Result<crate::nia87::lighting::Lighting> {
-    read_lighting_with(Selection::Expected(target))
-}
-
 pub(super) fn read_lighting_with(
     selection: Selection<'_>,
 ) -> Result<crate::nia87::lighting::Lighting> {
@@ -185,15 +181,6 @@ pub fn apply_lighting(
     apply_lighting_with(Selection::Unique, expected, setting, backup_dir)
 }
 
-pub fn apply_lighting_for(
-    target: &Target,
-    expected: &crate::nia87::lighting::Lighting,
-    setting: &crate::nia87::lighting::LightingSetting,
-    backup_dir: &std::path::Path,
-) -> Result<crate::nia87::lighting::Lighting> {
-    apply_lighting_with(Selection::Expected(target), expected, setting, backup_dir)
-}
-
 pub(super) fn apply_lighting_with(
     selection: Selection<'_>,
     expected: &crate::nia87::lighting::Lighting,
@@ -210,15 +197,6 @@ pub fn apply_lighting_detailed(
     backup_dir: &std::path::Path,
 ) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::session::ApplyFailure> {
     detailed(apply_lighting(expected, setting, backup_dir))
-}
-
-pub fn apply_lighting_detailed_for(
-    target: &Target,
-    expected: &crate::nia87::lighting::Lighting,
-    setting: &crate::nia87::lighting::LightingSetting,
-    backup_dir: &std::path::Path,
-) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::session::ApplyFailure> {
-    detailed(apply_lighting_for(target, expected, setting, backup_dir))
 }
 
 fn apply_lighting_unlocked(

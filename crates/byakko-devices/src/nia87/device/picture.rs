@@ -6,10 +6,6 @@ pub fn read_picture() -> Result<Vec<[u8; 3]>> {
     read_picture_with(Selection::Unique)
 }
 
-pub fn read_picture_for(target: &Target) -> Result<Vec<[u8; 3]>> {
-    read_picture_with(Selection::Expected(target))
-}
-
 pub(super) fn read_picture_with(selection: Selection<'_>) -> Result<Vec<[u8; 3]>> {
     let session = Session::open_for(selection)?;
     read_picture_on_device(session.device())
@@ -62,15 +58,6 @@ pub fn apply_picture(
     backup_dir: &std::path::Path,
 ) -> Result<Vec<[u8; 3]>> {
     apply_picture_with(Selection::Unique, expected, desired, backup_dir)
-}
-
-pub fn apply_picture_for(
-    target: &Target,
-    expected: &[[u8; 3]],
-    desired: &[[u8; 3]],
-    backup_dir: &std::path::Path,
-) -> Result<Vec<[u8; 3]>> {
-    apply_picture_with(Selection::Expected(target), expected, desired, backup_dir)
 }
 
 pub(super) fn apply_picture_with(
@@ -161,13 +148,4 @@ pub fn apply_picture_detailed(
     backup_dir: &std::path::Path,
 ) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
     detailed(apply_picture(expected, desired, backup_dir))
-}
-
-pub fn apply_picture_detailed_for(
-    target: &Target,
-    expected: &[[u8; 3]],
-    desired: &[[u8; 3]],
-    backup_dir: &std::path::Path,
-) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
-    detailed(apply_picture_for(target, expected, desired, backup_dir))
 }
