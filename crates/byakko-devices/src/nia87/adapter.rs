@@ -642,7 +642,16 @@ mod tests {
     }
     #[test]
     fn catalog_choices_match_decoded_bindings() {
-        for choice in descriptor().actions {
+        let choices = descriptor().actions;
+        let browser_back = choices
+            .iter()
+            .find(|choice| choice.label == "Browser Back")
+            .expect("official Nia87 keyboard catalog offers Browser Back");
+        assert_eq!(
+            raw_from_action(&browser_back.action).unwrap(),
+            [3, 0, 0x24, 2]
+        );
+        for choice in choices {
             assert_eq!(
                 action_from_raw(raw_from_action(&choice.action).unwrap()),
                 choice.action,

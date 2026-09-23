@@ -138,6 +138,10 @@ pub fn presets() -> Vec<ActionPreset> {
             bytes: [3, 0, 0x23, 2],
         },
         ActionPreset {
+            label: "Browser Back",
+            bytes: [3, 0, 0x24, 2],
+        },
+        ActionPreset {
             label: "Display Brightness Up",
             bytes: [3, 0, 0x6f, 0],
         },
