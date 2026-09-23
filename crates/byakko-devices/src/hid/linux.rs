@@ -44,7 +44,6 @@ struct RawInfo {
 
 pub struct Device {
     file: File,
-    numbered_feature_reports: bool,
 }
 
 impl Device {
@@ -80,20 +79,15 @@ impl Device {
         if count == 0 || count > buffer.len() {
             return Err("hidraw returned an invalid feature reply length".into());
         }
-        if self.numbered_feature_reports {
-            report[..count].copy_from_slice(&buffer[..count]);
-            Ok(count)
-        } else {
-            // hidraw places an unnumbered payload at byte zero. The existing
-            // device layer uses hidapi's host-buffer convention: report ID 0
-            // at byte zero, followed by the 64-byte device payload.
-            if count >= report.len() {
-                return Err("unnumbered feature reply does not fit host buffer".into());
-            }
-            report[0] = 0;
-            report[1..=count].copy_from_slice(&buffer[..count]);
-            Ok(count + 1)
+        // This transport opens only the verified unnumbered Nia87 feature
+        // collection. hidraw places its payload at byte zero; the device
+        // layer expects a leading host-side report ID of zero.
+        if count >= report.len() {
+            return Err("unnumbered feature reply does not fit host buffer".into());
         }
+        report[0] = 0;
+        report[1..=count].copy_from_slice(&buffer[..count]);
+        Ok(count + 1)
     }
 
     pub fn get_report_descriptor(&self, output: &mut [u8]) -> Result<usize> {
@@ -137,10 +131,10 @@ pub fn open(path: &CStr) -> Result<Device> {
     if !parsed.target {
         return Err("hidraw node lacks the Nia87 vendor application collection".into());
     }
-    Ok(Device {
-        file,
-        numbered_feature_reports: parsed.numbered_feature_reports,
-    })
+    if parsed.target_feature_count != 1 || !parsed.target_feature_shape_valid {
+        return Err("Nia87 collection must have one unnumbered 64-byte feature report".into());
+    }
+    Ok(Device { file })
 }
 
 pub fn enumerate() -> Result<Vec<DeviceInfo>> {
@@ -270,8 +264,17 @@ fn descriptor_from_fd(fd: libc::c_int) -> Result<Vec<u8>> {
 #[derive(Clone, Copy, Debug)]
 struct DescriptorInfo {
     target: bool,
-    numbered_feature_reports: bool,
+    target_feature_shape_valid: bool,
+    target_feature_count: usize,
     application_usage: Option<(u16, u16)>,
+}
+
+#[derive(Clone, Copy)]
+struct GlobalState {
+    usage_page: u32,
+    report_size: Option<u32>,
+    report_count: Option<u32>,
+    report_id: Option<u32>,
 }
 
 /// Parse HID items and inspect only top-level Application Collections. Usage
@@ -279,12 +282,17 @@ struct DescriptorInfo {
 fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
     let mut position = 0;
     let mut usage_page = 0u32;
-    let mut global_stack = Vec::new();
+    let mut global_stack: Vec<GlobalState> = Vec::new();
     let mut local_usage = None;
     let mut local_minimum = None;
     let mut depth = 0usize;
     let mut target = false;
-    let mut numbered_feature_reports = false;
+    let mut target_collection_depth = None;
+    let mut report_size = None;
+    let mut report_count = None;
+    let mut report_id = None;
+    let mut target_feature_shape_valid = true;
+    let mut target_feature_count = 0;
     let mut application_usage = None;
     while position < bytes.len() {
         let prefix = bytes[position];
@@ -314,10 +322,23 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
         let item_type = (prefix >> 2) & 3;
         let tag = prefix >> 4;
         match (item_type, tag) {
-            (1, 0) => usage_page = value,                // Global: Usage Page
-            (1, 8) => numbered_feature_reports = true,   // Global: Report ID
-            (1, 10) => global_stack.push(usage_page),    // Global: Push
-            (1, 11) => usage_page = global_stack.pop()?, // Global: Pop
+            (1, 0) => usage_page = value,         // Global: Usage Page
+            (1, 7) => report_size = Some(value),  // Global: Report Size
+            (1, 8) => report_id = Some(value),    // Global: Report ID
+            (1, 9) => report_count = Some(value), // Global: Report Count
+            (1, 10) => global_stack.push(GlobalState {
+                usage_page,
+                report_size,
+                report_count,
+                report_id,
+            }),
+            (1, 11) => {
+                let state = global_stack.pop()?;
+                usage_page = state.usage_page;
+                report_size = state.report_size;
+                report_count = state.report_count;
+                report_id = state.report_id;
+            }
             (2, 0) => {
                 local_usage.get_or_insert(full_usage(usage_page, value, size));
             }
@@ -333,6 +354,7 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
                     let usage = usage as u16;
                     if page == 0xffff && usage == 2 {
                         target = true;
+                        target_collection_depth = Some(depth + 1);
                         // Keep the Nia collection discoverable even if a
                         // descriptor has another application collection first.
                         application_usage = Some((page, usage));
@@ -344,10 +366,24 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
                 local_usage = None;
                 local_minimum = None;
             }
+            (0, 11)
+                if target_collection_depth.is_some_and(|target_depth| depth >= target_depth) =>
+            {
+                // Main: Feature. The observed Nia87 collection has one
+                // unnumbered 64-byte feature payload (8 bits × 64 fields).
+                target_feature_count += 1;
+                target_feature_shape_valid &=
+                    report_size == Some(8) && report_count == Some(64) && report_id.is_none();
+                local_usage = None;
+                local_minimum = None;
+            }
             (0, 12) => {
                 // Main: End Collection
                 if depth == 0 {
                     return None;
+                }
+                if target_collection_depth == Some(depth) {
+                    target_collection_depth = None;
                 }
                 depth -= 1;
                 local_usage = None;
@@ -362,7 +398,8 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
     }
     (depth == 0 && global_stack.is_empty()).then_some(DescriptorInfo {
         target,
-        numbered_feature_reports,
+        target_feature_shape_valid,
+        target_feature_count,
         application_usage,
     })
 }
@@ -387,7 +424,60 @@ mod tests {
         ];
         let parsed = parse_descriptor(&descriptor).unwrap();
         assert!(parsed.target);
-        assert!(!parsed.numbered_feature_reports);
+        assert_eq!(parsed.target_feature_count, 1);
+        assert!(parsed.target_feature_shape_valid);
+    }
+
+    #[test]
+    fn nia_target_rejects_incompatible_feature_report_shapes() {
+        let prefix = [0x06, 0xff, 0xff, 0x09, 0x02, 0xa1, 0x01];
+        let suffix = [0xb1, 0x02, 0xc0];
+        let wrong_size = [0x75, 0x07, 0x95, 0x40];
+        let wrong_count = [0x75, 0x08, 0x95, 0x3f];
+        let numbered = [0x85, 0x01, 0x75, 0x08, 0x95, 0x40];
+
+        for globals in [
+            wrong_size.as_slice(),
+            wrong_count.as_slice(),
+            numbered.as_slice(),
+        ] {
+            let descriptor = [prefix.as_slice(), globals, suffix.as_slice()].concat();
+            let parsed = parse_descriptor(&descriptor).unwrap();
+            assert!(parsed.target);
+            assert_eq!(parsed.target_feature_count, 1);
+            assert!(!parsed.target_feature_shape_valid);
+        }
+    }
+
+    #[test]
+    fn incompatible_feature_shape_in_other_collection_does_not_reject_target() {
+        let descriptor = [
+            // An unrelated application with an incompatible feature report.
+            0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x75, 0x07, 0x95, 0x01, 0xb1, 0x02, 0xc0,
+            // The observed Nia87 application and its 64-byte feature payload.
+            0x06, 0xff, 0xff, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x02, 0x15, 0x80, 0x25, 0x7f, 0x75,
+            0x08, 0x95, 0x40, 0xb1, 0x02, 0xc0,
+        ];
+        let parsed = parse_descriptor(&descriptor).unwrap();
+        assert!(parsed.target);
+        assert_eq!(parsed.target_feature_count, 1);
+        assert!(parsed.target_feature_shape_valid);
+    }
+
+    #[test]
+    fn unrelated_numbered_collection_does_not_number_target_feature_report() {
+        let descriptor = [
+            // Save the unnumbered globals while describing another collection.
+            0xa4, 0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0x85, 0x01, 0x75, 0x08, 0x95, 0x01, 0xb1,
+            0x02, 0xc0, 0xb4,
+            // The observed unnumbered Nia87 application and feature payload.
+            0x06, 0xff, 0xff, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x02, 0x15, 0x80, 0x25, 0x7f, 0x75,
+            0x08, 0x95, 0x40, 0xb1, 0x02, 0xc0,
+        ];
+        let parsed = parse_descriptor(&descriptor).unwrap();
+        assert!(parsed.target);
+        assert!(parsed.target_feature_shape_valid);
+        assert_eq!(parsed.target_feature_count, 1);
     }
 
     #[test]
