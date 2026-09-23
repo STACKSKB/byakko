@@ -27,5 +27,7 @@ and reader disagree on the latter. Neither difference should be resolved from
 an offline round trip alone.
 
 Offline validation: `compare_macro_capture` matched observed data and header
-prefix. The captured six event bytes and native report prefix are pinned in a
-device-crate regression test. No device writes were made.
+prefix. A device-crate regression now pins the complete observed 64-byte
+payload, including zero padding and checksum, and checks that only the
+intentional final-page flag and its checksum differ from Byakko's first page.
+No device writes were made.
