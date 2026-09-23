@@ -19,6 +19,7 @@ pub(super) fn read_lighting_with(
 /// restoration. Explicit finish reports restoration errors to the caller.
 pub struct HostLightingSession {
     session: Session,
+    target: Target,
     saved: crate::nia87::lighting::Lighting,
     active: crate::nia87::lighting::Lighting,
     backups: std::path::PathBuf,
@@ -48,17 +49,29 @@ impl HostLightingSession {
         desired: &crate::nia87::lighting::LightingSetting,
         backups: &std::path::Path,
     ) -> Result<Self> {
+        Self::start_mode_with(Selection::Unique, expected, desired, backups)
+    }
+
+    pub(super) fn start_mode_with(
+        selection: Selection<'_>,
+        expected: &crate::nia87::lighting::Lighting,
+        desired: &crate::nia87::lighting::LightingSetting,
+        backups: &std::path::Path,
+    ) -> Result<Self> {
         if !matches!(desired.effect_id, 20..=22) {
             return Err("Host lighting requires screen or music mode".into());
         }
-        let session = Session::open()?;
+        let session = Session::open_for(selection)?;
+        let target = session.target()?;
         if !read_settings_on_device(session.device())?.backlight_enabled() {
             return Err("Enable the backlight in Settings before starting host lighting".into());
         }
         // apply_lighting performs identity and expected-state checks before mutation.
-        let active = apply_lighting_unlocked(Selection::Unique, expected, desired, backups)?;
+        let active =
+            apply_lighting_unlocked(Selection::Expected(&target), expected, desired, backups)?;
         Ok(Self {
             session,
+            target,
             saved: expected.clone(),
             active,
             backups: backups.to_owned(),
@@ -92,8 +105,12 @@ impl HostLightingSession {
             .recognized_setting()
             .ok_or("Unrecognized saved lighting")?;
         // Expected-state checks prevent overwriting settings changed externally.
-        let restored =
-            apply_lighting_unlocked(Selection::Unique, &self.active, &setting, &self.backups)?;
+        let restored = apply_lighting_unlocked(
+            Selection::Expected(&self.target),
+            &self.active,
+            &setting,
+            &self.backups,
+        )?;
         self.finished = true;
         Ok(restored)
     }
