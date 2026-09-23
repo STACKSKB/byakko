@@ -237,6 +237,7 @@ impl Desktop {
             Err(TryRecvError::Empty) => return Task::none(),
             Err(TryRecvError::Disconnected) => {
                 executor.set_generation(0);
+                let caution = self.hold_reconnect_if_cautious();
                 let write_in_flight = matches!(
                     self.session.activity(),
                     byakko_core::session::Activity::Apply { .. }
@@ -251,10 +252,12 @@ impl Desktop {
                 }
                 self.executor = None;
                 self.session.disconnect();
-                self.notice = Some(
-                    "Device worker stopped; device state is unverified. Read again before editing."
-                        .into(),
-                );
+                if !caution {
+                    self.notice = Some(
+                        "Device worker stopped; device state is unverified. Read again before editing."
+                            .into(),
+                    );
+                }
                 self.closing = Closing::Open;
             }
         }
@@ -275,6 +278,15 @@ impl Desktop {
         }
     }
 
+    fn hold_reconnect_if_cautious(&mut self) -> bool {
+        let Some(caution) = self.session.reconnect_caution() else {
+            return false;
+        };
+        self.auto_read = AutoRead::ManualOnly;
+        self.notice = Some(view::reconnect_caution_label(caution));
+        true
+    }
+
     fn accept_availability(&mut self, availability: Availability) {
         if self.busy() {
             return;
@@ -282,21 +294,7 @@ impl Desktop {
         let previous = self.selected_device.as_deref();
         let changed = matches!(&availability, Availability::Ready { id } if previous.is_some_and(|old| old != id));
         if changed || !matches!(availability, Availability::Ready { .. }) {
-            if matches!(
-                self.session.status(),
-                Status::Conflict { .. }
-                    | Status::Unverified {
-                        problem: Problem::Apply(_)
-                            | Problem::InvalidApplyResult(_)
-                            | Problem::ApplyReadbackMismatch
-                    }
-            ) {
-                self.auto_read = AutoRead::ManualOnly;
-                self.notice = Some(format!(
-                    "{} · Read manually after reconnecting.",
-                    view::status(self)
-                ));
-            }
+            self.hold_reconnect_if_cautious();
             if let Some(executor) = &self.executor {
                 executor.set_generation(0);
             }

@@ -190,6 +190,13 @@ mod tests {
             session.lighting().unwrap().status(),
             lighting::editor::Status::Conflict { .. }
         ));
+        assert_eq!(
+            session.reconnect_caution(),
+            Some(super::super::ReconnectCaution {
+                surface: super::super::ReconnectSurface::Lighting,
+                cause: super::super::ReconnectCause::Conflict,
+            })
+        );
         assert_eq!(session.lighting().unwrap().draft(), Some(&setting(5)));
         read(&mut session, Ok(snapshot(1, 10)));
         let command = session.request_lighting_apply().unwrap();
@@ -242,6 +249,13 @@ mod tests {
                 problem: Problem::ApplyReadbackMismatch
             }
         ));
+        assert_eq!(
+            session.reconnect_caution(),
+            Some(super::super::ReconnectCaution {
+                surface: super::super::ReconnectSurface::Lighting,
+                cause: super::super::ReconnectCause::ApplyReadbackMismatch,
+            })
+        );
         assert_eq!(session.lighting().unwrap().draft(), Some(&setting(5)));
     }
     #[test]
@@ -282,6 +296,7 @@ mod tests {
                 problem: Problem::ReadRequired
             }
         ));
+        assert_eq!(session.reconnect_caution(), None);
         assert_eq!(
             session.accept(Completion::ApplyLighting {
                 generation,
@@ -294,5 +309,15 @@ mod tests {
             Acceptance::Accepted
         );
         assert_eq!(session.lighting().unwrap().draft(), Some(&setting(5)));
+        assert_eq!(
+            session.reconnect_caution(),
+            Some(super::super::ReconnectCaution {
+                surface: super::super::ReconnectSurface::Lighting,
+                cause: super::super::ReconnectCause::Apply(&ApplyFailure {
+                    message: "failed".into(),
+                    recovery: Recovery::Unverified,
+                }),
+            })
+        );
     }
 }

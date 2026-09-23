@@ -152,3 +152,37 @@ fn verified_lighting_close_checks_its_result_despite_keymap_invalidation() {
         &LightingStatus::Ready
     );
 }
+
+#[test]
+fn failed_lighting_write_requires_manual_reconnect_and_keeps_diagnostic() {
+    let mut app = loaded();
+    send(&mut app, Lighting::Edit(Edit::Brightness(42)));
+    let Command::ApplyLighting {
+        generation,
+        operation,
+        ..
+    } = app.session.request_lighting_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    let _ = app.complete(Completion::ApplyLighting {
+        generation,
+        operation,
+        result: Err(ApplyFailure {
+            message: "lighting readback uncertain".into(),
+            recovery: Recovery::Unverified,
+        }),
+    });
+    app.accept_availability(Availability::Missing);
+    assert_eq!(app.auto_read, AutoRead::ManualOnly);
+    app.accept_availability(Availability::Ready {
+        id: "demo-2".into(),
+    });
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert!(!app.session.busy());
+    assert!(
+        app.notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("lighting readback uncertain"))
+    );
+}

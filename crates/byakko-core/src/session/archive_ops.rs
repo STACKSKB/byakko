@@ -575,6 +575,13 @@ mod tests {
                 review: Some(review(&[1], &[2]))
             })
         );
+        assert_eq!(
+            session.reconnect_caution(),
+            Some(super::super::ReconnectCaution {
+                surface: super::super::ReconnectSurface::Archive,
+                cause: super::super::ReconnectCause::Apply(&failure),
+            })
+        );
         assert!(session.request_archive_apply().is_err());
         session.clear_archive_review();
         assert_eq!(
