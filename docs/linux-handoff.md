@@ -148,6 +148,9 @@ the exact descriptor comparison shown above; preserve the fail-closed rule
 until the Linux descriptor difference is reviewed. The current node has no
 active-user ACL, so device reads are blocked.
 
+Follow-up after source commit `a4fcb45`: the release builds, workspace tests,
+both Clippy checks, `ldd`, and the X11 demo smoke test were rerun and passed.
+
 ## Known limits to carry forward
 
 Linux release builds and X11 demo startup have been verified, but hidraw
