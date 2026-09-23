@@ -235,6 +235,55 @@ impl Desktop {
             .err();
     }
 
+    fn read_page_on_entry(&mut self) {
+        if self.busy() || *self.session.status() != Status::Ready {
+            return;
+        }
+        let request = match self.page {
+            Page::Lighting
+                if self.session.lighting().is_some_and(|editor| {
+                    matches!(
+                        editor.status(),
+                        byakko_core::lighting::editor::Status::Unloaded
+                            | byakko_core::lighting::editor::Status::Unverified {
+                                problem: Problem::ReadRequired
+                            }
+                    )
+                }) =>
+            {
+                self.session.request_lighting_read()
+            }
+            Page::Picture
+                if self.session.picture().is_some_and(|editor| {
+                    matches!(
+                        editor.status(),
+                        byakko_core::picture::editor::Status::Unloaded
+                            | byakko_core::picture::editor::Status::Unverified {
+                                problem: Problem::ReadRequired
+                            }
+                    )
+                }) =>
+            {
+                self.session.request_picture_read()
+            }
+            Page::Settings
+                if self.session.settings().is_some_and(|editor| {
+                    matches!(
+                        editor.status(),
+                        byakko_core::settings::editor::Status::Unloaded
+                            | byakko_core::settings::editor::Status::Unverified {
+                                problem: Problem::ReadRequired
+                            }
+                    )
+                }) =>
+            {
+                self.session.request_settings_read()
+            }
+            _ => return,
+        };
+        self.submit(request);
+    }
+
     fn poll(&mut self) -> Task<Message> {
         if let Some(task) = self.poll_host() {
             return task;
@@ -399,7 +448,7 @@ impl Desktop {
                 return self.close();
             }
         }
-        self.read_picture_on_entry();
+        self.read_page_on_entry();
         Task::none()
     }
 
@@ -445,7 +494,7 @@ impl Desktop {
             Message::Record(message) => self.update_recording(message),
             Message::Page(page) => {
                 self.page = page;
-                self.read_picture_on_entry();
+                self.read_page_on_entry();
             }
             Message::Macro(message) => self.update_macro(message),
             Message::SelectLayer(layer) => self.layer = layer,

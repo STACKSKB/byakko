@@ -20,6 +20,33 @@ fn loaded() -> Desktop {
 }
 
 #[test]
+fn lighting_page_reads_once_on_entry_and_after_pending_keymap() {
+    let mut app = ready();
+    let _ = app.update(Message::Page(Page::Lighting));
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::ReadLighting { .. }
+    ));
+    settle(&mut app);
+    assert_eq!(
+        app.session.lighting().unwrap().status(),
+        &LightingStatus::Ready
+    );
+    let _ = app.update(Message::Page(Page::Keys));
+    let _ = app.update(Message::Page(Page::Lighting));
+    assert!(!app.busy());
+
+    let mut app = ready();
+    let _ = app.update(Message::Read);
+    let _ = app.update(Message::Page(Page::Lighting));
+    settle(&mut app);
+    assert_eq!(
+        app.session.lighting().unwrap().status(),
+        &LightingStatus::Ready
+    );
+}
+
+#[test]
 fn lighting_uses_capabilities_and_memory_executor_without_losing_other_drafts() {
     let mut app = loaded();
     app.stage(1);

@@ -34,10 +34,13 @@ for the library crates.
 configuration-interface availability, `describe` prints its physical keymap
 descriptor, `read` exports a verified USB keymap as JSON, and `read-colors`
 exports the per-key color snapshot after the keymap read. `read-lighting` and
-`read-settings` likewise export typed snapshots and preserve raw revisions. Its synchronous
-adapter drives the same `Session → Command → Executor → Completion` path as
-Iced; a memory-device test exercises that path without USB. The CLI has no
-setter or apply subcommand yet.
+`read-settings` likewise export typed snapshots and preserve raw revisions.
+`read-macro <slot-id>` reads one slot advertised by the backend's capabilities
+and exports the complete snapshot, including opaque revision bytes, without
+decoding backend-owned content in the CLI. Its synchronous adapter drives the
+same `Session → Command → Executor → Completion` path as Iced; memory-device
+tests exercise that path without USB. The CLI has no setter or apply subcommand
+yet.
 
 Later CLI work can expose capability inspection, draft review and explicit apply.
 It should show the target identity and operation result, preserve opaque values,

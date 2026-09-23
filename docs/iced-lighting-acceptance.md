@@ -5,8 +5,13 @@ the same serialized device worker as keymaps and macros. The desktop renders
 backend-advertised effects, ranges, options and color choices; it does not
 contain Nia87 effect numbers or USB reports. `--demo` uses a memory keyboard
 with different effects and ranges. The stock-firmware Nia87 adapter advertises
-built-in effects 0–19. Music and screen-following effects 20–22 require a
-separate host stream lifecycle and remain read-only in this slice.
+built-in effects 0–19. Music and screen-following effects 20–22 use a
+separate host stream lifecycle and await physical Iced acceptance.
+
+Opening the Lighting page now reads an unloaded or invalidated snapshot once
+the keymap is ready. A pending keymap read finishes first. Revisiting a ready
+page does not repeat the request, and a failed read needs an explicit retry.
+This behavior has a memory-backend test; live window interaction is unverified.
 
 Reading preserves the full 64-byte response as a revision. Unknown or
 unrepresentable responses remain opaque. Every stage validates the complete
@@ -28,10 +33,15 @@ the baseline. No setter was sent. Pure codec tests cover every advertised
 effect's option, color and range limits, raw revision retention, forged
 baselines, and the native near-white alias before any write. Memory workflow
 tests exercise staged edits, saves, rereads, other-draft preservation and
-failed/stale result handling. All 260 workspace library tests pass. Windows
+failed/stale result handling. Workspace tests pass. Windows
 and Linux Clippy pass with warnings denied, the core checks for WASM, and the
 Windows desktop release builds. The UI uses shared responsive panes and typed
 style data; the lighting renderer consumes a pure core control projection.
+
+A later read-only CLI result reported effect 1, with all other lighting bytes
+unchanged. A complete archive confirmed that settings, keys, macros and
+per-key colors still matched the earlier baseline. The cause of the effect
+change is unknown; see `live-evidence.md`. No restore setter was attempted.
 
 Actual Iced lighting writes, rendered GUI interaction, visual behavior on
 this keyboard, power-cycle persistence and Linux runtime remain unverified.
