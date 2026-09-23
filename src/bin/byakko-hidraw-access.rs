@@ -2,9 +2,13 @@
 //! This reads only the sysfs HID report descriptor; it never opens a device node.
 use std::{env, fs::File, io::Read, path::PathBuf, process::ExitCode};
 
-const EXPECTED: [u8; 20] = [
+const WINDOWS_OBSERVED: [u8; 20] = [
     0x06, 0xff, 0xff, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x02, 0x15, 0x80, 0x25, 0x7f, 0x75, 0x08, 0x95,
     0x40, 0xb1, 0x02, 0xc0,
+];
+const LINUX_OBSERVED: [u8; 20] = [
+    0x06, 0xff, 0xff, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x02, 0x15, 0x80, 0x25, 0x7f, 0x95, 0x40, 0x75,
+    0x08, 0xb1, 0x02, 0xc0,
 ];
 const MAX_DESCRIPTOR: u64 = 4096;
 const MAX_HIDRAW_DIGITS: usize = 5;
@@ -19,7 +23,7 @@ fn valid_name(name: &str) -> bool {
 }
 
 fn matches_descriptor(bytes: &[u8]) -> bool {
-    bytes == EXPECTED
+    bytes == WINDOWS_OBSERVED || bytes == LINUX_OBSERVED
 }
 
 fn check(name: &str) -> bool {
@@ -67,13 +71,23 @@ mod tests {
     use super::*;
     #[test]
     fn exact_observed_descriptor_only() {
-        assert!(matches_descriptor(&EXPECTED));
+        assert!(matches_descriptor(&WINDOWS_OBSERVED));
+        assert!(matches_descriptor(&LINUX_OBSERVED));
         let keyboard = [0x05, 0x01, 0x09, 0x06, 0xa1, 0x01, 0xc0];
         assert!(!matches_descriptor(&keyboard));
-        let mut extra = EXPECTED.to_vec();
+        let mut extra = WINDOWS_OBSERVED.to_vec();
         extra.push(0);
         assert!(!matches_descriptor(&extra));
-        assert!(!matches_descriptor(&EXPECTED[..19]));
+        assert!(!matches_descriptor(&WINDOWS_OBSERVED[..19]));
+        let mut wrong_count = LINUX_OBSERVED;
+        wrong_count[14] = 0x3f;
+        assert!(!matches_descriptor(&wrong_count));
+        let mut wrong_size = LINUX_OBSERVED;
+        wrong_size[16] = 0x07;
+        assert!(!matches_descriptor(&wrong_size));
+        let mut reordered = LINUX_OBSERVED;
+        reordered.swap(7, 9);
+        assert!(!matches_descriptor(&reordered));
     }
     #[test]
     fn strict_hidraw_name_rejects_traversal_and_extra_text() {

@@ -134,6 +134,12 @@ while the helper's exact expected bytes order them `75 08 95 40`. The helper
 and udev rule were left unchanged pending review of this descriptor difference.
 The other two collections did not match the helper either.
 
+The Windows-side follow-up added only that second exact 20-byte descriptor to
+the helper's allowlist. The udev rule and VID/PID gate remain unchanged. This
+source change has unit tests but still needs a Linux helper rerun against
+`hidraw2` before installation or ACL testing; do not infer a granted ACL from
+the code change alone.
+
 `/dev/hidraw2` was `root:root` mode `0600` with no active-user ACL. The read-only
 CLI `devices` command identified it as the Nia87 configuration interface, but
 `read` failed with `Permission denied`. Lighting, settings, colors, macro and

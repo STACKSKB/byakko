@@ -37,13 +37,14 @@ rule so the active desktop seat receives the new hidraw ACL. Byakko then
 discovers and loads the Nia87 configuration collection automatically. The
 research CLI is separate from this desktop release.
 
-The rule matches USB `3151:4015` and grants access only if the helper finds the
-exact observed configuration report descriptor. Other HID collections, PID
-`4011`, missing descriptors and different descriptors do not match. The known
-descriptor was reconstructed on Windows; its exact Linux representation has
-not yet been measured. A legitimate but different Linux descriptor will fail
-closed until independently verified. Do not broaden the rule to every hidraw
-device to work around a mismatch.
+The rule matches USB `3151:4015` and grants access only if the helper finds
+one of two exact observed 20-byte configuration descriptors. The Windows and
+Linux observations differ only in the order of the final Report Size and
+Report Count global items (`75 08 95 40` versus `95 40 75 08`); both describe
+one unnumbered 64-byte Feature report. Other HID collections, PID `4011`,
+missing descriptors and different descriptors do not match. A future
+different descriptor will fail closed until independently verified. Do not
+broaden the rule to every hidraw device to work around a mismatch.
 
 The application also checks the opened collection itself. It requires the
 vendor Application Collection to contain exactly one unnumbered Feature report
