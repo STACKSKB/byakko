@@ -1,4 +1,5 @@
 //! Nia87 composition root for the read-only CLI.
+use byakko_core::archive::NativeArchive;
 use byakko_devices::{
     Executor,
     nia87::{self, BoundNia87Adapter},
@@ -7,8 +8,22 @@ use std::io::Write;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>>";
+    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>>";
     let arguments: Vec<_> = std::env::args().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|command| command == "compare-archives")
+    {
+        if arguments.len() != 3 {
+            return Err(USAGE.into());
+        }
+        let max_bytes = nia87::archive_adapter::capabilities().max_bytes;
+        let before = load_archive(&arguments[1], max_bytes)?;
+        let after = load_archive(&arguments[2], max_bytes)?;
+        let changes = nia87::archive_adapter::compare(&before, &after)?;
+        println!("{}", serde_json::to_string_pretty(&changes)?);
+        return Ok(());
+    }
     let macro_read = arguments
         .first()
         .is_some_and(|command| command == "read-macro");
@@ -30,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match arguments.first().map(String::as_str) {
         None | Some("--help") => {
             println!(
-                "{USAGE}\n\nRead commands export verified USB state as JSON; no command writes to the device."
+                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. No command writes to the device."
             );
         }
         Some("devices") => match nia87::device::availability() {
@@ -75,15 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .archive_capabilities()
                     .ok_or("Nia87 has no native archive capability")?
                     .max_bytes;
-                let limit = u64::from(max_bytes).saturating_mul(4).saturating_add(1024);
-                if std::fs::metadata(&arguments[1])?.len() > limit {
-                    return Err("Archive input exceeds the supported JSON file size".into());
-                }
-                Some(
-                    serde_json::from_slice::<byakko_core::archive::NativeArchive>(&std::fs::read(
-                        &arguments[1],
-                    )?)?,
-                )
+                Some(load_archive(&arguments[1], max_bytes)?)
             } else {
                 None
             };
@@ -152,4 +159,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err(USAGE.into()),
     }
     Ok(())
+}
+
+fn load_archive(path: &str, max_bytes: u32) -> Result<NativeArchive, Box<dyn std::error::Error>> {
+    let limit = u64::from(max_bytes).saturating_mul(4).saturating_add(1024);
+    if std::fs::metadata(path)?.len() > limit {
+        return Err("Archive input exceeds the supported JSON file size".into());
+    }
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }

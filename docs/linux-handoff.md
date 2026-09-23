@@ -36,7 +36,12 @@ captures and vendor fixtures under ignored paths are not in Git.
   `read-lighting`, `read-settings`, `read-colors`, and `read-macro slot-49` for
   initial read-only checks. Capture a new local archive with
   `target/release/byakko-cli capture-archive NEW_PATH.json` and repeat the read
-  to establish stability. The CLI sends no setters.
+  to establish stability. Compare the two saved files with
+  `target/release/byakko-cli compare-archives FIRST.json SECOND.json`; an empty
+  JSON list means the native configuration matches. The comparison runs offline
+  and uses the same forward/reverse preflight as archive review, so an
+  unrepresentable change is an error rather than a raw byte diff. The CLI sends
+  no setters.
 
 - [ ] Check Linux removal/reconnect, one-device selection, GUI page entry
   reads, and clean shutdown. Record whether X11 and Wayland behave differently.
