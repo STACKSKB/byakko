@@ -467,7 +467,7 @@ impl crate::Device for BoundNia87Adapter {
 
     fn start_host_lighting(
         &mut self,
-        mode: crate::HostMode,
+        mode: byakko_core::lighting::HostMode,
         expected: &byakko_core::lighting::Snapshot,
         backup_dir: &Path,
     ) -> Result<Box<dyn crate::HostActivity>, byakko_core::session::ApplyFailure> {

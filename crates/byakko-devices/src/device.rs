@@ -6,14 +6,10 @@ use byakko_core::{
 };
 use std::path::Path;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HostMode {
-    Screen,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostFrame {
     Rgb([u8; 3]),
+    Bands(Vec<u8>),
 }
 
 /// A temporary effect owned by the device executor. `finish` restores and
@@ -70,7 +66,7 @@ pub trait Device: Send + 'static {
     /// failure. Success transfers restoration ownership to the executor.
     fn start_host_lighting(
         &mut self,
-        _mode: HostMode,
+        _mode: lighting::HostMode,
         _expected: &lighting::Snapshot,
         _backup_dir: &Path,
     ) -> Result<Box<dyn HostActivity>, ApplyFailure> {

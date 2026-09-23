@@ -48,7 +48,7 @@ fn ready() -> Desktop {
         macro_files: Default::default(),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
-        screen: None,
+        host: None,
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),

@@ -2,8 +2,8 @@
 mod host;
 pub use host::{HostEvent, HostFrameError, HostStopResult, HostSubmitError, HostTicket};
 
-use crate::{Device, HostFrame, HostMode};
-use byakko_core::lighting;
+use crate::{Device, HostFrame};
+use byakko_core::lighting::{self, HostMode};
 use byakko_core::session::{ApplyFailure, Command, Completion, Recovery};
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},

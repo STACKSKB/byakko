@@ -6,12 +6,12 @@ use crate::{
     panels::{self, UiStyle},
 };
 use byakko_core::lighting::{
-    Content, Edit, HostSource,
+    Content, Edit,
     controls::{self, ChoiceEdit, Control},
     editor::{Editor, Status},
 };
 use byakko_core::session::Status as SessionStatus;
-pub(crate) use host::HostScreen;
+pub(crate) use host::HostInput;
 use iced::{
     Element, Fill,
     widget::{button, column, row, scrollable, text},
@@ -23,7 +23,7 @@ pub(super) enum Message {
     Apply,
     Revert,
     Edit(Edit),
-    StartScreen(String),
+    StartHost(String),
     StopHost,
 }
 
@@ -31,7 +31,7 @@ impl Desktop {
     pub(super) fn update_lighting(&mut self, message: Message) {
         match message {
             Message::StopHost => self.stop_host(),
-            Message::StartScreen(mode_id) if !self.busy() => self.start_screen(mode_id),
+            Message::StartHost(mode_id) if !self.busy() => self.start_host(mode_id),
             _ if self.busy() => (),
             Message::Read => {
                 let request = self.session.request_lighting_read();
@@ -43,7 +43,7 @@ impl Desktop {
             }
             Message::Revert => self.notice = self.session.revert_lighting().err(),
             Message::Edit(edit) => self.notice = self.session.edit_lighting(edit).err(),
-            Message::StartScreen(_) => {}
+            Message::StartHost(_) => {}
         }
     }
 }
@@ -102,23 +102,15 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
         && app.session.status() == &SessionStatus::Ready
         && editor.status() == &Status::Ready
         && !editor.dirty();
-    let starts = column(
-        editor
-            .capabilities()
-            .host_modes
-            .iter()
-            .filter(|mode| mode.source == HostSource::ScreenAverage)
-            .map(|mode| {
-                button(text(format!("Start {}", mode.label)))
-                    .on_press_maybe(
-                        can_start
-                            .then_some(AppMessage::Lighting(Message::StartScreen(mode.id.clone()))),
-                    )
-                    .into()
-            }),
-    );
+    let starts = column(editor.capabilities().host_modes.iter().map(|mode| {
+        button(text(format!("Start {}", mode.label)))
+            .on_press_maybe(
+                can_start.then_some(AppMessage::Lighting(Message::StartHost(mode.id.clone()))),
+            )
+            .into()
+    }));
     let stop = button("Stop & restore").on_press_maybe(
-        app.screen
+        app.host
             .as_ref()
             .map(|_| AppMessage::Lighting(Message::StopHost)),
     );

@@ -38,11 +38,23 @@ pub fn capabilities() -> Capabilities {
                 },
             })
             .collect(),
-        host_modes: vec![HostMode {
-            id: "screen-average".into(),
-            label: "Screen average".into(),
-            source: HostSource::ScreenAverage,
-        }],
+        host_modes: vec![
+            HostMode {
+                id: "screen-average".into(),
+                label: "Screen average".into(),
+                source: HostSource::ScreenAverage,
+            },
+            HostMode {
+                id: "music-follow-2".into(),
+                label: "Music follow 2 (green, upright)".into(),
+                source: HostSource::PlaybackAudio { bands: 32 },
+            },
+            HostMode {
+                id: "music-follow-3".into(),
+                label: "Music follow 3 (green, upright)".into(),
+                source: HostSource::PlaybackAudio { bands: 32 },
+            },
+        ],
     }
 }
 

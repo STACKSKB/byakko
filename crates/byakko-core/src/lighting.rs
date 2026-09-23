@@ -33,6 +33,7 @@ pub struct Effect {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum HostSource {
     ScreenAverage,
+    PlaybackAudio { bands: u8 },
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostMode {
@@ -133,6 +134,9 @@ pub fn validate_capabilities(caps: &Capabilities) -> Result<(), String> {
     for mode in &caps.host_modes {
         if mode.id.is_empty() || mode.label.is_empty() || !ids.insert(&mode.id) {
             return Err("Invalid host lighting mode ID or label".into());
+        }
+        if matches!(mode.source, HostSource::PlaybackAudio { bands: 0 }) {
+            return Err("Audio host mode requires a positive band count".into());
         }
     }
     Ok(())

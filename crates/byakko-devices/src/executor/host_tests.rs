@@ -2,7 +2,7 @@ use super::*;
 use crate::HostActivity;
 use byakko_core::{
     Change, State,
-    lighting::{Content, Setting},
+    lighting::{Content, HostMode, HostSource, Setting},
 };
 use std::{
     collections::BTreeMap,
@@ -88,7 +88,7 @@ impl Device for FakeDevice {
         expected: &lighting::Snapshot,
         _: &Path,
     ) -> Result<Box<dyn HostActivity>, ApplyFailure> {
-        assert_eq!(mode, HostMode::Screen);
+        assert_eq!(mode, screen_mode());
         self.entered.send(()).unwrap();
         self.start_release
             .recv_timeout(Duration::from_secs(2))
@@ -176,9 +176,17 @@ fn ticket() -> HostTicket {
     }
 }
 
+fn screen_mode() -> HostMode {
+    HostMode {
+        id: "screen-average".into(),
+        label: "Screen average".into(),
+        source: HostSource::ScreenAverage,
+    }
+}
+
 fn start(h: &Harness) {
     h.executor
-        .try_start_host(ticket(), HostMode::Screen, baseline())
+        .try_start_host(ticket(), screen_mode(), baseline())
         .unwrap();
     h.entered.recv_timeout(Duration::from_secs(2)).unwrap();
     h.start_release.send(()).unwrap();
@@ -195,7 +203,7 @@ fn start(h: &Harness) {
 fn stop_during_start_restores_before_any_frame() {
     let h = harness(false, false, false);
     h.executor
-        .try_start_host(ticket(), HostMode::Screen, baseline())
+        .try_start_host(ticket(), screen_mode(), baseline())
         .unwrap();
     h.entered.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(
