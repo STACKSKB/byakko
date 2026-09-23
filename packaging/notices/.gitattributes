@@ -1,2 +1,3 @@
 # Preserve copied upstream notice bytes and their recorded hashes.
 *.txt -text
+LICENSE-* -text

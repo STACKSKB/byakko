@@ -31,9 +31,18 @@ package/version entries in union. Of those, 171 have a top-level license or
 notice text in the extracted crate; 11 have none: `clipboard-win 5.4.1` and
 `iced_core`, `iced_debug`, `iced_futures`, `iced_graphics`, `iced_program`,
 `iced_renderer`, `iced_runtime`, `iced_tiny_skia`, `iced_widget`, and
-`iced_winit` at their locked 0.14.x versions. These missing files need
-authoritative source text before a notice bundle can be completed. A metadata
-license expression alone does not supply that text.
+`iced_winit` at their locked 0.14.x versions. A metadata license expression
+alone does not supply their notice text.
+
+The eleven missing repository-root texts were obtained from their exact
+upstream source commits on 2026-09-23 and are stored under
+`packaging/notices/iced-0.14` and `packaging/notices/clipboard-win-5.4.1`.
+The ten Iced crates share one MIT license whose bytes match at each of four
+recorded source revisions; `clipboard-win` has its own BSL-1.0 text. Each
+directory records the covered package versions, upstream revisions, URL and
+SHA-256. The inventory still reports these eleven as missing *from the local
+crate archives*. The supplemental files resolve their notice-text provenance,
+not the remaining packaging and asset review.
 
 This inventory does not choose which of a crate's alternate license files to
 ship, inspect nested attribution or bundled native libraries, or grant a
