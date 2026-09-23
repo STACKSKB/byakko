@@ -417,3 +417,13 @@ ignored JSON result is `Research/captures/cli-review-old-baseline-20260923.json`
 This matches the direct byte comparison of the old and current complete
 archives. Review is read-only; applying that old archive remains a separate,
 unaccepted write/recovery operation.
+
+## Repeated read-only archive stability (2026-09-23)
+
+A later `byakko-cli capture-archive` on the attached Nia87 saved a fresh ignored
+archive at `Research/captures/host-executor-before-20260923.json`. Its 139,657
+embedded native bytes have SHA-256
+`31C9B1C5CBF8E41A7018355E114361FC967C54732A4D5DA88E5A690506FAD3C8`,
+identical to both preceding CLI captures. The read-only command completed
+without setters. This establishes continued stability of the currently observed
+effect-1 configuration; it does not validate host streaming or archive recovery.
