@@ -54,6 +54,15 @@ shortcut usages while preserving opaque baseline values. Memory-device tests
 exercise planning, apply and stale-file rejection without USB. No physical CLI
 write has been attempted yet.
 
+`read-settings` output is likewise an editable snapshot file.
+`plan-settings <snapshot-file>` compares one proposed field with a fresh USB
+read and sends no setter. `apply-settings <snapshot-file>` accepts exactly one
+changed field per invocation, verifies its complete catalog and raw revision,
+then uses the same session/executor transaction as Iced. The backend checks
+the complete native settings readback and keeps a durable before-image.
+Memory-device tests cover the write, reread and rejection paths. The attached
+Nia87 has exercised planning only; physical CLI settings apply remains open.
+
 Later CLI work can expose macro, lighting and archive apply workflows. It should
 show the target identity and operation result, preserve opaque values, and use
 the same expected-state check, durable backup, readback and typed recovery

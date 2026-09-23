@@ -105,6 +105,8 @@ read-only-first device acceptance sequence there.
 - The CLI keymap file workflow uses the same session/executor write path as
   Iced: require a freshly matching raw revision, validate the intended changes
   against the Nia87 adapter, then wait for backup, write, and full readback.
+  The settings-file workflow follows the same boundary and permits only one
+  changed scalar field per apply, matching the backend's one-field transaction.
   Read-only CLI commands remain appropriate for unattended Linux smoke tests.
 
 ## Work sequence and evidence

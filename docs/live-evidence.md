@@ -453,3 +453,15 @@ coverage. Ignored files:
 `Research/captures/cli-keymap-plan-smoke-20260923.json` and
 `Research/captures/cli-keymap-plan-edited-20260923.json`, plus the rejected
 `Research/captures/cli-keymap-plan-opaque-20260923.json`.
+
+## CLI settings plan smoke check (2026-09-23)
+
+The release CLI exported the attached Nia87's complete 256-byte settings
+revision and seven editable values to an ignored JSON file. `plan-settings`
+returned `[]` for that unchanged export. A second file changed only debounce
+from 1 to 2 ms; planning reported exactly one `debounce` edit. These calls
+performed fresh keymap and settings reads but no setter. `apply-settings` was
+not run on hardware; memory-backend tests cover its one-field transaction and
+verified reread. Ignored files:
+`Research/captures/cli-settings-plan-smoke-20260923.json` and
+`Research/captures/cli-settings-plan-proposal-20260923.json`.

@@ -44,8 +44,9 @@ captures and vendor fixtures under ignored paths are not in Git.
   and uses the same forward/reverse preflight as archive review, so an
   unrepresentable change is an error rather than a raw byte diff. These
   read-only commands send no setters. `plan-keymap` also sends no setter;
-  `apply-keymap` is an explicit write command and is not part of the initial
-  unattended Linux smoke test.
+  `plan-settings` accepts an edited `read-settings` snapshot and likewise sends
+  no setter. `apply-keymap` and `apply-settings` are explicit write commands
+  and are not part of the initial unattended Linux smoke test.
 
 - [ ] Check Linux removal/reconnect, one-device selection, GUI page entry
   reads, and clean shutdown. Record whether X11 and Wayland behave differently.
@@ -57,6 +58,11 @@ captures and vendor fixtures under ignored paths are not in Git.
   `plan-keymap`, then explicitly run `apply-keymap`. Confirm key output, the
   durable before-image, full readback and restoration. Do this only after the
   read-only transport checks and the existing recovery concern are resolved.
+
+- [ ] After the same read-only and recovery gates, exercise one-field CLI
+  settings apply and restoration from a freshly exported `read-settings`
+  snapshot. Run `plan-settings` first; verify the before-image and full native
+  readback after the explicit `apply-settings` command.
 
 ## Linux verification record (2026-09-23)
 
