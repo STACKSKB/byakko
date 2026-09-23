@@ -51,6 +51,17 @@ pub fn review(target: &NativeArchive) -> Result<Review, String> {
     review_with(&Access::unique(), target)
 }
 
+/// Compare two saved native archives without opening a device. The same
+/// forward and reverse preflight used by live review validates the difference.
+pub fn compare(
+    before: &NativeArchive,
+    target: &NativeArchive,
+) -> Result<Vec<SectionChange>, String> {
+    let before_config = decode(before)?;
+    let target_config = decode(target)?;
+    Ok(review_captured(&before_config, target, &target_config)?.changes)
+}
+
 pub(super) fn review_with(access: &Access, target: &NativeArchive) -> Result<Review, String> {
     let target_config = decode(target)?;
     let before_config = access
@@ -234,6 +245,19 @@ mod tests {
         );
         assert_eq!(decode(&valid).unwrap(), target);
         assert!(!native.bytes.is_empty());
+    }
+
+    #[test]
+    fn offline_comparison_reports_changes_without_a_device() {
+        let before = encode(&fixture()).unwrap();
+        let mut changed = fixture();
+        changed.keymaps.base[0] = [0, 0, 5, 0];
+        let after = encode(&changed).unwrap();
+        let changes = compare(&before, &after).unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].id, "keymaps");
+        assert_eq!(changes[0].count, Some(1));
+        assert!(compare(&after, &after).unwrap().is_empty());
     }
 
     #[test]
