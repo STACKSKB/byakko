@@ -179,13 +179,18 @@ read-only-first device acceptance sequence there.
   descriptor capability and a staged Iced editor; memory-backend tests cover
   selection, apply and readback, while Nia87 codec tests cover encoding.
   Physical shortcut output remains unverified.
-  Entering Macros reads a complete backend-advertised slot catalog once the
-  keymap is ready. The library shows stored programs and slots still bound in
-  either keymap image; Add selects the first unbound free slot and stops at the
-  backend capacity. Selecting a macro reads its editable snapshot separately.
-  Lighting, per-key Color and Settings still read a stale or unloaded snapshot
-  on entry. An explicit retry remains necessary after a failed read or uncertain
-  write.
+  The user explicitly prioritized a persistent keyboard workspace and responsive
+  interaction on 2026-09-23. Keep the board visible while key, macro, lighting,
+  per-key color and settings controls change around it. Scalar settings are
+  presented together as toggles/sliders. Page navigation issues no reads.
+  Connection refresh loads scalar sections once; macro discovery is passive,
+  with a separate correlated ticket and foreground priority between slot reads
+  on the same serialized executor. Recording cancels the scan after the active
+  slot and remains local. The library shows configured/bound slots; Add chooses
+  the first unbound free slot. Selecting a macro reads its editable snapshot.
+  Explicit reads remain for failed or invalidated feature snapshots. The Windows
+  release containing this UX change has been opened for user validation; no
+  physical acceptance is implied by headless tests.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and
   the root sampler module is a compatibility re-export.

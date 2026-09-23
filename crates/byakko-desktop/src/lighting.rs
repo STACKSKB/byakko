@@ -7,19 +7,27 @@ use crate::{
     panels::{self, UiStyle},
 };
 use byakko_core::lighting::{
-    Content, Edit,
+    Color, Content, Edit,
     controls::{self, ChoiceEdit, Control},
     editor::{Editor, Status},
 };
 use byakko_core::session::Status as SessionStatus;
 pub(crate) use host::HostInput;
 use iced::{
-    Element, Fill,
-    widget::{button, column, row, scrollable, text},
+    Element, Fill, FillPortion,
+    widget::{button, column, container, row, scrollable, text},
 };
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum Panel {
+    #[default]
+    Onboard,
+    Host,
+}
 
 #[derive(Clone, Debug)]
 pub(super) enum Message {
+    Panel(Panel),
     Read,
     Apply,
     Revert,
@@ -38,6 +46,7 @@ impl Desktop {
             return self.screen_capture.update(message, editable);
         }
         match message {
+            Message::Panel(panel) => self.lighting_panel = panel,
             Message::StopHost => self.stop_host(),
             Message::StartHost(mode_id) if !self.busy() => self.start_host(mode_id),
             _ if self.busy() => (),
@@ -65,10 +74,32 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         return text("Lighting is unavailable on this device").into();
     };
     let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
-    let mut content = column![toolbar(app, editor, editable), text(status(app, editor))]
-        .spacing(app.ui.spacing.m);
-    if !editor.capabilities().host_modes.is_empty() {
-        content = content.push(host_controls(app, editor));
+    let style = &app.ui;
+    let selector = row![
+        panels::selectable_button(
+            style,
+            "Onboard effects",
+            app.lighting_panel == Panel::Onboard,
+            Some(AppMessage::Lighting(Message::Panel(Panel::Onboard))),
+        ),
+        panels::selectable_button(
+            style,
+            "Host modes",
+            app.lighting_panel == Panel::Host,
+            (!editor.capabilities().host_modes.is_empty())
+                .then_some(AppMessage::Lighting(Message::Panel(Panel::Host))),
+        ),
+    ]
+    .spacing(style.spacing.s);
+    let mut content = column![
+        toolbar(app, editor, editable),
+        selector,
+        text(status(app, editor))
+    ]
+    .spacing(style.spacing.s)
+    .height(Fill);
+    if app.lighting_panel == Panel::Host && !editor.capabilities().host_modes.is_empty() {
+        return content.push(host_controls(app, editor)).into();
     }
     let Some(draft) = editor.draft() else {
         if let Some(snapshot) = editor.baseline() {
@@ -96,30 +127,43 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         Ok(projected) => projected,
         Err(reason) => return content.push(text(reason)).into(),
     };
-    let style = &app.ui;
     let effects = projected.effects;
     let settings = projected.settings;
-    let workbench = panels::split(
-        style,
-        move || {
-            panels::panel(
-                style,
-                "Effects",
-                scrollable(choice_buttons(style, &effects, editable))
-                    .height(Fill)
-                    .into(),
+    let swatches = match draft.color {
+        Some(Color::Rgb(rgb)) => control_widgets::color_presets(
+            style,
+            rgb,
+            editable
+                .then_some(|rgb| AppMessage::Lighting(Message::Edit(Edit::Color(Color::Rgb(rgb))))),
+        ),
+        _ => column![].into(),
+    };
+    let workbench = row![
+        container(panels::panel(
+            style,
+            "Effects",
+            scrollable(choice_buttons(style, &effects, editable))
+                .height(Fill)
+                .into(),
+        ))
+        .width(FillPortion(style.panes.sidebar)),
+        container(panels::panel(
+            style,
+            "Selected effect · parameters",
+            scrollable(
+                column![
+                    swatches,
+                    setting_controls(style, &settings, editable, Message::Edit)
+                ]
+                .spacing(style.spacing.s)
             )
-        },
-        move || {
-            panels::panel(
-                style,
-                "Parameters",
-                scrollable(setting_controls(style, &settings, editable, Message::Edit))
-                    .height(Fill)
-                    .into(),
-            )
-        },
-    );
+            .height(Fill)
+            .into(),
+        ))
+        .width(FillPortion(style.panes.detail)),
+    ]
+    .spacing(style.spacing.m)
+    .height(Fill);
     content.push(workbench).height(Fill).into()
 }
 
@@ -182,18 +226,20 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
             .as_ref()
             .map(|_| AppMessage::Lighting(Message::StopHost)),
     );
-    panels::panel(
-        &app.ui,
-        "Host lighting",
-        column![
-            modes,
-            parameters,
-            capture,
-            row![start, stop].spacing(app.ui.spacing.m)
-        ]
-        .spacing(app.ui.spacing.l)
-        .into(),
-    )
+    column![
+        row![start, stop].spacing(app.ui.spacing.m),
+        scrollable(panels::panel(
+            &app.ui,
+            "Host lighting",
+            column![modes, parameters, capture]
+                .spacing(app.ui.spacing.l)
+                .into(),
+        ))
+        .height(Fill),
+    ]
+    .spacing(app.ui.spacing.s)
+    .height(Fill)
+    .into()
 }
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {

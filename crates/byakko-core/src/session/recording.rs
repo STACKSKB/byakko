@@ -14,6 +14,7 @@ impl Session {
         let editor = self.macros.as_ref().ok_or("Macros are unavailable")?;
         let recorder = editor.recorder(policy)?;
         self.activity = Activity::Recording { recorder };
+        self.macro_catalog_operation = None;
         Ok(())
     }
 

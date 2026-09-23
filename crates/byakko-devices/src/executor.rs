@@ -25,6 +25,36 @@ enum Request {
     },
 }
 
+struct CatalogScan {
+    generation: u64,
+    operation: u64,
+    slots: Vec<String>,
+    snapshots: Vec<byakko_core::macros::Snapshot>,
+}
+
+impl CatalogScan {
+    fn step(&mut self, device: &mut impl Device) -> Option<Completion> {
+        let slot = &self.slots[self.snapshots.len()];
+        let result = catch_unwind(AssertUnwindSafe(|| device.read_macro(slot)))
+            .unwrap_or_else(|_| Err("Macro catalog device read panicked".into()));
+        match result {
+            Ok(snapshot) => self.snapshots.push(snapshot),
+            Err(reason) => {
+                return Some(Completion::ReadMacroCatalog {
+                    generation: self.generation,
+                    operation: self.operation,
+                    result: Err(reason),
+                });
+            }
+        }
+        (self.snapshots.len() == self.slots.len()).then(|| Completion::ReadMacroCatalog {
+            generation: self.generation,
+            operation: self.operation,
+            result: Ok(std::mem::take(&mut self.snapshots)),
+        })
+    }
+}
+
 /// Commands, finite completions, and host frames use bounded queues. Closing
 /// the window must wait for restoration; dropping an executor requests Stop.
 pub struct Executor {
@@ -34,6 +64,8 @@ pub struct Executor {
     host_events: Receiver<HostEvent>,
     host: Arc<host::Control>,
     generation: Arc<AtomicU64>,
+    catalog_submitted: AtomicU64,
+    catalog_cancelled: Arc<AtomicU64>,
 }
 
 impl Executor {
@@ -45,29 +77,105 @@ impl Executor {
         let (host_responses, host_events) = mpsc::channel();
         let generation = Arc::new(AtomicU64::new(0));
         let active_generation = generation.clone();
+        let catalog_cancelled = Arc::new(AtomicU64::new(0));
+        let worker_catalog_cancelled = catalog_cancelled.clone();
         let host = Arc::new(host::Control::new());
         let active_host = host.clone();
         std::thread::Builder::new()
             .name("byakko-device".into())
             .spawn(move || {
                 let mut latest = None;
-                for request in requests {
+                let mut scan: Option<CatalogScan> = None;
+                loop {
+                    let request = if scan.is_some() {
+                        match requests.try_recv() {
+                            Ok(request) => Some(request),
+                            Err(TryRecvError::Empty) => None,
+                            Err(TryRecvError::Disconnected) => break,
+                        }
+                    } else {
+                        match requests.recv() {
+                            Ok(request) => Some(request),
+                            Err(_) => break,
+                        }
+                    };
+                    let Some(request) = request else {
+                        let pending = scan.as_mut().expect("scan remains active");
+                        if pending.generation != active_generation.load(Ordering::Acquire)
+                            || pending.operation <= worker_catalog_cancelled.load(Ordering::Acquire)
+                        {
+                            scan = None;
+                            continue;
+                        }
+                        if let Some(completion) = pending.step(&mut device) {
+                            scan = None;
+                            if responses.send(completion).is_err() {
+                                break;
+                            }
+                        }
+                        continue;
+                    };
                     match request {
                         Request::Finite(command) => {
                             let token = token(&command);
-                            let completion = if token.0 == 0
+                            if token.0 == 0
                                 || token.0 != active_generation.load(Ordering::Acquire)
                                 || latest.is_some_and(|previous| token <= previous)
                             {
-                                failure(
+                                let completion = failure(
                                     &command,
                                     "Stale or duplicate device command".into(),
                                     Recovery::NotAttempted,
-                                )
-                            } else {
-                                latest = Some(token);
-                                execute(&mut device, &command, &backup_dir)
-                            };
+                                );
+                                if responses.send(completion).is_err() {
+                                    break;
+                                }
+                                continue;
+                            }
+                            latest = Some(token);
+                            if let Command::ReadMacroCatalog {
+                                generation,
+                                operation,
+                                slots,
+                            } = command
+                            {
+                                if operation <= worker_catalog_cancelled.load(Ordering::Acquire) {
+                                    continue;
+                                }
+                                scan = Some(CatalogScan {
+                                    generation,
+                                    operation,
+                                    slots,
+                                    snapshots: Vec::new(),
+                                });
+                                if scan.as_ref().is_some_and(|scan| scan.slots.is_empty()) {
+                                    let completed = scan.take().unwrap();
+                                    if responses
+                                        .send(Completion::ReadMacroCatalog {
+                                            generation: completed.generation,
+                                            operation: completed.operation,
+                                            result: Ok(Vec::new()),
+                                        })
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                }
+                                continue;
+                            }
+                            if matches!(
+                                command,
+                                Command::Read { .. }
+                                    | Command::Apply { .. }
+                                    | Command::ApplyMacro { .. }
+                                    | Command::ApplyLighting { .. }
+                                    | Command::ApplyPicture { .. }
+                                    | Command::ApplySetting { .. }
+                                    | Command::ApplyArchive { .. }
+                            ) {
+                                scan = None;
+                            }
+                            let completion = execute(&mut device, &command, &backup_dir);
                             if responses.send(completion).is_err() {
                                 break;
                             }
@@ -78,6 +186,7 @@ impl Executor {
                             setting,
                             expected,
                         } => {
+                            scan = None;
                             if ticket.generation != active_generation.load(Ordering::Acquire)
                                 || latest.is_some_and(|previous| {
                                     (ticket.generation, ticket.operation) <= previous
@@ -120,6 +229,8 @@ impl Executor {
             host_events,
             host,
             generation,
+            catalog_submitted: AtomicU64::new(0),
+            catalog_cancelled,
         })
     }
 
@@ -129,9 +240,22 @@ impl Executor {
         self.generation.store(generation, Ordering::Release);
     }
 
+    /// Stop a pending or active catalog sweep after its current slot. Recording
+    /// stays local and does not wait for the USB slot already in progress.
+    pub fn cancel_macro_catalog(&self) {
+        self.catalog_cancelled.fetch_max(
+            self.catalog_submitted.load(Ordering::Acquire),
+            Ordering::AcqRel,
+        );
+    }
+
     /// Feed a rejected completion back into the core just like a worker result,
     /// so a full/closed queue cannot strand its pending operation.
     pub fn try_submit(&self, command: Command) -> Result<(), Box<Completion>> {
+        if let Command::ReadMacroCatalog { operation, .. } = &command {
+            self.catalog_submitted
+                .fetch_max(*operation, Ordering::AcqRel);
+        }
         let phase = self.host.phase.lock().unwrap();
         if !matches!(*phase, host::Phase::Idle) {
             return Err(Box::new(failure(

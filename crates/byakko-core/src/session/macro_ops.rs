@@ -24,6 +24,10 @@ impl Session {
         self.macros.as_ref()
     }
 
+    pub fn macro_catalog_scanning(&self) -> bool {
+        self.macro_catalog_operation.is_some()
+    }
+
     /// Stored programs and slots still referenced by either keymap image.
     /// A blank but bound slot must not be silently reused by Add.
     pub fn macro_library_slots(&self) -> Option<Vec<&Choice>> {
@@ -145,18 +149,24 @@ impl Session {
     }
 
     pub fn request_macro_catalog_read(&mut self) -> Result<Command, String> {
+        self.require_idle()?;
         if self.status == Status::Disconnected {
             return Err("Device is disconnected".into());
         }
+        if self.macro_catalog_operation.is_some() {
+            return Err("Macro catalog scan is already in progress".into());
+        }
         let slots = self
-            .macro_editor()?
+            .macros
+            .as_ref()
+            .ok_or("Device does not support macro editing")?
             .capabilities()
             .slots
             .iter()
             .map(|choice| choice.id.clone())
             .collect();
         let operation = self.operation()?;
-        self.activity = Activity::ReadMacroCatalog { operation };
+        self.macro_catalog_operation = Some(operation);
         Ok(Command::ReadMacroCatalog {
             generation: self.generation,
             operation,
@@ -170,6 +180,7 @@ impl Session {
         }
         let (expected, desired) = self.macro_editor()?.request_apply()?;
         let operation = self.operation()?;
+        self.macro_catalog_operation = None;
         self.activity = Activity::ApplyMacro {
             operation,
             slot: expected.slot.clone(),

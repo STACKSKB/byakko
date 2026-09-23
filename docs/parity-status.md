@@ -35,3 +35,20 @@ Physical Iced acceptance remains open. Host
 lighting is separate from per-key RGB picture storage.
 
 Firmware flashing, vendor account login and cloud sharing are outside the local stock-firmware configurator scope. OEM database metadata and UI arrangements are not product implementation sources. Further physical output and write-recovery tests remain explicitly pending while the user is AFK.
+
+### 2026-09-23 workspace responsiveness update
+
+The user prioritized UX during the Windows session. The keyboard now stays in
+the workspace across configuration pages; key assignments have an explicit action
+list, lighting parameters have their own visible pane and RGB presets, per-key
+RGB drafts preview on the board, and settings show all fields together. Tab
+navigation sends no reads. Connection loads scalar sections once and starts a
+passive macro scan; queued foreground operations run between individual slot
+reads. The full scan still has the existing USB read pacing. Display selection
+and optional point sampling are also implemented for host screen color.
+
+The release was opened for user validation. Native tests and Clippy passed;
+core WebAssembly and Linux devices cross-checks passed. Rendered/physical
+acceptance of the new workspace and Linux runtime remain pending. The earlier
+picture/recovery gate remains open. See the updated Iced lighting and macro
+acceptance notes for exact scope.

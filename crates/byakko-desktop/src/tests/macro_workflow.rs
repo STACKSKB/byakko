@@ -9,6 +9,7 @@ use byakko_core::macros::{Content, Edit, editor::Status as MacroStatus};
 fn add_uses_first_free_slot_and_capacity_disables_further_adds() {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Macros));
+    app.read_macro_catalog_in_background();
     settle(&mut app);
     let editor = app.session.macros().unwrap();
     assert_eq!(editor.configured_slots().unwrap().len(), 3);
@@ -51,44 +52,25 @@ fn add_uses_first_free_slot_and_capacity_disables_further_adds() {
 }
 
 #[test]
-fn macro_page_reads_catalog_once_on_entry_and_after_pending_keymap() {
+fn macro_scan_is_passive_and_navigation_keeps_the_same_scan() {
     let mut app = ready();
-    let _ = app.update(Message::Page(Page::Macros));
-    assert!(matches!(
-        app.session.activity(),
-        byakko_core::session::Activity::ReadMacroCatalog { .. }
-    ));
-    settle(&mut app);
-    assert_eq!(
-        app.session
-            .macros()
-            .unwrap()
-            .configured_slots()
-            .unwrap()
-            .len(),
-        3
-    );
-    assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
-    let _ = app.update(Message::Page(Page::Keys));
-    let _ = app.update(Message::Page(Page::Macros));
+    app.read_macro_catalog_in_background();
+    assert!(app.session.macro_catalog_scanning());
     assert!(!app.busy());
-
-    let mut app = ready();
-    let _ = app.update(Message::Read);
     let _ = app.update(Message::Page(Page::Macros));
+    assert_eq!(app.session.activity(), &byakko_core::session::Activity::Idle);
+    let _ = app.update(Message::Page(Page::Keys));
+    let _ = app.update(Message::SelectKey("Alpha".into()));
+    app.stage(1);
+    assert!(!app.session.changes().is_empty());
+    let draft = app.session.draft().cloned();
     settle(&mut app);
-    assert_eq!(
-        app.session
-            .macros()
-            .unwrap()
-            .configured_slots()
-            .unwrap()
-            .len(),
-        3
-    );
-    assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
+    assert_eq!(app.session.draft(), draft.as_ref());
+    assert_eq!(app.session.macros().unwrap().configured_slots().unwrap().len(), 3);
+    let _ = app.update(Message::Page(Page::Macros));
+    assert!(!app.session.macro_catalog_scanning());
+    assert!(!app.busy());
 }
-
 #[test]
 fn failed_read_preserves_unsubmitted_form_input() {
     let mut app = loaded();
@@ -141,7 +123,7 @@ fn send(app: &mut Desktop, message: Macro) {
 
 pub(super) fn settle(app: &mut Desktop) {
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
-    while app.busy() {
+    while app.busy() || app.session.macro_catalog_scanning() {
         assert!(
             std::time::Instant::now() < deadline,
             "memory worker timed out"

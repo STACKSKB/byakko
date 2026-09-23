@@ -352,6 +352,7 @@ pub struct Session {
     generation: u64,
     next_operation: u64,
     activity: Activity,
+    macro_catalog_operation: Option<u64>,
     macros: Option<crate::macros::editor::Editor>,
     lighting: Option<crate::lighting::editor::Editor>,
     host_draft: Option<HostDraft>,
@@ -395,6 +396,7 @@ impl Session {
             generation: 0,
             next_operation: 0,
             activity: Activity::Idle,
+            macro_catalog_operation: None,
             macros: None,
             lighting: None,
             host_draft: None,
@@ -631,6 +633,7 @@ impl Session {
     }
 
     fn invalidate_macros(&mut self) {
+        self.macro_catalog_operation = None;
         if let Some(editor) = self.macros.as_mut() {
             editor.invalidate();
         }
@@ -654,6 +657,25 @@ impl Session {
     }
 
     pub fn accept(&mut self, completion: Completion) -> Acceptance {
+        if let Completion::ReadMacroCatalog {
+            generation,
+            operation,
+            result,
+        } = completion
+        {
+            if generation != self.generation
+                || self.macro_catalog_operation != Some(operation)
+                || self.status == Status::Disconnected
+            {
+                return Acceptance::IgnoredStale;
+            }
+            self.macro_catalog_operation = None;
+            self.macros
+                .as_mut()
+                .expect("pending macro capability")
+                .accept_catalog(result);
+            return Acceptance::Accepted;
+        }
         if matches!(&completion, Completion::ReviewArchive { .. }) {
             let Completion::ReviewArchive {
                 generation,

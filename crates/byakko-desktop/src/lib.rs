@@ -85,13 +85,14 @@ struct Desktop {
     archive_file: archive::FileState,
     archive_path: String,
     picture_selected: Option<String>,
-    settings_selected: Option<String>,
     macro_files: macro_files::Fields,
     macro_new_slot: Option<String>,
     clock: std::time::Instant,
     recording_options: recording::Options,
     host: Option<lighting::HostInput>,
     screen_capture: lighting::screen::Controls,
+    lighting_panel: lighting::Panel,
+    initial_reads: std::collections::VecDeque<Page>,
     page: Page,
     macro_form: macro_form::Form,
     repeat_input: String,
@@ -126,13 +127,14 @@ pub fn run(
         archive_file: archive::FileState::Idle,
         archive_path: String::new(),
         picture_selected: None,
-        settings_selected: None,
         macro_files: macro_files::Fields::with_labels_directory(labels_directory),
         macro_new_slot: None,
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         host: None,
         screen_capture: Default::default(),
+        lighting_panel: Default::default(),
+        initial_reads: Default::default(),
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),
@@ -199,6 +201,7 @@ impl Desktop {
             self.session.request_read()
         });
         self.submit(request);
+        self.initial_reads = [Page::Lighting, Page::Settings, Page::Picture].into();
         if attached
             && let Some(editor) = self.session.macros()
             && let Err(reason) = self.macro_files.load_labels(editor)
@@ -280,60 +283,70 @@ impl Desktop {
         }
     }
 
-    fn read_page_on_entry(&mut self) {
+    fn read_initial_sections(&mut self) {
         if self.busy() || *self.session.status() != Status::Ready {
             return;
         }
-        let request = match self.page {
-            Page::Macros
-                if self.session.macros().is_some_and(|editor| {
-                    editor.catalog().is_none() && editor.catalog_error().is_none()
-                }) =>
-            {
-                self.session.request_macro_catalog_read()
-            }
-            Page::Lighting
-                if self.session.lighting().is_some_and(|editor| {
-                    matches!(
-                        editor.status(),
-                        byakko_core::lighting::editor::Status::Unloaded
-                            | byakko_core::lighting::editor::Status::Unverified {
-                                problem: Problem::ReadRequired
-                            }
-                    )
-                }) =>
-            {
-                self.session.request_lighting_read()
-            }
-            Page::Picture
-                if self.session.picture().is_some_and(|editor| {
-                    matches!(
-                        editor.status(),
-                        byakko_core::picture::editor::Status::Unloaded
-                            | byakko_core::picture::editor::Status::Unverified {
-                                problem: Problem::ReadRequired
-                            }
-                    )
-                }) =>
-            {
-                self.session.request_picture_read()
-            }
-            Page::Settings
-                if self.session.settings().is_some_and(|editor| {
-                    matches!(
-                        editor.status(),
-                        byakko_core::settings::editor::Status::Unloaded
-                            | byakko_core::settings::editor::Status::Unverified {
-                                problem: Problem::ReadRequired
-                            }
-                    )
-                }) =>
-            {
-                self.session.request_settings_read()
-            }
-            _ => return,
-        };
-        self.submit(request);
+        while let Some(page) = self.initial_reads.pop_front() {
+            let request = match page {
+                Page::Lighting
+                    if self.session.lighting().is_some_and(|editor| {
+                        matches!(
+                            editor.status(),
+                            byakko_core::lighting::editor::Status::Unloaded
+                                | byakko_core::lighting::editor::Status::Unverified {
+                                    problem: Problem::ReadRequired
+                                }
+                        )
+                    }) =>
+                {
+                    self.session.request_lighting_read()
+                }
+                Page::Picture
+                    if self.session.picture().is_some_and(|editor| {
+                        matches!(
+                            editor.status(),
+                            byakko_core::picture::editor::Status::Unloaded
+                                | byakko_core::picture::editor::Status::Unverified {
+                                    problem: Problem::ReadRequired
+                                }
+                        )
+                    }) =>
+                {
+                    self.session.request_picture_read()
+                }
+                Page::Settings
+                    if self.session.settings().is_some_and(|editor| {
+                        matches!(
+                            editor.status(),
+                            byakko_core::settings::editor::Status::Unloaded
+                                | byakko_core::settings::editor::Status::Unverified {
+                                    problem: Problem::ReadRequired
+                                }
+                        )
+                    }) =>
+                {
+                    self.session.request_settings_read()
+                }
+                _ => continue,
+            };
+            self.submit(request);
+            return;
+        }
+        self.read_macro_catalog_in_background();
+    }
+
+    fn read_macro_catalog_in_background(&mut self) {
+        if !self.busy()
+            && !self.session.macro_catalog_scanning()
+            && self.session.status() == &Status::Ready
+            && self.session.macros().is_some_and(|editor| {
+                editor.catalog().is_none() && editor.catalog_error().is_none()
+            })
+        {
+            let request = self.session.request_macro_catalog_read();
+            self.submit(request);
+        }
     }
 
     fn poll(&mut self) -> Task<Message> {
@@ -543,38 +556,11 @@ impl Desktop {
                 return self.close();
             }
         }
-        if macro_catalog_result && verified && self.page == Page::Macros {
-            let needs_read = self.session.macros().is_some_and(|editor| {
-                !editor.dirty()
-                    && matches!(
-                        editor.status(),
-                        byakko_core::macros::editor::Status::Unloaded
-                            | byakko_core::macros::editor::Status::Unverified {
-                                problem: Problem::ReadRequired
-                            }
-                    )
-            });
-            let target = self.session.macro_library_slots().and_then(|slots| {
-                let selected = self.session.macros()?.slot();
-                if slots.iter().any(|slot| slot.id == selected)
-                    || self.macro_new_slot.as_deref() == Some(selected)
-                {
-                    Some(selected.to_owned())
-                } else {
-                    slots.first().map(|slot| slot.id.clone())
-                }
-            });
-            if needs_read && let Some(slot) = target {
-                if let Err(reason) = self.session.select_macro(&slot) {
-                    self.notice = Some(reason);
-                } else {
-                    let request = self.session.request_macro_read();
-                    self.submit(request);
-                    return Task::none();
-                }
-            }
+        if verified {
+            self.read_initial_sections();
+        } else {
+            self.initial_reads.clear();
         }
-        self.read_page_on_entry();
         Task::none()
     }
 
@@ -620,7 +606,6 @@ impl Desktop {
             Message::Record(message) => self.update_recording(message),
             Message::Page(page) => {
                 self.page = page;
-                self.read_page_on_entry();
             }
             Message::Macro(message) => self.update_macro(message),
             Message::Shortcut(message) => self.update_shortcut(message),
@@ -629,6 +614,13 @@ impl Desktop {
                 self.sync_shortcut();
             }
             Message::SelectKey(key) => {
+                if self
+                    .session
+                    .picture()
+                    .is_some_and(|editor| editor.capabilities().keys.contains(&key))
+                {
+                    self.picture_selected = Some(key.clone());
+                }
                 self.selected = Some(key);
                 self.sync_shortcut();
             }
@@ -666,7 +658,7 @@ impl Desktop {
         }
         if self.session.recording() {
             Subscription::batch([close, recording::subscription()])
-        } else if self.busy()
+        } else if (self.busy() || self.session.macro_catalog_scanning())
             && !matches!(
                 self.session.activity(),
                 byakko_core::session::Activity::MacroFile { .. }

@@ -10,6 +10,7 @@ fn send(app: &mut Desktop, message: Picture) {
 fn loaded() -> Desktop {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Picture));
+    send(&mut app, Picture::Read);
     settle(&mut app);
     assert_eq!(
         app.session.picture().unwrap().status(),
@@ -19,13 +20,14 @@ fn loaded() -> Desktop {
 }
 
 #[test]
-fn entering_colors_reads_once_and_waits_for_a_pending_keymap_read() {
+fn entering_colors_does_not_issue_reads_and_connection_preloads_once() {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Picture));
-    assert!(matches!(
+    assert_eq!(
         app.session.activity(),
-        byakko_core::session::Activity::ReadPicture { .. }
-    ));
+        &byakko_core::session::Activity::Idle
+    );
+    send(&mut app, Picture::Read);
     settle(&mut app);
     assert_eq!(
         app.session.picture().unwrap().status(),
@@ -42,6 +44,7 @@ fn entering_colors_reads_once_and_waits_for_a_pending_keymap_read() {
         byakko_core::session::Activity::Read { .. }
     ));
     let _ = app.update(Message::Page(Page::Picture));
+    send(&mut app, Picture::Read);
     settle(&mut app);
     assert_eq!(
         app.session.picture().unwrap().status(),
@@ -50,9 +53,10 @@ fn entering_colors_reads_once_and_waits_for_a_pending_keymap_read() {
 }
 
 #[test]
-fn failed_automatic_color_read_waits_for_an_explicit_retry() {
+fn failed_color_read_waits_for_an_explicit_retry() {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Picture));
+    send(&mut app, Picture::Read);
     let byakko_core::session::Activity::ReadPicture { operation } = app.session.activity() else {
         panic!("expected automatic color read");
     };
