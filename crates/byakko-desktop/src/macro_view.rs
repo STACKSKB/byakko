@@ -25,7 +25,9 @@ fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
     let choices = column(editor.capabilities().slots.iter().map(|choice| {
         panels::selectable_button(
             &app.ui,
-            choice.label.clone(),
+            app.macro_files
+                .slot_label(&choice.id, &choice.label)
+                .to_owned(),
             choice.id == editor.slot(),
             (!app.busy()).then(|| Message::Macro(Macro::Select(choice.id.clone()))),
         )

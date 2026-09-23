@@ -10,6 +10,7 @@ mod macro_files;
 mod macro_form;
 mod macro_view;
 mod panels;
+mod physical_board;
 mod picture;
 mod recording;
 mod recording_input;
@@ -109,6 +110,7 @@ pub fn run(
     session: Session,
     probe: impl Fn() -> Availability + Send + 'static,
     attach: impl Fn(&str) -> Result<Executor, String> + 'static,
+    labels_directory: Option<std::path::PathBuf>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let layer = session.descriptor().layers[0].id.clone();
     let mut discovery = Discovery::spawn(probe)?;
@@ -120,7 +122,7 @@ pub fn run(
         archive_path: String::new(),
         picture_selected: None,
         settings_selected: None,
-        macro_files: Default::default(),
+        macro_files: macro_files::Fields::with_labels_directory(labels_directory),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         host: None,
@@ -163,6 +165,7 @@ impl Desktop {
         if self.busy() {
             return;
         }
+        let mut attached = false;
         if self.executor.is_none() {
             let Some(Availability::Ready { id }) = &self.presence else {
                 self.notice = Some("Waiting for one connected keyboard".into());
@@ -172,6 +175,7 @@ impl Desktop {
                 Ok(executor) => {
                     self.executor = Some(executor);
                     self.selected_device = Some(id.clone());
+                    attached = true;
                 }
                 Err(reason) => {
                     self.notice = Some(format!("Could not open keyboard: {reason}"));
@@ -187,6 +191,13 @@ impl Desktop {
             self.session.request_read()
         });
         self.submit(request);
+        if attached
+            && let Some(editor) = self.session.macros()
+            && let Err(reason) = self.macro_files.load_labels(editor)
+            && self.notice.is_none()
+        {
+            self.notice = Some(format!("Local labels could not be loaded: {reason}"));
+        }
     }
 
     fn submit(&mut self, request: Result<Command, String>) {

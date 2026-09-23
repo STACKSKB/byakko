@@ -12,9 +12,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     type Probe = Box<dyn Fn() -> Availability + Send>;
     type Attach = Box<dyn Fn(&str) -> Result<Executor, String>>;
-    let (session, probe, attach): (Session, Probe, Attach) = match arguments.as_slice() {
+    let (session, probe, attach, labels_directory): (
+        Session,
+        Probe,
+        Attach,
+        Option<std::path::PathBuf>,
+    ) = match arguments.as_slice() {
         [] => {
-            let backups = byakko_devices::storage::user_data_dir()?.join("backups");
+            let data = byakko_devices::storage::user_data_dir()?;
+            let backups = data.join("backups");
             (
                 Session::new(nia87::descriptor())?
                     .with_macros(nia87::macro_adapter::capabilities())?
@@ -48,6 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Executor::spawn(BoundNia87Adapter::new(target), backups.clone())
                         .map_err(|error| error.to_string())
                 }),
+                Some(data.join("macro-labels").join("nia87")),
             )
         }
         [flag] if flag == "--demo" => {
@@ -88,9 +95,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let device = demo::device()?;
                     Executor::spawn(device, Default::default()).map_err(|e| e.to_string())
                 }),
+                None,
             )
         }
         _ => return Err("Usage: byakko-desktop [--demo]".into()),
     };
-    byakko_desktop::run(session, probe, attach)
+    byakko_desktop::run(session, probe, attach, labels_directory)
 }

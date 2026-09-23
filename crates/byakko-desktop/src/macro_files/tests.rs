@@ -1,5 +1,23 @@
 use super::*;
 use byakko_core::macros::{Action, Event, Program};
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+static NEXT_LABEL_TEST: AtomicU64 = AtomicU64::new(0);
+
+fn label_directory() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "byakko-desktop-label-test-{}-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos(),
+        NEXT_LABEL_TEST.fetch_add(1, Ordering::Relaxed),
+    ))
+}
 
 fn document() -> Document {
     Document {
@@ -102,4 +120,60 @@ fn export_keeps_unverified_state_and_close_waits_for_its_result() {
     let close = app.update_macro_files(Message::Complete(ticket, Ok(None)));
     assert_eq!(close.units(), 1);
     assert_eq!(app.session.macros().unwrap().status(), &trust);
+}
+
+#[test]
+fn labels_save_locally_and_load_on_next_attach_without_device_write() {
+    let directory = label_directory();
+    let mut app = crate::tests::macro_workflow::loaded();
+    app.macro_files = Fields::with_labels_directory(Some(directory.clone()));
+    app.macro_files
+        .load_labels(app.session.macros().unwrap())
+        .unwrap();
+    let before_generation = app.session.generation();
+    let before_baseline = app.session.baseline().cloned();
+    let before_activity = app.session.activity().clone();
+    let _ = app.update_macro_files(Message::Name("Desk macro".into()));
+    assert!(app.macro_files.labels_dirty(app.session.macros().unwrap()));
+    let _ = app.update_macro_files(Message::SaveLabels);
+    assert_eq!(app.session.generation(), before_generation);
+    assert_eq!(app.session.activity(), &before_activity);
+    assert_eq!(app.session.baseline(), before_baseline.as_ref());
+    assert!(!app.macro_files.labels_dirty(app.session.macros().unwrap()));
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap()
+            .contains("Local labels saved")
+    );
+
+    let mut next = crate::tests::macro_workflow::loaded();
+    next.macro_files = Fields::with_labels_directory(Some(directory));
+    next.accept_availability(crate::discovery::Availability::Missing);
+    next.accept_availability(crate::discovery::Availability::Ready { id: "demo".into() });
+    assert_eq!(
+        next.macro_files.name(next.session.macros().unwrap()),
+        "Desk macro"
+    );
+}
+
+#[test]
+fn corrupt_newest_label_snapshot_is_visible_on_attach() {
+    let directory = label_directory();
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("label-00000000000000000001.json"), b"{").unwrap();
+    let mut app = crate::tests::macro_workflow::loaded();
+    app.macro_files = Fields::with_labels_directory(Some(directory));
+    app.accept_availability(crate::discovery::Availability::Missing);
+    app.accept_availability(crate::discovery::Availability::Ready { id: "demo".into() });
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap()
+            .contains("Local labels could not be loaded")
+    );
+    assert_eq!(
+        app.macro_files.name(app.session.macros().unwrap()),
+        "Intro sequence"
+    );
 }

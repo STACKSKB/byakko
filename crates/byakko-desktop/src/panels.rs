@@ -33,6 +33,14 @@ pub struct FieldWidths {
     pub regular: u32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BoardGeometry {
+    pub min_unit: f32,
+    pub max_unit: f32,
+    pub key_gap: f32,
+    pub key_label_size: u32,
+}
+
 /// Semantic colors supplied by the application style. `None` keeps the active
 /// Iced theme in charge, so the default adapts to light and dark themes.
 #[derive(Debug, Clone, Copy, Default)]
@@ -54,6 +62,8 @@ pub struct UiStyle {
     pub compact_breakpoint: f32,
     pub panes: PaneRatios,
     pub fields: FieldWidths,
+    pub board: BoardGeometry,
+    pub list_preview_height: f32,
     pub palette: SemanticPalette,
 }
 
@@ -84,6 +94,13 @@ impl UiStyle {
             compact: 120,
             regular: 240,
         },
+        board: BoardGeometry {
+            min_unit: 40.0,
+            max_unit: 52.0,
+            key_gap: 3.0,
+            key_label_size: 11,
+        },
+        list_preview_height: 180.0,
         palette: SemanticPalette {
             selected_background: None,
             selected_text: None,
@@ -140,9 +157,37 @@ pub fn selectable_button<'a, Message: Clone + 'a>(
     selected: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
+    selectable_button_with_size(style, label, selected, on_press, None)
+}
+
+pub fn selectable_button_with_size<'a, Message: Clone + 'a>(
+    style: &UiStyle,
+    label: impl Into<String>,
+    selected: bool,
+    on_press: Option<Message>,
+    size: Option<(f32, f32)>,
+) -> Element<'a, Message> {
     let palette = style.palette;
-    button(text(label.into()).size(style.type_scale.body))
-        .padding(style.spacing.control_padding)
+    let (width, height, label_size, padding) = size.map_or(
+        (
+            iced::Length::Shrink,
+            iced::Length::Shrink,
+            style.type_scale.body,
+            style.spacing.control_padding,
+        ),
+        |(width, height)| {
+            (
+                iced::Length::Fixed(width),
+                iced::Length::Fixed(height),
+                style.board.key_label_size,
+                0,
+            )
+        },
+    );
+    button(text(label.into()).size(label_size).center())
+        .width(width)
+        .height(height)
+        .padding(padding)
         .on_press_maybe(on_press)
         .style(move |theme: &Theme, status| {
             let mut visual = if selected {

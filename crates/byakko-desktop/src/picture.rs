@@ -1,9 +1,6 @@
 //! Per-key RGB controls over a device-neutral physical-key catalog.
 use super::{Desktop, Message as AppMessage};
-use crate::{
-    control_widgets::{self, Choice},
-    panels,
-};
+use crate::{control_widgets, panels, physical_board};
 use byakko_core::picture::{
     self, Content, Edit,
     editor::{Editor, Status},
@@ -87,69 +84,41 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         .iter()
         .find(|key| key.id == *selected)
         .map_or(selected.clone(), |key| key.label.clone());
-    let entries: Vec<_> = physical
-        .into_iter()
-        .map(|key| {
-            let rgb = draft[&key.id];
-            Choice {
-                label: format!(
-                    "{} · #{:02X}{:02X}{:02X}",
-                    key.label, rgb[0], rgb[1], rgb[2]
-                ),
-                selected: &key.id == selected,
-                message: (!app.busy())
-                    .then(|| AppMessage::Picture(Message::Select(key.id.clone()))),
-            }
-        })
-        .collect();
     let style = &app.ui;
-    let selected = selected.clone();
-    let workbench = panels::split(
-        style,
-        move || {
-            panels::panel(
-                style,
-                "Physical keys",
-                scrollable(control_widgets::choices(
-                    style,
-                    "Available",
-                    entries.clone(),
-                ))
-                .height(Fill)
-                .into(),
-            )
-        },
-        move || {
-            let controls = column(picture::channels(color).into_iter().map(|channel| {
-                let key = selected.clone();
-                control_widgets::level(
-                    style,
-                    channel.label,
-                    0..=u8::MAX as u16,
-                    channel.value.into(),
-                    editable.then_some(move |value| {
-                        AppMessage::Picture(Message::Edit(Edit::Channel {
-                            key: key.clone(),
-                            channel: channel.channel,
-                            value: u8::try_from(value).expect("byte channel range"),
-                        }))
-                    }),
-                )
-            }))
-            .spacing(style.spacing.l);
-            panels::panel(
-                style,
-                title.clone(),
-                column![
-                    text(format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2])),
-                    controls
-                ]
-                .spacing(style.spacing.m)
-                .into(),
-            )
-        },
-    );
-    content.push(workbench).height(Fill).into()
+    let selected_id = selected.clone();
+    let board = physical_board::view(style, physical, Some(selected_id.clone()), |key| {
+        (!app.busy()).then(|| AppMessage::Picture(Message::Select(key.id.clone())))
+    });
+    let controls = column(picture::channels(color).into_iter().map(|channel| {
+        let key = selected_id.clone();
+        control_widgets::level(
+            style,
+            channel.label,
+            0..=u8::MAX as u16,
+            channel.value.into(),
+            editable.then_some(move |value| {
+                AppMessage::Picture(Message::Edit(Edit::Channel {
+                    key: key.clone(),
+                    channel: channel.channel,
+                    value: u8::try_from(value).expect("byte channel range"),
+                }))
+            }),
+        )
+    }))
+    .spacing(style.spacing.l);
+    content = content
+        .push(panels::panel(style, "Physical keys", board))
+        .push(panels::panel(
+            style,
+            title,
+            column![
+                text(format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2])),
+                controls
+            ]
+            .spacing(style.spacing.m)
+            .into(),
+        ));
+    scrollable(content).height(Fill).into()
 }
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {
