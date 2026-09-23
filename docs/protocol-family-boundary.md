@@ -52,7 +52,9 @@ reports and supported button/ring actions need their own evidence and codec.
 Button-like ring steps may fit the current binding descriptor; continuous ring
 values do not yet have a portable domain type. Add that type when a tablet
 backend provides an observed contract, rather than copying Nia87's mouse/wheel
-report bytes or treating every HID collection as a keyboard.
+report bytes or treating every HID collection as a keyboard. The synthetic
+tablet contract test exercises ExpressKey and discrete ring bindings through
+the same core draft and memory-device apply path, without a tablet driver.
 
 Within each feature, keep the ordered read -> expected-state check -> durable
 backup -> write -> complete readback -> recovery sequence explicit. Shared
