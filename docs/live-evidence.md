@@ -308,8 +308,8 @@ The current Iced desktop and read-only CLI cross-linked for
 After the subsequent CLI, page-read and Windows entry-point changes, the
 refreshed desktop is 10,087,840 bytes (SHA-256
 `7CB12DC19791E02F7CEA6C7C5CC558C23DE1A6860B8296808448E049D5294663`);
-the CLI, refreshed after archive capture support, is 1,506,008 bytes (SHA-256
-`375172917BFD13BEAAD9E3CA9B0D7AE221DBA1B2C1A784FC0214E8B1A9732012`).
+the CLI, refreshed after archive capture and review support, is 1,527,688 bytes
+(SHA-256 `36C1047FC7E9C152D57D8F02BAFAE7224A9A5203634BD13D3CB1C5AFFC3995CD`).
 This proves linking, not Linux startup or HID access.
 
 The user located the installed Sharkfin at
@@ -405,3 +405,15 @@ exactly matching the preceding full read-only archive after the lighting-effect
 change. This independently validates a complete backup path through the
 frontend contract and continued state stability. It does not prove archive
 apply or recovery.
+
+## Independent archive review (2026-09-23)
+
+`byakko-cli review-archive <file>` fed the older restored native archive into
+the shared core review command. Its backend captured the attached board again
+without setters and returned one change summary: `lighting`, count 1. No
+keymap, macro, per-key color or scalar-setting changes were reported. The
+ignored JSON result is `Research/captures/cli-review-old-baseline-20260923.json`
+(SHA-256 `074DBFDDE4F5E809BC6B5296A3C1621A2DBDCB60DC924D2E414967933283A050`).
+This matches the direct byte comparison of the old and current complete
+archives. Review is read-only; applying that old archive remains a separate,
+unaccepted write/recovery operation.

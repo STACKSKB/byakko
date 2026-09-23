@@ -7,7 +7,7 @@ use std::io::Write;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>>";
+    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>>";
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let macro_read = arguments
         .first()
@@ -15,9 +15,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let archive_capture = arguments
         .first()
         .is_some_and(|command| command == "capture-archive");
+    let archive_review = arguments
+        .first()
+        .is_some_and(|command| command == "review-archive");
     if arguments.len() > 2
-        || (arguments.len() == 2 && !(macro_read || archive_capture))
-        || ((macro_read || archive_capture) && arguments.len() != 2)
+        || (arguments.len() == 2 && !(macro_read || archive_capture || archive_review))
+        || ((macro_read || archive_capture || archive_review) && arguments.len() != 2)
     {
         return Err(USAGE.into());
     }
@@ -47,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("describe") => println!("{}", serde_json::to_string_pretty(&nia87::descriptor())?),
         Some(
             "read" | "read-colors" | "read-lighting" | "read-settings" | "read-macro"
-            | "capture-archive",
+            | "capture-archive" | "review-archive",
         ) => {
             let candidate = match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => candidate,
@@ -67,6 +70,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let backups = byakko_devices::storage::user_data_dir()?.join("backups");
             let executor = Executor::spawn(BoundNia87Adapter::new(target), backups)?;
             let mut session = nia87::application::session()?;
+            let mut review_target = if archive_review {
+                let max_bytes = session
+                    .archive_capabilities()
+                    .ok_or("Nia87 has no native archive capability")?
+                    .max_bytes;
+                let limit = u64::from(max_bytes).saturating_mul(4).saturating_add(1024);
+                if std::fs::metadata(&arguments[1])?.len() > limit {
+                    return Err("Archive input exceeds the supported JSON file size".into());
+                }
+                Some(
+                    serde_json::from_slice::<byakko_core::archive::NativeArchive>(&std::fs::read(
+                        &arguments[1],
+                    )?)?,
+                )
+            } else {
+                None
+            };
             let keymap = if macro_read {
                 None
             } else {
@@ -105,16 +125,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &executor,
                         Duration::from_secs(180),
                     )?;
+                    let bytes = serde_json::to_vec(&archive)?;
                     let mut file = std::fs::OpenOptions::new()
                         .write(true)
                         .create_new(true)
                         .open(&arguments[1])?;
-                    file.write_all(&serde_json::to_vec(&archive)?)?;
+                    file.write_all(&bytes)?;
                     file.write_all(b"\n")?;
                     file.sync_all()?;
                     eprintln!("Verified archive saved to {}", arguments[1]);
                     return Ok(());
                 }
+                "review-archive" => serde_json::to_string_pretty(
+                    &byakko_cli::review_archive(
+                        &mut session,
+                        &executor,
+                        review_target.take().expect("loaded above"),
+                        Duration::from_secs(180),
+                    )?
+                    .changes,
+                )?,
                 _ => unreachable!("read command matched above"),
             };
             println!("{json}");

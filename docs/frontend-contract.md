@@ -39,7 +39,9 @@ exports the per-key color snapshot after the keymap read. `read-lighting` and
 and exports the complete snapshot, including opaque revision bytes, without
 decoding backend-owned content in the CLI. `capture-archive <new-file>` saves a
 complete opaque native backup only after the backend's verified capture; it
-refuses to overwrite an existing path. Its synchronous adapter drives the
+refuses to overwrite an existing path. `review-archive <file>` reads that
+wrapper, captures the device again, and prints only the changed section
+summaries; it sends no setter. Its synchronous adapter drives the
 same `Session → Command → Executor → Completion` path as Iced; memory-device
 tests exercise that path without USB. The CLI has no setter or apply subcommand
 yet.
