@@ -53,10 +53,7 @@ impl HostInput {
 
     fn start(&self) -> Result<(), String> {
         match &self.stream {
-            Sampler::Screen(stream) => {
-                stream.start();
-                Ok(())
-            }
+            Sampler::Screen(stream) => stream.start(),
             Sampler::Audio(stream) => stream.start(),
         }
     }

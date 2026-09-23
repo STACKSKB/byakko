@@ -10,8 +10,9 @@ use std::{
 };
 
 const PREPARING: u8 = 0;
-const STREAMING: u8 = 1;
-const STOPPED: u8 = 2;
+const READY: u8 = 1;
+const STREAMING: u8 = 2;
+const STOPPED: u8 = 3;
 
 pub enum Event {
     Ready,
@@ -35,6 +36,12 @@ impl ScreenStream {
                 let result = (|| -> Result<(), String> {
                     let mut sampler = ScreenSampler::new()?;
                     let first = sampler.sample()?;
+                    if control
+                        .compare_exchange(PREPARING, READY, Ordering::AcqRel, Ordering::Acquire)
+                        .is_err()
+                    {
+                        return Ok(());
+                    }
                     if sender.send(Event::Ready).is_err() {
                         return Ok(());
                     }
@@ -60,14 +67,22 @@ impl ScreenStream {
                     Ok(())
                 })();
                 if let Err(reason) = result {
+                    control.store(STOPPED, Ordering::Release);
                     let _ = sender.try_send(Event::Failed(reason));
                 }
             })?;
         Ok(Self { state, events })
     }
 
-    pub fn start(&self) {
-        self.state.store(STREAMING, Ordering::Release);
+    pub fn start(&self) -> Result<(), String> {
+        self.state
+            .compare_exchange(READY, STREAMING, Ordering::AcqRel, Ordering::Acquire)
+            .map(|_| ())
+            .map_err(|state| match state {
+                PREPARING => "Screen capture is still preparing".into(),
+                STREAMING => "Screen capture is already streaming".into(),
+                _ => "Screen capture has stopped".into(),
+            })
     }
     pub fn stop(&self) {
         self.state.store(STOPPED, Ordering::Release);

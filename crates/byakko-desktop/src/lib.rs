@@ -472,10 +472,16 @@ impl Desktop {
                 byakko_core::session::Activity::MacroFile { .. }
             )
         {
-            Subscription::batch([
-                close,
-                iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll),
-            ])
+            let poll = iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll);
+            if self.host.is_some() {
+                let focus = iced::event::listen_with(|event, _, _| {
+                    matches!(event, iced::Event::Window(window::Event::Unfocused))
+                        .then_some(Message::Lighting(lighting::Message::StopHost))
+                });
+                Subscription::batch([close, poll, focus])
+            } else {
+                Subscription::batch([close, poll])
+            }
         } else {
             Subscription::batch([
                 close,
