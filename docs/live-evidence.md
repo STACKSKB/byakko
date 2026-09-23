@@ -502,3 +502,30 @@ fresh keymap and picture reads and sent no setter. `apply-colors` was not run
 on hardware; memory-backend tests cover a two-color transaction and full
 reread. Ignored files: `Research/captures/cli-colors-plan-smoke-20260923.json`
 and `Research/captures/cli-colors-plan-proposal-20260923.json`.
+
+## CLI lighting write, visual check and full restoration (2026-09-23)
+
+The attached Nia87 started at effect 1, brightness 4 and fixed RGB `(8,8,8)`.
+A complete archive was captured before the test. A guarded CLI proposal changed
+only the RGB value to `(0,255,0)`. The first apply could not create its durable
+backup under the sandboxed `AppData` path, reported `Recovery::NotAttempted`,
+and a fresh lighting read proved the device's 64-byte response unchanged. The
+normal-host retry wrote the backup, applied the color and verified the complete
+lighting readback. A still from the user-authorized keyboard camera showed
+green illumination around the opaque keycaps.
+
+A fresh revision was then used to plan and apply restoration to `(8,8,8)`.
+The complete 64-byte lighting reply matched the original. A second full archive
+compared with the first as `[]`; the keymaps, all advertised macro slots,
+per-key colors, settings and lighting were unchanged. The later read-only
+slot-50 probe also left the complete advertised archive unchanged. A final
+camera still again showed the original pink-looking illumination. No other
+setter was sent. The ignored local captures are
+`Research/captures/cli-lighting-acceptance-before-20260923.json`,
+`cli-lighting-acceptance-after-20260923.json`,
+`cli-slot50-probe-after-20260923.json`, and webcam stills
+`keyboard-camera-1790156861780710100.png` (before) and
+`keyboard-camera-1790157063127008000.png` (green) and
+`keyboard-camera-1790158015206627300.png` (restored). This verifies the CLI's
+physical lighting file transaction and restoration on this board; it does not
+verify an Iced window click path or every lighting effect.
