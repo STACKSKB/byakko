@@ -12,7 +12,7 @@ read-only-first device acceptance sequence there.
 - Native Windows/Linux desktop, Rust + Iced. No JavaScript, Electron, webview,
   QML or vendor helper in the desktop product or its build.
 - Treat the core/session command and completion types as a frontend contract.
-  Iced and the read-only `byakko-cli` are independent clients; a future
+  Iced and `byakko-cli` are independent clients; a future
   static browser SPA may reuse the portable model via WebAssembly. Keep any web
   bootstrap/transport code out of the native executable and do not require a
   local Node.js server. Browser HID access still follows browser permissions;
@@ -99,6 +99,13 @@ read-only-first device acceptance sequence there.
   observed default matrix, including two unlabeled ISO positions. Preserve the
   special Fn slot and empty matrix entries verbatim in snapshots and archives;
   leave recovery able to repair any slot affected by a failed write.
+- Portable Nia87 keymap edits must use advertised typed actions. New opaque
+  four-byte bindings are not programmable through the frontend contract;
+  existing opaque values remain lossless in reads and native archives.
+- The CLI keymap file workflow uses the same session/executor write path as
+  Iced: require a freshly matching raw revision, validate the intended changes
+  against the Nia87 adapter, then wait for backup, write, and full readback.
+  Read-only CLI commands remain appropriate for unattended Linux smoke tests.
 
 ## Work sequence and evidence
 

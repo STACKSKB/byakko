@@ -1,7 +1,7 @@
 # Linux Codex handoff
 
 The product is the Rust/Iced `byakko-desktop` application, with a separate
-read-only `byakko-cli`. The root `byakko gui` command is the retained egui
+`byakko-cli`. The root `byakko gui` command is the retained egui
 research application. Use `AGENTS.md` for architecture and safety rules, and
 `docs/linux-install.md` for the maintained installation procedure. Windows
 captures and vendor fixtures under ignored paths are not in Git.
@@ -42,13 +42,21 @@ captures and vendor fixtures under ignored paths are not in Git.
   `target/release/byakko-cli compare-archives FIRST.json SECOND.json`; an empty
   JSON list means the native configuration matches. The comparison runs offline
   and uses the same forward/reverse preflight as archive review, so an
-  unrepresentable change is an error rather than a raw byte diff. The CLI sends
-  no setters.
+  unrepresentable change is an error rather than a raw byte diff. These
+  read-only commands send no setters. `plan-keymap` also sends no setter;
+  `apply-keymap` is an explicit write command and is not part of the initial
+  unattended Linux smoke test.
 
 - [ ] Check Linux removal/reconnect, one-device selection, GUI page entry
   reads, and clean shutdown. Record whether X11 and Wayland behave differently.
   Physical key output, macro playback/timing, RGB visual behavior and Linux
   write/readback/restoration remain separate acceptance gates.
+
+- [ ] With an attached board and physical access, exercise the CLI keymap
+  file workflow: save `read` output, edit one ordinary binding, run
+  `plan-keymap`, then explicitly run `apply-keymap`. Confirm key output, the
+  durable before-image, full readback and restoration. Do this only after the
+  read-only transport checks and the existing recovery concern are resolved.
 
 ## Linux verification record (2026-09-23)
 

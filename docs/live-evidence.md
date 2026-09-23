@@ -302,7 +302,7 @@ app has been built.
 
 ## Linux release cross-link and competitor idle sample (2026-09-23)
 
-The current Iced desktop and read-only CLI cross-linked for
+At that point, the Iced desktop and read-only CLI cross-linked for
 `x86_64-unknown-linux-gnu` with Zig 0.15.2 and cargo-zigbuild 0.23.4 using
 `--release --locked --offline`. Both files have ELF magic `7F454C46`.
 After the subsequent CLI, page-read and Windows entry-point changes, the
@@ -437,3 +437,19 @@ its decoded native sections with the older pre-drift archive found the full
 keymaps, all macro slots, per-key colors and settings unchanged. The sole
 difference is lighting raw byte 1, `5 -> 1`; all other lighting bytes match.
 This repeat read does not establish why the effect changed.
+
+## CLI keymap plan smoke check (2026-09-23)
+
+The new independent CLI keymap workflow exported a fresh state from the
+attached Nia87 to an ignored local JSON file. `plan-keymap` reported `[]` for
+that unchanged file. A second file changed only base slot 9 from `Key(4)` (A)
+to `Key(5)` (B); the plan reported exactly that one change. Planning the
+original file again returned `[]`. These calls used the selected Nia87 session
+and sent getters only. A third edited file tried to stage a fabricated opaque
+binding at the same slot; `plan-keymap` rejected it before any setter.
+`apply-keymap` was not run on hardware; its
+backup/write/readback and stale-file behavior has only in-memory backend test
+coverage. Ignored files:
+`Research/captures/cli-keymap-plan-smoke-20260923.json` and
+`Research/captures/cli-keymap-plan-edited-20260923.json`, plus the rejected
+`Research/captures/cli-keymap-plan-opaque-20260923.json`.

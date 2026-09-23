@@ -41,17 +41,24 @@ decoding backend-owned content in the CLI. `capture-archive <new-file>` saves a
 complete opaque native backup only after the backend's verified capture; it
 refuses to overwrite an existing path. `review-archive <file>` reads that
 wrapper, captures the device again, and prints only the changed section
-summaries; it sends no setter. Its synchronous adapter drives the
-same `Session → Command → Executor → Completion` path as Iced; memory-device
-tests exercise that path without USB. The CLI has no setter or apply subcommand
-yet.
+summaries; it sends no setter. `read` output is also a complete keymap state
+file. After editing its bindings, `plan-keymap <state-file>` compares it with a
+fresh device read and reports the intended changes. `apply-keymap <state-file>`
+requires the exact raw before-image revision from that fresh read and passes the
+changes through the Nia87 adapter, then stages them through the same
+`Session → Command → Executor → Completion` path as Iced. The device backend
+creates a durable backup, performs the write and checks complete readback; the
+CLI waits for its outcome rather than abandoning an in-flight write on a read
+timeout. The Nia87 adapter rejects new opaque bindings and unadvertised key or
+shortcut usages while preserving opaque baseline values. Memory-device tests
+exercise planning, apply and stale-file rejection without USB. No physical CLI
+write has been attempted yet.
 
-Later CLI work can expose capability inspection, draft review and explicit apply.
-It should show the target identity and operation result, preserve opaque values,
-and use the same expected-state check, durable backup, readback and typed
-recovery outcome as the desktop. CLI flags are presentation; they must not grow
-a second protocol implementation or bypass the session. This is the first
-useful proof of the contract after the current desktop acceptance work.
+Later CLI work can expose macro, lighting and archive apply workflows. It should
+show the target identity and operation result, preserve opaque values, and use
+the same expected-state check, durable backup, readback and typed recovery
+outcome as the desktop. CLI flags are presentation; they must not grow a second
+protocol implementation or bypass the session.
 
 ## Browser slice
 

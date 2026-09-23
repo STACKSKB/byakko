@@ -1,5 +1,5 @@
-//! Nia87 composition root for the read-only CLI.
-use byakko_core::archive::NativeArchive;
+//! Nia87 composition root for the native CLI.
+use byakko_core::{State, archive::NativeArchive};
 use byakko_devices::{
     Executor,
     nia87::{self, BoundNia87Adapter},
@@ -8,7 +8,7 @@ use std::io::Write;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>>";
+    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>>";
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments
         .first()
@@ -33,9 +33,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let archive_review = arguments
         .first()
         .is_some_and(|command| command == "review-archive");
+    let keymap_file = arguments
+        .first()
+        .is_some_and(|command| command == "plan-keymap" || command == "apply-keymap");
     if arguments.len() > 2
-        || (arguments.len() == 2 && !(macro_read || archive_capture || archive_review))
-        || ((macro_read || archive_capture || archive_review) && arguments.len() != 2)
+        || (arguments.len() == 2
+            && !(macro_read || archive_capture || archive_review || keymap_file))
+        || ((macro_read || archive_capture || archive_review || keymap_file)
+            && arguments.len() != 2)
     {
         return Err(USAGE.into());
     }
@@ -45,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match arguments.first().map(String::as_str) {
         None | Some("--help") => {
             println!(
-                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. No command writes to the device."
+                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. To edit keys, save `read` output, change bindings, run plan-keymap, then explicitly run apply-keymap. Apply writes to the device with a durable backup and complete readback."
             );
         }
         Some("devices") => match nia87::device::availability() {
@@ -65,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some("describe") => println!("{}", serde_json::to_string_pretty(&nia87::descriptor())?),
         Some(
             "read" | "read-colors" | "read-lighting" | "read-settings" | "read-macro"
-            | "capture-archive" | "review-archive",
+            | "capture-archive" | "review-archive" | "plan-keymap" | "apply-keymap",
         ) => {
             let candidate = match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => candidate,
@@ -83,7 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             let target = nia87::device::Target::from_candidate(&candidate)?;
             let backups = byakko_devices::storage::user_data_dir()?.join("backups");
-            let executor = Executor::spawn(BoundNia87Adapter::new(target), backups)?;
+            let executor = Executor::spawn(BoundNia87Adapter::new(target), backups.clone())?;
             let mut session = nia87::application::session()?;
             let mut review_target = if archive_review {
                 let max_bytes = session
@@ -91,6 +96,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or("Nia87 has no native archive capability")?
                     .max_bytes;
                 Some(load_archive(&arguments[1], max_bytes)?)
+            } else {
+                None
+            };
+            let keymap_target = if keymap_file {
+                Some(load_state(&arguments[1])?)
             } else {
                 None
             };
@@ -152,6 +162,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )?
                     .changes,
                 )?,
+                "plan-keymap" | "apply-keymap" => {
+                    let target = keymap_target.as_ref().expect("loaded above");
+                    let canonical =
+                        nia87::adapter::from_snapshot(&nia87::adapter::to_snapshot(target)?)?;
+                    if canonical.bindings != target.bindings {
+                        return Err("Keymap file contains noncanonical actions; export a fresh `read` state and edit its bindings".into());
+                    }
+                    let changes = byakko_cli::plan_keymap(&session, target)?;
+                    let adapter = nia87::Nia87Adapter;
+                    adapter.validate(keymap.as_ref().expect("read above"), &changes)?;
+                    if arguments[0] == "plan-keymap" {
+                        serde_json::to_string_pretty(&changes)?
+                    } else {
+                        if changes.is_empty() {
+                            return Err("Keymap file contains no changes".into());
+                        }
+                        eprintln!(
+                            "Applying {} key changes to {}",
+                            changes.len(),
+                            candidate.path
+                        );
+                        eprintln!("Before-image backup directory: {}", backups.display());
+                        serde_json::to_string_pretty(&byakko_cli::apply_keymap(
+                            &mut session,
+                            &executor,
+                            target,
+                        )?)?
+                    }
+                }
                 _ => unreachable!("read command matched above"),
             };
             println!("{json}");
@@ -159,6 +198,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err(USAGE.into()),
     }
     Ok(())
+}
+
+fn load_state(path: &str) -> Result<State, Box<dyn std::error::Error>> {
+    const MAX_STATE_JSON: u64 = 1024 * 1024;
+    if std::fs::metadata(path)?.len() > MAX_STATE_JSON {
+        return Err("Keymap state file exceeds the 1 MiB JSON limit".into());
+    }
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }
 
 fn load_archive(path: &str, max_bytes: u32) -> Result<NativeArchive, Box<dyn std::error::Error>> {
