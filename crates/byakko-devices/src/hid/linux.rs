@@ -75,19 +75,7 @@ impl Device {
         if status < 0 {
             return Err(io::Error::last_os_error().into());
         }
-        let count = status as usize;
-        if count == 0 || count > buffer.len() {
-            return Err("hidraw returned an invalid feature reply length".into());
-        }
-        // This transport opens only the verified unnumbered Nia87 feature
-        // collection. hidraw places its payload at byte zero; the device
-        // layer expects a leading host-side report ID of zero.
-        if count >= report.len() {
-            return Err("unnumbered feature reply does not fit host buffer".into());
-        }
-        report[0] = 0;
-        report[1..=count].copy_from_slice(&buffer[..count]);
-        Ok(count + 1)
+        normalize_unnumbered_feature_reply(report, &buffer, status as usize)
     }
 
     pub fn get_report_descriptor(&self, output: &mut [u8]) -> Result<usize> {
@@ -103,6 +91,28 @@ impl Device {
         output[..descriptor.len()].copy_from_slice(&descriptor);
         Ok(descriptor.len())
     }
+}
+
+/// hidraw normally omits the report-number byte for an unnumbered feature
+/// report, but some HID paths return it. Accept only the two complete shapes
+/// for the descriptor-verified 64-byte Nia87 payload.
+fn normalize_unnumbered_feature_reply(
+    report: &mut [u8],
+    buffer: &[u8],
+    count: usize,
+) -> Result<usize> {
+    if report.len() != HOST_REPORT_LEN || buffer.len() != HOST_REPORT_LEN || count > buffer.len() {
+        return Err("hidraw returned an invalid feature reply length".into());
+    }
+    match count {
+        count if count == HOST_REPORT_LEN - 1 => {
+            report[0] = 0;
+            report[1..].copy_from_slice(&buffer[..count]);
+        }
+        HOST_REPORT_LEN if buffer[0] == 0 => report.copy_from_slice(buffer),
+        _ => return Err("hidraw returned an incompatible unnumbered feature reply".into()),
+    }
+    Ok(HOST_REPORT_LEN)
 }
 
 pub fn open(path: &CStr) -> Result<Device> {
@@ -415,6 +425,39 @@ fn full_usage(page: u32, value: u32, size: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn feature_reply_accepts_only_complete_unnumbered_shapes() {
+        let mut payload = [0u8; HOST_REPORT_LEN];
+        payload[..HOST_REPORT_LEN - 1]
+            .iter_mut()
+            .enumerate()
+            .for_each(|(index, byte)| *byte = index as u8);
+        let mut report = [0xff; HOST_REPORT_LEN];
+        assert_eq!(
+            normalize_unnumbered_feature_reply(&mut report, &payload, HOST_REPORT_LEN - 1).unwrap(),
+            HOST_REPORT_LEN
+        );
+        assert_eq!(report[0], 0);
+        assert_eq!(&report[1..], &payload[..HOST_REPORT_LEN - 1]);
+
+        let mut numbered = [0u8; HOST_REPORT_LEN];
+        numbered[1..].copy_from_slice(&payload[..HOST_REPORT_LEN - 1]);
+        assert_eq!(
+            normalize_unnumbered_feature_reply(&mut report, &numbered, HOST_REPORT_LEN).unwrap(),
+            HOST_REPORT_LEN
+        );
+        assert_eq!(report, numbered);
+
+        numbered[0] = 1;
+        assert!(
+            normalize_unnumbered_feature_reply(&mut report, &numbered, HOST_REPORT_LEN).is_err()
+        );
+        assert!(normalize_unnumbered_feature_reply(&mut report, &payload, 63).is_err());
+        assert!(
+            normalize_unnumbered_feature_reply(&mut report, &payload, HOST_REPORT_LEN + 1).is_err()
+        );
+    }
 
     #[test]
     fn observed_nia87_descriptor_is_top_level_vendor_usage() {
