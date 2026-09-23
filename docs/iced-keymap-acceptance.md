@@ -42,6 +42,13 @@ readback; changing the selected physical key clears the unsubmitted
 shortcut form. Nia87 codec tests round-trip those forms without USB writes.
 Physical host output remains unverified.
 
+The descriptor also offers the standard keypad, two non-US keys, keypad equals
+and right Win as outputs absent from the physical TKL board. Their identifiers
+come from the [USB-IF Keyboard/Keypad usage table](https://usb.org/sites/default/files/hut1_4.pdf);
+they use the existing ordinary-key action encoding and round-trip in offline
+tests. This verifies the configurator choice and wire representation, not the
+keyboard's physical output for each usage.
+
 ## Remaining acceptance
 
 - The user confirmed the Iced TKL board and key selection after a physical
