@@ -47,9 +47,10 @@ record, not physical acceptance of the Iced path.
 ## Desktop behavior
 
 Iced offers screen and playback Start from backend capabilities only with a
-verified, editable, clean lighting baseline. The active view has Stop & restore. A close
-request asks for Stop and waits for a verified restoration result. The stream
-sampler is local, drops frames if its slot is full, and stores no captured image
+verified, editable, clean lighting baseline. The active view has Stop & restore.
+A close request or window focus loss asks for Stop and waits for a verified
+restoration result. The stream sampler is local, drops frames if its slot is
+full, and stores no captured image
 or audio sample.
 Focus-loss Stop and selected-target disconnect acceptance remain open; the
 music sampler uses WASAPI loopback on Windows and the default output monitor
