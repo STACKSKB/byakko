@@ -11,6 +11,7 @@ use std::path::Path;
 
 struct NiaHostActivity {
     session: device::HostLightingSession,
+    source: HostSource,
     expected: Snapshot,
     backup_dir: std::path::PathBuf,
 }
@@ -46,6 +47,7 @@ pub(super) fn start(
     let session = access.start_host_lighting_detailed(&original, &native_setting, backup_dir)?;
     Ok(Box::new(NiaHostActivity {
         session,
+        source: mode.source,
         expected: expected.clone(),
         backup_dir: backup_dir.to_owned(),
     }))
@@ -119,6 +121,7 @@ fn native_mode(
 
 impl HostActivity for NiaHostActivity {
     fn send_frame(&mut self, frame: HostFrame) -> Result<(), String> {
+        frame.validate_for(self.source)?;
         match frame {
             HostFrame::Rgb(rgb) => self
                 .session
@@ -138,6 +141,7 @@ impl HostActivity for NiaHostActivity {
     fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure> {
         let Self {
             session,
+            source: _,
             expected,
             backup_dir,
         } = *self;

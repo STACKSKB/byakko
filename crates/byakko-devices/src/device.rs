@@ -12,6 +12,28 @@ pub enum HostFrame {
     Bands(Vec<u8>),
 }
 
+impl HostFrame {
+    pub fn validate_for(&self, source: lighting::HostSource) -> Result<(), String> {
+        match (source, self) {
+            (lighting::HostSource::ScreenAverage, Self::Rgb(_)) => Ok(()),
+            (lighting::HostSource::PlaybackAudio { bands }, Self::Bands(values))
+                if values.len() == usize::from(bands) =>
+            {
+                Ok(())
+            }
+            (lighting::HostSource::PlaybackAudio { bands }, Self::Bands(_)) => {
+                Err(format!("Audio frame must contain {bands} bands"))
+            }
+            (lighting::HostSource::ScreenAverage, Self::Bands(_)) => {
+                Err("Screen-average mode requires an RGB frame".into())
+            }
+            (lighting::HostSource::PlaybackAudio { .. }, Self::Rgb(_)) => {
+                Err("Playback-audio mode requires a band frame".into())
+            }
+        }
+    }
+}
+
 /// A temporary effect owned by the device executor. `finish` restores and
 /// verifies the saved lighting; Drop must attempt restoration on unwinding.
 pub trait HostActivity: Send {
@@ -138,3 +160,32 @@ pub trait Device: Send + 'static {
 }
 
 pub use Device as KeymapDevice;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_frames_match_the_selected_source_and_band_count() {
+        let screen = lighting::HostSource::ScreenAverage;
+        let music = lighting::HostSource::PlaybackAudio { bands: 32 };
+        let rgb = HostFrame::Rgb([4, 5, 6]);
+        let bands = HostFrame::Bands(vec![0; 32]);
+        assert!(rgb.validate_for(screen).is_ok());
+        assert!(bands.validate_for(music).is_ok());
+        assert_eq!(
+            bands.validate_for(screen).unwrap_err(),
+            "Screen-average mode requires an RGB frame"
+        );
+        assert_eq!(
+            rgb.validate_for(music).unwrap_err(),
+            "Playback-audio mode requires a band frame"
+        );
+        assert_eq!(
+            HostFrame::Bands(vec![0; 31])
+                .validate_for(music)
+                .unwrap_err(),
+            "Audio frame must contain 32 bands"
+        );
+    }
+}

@@ -42,7 +42,10 @@ record, not physical acceptance of the Iced path.
    travels through the portable executor contract; the Nia87 adapter verifies
    the exact advertised mode and setting before any device access.
    The same worker owns Stop and recovery; it never opens an arbitrary matching
-   collection.
+   collection. Each activity retains its selected host source, and the shared
+   frame contract checks RGB versus audio-band input and the advertised band
+   count before the Nia87 session sends a frame. An incompatible frame fails
+   the stream and enters the normal restoration path.
 4. Restoration returns a typed result. A verified restored snapshot may refresh
    the lighting baseline. Failed or uncertain restoration leaves lighting
    unverified, keeps the backup path visible, and blocks another write until a
@@ -76,7 +79,8 @@ Linux, including X11 disconnect, Wayland and audio routing.
   existing protocol fixtures. Pure adapter tests cover the music brightness
   bounds, each option and fixed/rainbow report encodings, plus rejection of a
   forged mode or invalid setting before I/O. Tests use fakes and never drive
-  the keyboard.
+  the keyboard. Shared frame tests cover both source types, mismatched frame
+  types and the 32-band length requirement.
 - Physical acceptance: with a backup and the selected USB collection, verify
   start, frames, Stop, close, focus loss, unplug/replug, and restoration
   readback. The earlier failed automatic recovery remains an open gate. Linux
