@@ -656,6 +656,54 @@ impl Session {
         }
     }
 
+    fn invalidate_ready_keymap(&mut self) {
+        if self.status == Status::Ready {
+            self.status = Status::Unverified {
+                problem: Problem::ReadRequired,
+            };
+        }
+    }
+
+    fn invalidate_ready_macros(&mut self) {
+        if self
+            .macros
+            .as_ref()
+            .is_some_and(|editor| editor.status() == &crate::macros::editor::Status::Ready)
+        {
+            self.invalidate_macros();
+        }
+    }
+
+    fn invalidate_ready_lighting(&mut self) {
+        if self
+            .lighting
+            .as_ref()
+            .is_some_and(|editor| editor.status() == &crate::lighting::editor::Status::Ready)
+        {
+            self.invalidate_lighting();
+        }
+    }
+
+    fn invalidate_ready_picture(&mut self) {
+        if self
+            .picture
+            .as_ref()
+            .is_some_and(|editor| editor.status() == &crate::picture::editor::Status::Ready)
+        {
+            self.invalidate_picture();
+        }
+    }
+
+    fn invalidate_ready_settings(&mut self) {
+        if self
+            .settings
+            .as_ref()
+            .is_some_and(|editor| editor.status() == &crate::settings::editor::Status::Ready)
+        {
+            self.invalidate_settings();
+        }
+    }
+
     pub fn accept(&mut self, completion: Completion) -> Acceptance {
         if let Completion::ReadMacroCatalog {
             generation,
@@ -862,31 +910,45 @@ impl Session {
                 .as_mut()
                 .expect("pending lighting capability")
                 .accept_read(result),
-            Completion::ApplyLighting { result, .. } => self
-                .lighting
-                .as_mut()
-                .expect("pending lighting capability")
-                .accept_apply(result),
+            Completion::ApplyLighting { result, .. } => {
+                let editor = self.lighting.as_mut().expect("pending lighting capability");
+                editor.accept_apply(result);
+                if editor.status() != &crate::lighting::editor::Status::Ready {
+                    self.invalidate_ready_keymap();
+                    self.invalidate_ready_macros();
+                    self.invalidate_ready_settings();
+                }
+            }
             Completion::ReadPicture { result, .. } => self
                 .picture
                 .as_mut()
                 .expect("pending picture capability")
                 .accept_read(result),
-            Completion::ApplyPicture { result, .. } => self
-                .picture
-                .as_mut()
-                .expect("pending picture capability")
-                .accept_apply(result),
+            Completion::ApplyPicture { result, .. } => {
+                let editor = self.picture.as_mut().expect("pending picture capability");
+                editor.accept_apply(result);
+                if editor.status() != &crate::picture::editor::Status::Ready {
+                    self.invalidate_ready_keymap();
+                    self.invalidate_ready_macros();
+                    self.invalidate_ready_lighting();
+                    self.invalidate_ready_settings();
+                }
+            }
             Completion::ReadSettings { result, .. } => self
                 .settings
                 .as_mut()
                 .expect("pending settings capability")
                 .accept_read(result),
-            Completion::ApplySetting { result, .. } => self
-                .settings
-                .as_mut()
-                .expect("pending settings capability")
-                .accept_apply(result),
+            Completion::ApplySetting { result, .. } => {
+                let editor = self.settings.as_mut().expect("pending settings capability");
+                editor.accept_apply(result);
+                if editor.status() != &crate::settings::editor::Status::Ready {
+                    self.invalidate_ready_keymap();
+                    self.invalidate_ready_macros();
+                    self.invalidate_ready_lighting();
+                    self.invalidate_ready_picture();
+                }
+            }
             Completion::CaptureArchive { result, .. } => self.accept_archive_capture(result),
             Completion::ApplyArchive { result, .. } => self.accept_archive_apply(result),
             Completion::ReviewArchive { .. } => unreachable!(),

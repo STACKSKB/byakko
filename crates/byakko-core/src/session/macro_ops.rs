@@ -49,22 +49,63 @@ impl Session {
         )
     }
 
+    /// Known bindings remain navigable while the storage catalog is scanning.
+    pub fn macro_bound_slots(&self) -> Option<Vec<&Choice>> {
+        let editor = self.macros.as_ref()?;
+        Some(
+            editor
+                .capabilities()
+                .slots
+                .iter()
+                .filter(|slot| self.macro_slot_bound(&slot.id))
+                .collect(),
+        )
+    }
+
+    /// A foreground candidate is only a slot to read, never proof it is free.
+    pub fn next_macro_candidate_after(&self, after: Option<&str>) -> Option<&str> {
+        if self.status != Status::Ready {
+            return None;
+        }
+        let slots = &self.macros.as_ref()?.capabilities().slots;
+        let start = after
+            .and_then(|id| slots.iter().position(|slot| slot.id == id))
+            .map_or(0, |index| index + 1);
+        slots
+            .iter()
+            .skip(start)
+            .find(|slot| !self.macro_slot_bound(&slot.id))
+            .map(|slot| slot.id.as_str())
+    }
+
     pub fn next_free_macro_slot(&self) -> Option<&str> {
         if self.status != Status::Ready {
             return None;
         }
         let editor = self.macros.as_ref()?;
-        let configured: std::collections::BTreeSet<_> = editor
-            .configured_slots()?
-            .into_iter()
-            .map(|slot| slot.id.as_str())
-            .collect();
-        editor
-            .capabilities()
-            .slots
-            .iter()
-            .find(|slot| !configured.contains(slot.id.as_str()) && !self.macro_slot_bound(&slot.id))
-            .map(|slot| slot.id.as_str())
+        if let Some(configured) = editor.configured_slots() {
+            let configured: std::collections::BTreeSet<_> = configured
+                .into_iter()
+                .map(|slot| slot.id.as_str())
+                .collect();
+            return editor
+                .capabilities()
+                .slots
+                .iter()
+                .find(|slot| {
+                    !configured.contains(slot.id.as_str()) && !self.macro_slot_bound(&slot.id)
+                })
+                .map(|slot| slot.id.as_str());
+        }
+        // A foreground read can prove one slot free before the background
+        // catalog has reached every slot. Never infer another slot is empty.
+        matches!(
+            editor.baseline(),
+            Some(snapshot) if snapshot.slot == editor.slot()
+                && matches!(&snapshot.content, crate::macros::Content::Editable(program) if program.events.is_empty())
+        )
+        .then(|| editor.slot())
+        .filter(|slot| editor.status() == &crate::macros::editor::Status::Ready && !self.macro_slot_bound(slot))
     }
 
     fn macro_slot_bound(&self, slot: &str) -> bool {

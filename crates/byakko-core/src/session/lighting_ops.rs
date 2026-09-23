@@ -1,4 +1,4 @@
-use super::{Activity, Command, Problem, Session, Status};
+use super::{Activity, Command, Session, Status};
 use crate::lighting::{Capabilities, Edit, Setting, editor::Editor};
 
 impl Session {
@@ -56,12 +56,11 @@ impl Session {
         let (expected, desired) = self.lighting_editor()?.request_apply()?;
         let operation = self.operation()?;
         self.activity = Activity::ApplyLighting { operation };
-        self.status = Status::Unverified {
-            problem: Problem::ReadRequired,
-        };
-        self.invalidate_macros();
+        // This transaction verifies lighting only. Keep the last observed
+        // keymap and unrelated drafts; their own later writes compare fresh
+        // device state with their expected snapshots before sending reports.
+        self.macro_catalog_operation = None;
         self.invalidate_picture();
-        self.invalidate_settings();
         self.invalidate_archive();
         Ok(Command::ApplyLighting {
             generation: self.generation,
@@ -76,9 +75,9 @@ impl Session {
 mod tests {
     use super::*;
     use crate::{
-        Descriptor, Layer, PhysicalKey,
+        Action, Descriptor, Layer, PhysicalKey, State,
         lighting::{self, Color, ColorCapability, Content, Effect, Snapshot},
-        session::{Acceptance, ApplyFailure, Completion, Recovery},
+        session::{Acceptance, ApplyFailure, Completion, Problem, Recovery},
     };
 
     fn caps() -> Capabilities {
@@ -149,6 +148,174 @@ mod tests {
             }),
             Acceptance::Accepted
         );
+    }
+    fn read_keymap(session: &mut Session) {
+        let Command::Read {
+            generation,
+            operation,
+        } = session.request_read().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::Read {
+            generation,
+            operation,
+            result: Ok(State {
+                revision: vec![1],
+                bindings: std::collections::BTreeMap::from([(
+                    "base".into(),
+                    std::collections::BTreeMap::from([("a".into(), Action::Disabled)]),
+                )]),
+            }),
+        });
+        assert_eq!(session.status(), &Status::Ready);
+    }
+    #[test]
+    fn successful_lighting_apply_preserves_last_observed_keymap() {
+        let mut session = session();
+        session.connect().unwrap();
+        read_keymap(&mut session);
+        read(&mut session, Ok(snapshot(1, 10)));
+        session.stage_lighting(setting(5)).unwrap();
+        let original = session.baseline().cloned();
+        let Command::ApplyLighting {
+            generation,
+            operation,
+            ..
+        } = session.request_lighting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(session.status(), &Status::Ready);
+        session.accept(Completion::ApplyLighting {
+            generation,
+            operation,
+            result: Ok(snapshot(2, 5)),
+        });
+        assert_eq!(session.status(), &Status::Ready);
+        assert_eq!(session.baseline(), original.as_ref());
+        assert_eq!(
+            session.lighting().unwrap().status(),
+            &lighting::editor::Status::Ready
+        );
+    }
+    #[test]
+    fn scalar_successes_keep_other_drafts_and_failure_invalidates_ready_caches() {
+        use crate::settings::{self, Field, Kind, Value};
+        let mut session = session()
+            .with_settings(settings::Capabilities {
+                backend_id: "memory".into(),
+                fields: vec![Field {
+                    id: "enabled".into(),
+                    label: "Enabled".into(),
+                    kind: Kind::Toggle,
+                }],
+            })
+            .unwrap();
+        session.connect().unwrap();
+        read_keymap(&mut session);
+        read(&mut session, Ok(snapshot(1, 10)));
+        let Command::ReadSettings {
+            generation,
+            operation,
+        } = session.request_settings_read().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ReadSettings {
+            generation,
+            operation,
+            result: Ok(settings::Snapshot {
+                backend_id: "memory".into(),
+                revision: vec![1],
+                content: settings::Content::Editable(std::collections::BTreeMap::from([(
+                    "enabled".into(),
+                    Value::Toggle(false),
+                )])),
+            }),
+        });
+        session
+            .edit_setting(settings::Edit {
+                id: "enabled".into(),
+                value: Value::Toggle(true),
+            })
+            .unwrap();
+        session.stage_lighting(setting(5)).unwrap();
+        let Command::ApplyLighting {
+            generation,
+            operation,
+            ..
+        } = session.request_lighting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ApplyLighting {
+            generation,
+            operation,
+            result: Ok(snapshot(2, 5)),
+        });
+        assert_eq!(
+            session.settings().unwrap().status(),
+            &settings::editor::Status::Ready
+        );
+        assert_eq!(
+            session.settings().unwrap().draft().unwrap()["enabled"],
+            Value::Toggle(true)
+        );
+        let Command::ApplySetting {
+            generation,
+            operation,
+            ..
+        } = session.request_setting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ApplySetting {
+            generation,
+            operation,
+            result: Ok(settings::Snapshot {
+                backend_id: "memory".into(),
+                revision: vec![2],
+                content: settings::Content::Editable(std::collections::BTreeMap::from([(
+                    "enabled".into(),
+                    Value::Toggle(true),
+                )])),
+            }),
+        });
+        assert_eq!(
+            session.lighting().unwrap().status(),
+            &lighting::editor::Status::Ready
+        );
+        assert_eq!(session.status(), &Status::Ready);
+        session.stage_lighting(setting(4)).unwrap();
+        let Command::ApplyLighting {
+            generation,
+            operation,
+            ..
+        } = session.request_lighting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ApplyLighting {
+            generation,
+            operation,
+            result: Err(ApplyFailure {
+                message: "uncertain".into(),
+                recovery: Recovery::Unverified,
+            }),
+        });
+        assert!(matches!(
+            session.status(),
+            Status::Unverified {
+                problem: Problem::ReadRequired
+            }
+        ));
+        assert!(matches!(
+            session.settings().unwrap().status(),
+            settings::editor::Status::Unverified {
+                problem: Problem::ReadRequired
+            }
+        ));
     }
     #[test]
     fn opaque_and_invalid_edits_do_not_create_drafts() {
@@ -279,6 +446,7 @@ mod tests {
             operation,
             result: Err("read failed".into()),
         });
+        read_keymap(&mut session);
         assert!(matches!(
             session.lighting().unwrap().status(),
             lighting::editor::Status::Ready
@@ -291,12 +459,7 @@ mod tests {
         else {
             unreachable!()
         };
-        assert!(matches!(
-            session.status(),
-            Status::Unverified {
-                problem: Problem::ReadRequired
-            }
-        ));
+        assert_eq!(session.status(), &Status::Ready);
         assert!(session.reconnect_cautions().is_empty());
         assert_eq!(
             session.accept(Completion::ApplyLighting {
@@ -310,6 +473,12 @@ mod tests {
             Acceptance::Accepted
         );
         assert_eq!(session.lighting().unwrap().draft(), Some(&setting(5)));
+        assert!(matches!(
+            session.status(),
+            Status::Unverified {
+                problem: Problem::ReadRequired
+            }
+        ));
         assert_eq!(
             session.reconnect_cautions(),
             vec![super::super::ReconnectCaution {

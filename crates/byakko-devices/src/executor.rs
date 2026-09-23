@@ -70,7 +70,8 @@ pub struct Executor {
 
 impl Executor {
     pub fn spawn(mut device: impl Device, backup_dir: PathBuf) -> std::io::Result<Self> {
-        let (commands, requests) = mpsc::sync_channel::<Request>(1);
+        // One passive catalog scan may be queued alongside a foreground command.
+        let (commands, requests) = mpsc::sync_channel::<Request>(2);
         let (responses, completions) = mpsc::sync_channel(1);
         let (frames, incoming_frames) = mpsc::sync_channel(1);
         // A Started event cannot block restoration if the caller stops polling.

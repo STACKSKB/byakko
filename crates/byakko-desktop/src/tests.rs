@@ -52,6 +52,9 @@ fn ready() -> Desktop {
         screen_capture: Default::default(),
         lighting_panel: Default::default(),
         initial_reads: Default::default(),
+        picture_activation: None,
+        live_lighting: Default::default(),
+        live_picture: Default::default(),
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),
@@ -298,13 +301,17 @@ fn close_waits_for_apply_and_keeps_failure_and_draft_visible() {
 }
 
 #[test]
-fn dirty_close_confirmation_is_dismissed_by_new_edit_and_clean_close_does_not_mutate() {
+fn dirty_close_modal_blocks_background_edits_until_dismissed() {
     let mut app = ready();
     app.stage(1);
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::ConfirmDiscard);
     let _ = app.update(Message::Revert);
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
+    assert!(!app.session.changes().is_empty());
+    let _ = app.update(Message::KeepEditing);
     assert_eq!(app.closing, Closing::Open);
+    let _ = app.update(Message::Revert);
     assert!(app.session.changes().is_empty());
     let baseline = app.session.baseline().cloned();
     let _ = app.update(Message::Close);

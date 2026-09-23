@@ -70,14 +70,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
     content = match app.closing {
         Closing::Open => content,
         Closing::Waiting => content.push(text("Waiting for the device operation before closing…")),
-        Closing::ConfirmDiscard => content.push(
-            row![
-                text("Discard all staged drafts and close?"),
-                button("Keep editing").on_press(Message::KeepEditing),
-                button("Discard & close").on_press(Message::DiscardAndClose),
-            ]
-            .spacing(app.ui.spacing.m),
-        ),
+        Closing::ConfirmDiscard => content,
     };
     content = content.push(keys(app));
     content = content.push(match app.page {
@@ -88,11 +81,38 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
         Page::Picture => super::picture::view(app),
         Page::Settings => super::settings::view(app),
     });
-    container(content)
+    let workspace = container(content).max_width(app.ui.initial_window.0);
+    let base: Element<'_, Message> = container(workspace)
         .padding(app.ui.spacing.page_padding)
         .height(Fill)
+        .center_x(Fill)
         .width(Fill)
-        .into()
+        .into();
+    if app.closing != Closing::ConfirmDiscard {
+        return base;
+    }
+    let dialog = container(
+        column![
+            text("Discard unsaved changes?").size(app.ui.type_scale.section_title),
+            text("Your unsaved changes will be lost when Byakko closes."),
+            row![
+                button("Keep editing").on_press(Message::KeepEditing),
+                button("Discard & close").on_press(Message::DiscardAndClose),
+            ]
+            .spacing(app.ui.spacing.m),
+        ]
+        .spacing(app.ui.spacing.l),
+    )
+    .padding(app.ui.spacing.page_padding)
+    .style(container::bordered_box);
+    let backdrop = container(iced::widget::opaque(dialog))
+        .center_x(Fill)
+        .center_y(Fill)
+        .style(|_| container::Style {
+            background: Some(iced::Color::BLACK.scale_alpha(0.65).into()),
+            ..Default::default()
+        });
+    iced::widget::stack![base, iced::widget::opaque(backdrop)].into()
 }
 
 fn keymap(app: &Desktop) -> Element<'_, Message> {
@@ -133,7 +153,6 @@ fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
             column![
                 text(selected_label(app)),
                 text(selected_action(app)),
-                text("Choose an action below, then Apply to save it to the keyboard."),
                 search(app),
             ]
             .spacing(app.ui.spacing.s)
@@ -149,6 +168,9 @@ fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
 fn staged_edits(app: &Desktop) -> Element<'_, Message> {
     let descriptor = app.session.descriptor();
     let dirty = app.session.changes();
+    if dirty.is_empty() {
+        return text("Nothing staged").into();
+    }
     let edits = column(dirty.iter().map(|change| {
         let key = descriptor
             .keys
@@ -173,9 +195,7 @@ fn staged_edits(app: &Desktop) -> Element<'_, Message> {
         .into()
     }))
     .spacing(app.ui.spacing.xs);
-    scrollable(edits)
-        .height(Length::Fixed(app.ui.list_preview_height))
-        .into()
+    edits.into()
 }
 
 fn keys(app: &Desktop) -> Element<'_, Message> {
@@ -187,12 +207,7 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
         .filter(|key| key.visible)
         .collect();
     if app.page == Page::Picture {
-        let colors = app
-            .session
-            .picture()
-            .and_then(|editor| editor.draft())
-            .cloned()
-            .unwrap_or_default();
+        let colors = super::picture::projected_colors(app).unwrap_or_default();
         return physical_board::colored_view(&app.ui, keys, app.selected.clone(), colors, |key| {
             Some(Message::Picture(super::picture::Message::Select(
                 key.id.clone(),
@@ -249,24 +264,38 @@ fn search(app: &Desktop) -> Element<'_, Message> {
             .keys
             .iter()
             .any(|key| key.writable && Some(&key.id) == app.selected.as_ref());
-    let actions = column(
-        app.session
-            .descriptor()
-            .actions
-            .iter()
-            .enumerate()
-            .filter(|(_, choice)| choice.label.to_lowercase().contains(&query))
-            .map(|(index, choice)| {
-                button(text(format!("Assign {}", choice.label)))
-                    .width(Fill)
-                    .on_press_maybe(editable.then_some(Message::Stage(index)))
-                    .into()
-            }),
-    )
-    .spacing(app.ui.spacing.xs);
+    let filtered: Vec<_> = app
+        .session
+        .descriptor()
+        .actions
+        .iter()
+        .enumerate()
+        .filter(|(_, choice)| choice.label.to_lowercase().contains(&query))
+        .collect();
+    let actions = row(filtered.iter().map(|(index, choice)| {
+        button(text(&choice.label))
+            .width(Length::Fixed(app.ui.fields.regular as f32))
+            .on_press_maybe(editable.then_some(Message::Stage(*index)))
+            .into()
+    }))
+    .spacing(app.ui.spacing.xs)
+    .wrap();
+    let results: Element<'_, Message> = if filtered.is_empty() {
+        text("No matching actions").into()
+    } else {
+        scrollable(actions).height(Fill).into()
+    };
     column![
-        text_input("Find an action…", &app.search).on_input(Message::Search),
-        scrollable(actions).height(Fill)
+        text("Assign action"),
+        row![
+            text_input("Search actions", &app.search)
+                .on_input(Message::Search)
+                .width(Length::Fixed(app.ui.fields.regular as f32)),
+            text(format!("{} available", filtered.len())),
+        ]
+        .spacing(app.ui.spacing.s)
+        .align_y(iced::Center),
+        results
     ]
     .spacing(app.ui.spacing.s)
     .height(Fill)

@@ -90,9 +90,12 @@ pub fn colored_view<'a, Message: Clone + 'a>(
             board.push(pin(key_button).x(key.x * unit).y(key.y * unit))
         });
         scrollable(
-            board
-                .width(Length::Fixed(board_width))
-                .height(Length::Fixed(board_height)),
+            container(
+                board
+                    .width(Length::Fixed(board_width))
+                    .height(Length::Fixed(board_height)),
+            )
+            .center_x(Fill),
         )
         .horizontal()
         .width(Fill)

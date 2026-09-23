@@ -21,37 +21,21 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
     let Some(editor) = app.session.macros() else {
         return text("This device has no macro editor").into();
     };
-    if editor.catalog().is_none() {
-        let pending = editor.catalog_error();
-        let message = pending.map_or_else(
-            || {
-                "Loading macros in the background. You can keep configuring the keyboard."
-                    .to_owned()
-            },
-            |error| format!("Could not read the macro library: {error}"),
-        );
-        let body = column![
-            text(message),
-            button("Retry read").on_press_maybe(
-                (pending.is_some() && !app.busy()).then_some(Message::Macro(Macro::ReadCatalog))
-            )
-        ]
-        .spacing(app.ui.spacing.s);
-        return panels::panel(&app.ui, "Macros", body.into());
-    }
     panels::split(&app.ui, || slots(app, editor), || detail(app, editor))
 }
 
 fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
     let style = &app.ui;
-    let configured = app
-        .session
-        .macro_library_slots()
-        .expect("catalog checked by view");
-    let occupied = configured.len();
+    let configured = app.session.macro_library_slots();
+    let bound = app.session.macro_bound_slots().unwrap_or_default();
     let capacity = editor.capabilities().slots.len();
-    let configured_ids: std::collections::BTreeSet<_> =
-        configured.iter().map(|choice| choice.id.as_str()).collect();
+    let configured_ids: std::collections::BTreeSet<_> = configured
+        .as_ref()
+        .into_iter()
+        .flat_map(|choices| choices.iter().copied())
+        .chain(bound.iter().copied())
+        .map(|choice| choice.id.as_str())
+        .collect();
     let slots: Vec<&Choice> = editor
         .capabilities()
         .slots
@@ -59,16 +43,46 @@ fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
         .filter(|choice| {
             configured_ids.contains(choice.id.as_str())
                 || app.macro_new_slot.as_deref() == Some(choice.id.as_str())
+                || editor
+                    .baseline()
+                    .is_some_and(|snapshot| snapshot.slot == choice.id)
         })
         .collect();
     let no_slots = slots.is_empty();
     let slot_id = editor.slot();
     let can_select = !app.busy();
-    let can_add =
-        can_select && app.session.next_free_macro_slot().is_some() && app.macro_new_slot.is_none();
+    let selected_candidate_free = app.macro_new_slot.as_deref().is_some_and(|id| {
+        editor.baseline().is_some_and(|snapshot| snapshot.slot == id && matches!(&snapshot.content, Content::Editable(program) if program.events.is_empty()))
+    });
+    let candidate = if configured.is_some() {
+        app.session.next_free_macro_slot()
+    } else if app.macro_new_slot.is_none() {
+        app.session
+            .next_free_macro_slot()
+            .or_else(|| app.session.next_macro_candidate_after(None))
+    } else {
+        app.session
+            .next_macro_candidate_after(app.macro_new_slot.as_deref())
+    };
+    let can_add = can_select
+        && !editor.dirty()
+        && candidate.is_some()
+        && !(configured.is_some() && app.macro_new_slot.is_some())
+        && !selected_candidate_free;
+    let catalog_status = if let Some(configured) = configured {
+        format!("{} / {capacity}", configured.len())
+    } else if let Some(error) = editor.catalog_error() {
+        format!("Library scan failed: {error}")
+    } else {
+        "Scanning library · Add checks one slot now".into()
+    };
     let toolbar = row![
         button("Add macro").on_press_maybe(can_add.then_some(Message::Macro(Macro::Add))),
-        text(format!("{occupied} / {capacity}")),
+        text(catalog_status),
+        button("Retry scan").on_press_maybe(
+            (editor.catalog_error().is_some() && !app.busy())
+                .then_some(Message::Macro(Macro::ReadCatalog))
+        ),
     ]
     .spacing(style.spacing.s);
     let min_cell_width = style.choice_grid_min_cell_width;
@@ -112,7 +126,7 @@ fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
         .into()
     });
     let list: Element<'_, Message> = if no_slots {
-        text("No macros stored yet").into()
+        text("No macros found yet. Add checks an unbound slot now.").into()
     } else {
         choices.into()
     };
@@ -132,6 +146,10 @@ fn detail<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
         .macro_library_slots()
         .is_some_and(|slots| slots.iter().any(|choice| choice.id == editor.slot()))
         || app.macro_new_slot.as_deref() == Some(editor.slot());
+    let selected = selected
+        || editor
+            .baseline()
+            .is_some_and(|snapshot| snapshot.slot == editor.slot());
     if !selected {
         return panels::panel(
             &app.ui,

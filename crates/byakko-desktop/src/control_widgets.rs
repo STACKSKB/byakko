@@ -32,21 +32,22 @@ pub fn color_presets<Message: Clone + 'static>(
         } else {
             iced::Color::WHITE
         };
-        button(text(if selected == rgb {
-            format!("● {label}")
-        } else {
-            label.into()
-        }))
-        .on_press_maybe(on_change.as_ref().map(|on_change| on_change(rgb)))
-        .style(move |theme, status| {
-            let mut appearance = button::secondary(theme, status);
-            appearance.background = Some(iced::Background::Color(iced::Color::from_rgb8(
-                rgb[0], rgb[1], rgb[2],
-            )));
-            appearance.text_color = foreground;
-            appearance
-        })
-        .into()
+        let swatch = button(iced::widget::space())
+            .width(style.color_hue_width)
+            .height(style.color_hue_width)
+            .padding(0)
+            .on_press_maybe(on_change.as_ref().map(|on_change| on_change(rgb)))
+            .style(move |theme, status| {
+                let mut appearance = button::secondary(theme, status);
+                appearance.background = Some(iced::Background::Color(iced::Color::from_rgb8(
+                    rgb[0], rgb[1], rgb[2],
+                )));
+                appearance.text_color = foreground;
+                appearance.border.width = if selected == rgb { 3.0 } else { 1.0 };
+                appearance.border.color = foreground;
+                appearance
+            });
+        iced::widget::tooltip(swatch, text(label), iced::widget::tooltip::Position::Top).into()
     }))
     .spacing(style.spacing.xs)
     .wrap()
@@ -122,6 +123,7 @@ pub fn level<Message: Clone + 'static>(
         Some(on_change) if range.start() != range.end() => {
             column![label, slider(range, value, on_change).step(1u16),]
                 .spacing(style.spacing.xs)
+                .width(style.fields.regular)
                 .into()
         }
         _ => label.into(),

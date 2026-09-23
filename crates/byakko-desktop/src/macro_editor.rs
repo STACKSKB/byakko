@@ -40,9 +40,23 @@ impl Desktop {
         self.notice = None;
         match message {
             Message::Add => {
-                let slot = self.session.next_free_macro_slot().map(str::to_owned);
+                let catalog_complete = self
+                    .session
+                    .macros()
+                    .is_some_and(|editor| editor.catalog().is_some());
+                let slot = if catalog_complete || self.macro_new_slot.is_none() {
+                    self.session.next_free_macro_slot().or_else(|| {
+                        (!catalog_complete)
+                            .then(|| self.session.next_macro_candidate_after(None))
+                            .flatten()
+                    })
+                } else {
+                    self.session
+                        .next_macro_candidate_after(self.macro_new_slot.as_deref())
+                }
+                .map(str::to_owned);
                 let Some(slot) = slot else {
-                    self.notice = Some("No free macro slot is available".into());
+                    self.notice = Some("No further unbound macro slot is available".into());
                     return;
                 };
                 if let Err(reason) = self.session.select_macro(&slot) {
@@ -51,8 +65,15 @@ impl Desktop {
                 }
                 self.macro_new_slot = Some(slot);
                 self.reset_macro_inputs();
-                let request = self.session.request_macro_read();
-                self.submit(request);
+                if !self.session.macros().is_some_and(|editor| {
+                    editor.status() == &byakko_core::macros::editor::Status::Ready
+                        && editor
+                            .baseline()
+                            .is_some_and(|snapshot| snapshot.slot == editor.slot())
+                }) {
+                    let request = self.session.request_macro_read();
+                    self.submit(request);
+                }
             }
             Message::ReadCatalog => {
                 let request = self.session.request_macro_catalog_read();

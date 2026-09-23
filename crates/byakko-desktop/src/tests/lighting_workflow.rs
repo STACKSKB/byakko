@@ -139,7 +139,7 @@ fn lighting_uses_capabilities_and_memory_executor_without_losing_other_drafts() 
     );
     assert!(!app.session.lighting().unwrap().dirty());
     assert_eq!(app.session.changes(), keys);
-    assert!(matches!(app.session.status(), Status::Unverified { .. }));
+    assert_eq!(app.session.status(), &Status::Ready);
     send(&mut app, Lighting::Read);
     settle(&mut app);
     assert_eq!(
@@ -161,6 +161,39 @@ fn lighting_uses_capabilities_and_memory_executor_without_losing_other_drafts() 
     );
     send(&mut app, Lighting::Revert);
     assert!(!app.session.lighting().unwrap().dirty());
+}
+
+#[test]
+fn live_onboard_choices_apply_and_queue_during_the_first_write() {
+    let mut app = loaded();
+    send(&mut app, Lighting::Live(Edit::Effect("sweep".into())));
+    assert!(app.busy());
+    send(&mut app, Lighting::Live(Edit::Option("in".into())));
+    assert!(app.live_lighting.has_pending());
+    settle(&mut app);
+    let editor = app.session.lighting().unwrap();
+    let Some(Content::Editable(saved)) = editor.baseline().map(|snapshot| &snapshot.content) else {
+        panic!("expected editable lighting readback");
+    };
+    assert_eq!(saved.effect, "sweep");
+    assert_eq!(saved.option.as_deref(), Some("in"));
+    assert!(!app.live_lighting.has_queued());
+}
+
+#[test]
+fn live_effect_click_survives_an_unrelated_read() {
+    let mut app = loaded();
+    let request = app.session.request_settings_read();
+    app.submit(request);
+    assert!(app.busy());
+    send(&mut app, Lighting::Live(Edit::Effect("sweep".into())));
+    assert!(app.live_lighting.has_pending());
+    settle(&mut app);
+    let editor = app.session.lighting().unwrap();
+    let Some(Content::Editable(saved)) = editor.baseline().map(|snapshot| &snapshot.content) else {
+        panic!("expected editable lighting readback");
+    };
+    assert_eq!(saved.effect, "sweep");
 }
 
 #[test]
