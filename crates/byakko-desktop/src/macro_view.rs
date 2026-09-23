@@ -36,13 +36,13 @@ fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
 
 fn detail<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
     let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
+    let can_save = editable && editor.dirty() && editor.request_apply().is_ok();
     let toolbar = row![
         button("Read slot").on_press_maybe((!app.busy()).then_some(Message::Macro(Macro::Read))),
         button("Revert draft").on_press_maybe(
             (!app.busy() && editor.dirty()).then_some(Message::Macro(Macro::Revert))
         ),
-        button("Save & verify")
-            .on_press_maybe((editable && editor.dirty()).then_some(Message::Macro(Macro::Apply))),
+        button("Save & verify").on_press_maybe(can_save.then_some(Message::Macro(Macro::Apply))),
         text(if editor.dirty() {
             "Staged changes"
         } else {
@@ -60,6 +60,17 @@ fn detail<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
         content = content.push(text(format!("Preserved as read-only: {reason}")));
     }
     if let Some(program) = editor.draft() {
+        if !editor
+            .capabilities()
+            .editable_repeat_counts
+            .contains(&program.repeat_count)
+        {
+            content = content.push(text(format!(
+                "Stored count {} is preserved; stage a count in {:?} before saving or binding.",
+                program.repeat_count,
+                editor.capabilities().editable_repeat_counts
+            )));
+        }
         let repeat = text_input("Count", &app.repeat_input)
             .on_input_maybe(editable.then_some(|value| Message::Macro(Macro::RepeatInput(value))))
             .width(app.ui.fields.compact);
@@ -193,7 +204,7 @@ fn composer<'a>(app: &'a Desktop, editor: &Editor, editable: bool) -> Element<'a
         .spacing(app.ui.spacing.s),
         text(format!(
             "{limits} · wait {:?} ms · repeat {:?}",
-            caps.delays_ms, caps.repeat_counts
+            caps.delays_ms, caps.editable_repeat_counts
         ))
         .size(app.ui.type_scale.body),
     ]

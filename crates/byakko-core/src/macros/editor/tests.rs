@@ -12,6 +12,7 @@ fn caps() -> Capabilities {
             })
             .into(),
         repeat_counts: 1..=4,
+        editable_repeat_counts: 1..=4,
         delays_ms: 0..=100,
         keys: Some(1..=10),
         buttons: vec![],
@@ -200,4 +201,45 @@ fn binding_requires_ready_clean_editable_program_and_advertised_count() {
         },
     )));
     assert!(editor.binding_action("play").is_err());
+}
+
+#[test]
+fn legacy_zero_count_remains_readable_but_cannot_be_newly_saved_or_bound() {
+    let mut capabilities = caps();
+    capabilities.repeat_counts = 0..=4;
+    capabilities.editable_repeat_counts = 1..=4;
+    capabilities.bindings.push(crate::macros::Binding {
+        slot: "one".into(),
+        id: "counted".into(),
+        label: "Counted".into(),
+        action: crate::Action::Macro { slot: 0, mode: 0 },
+        required_repeat_count: None,
+    });
+    let original = snapshot(
+        7,
+        Content::Editable(Program {
+            repeat_count: 0,
+            events: vec![],
+        }),
+    );
+    let mut editor = Editor::new(capabilities).unwrap();
+    editor.accept_read(Ok(original.clone()));
+    assert_eq!(editor.status(), &Status::Ready);
+    assert_eq!(editor.baseline(), Some(&original));
+    assert_eq!(editor.draft().unwrap().repeat_count, 0);
+    assert!(!editor.dirty());
+    assert!(editor.binding_action("counted").is_err());
+    assert!(editor.edit(Edit::Repeat(0)).is_err());
+    assert_eq!(editor.draft().unwrap().repeat_count, 0);
+
+    editor
+        .edit(Edit::Insert {
+            at: 0,
+            event: program(1).events[0].clone(),
+        })
+        .unwrap();
+    assert!(editor.request_apply().is_err());
+    editor.edit(Edit::Repeat(1)).unwrap();
+    assert_eq!(editor.request_apply().unwrap().1.repeat_count, 1);
+    assert_eq!(editor.baseline(), Some(&original));
 }

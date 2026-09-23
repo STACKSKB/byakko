@@ -94,6 +94,9 @@ pub struct Capabilities {
     pub backend_id: String,
     pub slots: Vec<Choice>,
     pub repeat_counts: RangeInclusive<u32>,
+    /// Counts the editor may newly stage or save. The storage range above may
+    /// include legacy values whose playback meaning has not been established.
+    pub editable_repeat_counts: RangeInclusive<u32>,
     pub delays_ms: RangeInclusive<u32>,
     pub keys: Option<RangeInclusive<u16>>,
     pub buttons: Vec<ButtonChoice>,
@@ -156,6 +159,13 @@ pub fn validate_capabilities(capabilities: &Capabilities) -> Result<(), String> 
         || !valid_choices(&capabilities.slots)
         || !valid_choices(&capabilities.backend_actions)
         || capabilities.repeat_counts.is_empty()
+        || capabilities.editable_repeat_counts.is_empty()
+        || !capabilities
+            .repeat_counts
+            .contains(capabilities.editable_repeat_counts.start())
+        || !capabilities
+            .repeat_counts
+            .contains(capabilities.editable_repeat_counts.end())
         || capabilities.delays_ms.is_empty()
         || capabilities
             .keys
@@ -202,7 +212,7 @@ pub fn validate_capabilities(capabilities: &Capabilities) -> Result<(), String> 
             || binding.label.is_empty()
             || binding
                 .required_repeat_count
-                .is_some_and(|count| !capabilities.repeat_counts.contains(&count))
+                .is_some_and(|count| !capabilities.editable_repeat_counts.contains(&count))
             || !bindings.insert((binding.slot.as_str(), binding.id.as_str()))
         {
             return Err("Invalid macro binding capabilities".into());

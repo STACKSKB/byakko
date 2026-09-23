@@ -9,6 +9,7 @@ fn capabilities() -> Capabilities {
             label: "Scene A".into(),
         }],
         repeat_counts: 1..=10,
+        editable_repeat_counts: 1..=10,
         delays_ms: 0..=100_000,
         keys: Some(4..=300),
         buttons: vec![],
@@ -210,4 +211,19 @@ fn binding_catalog_checks_identity_slot_and_repeat_policy() {
             .bindings
             .is_empty()
     );
+
+    let mut caps = capabilities();
+    caps.repeat_counts = 0..=10;
+    caps.editable_repeat_counts = 1..=10;
+    caps.bindings.push(Binding {
+        slot: "scene-a".into(),
+        id: "legacy-zero".into(),
+        label: "Legacy zero".into(),
+        action: crate::Action::Macro { slot: 7, mode: 2 },
+        required_repeat_count: Some(0),
+    });
+    assert!(validate_capabilities(&caps).is_err());
+    caps.bindings.clear();
+    caps.editable_repeat_counts = 0..=11;
+    assert!(validate_capabilities(&caps).is_err());
 }

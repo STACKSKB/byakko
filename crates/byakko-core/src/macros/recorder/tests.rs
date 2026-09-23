@@ -9,6 +9,7 @@ fn caps(limit: u32) -> Capabilities {
             label: "One".into(),
         }],
         repeat_counts: 1..=1,
+        editable_repeat_counts: 1..=1,
         delays_ms: 0..=u16::MAX as u32,
         keys: Some(4..=239),
         buttons: vec![ButtonChoice {
