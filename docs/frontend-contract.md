@@ -32,7 +32,8 @@ for the library crates.
 
 `byakko-cli` is the first independent client. `devices` checks exact Nia87
 configuration-interface availability, `describe` prints its physical keymap
-descriptor, and `read` exports a verified USB keymap as JSON. Its synchronous
+descriptor, `read` exports a verified USB keymap as JSON, and `read-colors`
+exports the per-key color snapshot after the keymap read. Its synchronous
 adapter drives the same `Session → Command → Executor → Completion` path as
 Iced; a memory-device test exercises that path without USB. The CLI has no
 setter or apply subcommand yet.

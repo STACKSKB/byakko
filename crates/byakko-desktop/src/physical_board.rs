@@ -3,29 +3,13 @@ use crate::panels::{self, UiStyle};
 use byakko_core::PhysicalKey;
 use iced::{
     Element, Fill, Length, Size,
-    widget::{column, container, responsive, row, scrollable, space},
+    widget::{pin, responsive, scrollable, space, stack},
 };
 
-struct BoardRow<'a> {
-    y: f32,
-    keys: Vec<&'a PhysicalKey>,
-}
-
-fn rows<'a>(keys: &[&'a PhysicalKey]) -> Vec<BoardRow<'a>> {
-    let mut ordered = keys.to_vec();
-    ordered.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
-    let mut rows: Vec<BoardRow<'_>> = Vec::new();
-    for key in ordered {
-        if let Some(last) = rows.last_mut().filter(|row| row.y == key.y) {
-            last.keys.push(key);
-        } else {
-            rows.push(BoardRow {
-                y: key.y,
-                keys: vec![key],
-            });
-        }
-    }
-    rows
+fn bounds(keys: &[&PhysicalKey]) -> (f32, f32) {
+    keys.iter().fold((0.0, 0.0), |(width, height), key| {
+        (width.max(key.x + key.width), height.max(key.y + key.height))
+    })
 }
 
 /// Uses the descriptor's physical geometry. Narrow windows scroll horizontally;
@@ -36,49 +20,35 @@ pub fn view<'a, Message: Clone + 'a>(
     selected: Option<String>,
     on_select: impl Fn(&PhysicalKey) -> Option<Message> + 'a,
 ) -> Element<'a, Message> {
-    let span = keys.iter().map(|key| key.x + key.width).fold(0.0, f32::max);
-    let layout = rows(&keys);
+    let (span, rise) = bounds(&keys);
     responsive(move |size: Size| {
         let unit = (size.width / span.max(1.0)).clamp(style.board.min_unit, style.board.max_unit);
-        let mut board = column![];
-        let mut bottom = 0.0;
-        for physical_row in &layout {
-            let vertical_gap = (physical_row.y - bottom).max(0.0) * unit;
-            if vertical_gap > 0.0 {
-                board = board.push(space().height(Length::Fixed(vertical_gap)));
-            }
-            let mut line = row![];
-            let mut right = 0.0;
-            for key in &physical_row.keys {
-                let gap = (key.x - right).max(0.0) * unit;
-                if gap > 0.0 {
-                    line = line.push(space().width(Length::Fixed(gap)));
-                }
-                let slot_width = key.width * unit;
-                let slot_height = key.height * unit;
-                let key_width = (slot_width - style.board.key_gap).max(1.0);
-                let key_height = (slot_height - style.board.key_gap).max(1.0);
-                line = line.push(panels::selectable_button_with_size(
-                    style,
-                    key.label.clone(),
-                    selected.as_deref() == Some(key.id.as_str()),
-                    on_select(key),
-                    Some((key_width, key_height)),
-                ));
-                line = line.push(space().width(Length::Fixed(style.board.key_gap)));
-                right = key.x + key.width;
-            }
-            bottom = physical_row
-                .keys
-                .iter()
-                .map(|key| key.y + key.height)
-                .fold(bottom, f32::max);
-            board = board.push(line);
-        }
-        scrollable(container(board).width(Length::Fixed(span * unit)))
-            .horizontal()
-            .width(Fill)
-            .into()
+        let board_width = span * unit;
+        let board_height = rise * unit;
+        let base: Element<'_, Message> = space()
+            .width(Length::Fixed(board_width))
+            .height(Length::Fixed(board_height))
+            .into();
+        let board = keys.iter().fold(stack![base], |board, key| {
+            let width = (key.width * unit - style.board.key_gap).max(1.0);
+            let height = (key.height * unit - style.board.key_gap).max(1.0);
+            let key_button = panels::selectable_button_with_size(
+                style,
+                key.label.clone(),
+                selected.as_deref() == Some(key.id.as_str()),
+                on_select(key),
+                Some((width, height)),
+            );
+            board.push(pin(key_button).x(key.x * unit).y(key.y * unit))
+        });
+        scrollable(
+            board
+                .width(Length::Fixed(board_width))
+                .height(Length::Fixed(board_height)),
+        )
+        .horizontal()
+        .width(Fill)
+        .into()
     })
     .into()
 }
@@ -101,21 +71,11 @@ mod tests {
     }
 
     #[test]
-    fn projects_descriptor_rows_without_board_specific_assumptions() {
-        let caps = key("caps", 0.0, 1.0, 1.75);
-        let a = key("a", 1.75, 1.0, 1.0);
+    fn descriptor_bounds_include_stagger_and_tall_keys() {
         let esc = key("esc", 0.0, 0.0, 1.0);
-        let projected = rows(&[&a, &caps, &esc]);
-        assert_eq!(projected.len(), 2);
-        assert_eq!(projected[0].keys[0].id, "esc");
-        assert_eq!(
-            projected[1]
-                .keys
-                .iter()
-                .map(|key| key.id.as_str())
-                .collect::<Vec<_>>(),
-            ["caps", "a"]
-        );
-        assert_eq!(projected[1].keys[0].width, 1.75);
+        let mut enter = key("enter", 13.0, 2.0, 2.0);
+        enter.height = 2.0;
+        let arrow = key("arrow", 17.5, 5.5, 1.0);
+        assert_eq!(bounds(&[&enter, &arrow, &esc]), (18.5, 6.5));
     }
 }
