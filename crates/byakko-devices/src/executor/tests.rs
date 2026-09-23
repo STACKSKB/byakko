@@ -18,6 +18,72 @@ struct MemoryDevice {
 }
 
 struct PanickingDevice;
+
+struct CatalogDevice {
+    reads: Arc<AtomicUsize>,
+}
+
+impl KeymapDevice for CatalogDevice {
+    fn read(&mut self) -> Result<State, String> {
+        unreachable!()
+    }
+    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+        unreachable!()
+    }
+    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        Ok(macros::Snapshot {
+            backend_id: "test".into(),
+            slot: slot.into(),
+            revision: vec![1],
+            content: macros::Content::Editable(macros::Program {
+                repeat_count: 1,
+                events: vec![],
+            }),
+        })
+    }
+}
+
+#[test]
+fn catalog_reads_every_requested_slot_in_one_correlated_command() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        CatalogDevice {
+            reads: reads.clone(),
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(3);
+    worker
+        .try_submit(Command::ReadMacroCatalog {
+            generation: 3,
+            operation: 5,
+            slots: vec!["first".into(), "second".into()],
+        })
+        .unwrap();
+    let Completion::ReadMacroCatalog {
+        generation,
+        operation,
+        result,
+    } = worker
+        .completions
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!((generation, operation), (3, 5));
+    assert_eq!(
+        result
+            .unwrap()
+            .iter()
+            .map(|snapshot| snapshot.slot.as_str())
+            .collect::<Vec<_>>(),
+        vec!["first", "second"]
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+}
 impl KeymapDevice for PanickingDevice {
     fn read(&mut self) -> Result<State, String> {
         panic!("read panic")

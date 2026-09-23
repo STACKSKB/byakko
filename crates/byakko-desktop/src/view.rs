@@ -306,6 +306,7 @@ pub(super) fn status(app: &Desktop) -> String {
         }
         Activity::Read { .. }
         | Activity::ReadMacro { .. }
+        | Activity::ReadMacroCatalog { .. }
         | Activity::ReadLighting { .. }
         | Activity::ReadPicture { .. }
         | Activity::ReadSettings { .. }

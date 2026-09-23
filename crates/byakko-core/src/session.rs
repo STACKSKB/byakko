@@ -32,6 +32,11 @@ pub enum Command {
         operation: u64,
         slot: String,
     },
+    ReadMacroCatalog {
+        generation: u64,
+        operation: u64,
+        slots: Vec<String>,
+    },
     ApplyMacro {
         generation: u64,
         operation: u64,
@@ -102,6 +107,11 @@ pub enum Completion {
         operation: u64,
         slot: String,
         result: Result<crate::macros::Snapshot, String>,
+    },
+    ReadMacroCatalog {
+        generation: u64,
+        operation: u64,
+        result: Result<Vec<crate::macros::Snapshot>, String>,
     },
     ApplyMacro {
         generation: u64,
@@ -290,6 +300,9 @@ pub enum Activity {
     ReadMacro {
         operation: u64,
         slot: String,
+    },
+    ReadMacroCatalog {
+        operation: u64,
     },
     ApplyMacro {
         operation: u64,
@@ -696,6 +709,16 @@ impl Session {
                     slot: slot.clone(),
                 },
             ),
+            Completion::ReadMacroCatalog {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::ReadMacroCatalog {
+                    operation: *operation,
+                },
+            ),
             Completion::ApplyMacro {
                 generation,
                 operation,
@@ -802,6 +825,11 @@ impl Session {
                 .as_mut()
                 .expect("pending macro capability")
                 .accept_read(result),
+            Completion::ReadMacroCatalog { result, .. } => self
+                .macros
+                .as_mut()
+                .expect("pending macro capability")
+                .accept_catalog(result),
             Completion::ApplyMacro { result, .. } => self
                 .macros
                 .as_mut()

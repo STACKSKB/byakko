@@ -20,7 +20,7 @@ use std::{
     time::Duration,
 };
 
-const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>|plan-settings <snapshot-file>|apply-settings <snapshot-file>|plan-lighting <snapshot-file>|apply-lighting <snapshot-file>|plan-macro <snapshot-file>|apply-macro <snapshot-file>|plan-restore-macro <native-backup-file>|restore-macro <native-backup-file>|plan-colors <snapshot-file>|apply-colors <snapshot-file>>";
+const USAGE: &str = "Usage: byakko-cli <devices|describe|read|list-macros|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>|plan-settings <snapshot-file>|apply-settings <snapshot-file>|plan-lighting <snapshot-file>|apply-lighting <snapshot-file>|plan-macro <snapshot-file>|apply-macro <snapshot-file>|plan-restore-macro <native-backup-file>|restore-macro <native-backup-file>|plan-colors <snapshot-file>|apply-colors <snapshot-file>>";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
@@ -33,6 +33,7 @@ enum Command {
     Devices,
     Describe,
     Read,
+    ListMacros,
     ReadColors,
     ReadLighting,
     ReadSettings,
@@ -55,6 +56,7 @@ fn parse_command(arguments: &[String]) -> Result<Command, Box<dyn std::error::Er
         [name] if name == "devices" => Ok(Command::Devices),
         [name] if name == "describe" => Ok(Command::Describe),
         [name] if name == "read" => Ok(Command::Read),
+        [name] if name == "list-macros" => Ok(Command::ListMacros),
         [name] if name == "read-colors" => Ok(Command::ReadColors),
         [name] if name == "read-lighting" => Ok(Command::ReadLighting),
         [name] if name == "read-settings" => Ok(Command::ReadSettings),
@@ -176,6 +178,14 @@ fn run_device(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     let executor = Executor::spawn(BoundNia87Adapter::new(target), backups.clone())?;
     let mut session = nia87::application::session()?;
     let json = match command {
+        Command::ListMacros => {
+            byakko_cli::read_keymap(&mut session, &executor, Duration::from_secs(30))?;
+            serde_json::to_string_pretty(&byakko_cli::read_macro_library(
+                &mut session,
+                &executor,
+                Duration::from_secs(90),
+            )?)?
+        }
         Command::ReadMacro(slot) => serde_json::to_string_pretty(&byakko_cli::read_macro(
             &mut session,
             &executor,
@@ -368,6 +378,7 @@ fn run_device(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                 | Command::Devices
                 | Command::Describe
                 | Command::CompareArchives(..)
+                | Command::ListMacros
                 | Command::ReadMacro(_)
                 | Command::Macro(..)
                 | Command::NativeMacroRestore(..) => unreachable!("handled before keymap read"),
@@ -449,6 +460,10 @@ mod tests {
     #[test]
     fn parser_rejects_wrong_arity_and_unknown_commands() {
         assert!(matches!(parse_command(&args(&[])).unwrap(), Command::Help));
+        assert!(matches!(
+            parse_command(&args(&["list-macros"])).unwrap(),
+            Command::ListMacros
+        ));
         assert!(parse_command(&args(&["read", "extra"])).is_err());
         assert!(parse_command(&args(&["read-macro"])).is_err());
         assert!(parse_command(&args(&["restore-macro"])).is_err());

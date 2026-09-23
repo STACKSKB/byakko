@@ -46,6 +46,7 @@ fn ready() -> Desktop {
         picture_selected: None,
         settings_selected: None,
         macro_files: Default::default(),
+        macro_new_slot: None,
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         host: None,

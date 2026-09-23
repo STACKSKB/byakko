@@ -24,6 +24,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct MacroLibrary {
+    pub capacity: usize,
+    pub configured: Vec<byakko_core::macros::Choice>,
+    pub next_free: Option<String>,
+}
+
 pub fn read_keymap(
     session: &mut Session,
     executor: &Executor,
@@ -72,6 +79,34 @@ pub fn read_macro(
             .ok_or("Verified macro read has no baseline".into()),
         status => Err(format!("Macro read failed: {status:?}")),
     }
+}
+
+/// Read the complete advertised macro library through the shared session.
+pub fn read_macro_library(
+    session: &mut Session,
+    executor: &Executor,
+    timeout: Duration,
+) -> Result<MacroLibrary, String> {
+    if *session.status() != Status::Ready {
+        return Err("Read the keymap before listing macros".into());
+    }
+    let command = session.request_macro_catalog_read()?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
+    let editor = session.macros().ok_or("Device does not support macros")?;
+    if let Some(error) = editor.catalog_error() {
+        return Err(format!("Macro library read failed: {error}"));
+    }
+    let configured = session
+        .macro_library_slots()
+        .ok_or("Macro library is incomplete")?
+        .into_iter()
+        .cloned()
+        .collect();
+    Ok(MacroLibrary {
+        capacity: editor.capabilities().slots.len(),
+        configured,
+        next_free: session.next_free_macro_slot().map(str::to_owned),
+    })
 }
 
 pub fn read_colors(

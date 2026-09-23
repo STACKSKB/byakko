@@ -8,7 +8,9 @@ use byakko_core::macros::Edit;
 #[derive(Clone, Debug)]
 pub(super) enum Message {
     Bind(String),
+    Add,
     Select(String),
+    ReadCatalog,
     Read,
     Apply,
     Revert,
@@ -37,6 +39,25 @@ impl Desktop {
         }
         self.notice = None;
         match message {
+            Message::Add => {
+                let slot = self.session.next_free_macro_slot().map(str::to_owned);
+                let Some(slot) = slot else {
+                    self.notice = Some("No free macro slot is available".into());
+                    return;
+                };
+                if let Err(reason) = self.session.select_macro(&slot) {
+                    self.notice = Some(reason);
+                    return;
+                }
+                self.macro_new_slot = Some(slot);
+                self.reset_macro_inputs();
+                let request = self.session.request_macro_read();
+                self.submit(request);
+            }
+            Message::ReadCatalog => {
+                let request = self.session.request_macro_catalog_read();
+                self.submit(request);
+            }
             Message::Bind(binding) => {
                 self.notice = match self.selected.as_deref() {
                     Some(key) => self
@@ -61,6 +82,7 @@ impl Desktop {
                     self.notice = Some(reason);
                     return;
                 }
+                self.macro_new_slot = None;
                 if changed {
                     self.reset_macro_inputs();
                 }

@@ -264,6 +264,11 @@ fn token(command: &Command) -> (u64, u64) {
             operation,
             ..
         }
+        | Command::ReadMacroCatalog {
+            generation,
+            operation,
+            ..
+        }
         | Command::ApplyMacro {
             generation,
             operation,
@@ -330,6 +335,11 @@ fn failure(command: &Command, message: String, recovery: Recovery) -> Completion
             generation,
             operation,
             slot: slot.clone(),
+            result: Err(message),
+        },
+        Command::ReadMacroCatalog { .. } => Completion::ReadMacroCatalog {
+            generation,
+            operation,
             result: Err(message),
         },
         Command::ApplyMacro { expected, .. } => Completion::ApplyMacro {
@@ -406,6 +416,11 @@ fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Co
             operation,
             slot: slot.clone(),
             result: device.read_macro(slot),
+        },
+        Command::ReadMacroCatalog { slots, .. } => Completion::ReadMacroCatalog {
+            generation,
+            operation,
+            result: device.read_macro_catalog(slots),
         },
         Command::ApplyMacro {
             expected, desired, ..

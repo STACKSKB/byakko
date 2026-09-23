@@ -11,6 +11,14 @@ pub(super) fn read_macro_with(selection: Selection<'_>, slot: u8) -> Result<Vec<
     read_macro_on_device(session.device(), slot)
 }
 
+pub(super) fn read_macros_with(selection: Selection<'_>, slots: &[u8]) -> Result<Vec<Vec<u8>>> {
+    let session = Session::open_for(selection)?;
+    slots
+        .iter()
+        .map(|slot| read_macro_on_device(session.device(), *slot))
+        .collect()
+}
+
 fn read_macro_unlocked(selection: Selection<'_>, slot: u8) -> Result<Vec<u8>> {
     let (_, device) = selection.open()?;
     read_macro_on_device(&device, slot)

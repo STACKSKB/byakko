@@ -2,7 +2,7 @@
 use super::{Activity, Command, Problem, Session, Status};
 use crate::{
     Change,
-    macros::{Capabilities, Edit, editor::Editor},
+    macros::{Capabilities, Choice, Edit, editor::Editor},
 };
 #[cfg(test)]
 mod tests;
@@ -22,6 +22,68 @@ impl Session {
 
     pub fn macros(&self) -> Option<&Editor> {
         self.macros.as_ref()
+    }
+
+    /// Stored programs and slots still referenced by either keymap image.
+    /// A blank but bound slot must not be silently reused by Add.
+    pub fn macro_library_slots(&self) -> Option<Vec<&Choice>> {
+        let editor = self.macros.as_ref()?;
+        let configured: std::collections::BTreeSet<_> = editor
+            .configured_slots()?
+            .into_iter()
+            .map(|slot| slot.id.as_str())
+            .collect();
+        Some(
+            editor
+                .capabilities()
+                .slots
+                .iter()
+                .filter(|slot| {
+                    configured.contains(slot.id.as_str()) || self.macro_slot_bound(&slot.id)
+                })
+                .collect(),
+        )
+    }
+
+    pub fn next_free_macro_slot(&self) -> Option<&str> {
+        if self.status != Status::Ready {
+            return None;
+        }
+        let editor = self.macros.as_ref()?;
+        let configured: std::collections::BTreeSet<_> = editor
+            .configured_slots()?
+            .into_iter()
+            .map(|slot| slot.id.as_str())
+            .collect();
+        editor
+            .capabilities()
+            .slots
+            .iter()
+            .find(|slot| !configured.contains(slot.id.as_str()) && !self.macro_slot_bound(&slot.id))
+            .map(|slot| slot.id.as_str())
+    }
+
+    fn macro_slot_bound(&self, slot: &str) -> bool {
+        let Some(editor) = self.macros.as_ref() else {
+            return false;
+        };
+        let actions: Vec<_> = editor
+            .capabilities()
+            .bindings
+            .iter()
+            .filter(|binding| binding.slot == slot)
+            .map(|binding| &binding.action)
+            .collect();
+        let contains = |bindings: &super::Bindings| {
+            bindings
+                .values()
+                .flat_map(|layer| layer.values())
+                .any(|action| actions.contains(&action))
+        };
+        self.baseline
+            .as_ref()
+            .is_some_and(|state| contains(&state.bindings))
+            || self.draft.as_ref().is_some_and(contains)
     }
 
     fn macro_editor(&mut self) -> Result<&mut Editor, String> {
@@ -79,6 +141,26 @@ impl Session {
             generation: self.generation,
             operation,
             slot,
+        })
+    }
+
+    pub fn request_macro_catalog_read(&mut self) -> Result<Command, String> {
+        if self.status == Status::Disconnected {
+            return Err("Device is disconnected".into());
+        }
+        let slots = self
+            .macro_editor()?
+            .capabilities()
+            .slots
+            .iter()
+            .map(|choice| choice.id.clone())
+            .collect();
+        let operation = self.operation()?;
+        self.activity = Activity::ReadMacroCatalog { operation };
+        Ok(Command::ReadMacroCatalog {
+            generation: self.generation,
+            operation,
+            slots,
         })
     }
 

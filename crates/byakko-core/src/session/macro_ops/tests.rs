@@ -29,10 +29,20 @@ fn ready() -> Session {
     let capabilities = macros::Capabilities {
         byte_budget: None,
         backend_id: "memory".into(),
-        slots: vec![macros::Choice {
-            id: "scene".into(),
-            label: "Scene".into(),
-        }],
+        slots: vec![
+            macros::Choice {
+                id: "scene".into(),
+                label: "Scene".into(),
+            },
+            macros::Choice {
+                id: "second".into(),
+                label: "Second".into(),
+            },
+            macros::Choice {
+                id: "third".into(),
+                label: "Third".into(),
+            },
+        ],
         repeat_counts: 1..=10,
         editable_repeat_counts: 1..=10,
         delays_ms: 0..=100_000,
@@ -279,4 +289,129 @@ fn binding_uses_advertised_action_and_preserves_drafts_on_rejection() {
     assert_eq!(session.changes(), before);
     read(&mut session, snapshot(1, 1));
     session.stage_macro_binding("layer", "key", "play").unwrap();
+}
+
+#[test]
+fn catalog_is_complete_and_read_only_across_dirty_draft() {
+    let mut session = ready();
+    session.edit_macro(Edit::Repeat(2)).unwrap();
+    let original_draft = session.macros().unwrap().draft().cloned();
+    let Command::ReadMacroCatalog {
+        generation,
+        operation,
+        slots,
+    } = session.request_macro_catalog_read().unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(slots, vec!["scene", "second", "third"]);
+    assert!(session.request_macro_read().is_err());
+    assert!(session.macros().unwrap().catalog().is_none());
+    let occupied = Snapshot {
+        slot: "second".into(),
+        content: Content::Opaque {
+            reason: "unknown".into(),
+        },
+        ..snapshot(2, 1)
+    };
+    let mut empty = snapshot(3, 1);
+    empty.slot = "third".into();
+    let completion = Completion::ReadMacroCatalog {
+        generation,
+        operation,
+        result: Ok(vec![snapshot(1, 1), occupied.clone(), empty.clone()]),
+    };
+    assert_eq!(session.accept(completion.clone()), Acceptance::Accepted);
+    assert_eq!(session.accept(completion), Acceptance::IgnoredStale);
+    let editor = session.macros().unwrap();
+    assert_eq!(editor.catalog().unwrap().len(), 3);
+    assert_eq!(
+        editor
+            .configured_slots()
+            .unwrap()
+            .iter()
+            .map(|slot| slot.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["second"]
+    );
+    assert_eq!(session.next_free_macro_slot(), Some("scene"));
+    assert_eq!(editor.draft(), original_draft.as_ref());
+    assert!(editor.dirty());
+}
+
+#[test]
+fn catalog_rejects_incomplete_result_and_old_generation() {
+    let mut session = ready();
+    let Command::ReadMacroCatalog {
+        generation,
+        operation,
+        ..
+    } = session.request_macro_catalog_read().unwrap()
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        session.accept(Completion::ReadMacroCatalog {
+            generation,
+            operation,
+            result: Ok(vec![snapshot(1, 1)])
+        }),
+        Acceptance::Accepted
+    );
+    assert!(session.macros().unwrap().catalog().is_none());
+    assert!(session.macros().unwrap().catalog_error().is_some());
+    let Command::ReadMacroCatalog {
+        generation,
+        operation,
+        ..
+    } = session.request_macro_catalog_read().unwrap()
+    else {
+        unreachable!()
+    };
+    session.disconnect();
+    session.connect().unwrap();
+    assert_eq!(
+        session.accept(Completion::ReadMacroCatalog {
+            generation,
+            operation,
+            result: Ok(vec![snapshot(1, 1)])
+        }),
+        Acceptance::IgnoredStale
+    );
+    assert!(session.macros().unwrap().catalog().is_none());
+}
+
+#[test]
+fn empty_but_bound_slot_is_visible_and_not_allocated() {
+    let mut session = ready();
+    session.stage_macro_binding("layer", "key", "play").unwrap();
+    let Command::ReadMacroCatalog {
+        generation,
+        operation,
+        ..
+    } = session.request_macro_catalog_read().unwrap()
+    else {
+        unreachable!()
+    };
+    let mut second = snapshot(2, 1);
+    second.slot = "second".into();
+    let mut third = snapshot(3, 1);
+    third.slot = "third".into();
+    session.accept(Completion::ReadMacroCatalog {
+        generation,
+        operation,
+        result: Ok(vec![snapshot(1, 1), second, third]),
+    });
+    assert_eq!(
+        session
+            .macro_library_slots()
+            .unwrap()
+            .iter()
+            .map(|slot| slot.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["scene"]
+    );
+    assert_eq!(session.next_free_macro_slot(), Some("second"));
+    session.revert().unwrap();
+    assert_eq!(session.next_free_macro_slot(), Some("scene"));
 }

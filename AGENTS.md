@@ -171,9 +171,13 @@ read-only-first device acceptance sequence there.
   descriptor capability and a staged Iced editor; memory-backend tests cover
   selection, apply and readback, while Nia87 codec tests cover encoding.
   Physical shortcut output remains unverified.
-  Entering the Macros, Lighting, per-key Color or Settings page automatically
-  reads a stale or unloaded snapshot once the keymap is ready; an explicit retry
-  remains necessary after a failed read or uncertain write.
+  Entering Macros reads a complete backend-advertised slot catalog once the
+  keymap is ready. The library shows stored programs and slots still bound in
+  either keymap image; Add selects the first unbound free slot and stops at the
+  backend capacity. Selecting a macro reads its editable snapshot separately.
+  Lighting, per-key Color and Settings still read a stale or unloaded snapshot
+  on entry. An explicit retry remains necessary after a failed read or uncertain
+  write.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and
   the root sampler module is a compatibility re-export.
