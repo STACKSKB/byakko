@@ -124,6 +124,10 @@ read-only-first device acceptance sequence there.
   around each picture read and rechecks that context inside the guarded color
   transaction. A matching RGB revision alone does not authorize a write after
   the picture selector changes.
+  A full Nia87 archive contains only the picture response under its captured
+  selector. Its preflight must reject a restore that changes both the lighting
+  selector and picture colors in one transaction; there is no verified
+  multi-selector backup or recovery representation yet.
   Keep physical color writes pending until the earlier recovery concern and
   Iced picture-write acceptance gate can be addressed with user interaction.
   Keep CLI command parsing closed and typed; load only the file associated with

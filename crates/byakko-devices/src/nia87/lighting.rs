@@ -121,6 +121,10 @@ impl Lighting {
     pub fn effect_id(&self) -> u8 {
         self.raw[1]
     }
+    /// Context affecting the index-zero picture response on this firmware.
+    pub fn picture_context(&self) -> [u8; 2] {
+        [self.effect_id(), self.raw[4] >> 4]
+    }
     pub fn speed(&self) -> Option<u8> {
         (self.raw[2] <= 4).then(|| 4 - self.raw[2])
     }

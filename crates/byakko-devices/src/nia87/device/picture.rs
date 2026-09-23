@@ -20,11 +20,7 @@ pub(super) fn read_picture_with_context(
 
 fn picture_context(device: &HidDevice) -> Result<[u8; 2]> {
     let lighting = read_lighting_on_device(device)?;
-    Ok(selector_token(&lighting))
-}
-
-fn selector_token(lighting: &crate::nia87::lighting::Lighting) -> [u8; 2] {
-    [lighting.effect_id(), lighting.raw()[4] >> 4]
+    Ok(lighting.picture_context())
 }
 
 fn read_picture_with_context_on_device(device: &HidDevice) -> Result<(Vec<[u8; 3]>, [u8; 2])> {
@@ -224,20 +220,26 @@ mod tests {
         reply[1] = 13;
         reply[4] = 0x10;
         let option_two = crate::nia87::lighting::Lighting::decode(&reply).unwrap();
-        assert_eq!(selector_token(&option_two), [13, 1]);
+        assert_eq!(option_two.picture_context(), [13, 1]);
         reply[3] = 2;
         assert_eq!(
-            selector_token(&crate::nia87::lighting::Lighting::decode(&reply).unwrap()),
+            crate::nia87::lighting::Lighting::decode(&reply)
+                .unwrap()
+                .picture_context(),
             [13, 1]
         );
         reply[4] = 0x20;
         assert_eq!(
-            selector_token(&crate::nia87::lighting::Lighting::decode(&reply).unwrap()),
+            crate::nia87::lighting::Lighting::decode(&reply)
+                .unwrap()
+                .picture_context(),
             [13, 2]
         );
         reply[1] = 1;
         assert_eq!(
-            selector_token(&crate::nia87::lighting::Lighting::decode(&reply).unwrap()),
+            crate::nia87::lighting::Lighting::decode(&reply)
+                .unwrap()
+                .picture_context(),
             [1, 2]
         );
     }
