@@ -176,23 +176,30 @@ Rebuilt `byakko-hidraw-access` from this commit. It printed `nia87-config` for
 `3151:4015` and interface `02`; the accepted descriptor is the Linux ordering
 listed in [Linux installation](linux-install.md).
 
-The helper and exact narrow udev rule were not installed. The attempted
-installation was rejected by automatic approval review because it would
-persistently grant active-user device access without authorization for that
-system permission change. No workaround was attempted. The current
-`/dev/hidraw2` ACL remains `root:root` mode `0600` with no active-user ACL.
+After explicit user authorization, the root-owned helper and exact narrow udev
+rule were installed temporarily. The rule added the `uaccess` tag only to the
+matching configuration collection. `/dev/hidraw2` then had a `user:three:rw-`
+ACL; the other collections remained rejected by the helper.
 
 The latest `byakko-cli devices` identified `/dev/hidraw2` as the Nia87
 configuration interface. The first normal-user `read` failed with:
-`Error: "Device read failed: Unverified { problem: Read(\"Permission denied (os error 13)\") }"`.
-Because that read failed, the repeat read, other section reads, and archive
-stability comparison were not run. No device setters were run.
+`Error: "Device read failed: Unverified { problem: Read(\"unnumbered feature reply does not fit host buffer\") }"`.
+The ACL was rechecked after the failure and remained present. Because the first
+read failed, the repeat read, other section reads, and archive stability
+comparison were not run. No device setters were run.
+
+Removing the helper/rule was requested after testing, but this shell's
+noninteractive `sudo` requires a password. At the end of the run, the root-owned
+helper and rule remained installed and the ACL was still present; complete
+cleanup with the user's authenticated system terminal. The user also wants the
+eventual application image to avoid manual udev setup.
 
 **Note for the Windows agent:** the updated exact-descriptor helper works on the
-Linux descriptor and accepts only the configuration node. The remaining
-blocker is the absent root-owned helper/rule and active-seat ACL; installation
-needs explicit user authorization. Keep the first Linux device activity
-read-only after access is granted.
+Linux descriptor and accepts only the configuration node. Linux permissions
+were granted by the narrow rule, but the first read reaches the HID transport
+and fails on the unnumbered feature-reply length. Do not change transport code
+or try a setter without reviewing this exact failure. The temporary rule still
+needs cleanup from an authenticated system terminal.
 
 ## Known limits to carry forward
 
