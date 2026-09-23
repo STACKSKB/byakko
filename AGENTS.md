@@ -4,6 +4,8 @@ This is a functional-first house. Read this file before changing code. The
 approved direction is `docs/pre-alpha-proposal.md`, amended below for browser
 delivery. Iced is the selected desktop toolkit; the egui application is a
 research baseline, not the structure to port.
+For a Linux checkout, start with `docs/linux-handoff.md` and retain the
+read-only-first device acceptance sequence there.
 
 ## Product constraints
 

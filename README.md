@@ -81,6 +81,7 @@ The built-in Nia87 slot profile comes from our observed default map, independent
 The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a [focused keyboard/mouse-button macro recorder](docs/macro-recording.md). The Iced pages use backend capabilities and portable state; the Nia87 report details remain in its device adapter. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Four wireless sleep timers have native controls and passed complete write/readback/restoration tests. The backlight option has a native control; other option semantics remain limited to the verified subset. A captured official Fn media binding now passes native write/readback/restoration. USB access recovered after a replug; the pending test binding was restored, and Fn editing is enabled. Mixed edits to both layers of the same slot are now supported and verified by readback/restoration.
 
 Linux desktop permission setup is documented in [Linux installation](docs/linux-install.md). The native helper and narrow udev rule are included; their real Linux device behavior remains unverified.
+For work from a Linux checkout, follow the [Linux Codex handoff](docs/linux-handoff.md) for the current build, read-only hardware, and acceptance tasks.
 
 ## Research and provenance
 
