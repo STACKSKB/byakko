@@ -215,6 +215,15 @@ count or response data; no permissions were changed. Repeat the diagnostic only
 when the already validated Nia87 configuration collection is present, and keep
 it read-only.
 
+The earlier adapter error proves the first reply count was 65, because its
+65-byte buffer rejects that count at the final fit check. The bytes were not
+recorded. The adapter now handles both complete shapes for the descriptor's
+64-byte payload: 64 payload bytes without a report ID, or 65 bytes with a
+leading zero report ID. It rejects a 65-byte reply without that zero and all
+partial lengths. Cross-target compilation and Clippy passed on Windows; the
+new path still needs a Linux runtime read and full identity validation before
+any write acceptance.
+
 ## Known limits to carry forward
 
 Linux release builds and X11 demo startup have been verified, but hidraw
