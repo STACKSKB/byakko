@@ -233,6 +233,21 @@ integration test passed, with no doc tests. `cargo clippy --locked
 was clean after verification. No device access or permission changes were
 made; these results do not replace the pending read-only hardware diagnostic.
 
+## Linux CLI and device verification (2026-09-23, source `3ed3f3e`)
+
+At `3ed3f3e549190f1c2e8cba9a401d08426fed56fc`, the following checks passed
+on Linux with dependencies offline:
+
+- `cargo build --locked --offline -p byakko-cli -p byakko-devices`
+- `cargo test --locked --offline -p byakko-cli -p byakko-devices`: 197 tests
+  passed (15 CLI unit tests, 181 device unit tests, and one device integration
+  test); doc tests were empty.
+- `cargo clippy --locked --offline -p byakko-cli -p byakko-devices --all-targets -- -D warnings`
+
+No device access or permission changes were made. These checks do not verify
+the new system-action records on a physical keyboard or the Linux runtime HID
+framing.
+
 ## Known limits to carry forward
 
 Linux release builds and X11 demo startup have been verified, but hidraw
