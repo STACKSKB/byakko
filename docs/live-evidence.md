@@ -306,8 +306,8 @@ The current Iced desktop and read-only CLI cross-linked for
 `x86_64-unknown-linux-gnu` with Zig 0.15.2 and cargo-zigbuild 0.23.4 using
 `--release --locked --offline`. Both files have ELF magic `7F454C46`.
 After the subsequent CLI, page-read and Windows entry-point changes, the
-refreshed desktop is 10,087,712 bytes (SHA-256
-`D849F0B0AC7E687F26F885EF77ABAF9D9DF76E50579D66715F7896616FDD3553`);
+refreshed desktop is 10,087,840 bytes (SHA-256
+`7CB12DC19791E02F7CEA6C7C5CC558C23DE1A6860B8296808448E049D5294663`);
 the CLI is 1,496,240 bytes (SHA-256
 `377A89D908E8F7A5F44E6964D9580709329DFAF9F5F3A943C69C7D70D76B8E04`).
 This proves linking, not Linux startup or HID access.
@@ -369,7 +369,7 @@ tests; do not assume the older effect-5 archive still describes current state.
 
 ## Automatic feature-page reads and CLI macro read (2026-09-23)
 
-The Iced Lighting, per-key Color and Settings pages now share one entry-read
+The Iced Macro, Lighting, per-key Color and Settings pages now share one entry-read
 decision: when the selected page has an unloaded or invalidated snapshot, it
 reads once after keymap readiness. Revisiting a verified page does not repeat
 the request; failed reads remain manual retries. Memory-backend tests cover

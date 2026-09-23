@@ -6,6 +6,27 @@ use crate::{
 use byakko_core::macros::{Content, Edit, editor::Status as MacroStatus};
 
 #[test]
+fn macro_page_reads_selected_slot_once_on_entry_and_after_pending_keymap() {
+    let mut app = ready();
+    let _ = app.update(Message::Page(Page::Macros));
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::ReadMacro { .. }
+    ));
+    settle(&mut app);
+    assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
+    let _ = app.update(Message::Page(Page::Keys));
+    let _ = app.update(Message::Page(Page::Macros));
+    assert!(!app.busy());
+
+    let mut app = ready();
+    let _ = app.update(Message::Read);
+    let _ = app.update(Message::Page(Page::Macros));
+    settle(&mut app);
+    assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
+}
+
+#[test]
 fn failed_read_preserves_unsubmitted_form_input() {
     let mut app = loaded();
     send(&mut app, Macro::Inspect(0));

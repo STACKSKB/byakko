@@ -240,6 +240,19 @@ impl Desktop {
             return;
         }
         let request = match self.page {
+            Page::Macros
+                if self.session.macros().is_some_and(|editor| {
+                    matches!(
+                        editor.status(),
+                        byakko_core::macros::editor::Status::Unloaded
+                            | byakko_core::macros::editor::Status::Unverified {
+                                problem: Problem::ReadRequired
+                            }
+                    )
+                }) =>
+            {
+                self.session.request_macro_read()
+            }
             Page::Lighting
                 if self.session.lighting().is_some_and(|editor| {
                     matches!(
