@@ -573,3 +573,20 @@ settings were unchanged. The ignored files are
 `keymap-cli-restore-20260923.json`, and
 `keymap-cli-after-20260923.json`. No physical key output or power-cycle
 persistence was checked.
+
+## CLI one-field settings write and full restoration (2026-09-23)
+
+The attached board's seven settings were read from a fresh 256-byte revision;
+debounce was 1 ms. A complete archive was saved before the test. The
+independent CLI planned exactly one change, debounce 1→2 ms, then applied it
+with a durable backup and complete settings readback. A new read confirmed
+2 ms and supplied the revision for the reverse 2→1 ms plan. The guarded
+restore verified the original value. A complete archive after restoration
+compared with the before archive as `[]`, including both keymaps, all macros,
+lighting, per-key colors and settings. No physical debounce timing or
+power-cycle persistence was checked. The ignored files are
+`Research/captures/settings-cli-before-20260923.json`,
+`settings-cli-state-before-20260923.json`,
+`settings-cli-proposal-20260923.json`,
+`settings-cli-restore-20260923.json`, and
+`settings-cli-after-20260923.json`.
