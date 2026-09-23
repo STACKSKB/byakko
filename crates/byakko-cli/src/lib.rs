@@ -1,6 +1,7 @@
 //! Synchronous CLI adapter for the same owned session commands used by Iced.
 use byakko_core::{
     State,
+    archive::{ArchiveState, NativeArchive},
     lighting::{Snapshot as LightingSnapshot, editor::Status as LightingStatus},
     macros::{Snapshot as MacroSnapshot, editor::Status as MacroStatus},
     picture::{Snapshot as PictureSnapshot, editor::Status as PictureStatus},
@@ -123,6 +124,23 @@ pub fn read_settings(
     }
 }
 
+pub fn capture_archive(
+    session: &mut Session,
+    executor: &Executor,
+    timeout: Duration,
+) -> Result<NativeArchive, String> {
+    if *session.status() != Status::Ready {
+        return Err("Read the keymap before capturing an archive".into());
+    }
+    let command = session.request_archive_capture()?;
+    submit_and_wait(session, executor, command, timeout)?;
+    match session.archive() {
+        Some(ArchiveState::Captured(snapshot)) => Ok(snapshot.clone()),
+        Some(state) => Err(format!("Archive capture failed: {state:?}")),
+        None => Err("No native archive capability".into()),
+    }
+}
+
 fn submit_and_wait(
     session: &mut Session,
     executor: &Executor,
@@ -155,7 +173,8 @@ fn submit_and_wait(
 mod tests {
     use super::*;
     use byakko_core::{
-        Action, ActionChoice, Descriptor, Layer, PhysicalKey, lighting, macros, picture, settings,
+        Action, ActionChoice, Descriptor, Layer, PhysicalKey, archive, lighting, macros, picture,
+        settings,
     };
     use byakko_devices::memory::MemoryDevice;
     use std::{collections::BTreeMap, path::PathBuf};
@@ -239,6 +258,16 @@ mod tests {
                 settings::Value::Toggle(true),
             )])),
         };
+        let archive_caps = archive::ArchiveCapabilities {
+            backend_id: "synthetic".into(),
+            format_id: "fixture".into(),
+            max_bytes: 16,
+        };
+        let archive = archive::NativeArchive {
+            backend_id: "synthetic".into(),
+            format_id: "fixture".into(),
+            bytes: vec![0, 255, 7],
+        };
         let device = MemoryDevice::new(descriptor.clone(), state.clone())
             .unwrap()
             .with_picture(capabilities.clone(), colors.clone())
@@ -246,6 +275,8 @@ mod tests {
             .with_lighting(lighting_capabilities.clone(), lighting.clone())
             .unwrap()
             .with_settings(settings_capabilities.clone(), settings.clone())
+            .unwrap()
+            .with_archive(archive_caps.clone(), archive.clone())
             .unwrap();
         let executor = Executor::spawn(device, PathBuf::new()).unwrap();
         let mut session = Session::new(descriptor)
@@ -255,6 +286,8 @@ mod tests {
             .with_lighting(lighting_capabilities)
             .unwrap()
             .with_settings(settings_capabilities)
+            .unwrap()
+            .with_archive(archive_caps)
             .unwrap();
         let observed = read_keymap(&mut session, &executor, Duration::from_secs(1)).unwrap();
         assert_eq!(observed, state);
@@ -270,6 +303,10 @@ mod tests {
         assert_eq!(
             read_settings(&mut session, &executor, Duration::from_secs(1)).unwrap(),
             settings
+        );
+        assert_eq!(
+            capture_archive(&mut session, &executor, Duration::from_secs(1)).unwrap(),
+            archive
         );
     }
 
