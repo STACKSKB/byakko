@@ -1,4 +1,6 @@
 //! Nia87 composition root for the native CLI.
+mod native_macro_restore;
+
 use byakko_core::{
     State,
     archive::NativeArchive,
@@ -11,7 +13,7 @@ use byakko_devices::{
     Executor,
     nia87::{self, BoundNia87Adapter},
 };
-use serde::Deserialize;
+use native_macro_restore::NativeMacroBackup;
 use std::{
     io::Write,
     path::{Path, PathBuf},
@@ -19,28 +21,6 @@ use std::{
 };
 
 const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>|plan-settings <snapshot-file>|apply-settings <snapshot-file>|plan-lighting <snapshot-file>|apply-lighting <snapshot-file>|plan-macro <snapshot-file>|apply-macro <snapshot-file>|plan-restore-macro <native-backup-file>|restore-macro <native-backup-file>|plan-colors <snapshot-file>|apply-colors <snapshot-file>>";
-
-/// The exact slot before-image written by the Nia87 guarded macro transaction.
-/// Restoration is distinct from authoring a portable macro with repeat zero.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NativeMacroBackup {
-    slot: u8,
-    bytes: Vec<u8>,
-}
-
-impl NativeMacroBackup {
-    fn program(&self) -> Result<nia87::macros::Macro, Box<dyn std::error::Error>> {
-        if self.slot >= 50 {
-            return Err("Native macro backup slot is outside 0..49".into());
-        }
-        let program = nia87::macros::decode(&self.bytes)?;
-        if nia87::macros::encode(&program)? != self.bytes {
-            return Err("Native macro backup is not an exact codec round trip".into());
-        }
-        Ok(program)
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
@@ -117,11 +97,11 @@ fn parse_command(arguments: &[String]) -> Result<Command, Box<dyn std::error::Er
         [name, path] if name == "apply-macro" => Ok(Command::Macro(Mode::Apply, load_macro(path)?)),
         [name, path] if name == "plan-restore-macro" => Ok(Command::NativeMacroRestore(
             Mode::Plan,
-            load_native_macro_backup(path)?,
+            native_macro_restore::load(path)?,
         )),
         [name, path] if name == "restore-macro" => Ok(Command::NativeMacroRestore(
             Mode::Apply,
-            load_native_macro_backup(path)?,
+            native_macro_restore::load(path)?,
         )),
         [name, path] if name == "plan-colors" => {
             Ok(Command::Colors(Mode::Plan, load_colors(path)?))
@@ -191,7 +171,7 @@ fn run_device(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     let target = nia87::device::Target::from_candidate(&candidate)?;
     let backups = byakko_devices::storage::user_data_dir()?.join("backups");
     if let Command::NativeMacroRestore(mode, backup) = &command {
-        return run_native_macro_restore(*mode, backup, target, &backups, &candidate.path);
+        return native_macro_restore::run(*mode, backup, target, &backups, &candidate.path);
     }
     let executor = Executor::spawn(BoundNia87Adapter::new(target), backups.clone())?;
     let mut session = nia87::application::session()?;
@@ -398,48 +378,6 @@ fn run_device(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_native_macro_restore(
-    mode: Mode,
-    backup: &NativeMacroBackup,
-    target: nia87::device::Target,
-    backup_dir: &Path,
-    path: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let desired = backup.program()?;
-    let access = nia87::device::Access::bound(target);
-    let current = access
-        .read_macro(backup.slot)
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
-    let before = nia87::macros::decode(&current)?;
-    let changed = current != backup.bytes;
-    if mode == Mode::Apply && changed {
-        eprintln!("Restoring macro slot {} on {path}", backup.slot);
-        eprintln!("Before-image backup directory: {}", backup_dir.display());
-        let verified = access
-            .apply_macro_detailed(backup.slot, &current, &desired, backup_dir)
-            .map_err(|failure| {
-                std::io::Error::other(format!(
-                    "{}; recovery {:?}",
-                    failure.message, failure.recovery
-                ))
-            })?;
-        if verified != backup.bytes {
-            return Err("Macro restoration did not match its exact native backup".into());
-        }
-    }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&serde_json::json!({
-            "slot": backup.slot,
-            "changed": changed,
-            "before": before,
-            "after": desired,
-            "applied": mode == Mode::Apply && changed,
-        }))?
-    );
-    Ok(())
-}
-
 fn load_state(path: &str) -> Result<State, Box<dyn std::error::Error>> {
     Ok(serde_json::from_slice(&read_bounded(
         Path::new(path),
@@ -470,16 +408,6 @@ fn load_macro(path: &str) -> Result<MacroSnapshot, Box<dyn std::error::Error>> {
         64 * 1024,
         "Macro snapshot file exceeds the 64 KiB JSON limit",
     )?)?)
-}
-
-fn load_native_macro_backup(path: &str) -> Result<NativeMacroBackup, Box<dyn std::error::Error>> {
-    let backup: NativeMacroBackup = serde_json::from_slice(&read_bounded(
-        Path::new(path),
-        64 * 1024,
-        "Native macro backup exceeds the 64 KiB JSON limit",
-    )?)?;
-    backup.program()?;
-    Ok(backup)
 }
 
 fn load_colors(path: &str) -> Result<PictureSnapshot, Box<dyn std::error::Error>> {
@@ -526,22 +454,6 @@ mod tests {
         assert!(parse_command(&args(&["restore-macro"])).is_err());
         assert!(parse_command(&args(&["compare-archives", "only-one"])).is_err());
         assert!(parse_command(&args(&["unknown"])).is_err());
-    }
-
-    #[test]
-    fn native_macro_restore_accepts_exact_empty_backup_and_rejects_noncanonical_bytes() {
-        let mut backup = NativeMacroBackup {
-            slot: 49,
-            bytes: vec![0; 256],
-        };
-        let program = backup.program().unwrap();
-        assert_eq!(program.repeat_count, 0);
-        assert!(program.events.is_empty());
-        backup.bytes[255] = 1;
-        assert!(backup.program().is_err());
-        backup.bytes[255] = 0;
-        backup.slot = 50;
-        assert!(backup.program().is_err());
     }
 
     #[test]
