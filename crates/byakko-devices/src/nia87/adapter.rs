@@ -44,6 +44,15 @@ pub fn action_from_raw(raw: [u8; 4]) -> Action {
     if raw == [0; 4] {
         return Action::Disabled;
     }
+    if raw == [0, 0, 3, 0] {
+        // The selected OEM decoder displays this as disabled. Keep its distinct
+        // stored form intact instead of normalizing it to the zero setter.
+        return Action::Opaque {
+            backend_id: BACKEND_ID.into(),
+            data: raw.into(),
+            label: "Disabled (stored form 00 00 03 00)".into(),
+        };
+    }
     if raw[0] == 0 && raw[1] == 0 && raw[3] == 0 && raw[2] != 0 {
         return Action::Key(raw[2] as u16);
     }
@@ -614,6 +623,31 @@ mod tests {
         assert!(descriptor().keys[10].writable);
         assert!(!descriptor().keys[59].writable);
         assert!(descriptor().keys[75].writable);
+    }
+    #[test]
+    fn alternate_disabled_form_is_visible_without_rewriting_its_raw_bytes() {
+        let mut raw = snapshot();
+        raw.base[9] = [0, 0, 3, 0];
+        let state = from_snapshot(&raw).unwrap();
+        assert!(matches!(
+            &state.bindings["base"]["slot-009"],
+            Action::Opaque { label, .. } if label.starts_with("Disabled")
+        ));
+        assert_eq!(to_snapshot(&state).unwrap(), raw);
+        assert_eq!(draft_snapshot(&state, &[]).unwrap(), raw);
+        assert_eq!(
+            draft_snapshot(
+                &state,
+                &[Change {
+                    layer: "base".into(),
+                    key: key_id(9),
+                    action: Action::Disabled,
+                }],
+            )
+            .unwrap()
+            .base[9],
+            [0; 4]
+        );
     }
     #[test]
     fn rejects_stale_or_hidden_edit() {
