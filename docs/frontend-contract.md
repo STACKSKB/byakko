@@ -30,8 +30,14 @@ for the library crates.
 
 ## CLI slice
 
-A CLI can construct the same session and executor and expose discovery,
-capability inspection, read-only state export, draft review and explicit apply.
+`byakko-cli` is the first independent client. `devices` checks exact Nia87
+configuration-interface availability, `describe` prints its physical keymap
+descriptor, and `read` exports a verified USB keymap as JSON. Its synchronous
+adapter drives the same `Session → Command → Executor → Completion` path as
+Iced; a memory-device test exercises that path without USB. The CLI has no
+setter or apply subcommand yet.
+
+Later CLI work can expose capability inspection, draft review and explicit apply.
 It should show the target identity and operation result, preserve opaque values,
 and use the same expected-state check, durable backup, readback and typed
 recovery outcome as the desktop. CLI flags are presentation; they must not grow
@@ -49,8 +55,10 @@ device-access and permission rules rather than promise the native app's
 automatic plug-and-play behavior. A native backend exposed through a separate,
 deliberately secured service is another possible transport, not part of this
 slice. Keep command semantics the same whichever transport is chosen.
+Chromium's [WebHID access model](https://developer.chrome.com/docs/capabilities/hid)
+requires an explicit device permission flow and may protect keyboard HID
+collections; a static build alone cannot remove those constraints.
 
 Do not introduce a universal report interpreter, remote service, plugin ABI or
-frontend framework merely to prove that the seam exists. The next concrete
-test is a small CLI using the current read path; adapt the contract only where
-that client exposes a real gap.
+frontend framework merely to prove that the seam exists. Adapt the contract
+only where an independent client exposes a real gap.

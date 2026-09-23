@@ -256,3 +256,16 @@ launched the rebuilt release app and confirmed that the Keys page showed a
 TKL-shaped board and clicking a key selected it. No Apply action or device
 setter was used in this UI check. Visual acceptance of the per-key color page,
 Linux runtime and live write recovery remain open.
+
+## Independent CLI read (2026-09-23)
+
+`byakko-cli read` used the same core session command and selected Nia87
+executor as the Iced app, with no setter command. The ignored local JSON export
+`Research/captures/cli-read-20260923.json` contains two 128-binding layers.
+Its revision and both binding maps matched the earlier post-replug shared
+executor completion capture exactly. The CLI export SHA-256 is
+`30DCFF7A58F4767676AFDD415682A36175469F7C5BEF2105D245F1D523B2515E`.
+This exercises a second frontend through a physical USB getter; it does not
+prove a CLI apply workflow or Linux runtime behavior. Windows and Linux-target
+Clippy checks pass. A Linux release link from this Windows host remains
+unverified because this environment has no `cc` cross-linker.

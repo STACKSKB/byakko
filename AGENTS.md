@@ -10,7 +10,7 @@ research baseline, not the structure to port.
 - Native Windows/Linux desktop, Rust + Iced. No JavaScript, Electron, webview,
   QML or vendor helper in the desktop product or its build.
 - Treat the core/session command and completion types as a frontend contract.
-  Iced is one client; a CLI is the next small independent client, and a future
+  Iced and the read-only `byakko-cli` are independent clients; a future
   static browser SPA may reuse the portable model via WebAssembly. Keep any web
   bootstrap/transport code out of the native executable and do not require a
   local Node.js server. Browser HID access still follows browser permissions;

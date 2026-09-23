@@ -7,7 +7,7 @@ publish = false
 description = "Native Nia87 configuration research tools"
 
 [workspace]
-members = ["crates/byakko-core", "crates/byakko-devices", "crates/byakko-desktop"]
+members = ["crates/byakko-core", "crates/byakko-devices", "crates/byakko-desktop", "crates/byakko-cli"]
 resolver = "3"
 
 [features]
