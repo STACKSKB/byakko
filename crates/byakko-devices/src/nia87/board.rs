@@ -106,3 +106,27 @@ pub fn physical_slot_mask() -> [bool; 128] {
     }
     mask
 }
+
+/// Ordinary keymap slots in the observed default matrix. The ANSI drawing
+/// omits two ISO positions, while its physical Fn key has a special binding
+/// that is preserved but not offered as an ordinary remap target.
+pub fn writable_keymap_slot_mask() -> [bool; 128] {
+    let mut mask = physical_slot_mask();
+    mask[59] = false; // Fn
+    mask[10] = true; // Non-US backslash
+    mask[75] = true; // Non-US hash
+    mask
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keymap_mask_preserves_iso_positions_but_protects_fn_and_empty_slots() {
+        let mask = writable_keymap_slot_mask();
+        assert_eq!(mask.iter().filter(|&&writable| writable).count(), 88);
+        assert!(mask[10] && mask[75] && mask[42]);
+        assert!(!mask[6] && !mask[59] && !mask[94] && !mask[126]);
+    }
+}

@@ -304,6 +304,22 @@ mod tests {
     }
 
     #[test]
+    fn archive_plan_preserves_unmapped_keymap_data_but_rejects_new_edits() {
+        let mut before = fixture();
+        before.keymaps.base[6] = [7, 8, 9, 10];
+        assert_eq!(plan(&before, &before).unwrap().key_bindings, 0);
+        for slot in [6, 59, 94] {
+            let mut after = before.clone();
+            after.keymaps.function[slot][0] ^= 1;
+            assert!(
+                plan(&before, &after)
+                    .unwrap_err()
+                    .contains(&format!("slot {slot}"))
+            );
+        }
+    }
+
+    #[test]
     fn unmapped_picture_slots_are_archival_but_not_writable() {
         let before = fixture();
         let mask = board::physical_slot_mask();

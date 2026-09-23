@@ -128,6 +128,7 @@ pub fn raw_from_action(action: &Action) -> Result<[u8; 4], String> {
 }
 
 pub fn descriptor() -> Descriptor {
+    let writable = board::writable_keymap_slot_mask();
     let mut keys: Vec<PhysicalKey> = (0..128)
         .map(|slot| PhysicalKey {
             id: key_id(slot),
@@ -137,7 +138,7 @@ pub fn descriptor() -> Descriptor {
             width: 0.0,
             height: 0.0,
             visible: false,
-            writable: slot < 126,
+            writable: writable[slot],
         })
         .collect();
     for key in layout::nia87_keys() {
@@ -150,7 +151,7 @@ pub fn descriptor() -> Descriptor {
                 width: key.width,
                 height: 1.0,
                 visible: true,
-                writable: key.usage != layout::FN_PLACEHOLDER_USAGE,
+                writable: writable[slot],
             };
         }
     }
@@ -587,7 +588,10 @@ mod tests {
         );
         assert_eq!(to_snapshot(&state).unwrap(), raw);
         assert_eq!(descriptor().keys.iter().filter(|k| k.visible).count(), 87);
+        assert!(!descriptor().keys[6].writable);
+        assert!(descriptor().keys[10].writable);
         assert!(!descriptor().keys[59].writable);
+        assert!(descriptor().keys[75].writable);
     }
     #[test]
     fn rejects_stale_or_hidden_edit() {
