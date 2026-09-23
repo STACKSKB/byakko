@@ -2,11 +2,10 @@
 
 This ledger separates implemented configuration storage from end-to-end behavior. Source observations live in `feature-inventory.md`; attached-device evidence lives in `live-evidence.md`. Neither a shared OEM encoder nor an advertised catalog proves that every feature works on this board.
 
-The table records the retained research application's feature evidence. The
-approved Iced migration currently has keymap, macro, built-in global lighting
-per-key picture and scalar settings editing/read/save slices, plus native archive
-capture/export/review/apply;
-it has not yet inherited the remaining screens or feature parity. See
+The table combines retained research evidence with the current Iced migration.
+Iced has keymap, macro, built-in global lighting, per-key picture and scalar
+settings editing/read/save slices, plus native archive capture/export/review/apply.
+Physical acceptance remains narrower than implemented behavior. See
 `iced-keymap-acceptance.md`, `iced-macro-acceptance.md`,
 `iced-lighting-acceptance.md`, `iced-picture-acceptance.md` and
 `iced-settings-acceptance.md` and `iced-archive-acceptance.md` for their exact
@@ -14,8 +13,8 @@ scope.
 
 | Requirement | Current evidence | Remaining acceptance work |
 | --- | --- | --- |
-| Native product without JS, Electron or IoT helper | Rust/egui application builds and launches; direct HID reads/writes work with OEM helper stopped | Target-specific dependency/license audit and distributable packaging |
-| Reusable frontend | Shared keymap editor with dynamic layout/layers, typed actions and Nia87 adapter; device-free 12-key/three-layer backend tests | Migrate discovery and remaining panels; implement and validate independent backends such as QMK/VIA |
+| Native product without JS, Electron or IoT helper | Rust/Iced desktop release builds; direct HID reads/writes work with OEM helper stopped | Target-specific dependency/license audit and distributable packaging |
+| Reusable frontend | Iced feature views render portable descriptors and capabilities without Nia87 protocol branches; memory backend exercises different layout/layers. Nia87 and demo are wired at the executable composition root. Shared HID inventory also discovered eleven Wacom tablet collections without tablet protocol code. | Add QMK/VIA discovery and adapter after Nia87 acceptance; extend generic settings choices only when a concrete backend needs them |
 | Linux configuration | Original hidraw adapter and full GUI cross-link to ELF64 using Zig | Native Linux GUI launch, hidraw permissions, hardware transactions |
 | Plug-and-play Nia87 TKL | Attached device auto-loads built-in 87-key geometry and fixed slots. Iced scans the USB configuration collection without sending HID reports, starts a read on one match, notices idle removal, and re-reads after reconnection. Each connection's executor binds an immutable candidate identity; every transaction open, including recovery readback, checks that identity. Multiple matches and enumeration errors are explicit; headless reconnect tests retain staged drafts and reject stale results. | Physical unplug/replug and clean-machine acceptance; stronger board/revision identification, reused-path identity limits and cross-panel reconnect validation |
 | Base and Fn keymaps | Both maps read twice; base, Fn-only and mixed same-slot application writes/restores pass with one-second setter spacing | Broader action coverage, physical output and persistence |
