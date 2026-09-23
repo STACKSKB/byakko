@@ -21,40 +21,14 @@ fn read_macro_unlocked(selection: Selection<'_>, slot: u8) -> Result<Vec<u8>> {
 }
 
 pub(super) fn read_macro_on_device(device: &HidDevice, slot: u8) -> Result<Vec<u8>> {
-    stable_macro_reads(|| {
-        let mut bytes = Vec::with_capacity(256);
-        for page in 0..4 {
-            crate::nia87::macros::read_request(slot, page)?;
-            let barrier = read_payload(device, 0x80, 0, 0)?;
-            if barrier[0] != 0x80 {
-                return Err("Macro read identity barrier failed".into());
-            }
-            let data = read_payload(device, 0x8b, slot, page)?;
-            if data == barrier {
-                return Err("Macro read returned stale identity data".into());
-            }
-            bytes.extend_from_slice(&data);
-        }
-        Ok(bytes)
+    crate::rongyuan::yc500::macro_io::read_stable(slot, |opcode, index, page| {
+        read_payload(device, opcode, index, page)
     })
 }
 
-pub(super) fn stable_macro_reads(mut read: impl FnMut() -> Result<Vec<u8>>) -> Result<Vec<u8>> {
-    // Immediately after a write the first page can contain its new first
-    // 32 bytes and old remaining bytes. Require two consecutive full matching
-    // snapshots, allowing one initial transitional snapshot, never a majority.
-    let mut previous = None;
-    for _ in 0..3 {
-        let bytes = read()?;
-        if bytes.len() != 256 {
-            return Err("Incomplete macro snapshot".into());
-        }
-        if previous.as_ref() == Some(&bytes) {
-            return Ok(bytes);
-        }
-        previous = Some(bytes);
-    }
-    Err("Macro did not stabilize across three complete reads".into())
+#[cfg(test)]
+pub(super) fn stable_macro_reads(read: impl FnMut() -> Result<Vec<u8>>) -> Result<Vec<u8>> {
+    crate::rongyuan::yc500::macro_io::stable_reads(read)
 }
 
 pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {

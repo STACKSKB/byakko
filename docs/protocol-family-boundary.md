@@ -23,7 +23,7 @@ No Sharkfin source or UX is incorporated.
 | --- | --- |
 | `byakko-core` | Device-neutral capabilities, drafts, commands, transitions and typed outcomes. |
 | `byakko-devices::rongyuan::report` | Shared, observed 64-byte framing and checksum mechanics. No write opcode selection. |
-| `byakko-devices::rongyuan::yc500` | `yc500`-shaped codecs and, when verified, ordered feature transactions. `gen2` will have a distinct namespace and codec. |
+| `byakko-devices::rongyuan::yc500` | `yc500`-shaped matrix and macro codecs plus the observed macro read sequence. Further ordered feature transactions move here when verified. `gen2` will have a distinct namespace and codec. |
 | Nia87 profile | Collection identity, accepted firmware/profile, matrix dimensions and reserved slots, physical layout, action and effect catalogs, and capabilities proven on this board. |
 | HID/session infrastructure | Target-pinned open, lock, pacing, backup mechanics and typed recovery envelope; it does not choose feature-specific write order. |
 | QMK/VIA backend | Independent protocol adapter implementing the portable device contract; it never emulates Rongyuan reports. |
@@ -53,3 +53,9 @@ may consume the same core model or call a native service adapter. Native
 archives remain backend-specific, distinct from portable profiles. QMK/VIA
 support follows Nia87 through the device contract rather than sharing this
 OEM's packet representation.
+
+USB cable and 2.4 GHz receiver access are transport variants, not command
+families. The receiver's settings relay must be discovered and validated on the
+connected hardware; a matching board name cannot imply that its receiver
+forwards reads or safely accepts writes. USB remains the only supported Nia87
+configuration transport until those observations exist.
