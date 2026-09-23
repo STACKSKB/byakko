@@ -446,6 +446,15 @@ impl Desktop {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        let macro_draft_before_read = match &completion {
+            Completion::ReadMacro { .. } => Some(
+                self.session
+                    .macros()
+                    .and_then(|editor| editor.draft())
+                    .cloned(),
+            ),
+            _ => None,
+        };
         let keymap_result = matches!(
             &completion,
             Completion::Read { .. } | Completion::Apply { .. }
@@ -502,7 +511,12 @@ impl Desktop {
             let verified = self.session.macros().is_some_and(|editor| {
                 *editor.status() == byakko_core::macros::editor::Status::Ready
             });
-            if verified {
+            let current_draft = self.session.macros().and_then(|editor| editor.draft());
+            if verified
+                && macro_draft_before_read
+                    .as_ref()
+                    .is_none_or(|before| before.as_ref() != current_draft)
+            {
                 self.reset_macro_inputs();
             }
             verified

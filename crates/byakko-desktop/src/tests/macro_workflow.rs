@@ -53,6 +53,25 @@ fn failed_read_preserves_unsubmitted_form_input() {
     ));
 }
 
+#[test]
+fn unchanged_slot_read_preserves_unsubmitted_event_fields() {
+    let mut app = loaded();
+    send(&mut app, Macro::Inspect(0));
+    send(&mut app, Macro::Form(Input::Wait("123".into())));
+    let draft = app.session.macros().unwrap().draft().cloned();
+
+    send(&mut app, Macro::Read);
+    settle(&mut app);
+    assert_eq!(app.session.macros().unwrap().draft(), draft.as_ref());
+    assert_eq!(app.macro_form.target, Some(0));
+    assert_eq!(app.macro_form.wait, "123");
+
+    send(&mut app, Macro::Select("intro".into()));
+    settle(&mut app);
+    assert_eq!(app.macro_form.target, Some(0));
+    assert_eq!(app.macro_form.wait, "123");
+}
+
 fn send(app: &mut Desktop, message: Macro) {
     let _ = app.update(Message::Macro(message));
 }

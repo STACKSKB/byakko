@@ -8,8 +8,8 @@ captures and vendor fixtures under ignored paths are not in Git.
 
 ## Remaining TODO on Linux
 
-- [x] Build the selected native packages, run their tests, and pass Clippy from
-  `master`:
+- [x] Build the selected native packages, run their tests, and pass Clippy at
+  the recorded Linux verification commit below:
 
   ```sh
   cargo build --release --locked -p byakko-desktop -p byakko-cli
@@ -18,6 +18,10 @@ captures and vendor fixtures under ignored paths are not in Git.
   cargo clippy --locked -p byakko-core -p byakko-devices -p byakko-desktop -p byakko-cli --all-targets -- -D warnings
   cargo clippy --locked -p byakko --no-default-features --bin byakko-hidraw-access -- -D warnings
   ```
+
+- [ ] After pulling newer `master` commits, rerun the commands above and record
+  the verified commit ID before hardware acceptance. The record below is a
+  point-in-time check, not validation of every later Windows commit.
 
 - [x] Record the distribution, display server, Rust version, build failures,
   and `ldd target/release/byakko-desktop` output. Launch
