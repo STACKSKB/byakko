@@ -67,10 +67,24 @@ fn checked_native(snapshot: &picture::Snapshot) -> Result<Vec<[u8; 3]>, String> 
 }
 
 pub fn read() -> Result<picture::Snapshot, String> {
-    project(&device::read_picture().map_err(|error| error.to_string())?)
+    read_with(&device::Access::unique())
+}
+
+pub(super) fn read_with(access: &device::Access) -> Result<picture::Snapshot, String> {
+    let colors = access.read_picture().map_err(|error| error.to_string())?;
+    project(&colors)
 }
 
 pub fn apply(
+    expected: &picture::Snapshot,
+    desired: &BTreeMap<String, [u8; 3]>,
+    backup: &Path,
+) -> Result<picture::Snapshot, ApplyFailure> {
+    apply_with(&device::Access::unique(), expected, desired, backup)
+}
+
+pub(super) fn apply_with(
+    access: &device::Access,
     expected: &picture::Snapshot,
     desired: &BTreeMap<String, [u8; 3]>,
     backup: &Path,
@@ -93,7 +107,7 @@ pub fn apply(
         };
         target[slot] = *color;
     }
-    let actual = device::apply_picture_detailed(&original, &target, backup)?;
+    let actual = access.apply_picture_detailed(&original, &target, backup)?;
     project(&actual).map_err(|message| ApplyFailure {
         message,
         recovery: Recovery::Unverified,

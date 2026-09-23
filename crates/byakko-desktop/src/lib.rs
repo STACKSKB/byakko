@@ -73,6 +73,8 @@ enum AutoRead {
     ManualOnly,
 }
 
+type Attach = dyn Fn(&str) -> Result<Executor, String>;
+
 struct Desktop {
     ui: panels::UiStyle,
     archive_file: archive::FileState,
@@ -86,12 +88,12 @@ struct Desktop {
     macro_form: macro_form::Form,
     repeat_input: String,
     session: Session,
-    executor: Executor,
+    executor: Option<Executor>,
+    attach: Box<Attach>,
     discovery: Discovery,
     presence: Option<Availability>,
     selected_device: Option<String>,
     auto_read: AutoRead,
-    executor_live: bool,
     layer: String,
     selected: Option<String>,
     search: String,
@@ -99,11 +101,11 @@ struct Desktop {
     closing: Closing,
 }
 
-/// The composition root supplies a configured session and its executor together.
+/// The composition root supplies a session and a factory for one executor per connection.
 pub fn run(
     session: Session,
-    executor: Executor,
     probe: impl Fn() -> Availability + Send + 'static,
+    attach: impl Fn(&str) -> Result<Executor, String> + 'static,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let layer = session.descriptor().layers[0].id.clone();
     let mut discovery = Discovery::spawn(probe)?;
@@ -122,12 +124,12 @@ pub fn run(
         macro_form: Default::default(),
         repeat_input: String::new(),
         session,
-        executor,
+        executor: None,
+        attach: Box::new(attach),
         discovery,
         presence: None,
         selected_device: None,
         auto_read: AutoRead::Enabled,
-        executor_live: true,
         layer,
         selected: None,
         search: String::new(),
@@ -154,11 +156,30 @@ impl Desktop {
     }
 
     fn read(&mut self) {
-        if self.busy() || !self.executor_live {
+        if self.busy() {
             return;
         }
+        if self.executor.is_none() {
+            let Some(Availability::Ready { id }) = &self.presence else {
+                self.notice = Some("Waiting for one connected keyboard".into());
+                return;
+            };
+            match (self.attach)(id) {
+                Ok(executor) => {
+                    self.executor = Some(executor);
+                    self.selected_device = Some(id.clone());
+                }
+                Err(reason) => {
+                    self.notice = Some(format!("Could not open keyboard: {reason}"));
+                    return;
+                }
+            }
+        }
         let request = self.session.connect().and_then(|generation| {
-            self.executor.set_generation(generation);
+            self.executor
+                .as_ref()
+                .expect("attached above")
+                .set_generation(generation);
             self.session.request_read()
         });
         self.submit(request);
@@ -169,8 +190,13 @@ impl Desktop {
         match request {
             Ok(command) => {
                 self.discovery.invalidate();
-                if let Err(completion) = self.executor.try_submit(command) {
-                    self.session.accept(*completion);
+                if let Some(executor) = &self.executor {
+                    if let Err(completion) = executor.try_submit(command) {
+                        self.session.accept(*completion);
+                    }
+                } else {
+                    self.session.disconnect();
+                    self.notice = Some("Device executor is unavailable".into());
                 }
             }
             Err(message) => self.notice = Some(message),
@@ -195,18 +221,30 @@ impl Desktop {
     }
 
     fn poll(&mut self) -> Task<Message> {
-        if !self.executor_live {
+        let Some(executor) = &self.executor else {
             return Task::none();
-        }
-        match self.executor.try_receive() {
+        };
+        match executor.try_receive() {
             Ok(completion) => return self.complete(completion),
             Err(TryRecvError::Empty) => return Task::none(),
             Err(TryRecvError::Disconnected) => {
-                self.executor.set_generation(0);
+                executor.set_generation(0);
+                let write_in_flight = matches!(
+                    self.session.activity(),
+                    byakko_core::session::Activity::Apply { .. }
+                        | byakko_core::session::Activity::ApplyMacro { .. }
+                        | byakko_core::session::Activity::ApplyLighting { .. }
+                        | byakko_core::session::Activity::ApplyPicture { .. }
+                        | byakko_core::session::Activity::ApplySetting { .. }
+                        | byakko_core::session::Activity::ApplyArchive { .. }
+                );
+                if write_in_flight {
+                    self.auto_read = AutoRead::ManualOnly;
+                }
+                self.executor = None;
                 self.session.disconnect();
-                self.executor_live = false;
                 self.notice = Some(
-                    "Device worker stopped; device state is unverified. Restart to reconnect."
+                    "Device worker stopped; device state is unverified. Read again before editing."
                         .into(),
                 );
                 self.closing = Closing::Open;
@@ -224,7 +262,7 @@ impl Desktop {
         if let Some(availability) = self.discovery.receive() {
             self.accept_availability(availability);
         }
-        if !self.busy() && self.executor_live {
+        if !self.busy() {
             self.discovery.request();
         }
     }
@@ -251,12 +289,18 @@ impl Desktop {
                     view::status(self)
                 ));
             }
-            self.executor.set_generation(0);
+            if let Some(executor) = &self.executor {
+                executor.set_generation(0);
+            }
+            self.executor = None;
             self.session.disconnect();
         }
+        self.presence = Some(availability.clone());
         match &availability {
-            Availability::Ready { id } => {
-                self.selected_device = Some(id.clone());
+            Availability::Ready { .. } => {
+                if self.executor.is_none() {
+                    self.selected_device = None;
+                }
                 if self.auto_read == AutoRead::Enabled
                     && matches!(
                         self.session.status(),
@@ -271,7 +315,6 @@ impl Desktop {
             }
             _ => self.selected_device = None,
         }
-        self.presence = Some(availability);
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {

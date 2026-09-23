@@ -2,14 +2,17 @@
 mod demo;
 
 use byakko_core::session::Session;
+use byakko_desktop::discovery::Availability;
 use byakko_devices::{
     Executor, KeymapDevice,
-    nia87::{self, Nia87Adapter},
+    nia87::{self, BoundNia87Adapter},
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    let (session, executor) = match arguments.as_slice() {
+    type Probe = Box<dyn Fn() -> Availability + Send>;
+    type Attach = Box<dyn Fn(&str) -> Result<Executor, String>>;
+    let (session, probe, attach): (Session, Probe, Attach) = match arguments.as_slice() {
         [] => {
             let backups = byakko_devices::storage::user_data_dir()?.join("backups");
             (
@@ -19,7 +22,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .with_picture(nia87::picture_adapter::capabilities())?
                     .with_settings(nia87::settings_adapter::capabilities())?
                     .with_archive(nia87::archive_adapter::capabilities())?,
-                Executor::spawn(Nia87Adapter, backups)?,
+                Box::new(|| match nia87::device::availability() {
+                    nia87::device::Availability::Unavailable => Availability::Missing,
+                    nia87::device::Availability::Available(candidate) => {
+                        Availability::Ready { id: candidate.path }
+                    }
+                    nia87::device::Availability::Ambiguous(candidates) => Availability::Ambiguous {
+                        count: candidates.len(),
+                    },
+                    nia87::device::Availability::EnumerationFailed(reason) => {
+                        Availability::Error(reason)
+                    }
+                }),
+                Box::new(move |id| {
+                    let candidate = match nia87::device::availability() {
+                        nia87::device::Availability::Available(candidate)
+                            if candidate.path == id =>
+                        {
+                            candidate
+                        }
+                        _ => return Err("Keyboard identity changed before attachment".into()),
+                    };
+                    let target = nia87::device::Target::from_candidate(&candidate)
+                        .map_err(|error| error.to_string())?;
+                    Executor::spawn(BoundNia87Adapter::new(target), backups.clone())
+                        .map_err(|error| error.to_string())
+                }),
             )
         }
         [flag] if flag == "--demo" => {
@@ -55,26 +83,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .archive_capabilities()
                             .expect("demo archive configured"),
                     )?,
-                Executor::spawn(device, Default::default())?,
+                Box::new(|| Availability::Ready { id: "demo".into() }),
+                Box::new(|_id| {
+                    let device = demo::device()?;
+                    Executor::spawn(device, Default::default()).map_err(|e| e.to_string())
+                }),
             )
         }
         _ => return Err("Usage: byakko-desktop [--demo]".into()),
     };
-    let probe = move || {
-        use byakko_desktop::discovery::Availability;
-        if arguments.as_slice() == ["--demo"] {
-            return Availability::Ready { id: "demo".into() };
-        }
-        match nia87::device::availability() {
-            nia87::device::Availability::Unavailable => Availability::Missing,
-            nia87::device::Availability::Available(candidate) => {
-                Availability::Ready { id: candidate.path }
-            }
-            nia87::device::Availability::Ambiguous(candidates) => Availability::Ambiguous {
-                count: candidates.len(),
-            },
-            nia87::device::Availability::EnumerationFailed(reason) => Availability::Error(reason),
-        }
-    };
-    byakko_desktop::run(session, executor, probe)
+    byakko_desktop::run(session, probe, attach)
 }

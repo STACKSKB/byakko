@@ -1,6 +1,10 @@
 # Pre-alpha architecture — approved direction
 
 Status: approved by the user with Iced selected. Implementation may proceed.
+The later [protocol-family amendment](protocol-family-boundary.md) supersedes
+the assumption below that all native wire behavior belongs directly to Nia87:
+the Rongyuan driver should be reusable across verified OEM boards, and QMK/VIA
+is the next independent backend after Nia87.
 The user additionally requires future browser delivery: core models and
 command/result contracts must remain independent of Iced, OS transport and
 in-process channels. A future frontend may run the core in WebAssembly or

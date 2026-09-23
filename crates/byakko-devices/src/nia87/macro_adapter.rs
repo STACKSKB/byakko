@@ -242,12 +242,27 @@ pub fn draft(expected: &Snapshot, desired: &Program) -> Result<native::Macro, St
 }
 
 pub fn read(slot: &str) -> Result<Snapshot, String> {
+    read_with(&device::Access::unique(), slot)
+}
+
+pub(super) fn read_with(access: &device::Access, slot: &str) -> Result<Snapshot, String> {
     let number = slot_number(slot)?;
-    let raw = device::read_macro(number).map_err(|error| error.to_string())?;
+    let raw = access
+        .read_macro(number)
+        .map_err(|error| error.to_string())?;
     from_bytes(slot, &raw)
 }
 
 pub fn apply(
+    expected: &Snapshot,
+    desired: &Program,
+    backup: &Path,
+) -> Result<Snapshot, ApplyFailure> {
+    apply_with(&device::Access::unique(), expected, desired, backup)
+}
+
+pub(super) fn apply_with(
+    access: &device::Access,
     expected: &Snapshot,
     desired: &Program,
     backup: &Path,
@@ -260,7 +275,7 @@ pub fn apply(
         message,
         recovery: Recovery::NotAttempted,
     })?;
-    let raw = device::apply_macro_detailed(number, &expected.revision, &value, backup)?;
+    let raw = access.apply_macro_detailed(number, &expected.revision, &value, backup)?;
     from_bytes(&expected.slot, &raw).map_err(|message| ApplyFailure {
         message,
         recovery: Recovery::Unverified,

@@ -1,6 +1,6 @@
 //! Whole-configuration capture, apply, and recovery on one locked HID session.
 use super::{
-    FeatureSetter, HidDevice, Result, Session, lighting_restore_report, open_unique,
+    FeatureSetter, HidDevice, Result, Selection, Session, lighting_restore_report,
     read_lighting_on_device, read_macro_on_device, read_payload, read_picture_on_device,
     read_settings_on_device, snapshot_on_device, write_binding, write_lighting_report,
     write_macro_bytes,
@@ -31,7 +31,14 @@ enum RecoveryResult {
 pub fn capture_configuration(
     progress: impl FnMut(usize, usize),
 ) -> Result<crate::nia87::configuration::Configuration> {
-    let session = Session::open()?;
+    capture_selected(Selection::Unique, progress)
+}
+
+pub(super) fn capture_selected(
+    selection: Selection<'_>,
+    progress: impl FnMut(usize, usize),
+) -> Result<crate::nia87::configuration::Configuration> {
+    let session = Session::open_for(selection)?;
     capture_configuration_on_device(session.device(), progress)
 }
 
@@ -80,12 +87,22 @@ pub fn apply_configuration(
     expected: &crate::nia87::configuration::Configuration,
     target: &crate::nia87::configuration::Configuration,
     backup_dir: &std::path::Path,
+    progress: impl FnMut(&str),
+) -> Result<crate::nia87::configuration::Configuration> {
+    apply_configuration_selected(Selection::Unique, expected, target, backup_dir, progress)
+}
+
+fn apply_configuration_selected(
+    selection: Selection<'_>,
+    expected: &crate::nia87::configuration::Configuration,
+    target: &crate::nia87::configuration::Configuration,
+    backup_dir: &std::path::Path,
     mut progress: impl FnMut(&str),
 ) -> Result<crate::nia87::configuration::Configuration> {
     let plan = crate::nia87::configuration_plan::plan(expected, target)?;
     // Recovery must be representable before the first setter is sent.
     let reverse = crate::nia87::configuration_plan::plan(target, expected)?;
-    let session = Session::open()?;
+    let session = Session::open_for(selection)?;
     let device = session.device();
     progress("Checking complete current configuration");
     if &capture_configuration_on_device(device, |_, _| {})? != expected {
@@ -118,7 +135,7 @@ pub fn apply_configuration(
                 return Err(error);
             }
             progress("Restoring original configuration after failure");
-            let restore = recover_configuration(device, target, expected, &reverse);
+            let restore = recover_configuration(selection, device, target, expected, &reverse);
             let (recovery, detail) = match restore {
                 RecoveryResult::Verified(message) => (Recovery::Verified, message),
                 RecoveryResult::Failed(message) => (Recovery::Failed, message),
@@ -144,18 +161,31 @@ pub fn apply_configuration_detailed(
     backup_dir: &std::path::Path,
     progress: impl FnMut(&str),
 ) -> std::result::Result<crate::nia87::configuration::Configuration, ApplyFailure> {
-    apply_configuration(expected, target, backup_dir, progress).map_err(|error| {
-        error.downcast_ref::<ConfigurationApplyError>().map_or_else(
-            || ApplyFailure {
-                message: error.to_string(),
-                recovery: Recovery::NotAttempted,
-            },
-            |typed| typed.0.clone(),
-        )
-    })
+    apply_detailed_selected(Selection::Unique, expected, target, backup_dir, progress)
+}
+
+pub(super) fn apply_detailed_selected(
+    selection: Selection<'_>,
+    expected: &crate::nia87::configuration::Configuration,
+    target: &crate::nia87::configuration::Configuration,
+    backup_dir: &std::path::Path,
+    progress: impl FnMut(&str),
+) -> std::result::Result<crate::nia87::configuration::Configuration, ApplyFailure> {
+    apply_configuration_selected(selection, expected, target, backup_dir, progress).map_err(
+        |error| {
+            error.downcast_ref::<ConfigurationApplyError>().map_or_else(
+                || ApplyFailure {
+                    message: error.to_string(),
+                    recovery: Recovery::NotAttempted,
+                },
+                |typed| typed.0.clone(),
+            )
+        },
+    )
 }
 
 fn recover_configuration(
+    selection: Selection<'_>,
     device: &HidDevice,
     attempted: &crate::nia87::configuration::Configuration,
     original: &crate::nia87::configuration::Configuration,
@@ -284,7 +314,7 @@ fn recover_configuration(
     let verified = crate::nia87::recovery_verification::verify(original, first, || {
         // An aborted Windows feature request can leave this handle unusable.
         // Reopen only for readback under the same lock, never to retry setters.
-        let (_, fresh) = open_unique().map_err(|e| e.to_string())?;
+        let (_, fresh) = selection.open().map_err(|e| e.to_string())?;
         capture_configuration_on_device(&fresh, |_, _| {}).map_err(|e| e.to_string())
     });
     let section_failures = failures.join("; ");

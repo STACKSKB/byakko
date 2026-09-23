@@ -52,12 +52,14 @@ fn ready() -> Desktop {
         macro_form: Default::default(),
         repeat_input: String::new(),
         session,
-        executor,
+        executor: Some(executor),
+        attach: Box::new(|_| {
+            Executor::spawn(demo::device()?, Default::default()).map_err(|e| e.to_string())
+        }),
         discovery: Discovery::spawn(|| Availability::Ready { id: "demo".into() }).unwrap(),
         presence: Some(Availability::Ready { id: "demo".into() }),
         selected_device: Some("demo".into()),
         auto_read: AutoRead::Enabled,
-        executor_live: true,
         layer: "Typing".into(),
         selected: Some("Alpha".into()),
         search: String::new(),
@@ -103,6 +105,12 @@ fn automatic_reconnect_preserves_staged_draft_and_ignores_late_completion() {
 #[test]
 fn changed_configuration_path_forces_new_read() {
     let mut app = ready();
+    let attached = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = attached.clone();
+    app.attach = Box::new(move |id| {
+        observed.lock().unwrap().push(id.to_owned());
+        Executor::spawn(demo::device()?, Default::default()).map_err(|e| e.to_string())
+    });
     let generation = app.session.generation();
     app.accept_availability(Availability::Ready {
         id: "another-path".into(),
@@ -113,6 +121,7 @@ fn changed_configuration_path_forces_new_read() {
     ));
     assert!(app.session.generation() > generation);
     assert_eq!(app.selected_device.as_deref(), Some("another-path"));
+    assert_eq!(attached.lock().unwrap().as_slice(), ["another-path"]);
 }
 
 #[test]
