@@ -85,6 +85,13 @@ pub fn plan(current: &Configuration, target: &Configuration) -> Result<ChangeSum
         .take(126)
         .filter(|(a, b)| a != b)
         .count();
+    // An archive holds only the picture read under its captured selector.
+    // Writing those colors before switching selectors could target another store.
+    if picture_keys > 0 && current.lighting.picture_context() != target.lighting.picture_context() {
+        return Err(
+            "picture colors and lighting selector cannot change in one archive restore; select the picture option and capture again".into(),
+        );
+    }
     let lighting = current.lighting.raw() != target.lighting.raw();
     if lighting {
         for (label, value) in [("current", &current.lighting), ("target", &target.lighting)] {
@@ -248,6 +255,33 @@ mod tests {
             summary.settings,
             vec![Setting::Debounce(4), Setting::Backlight(true)]
         );
+    }
+
+    #[test]
+    fn archive_cannot_write_picture_while_switching_its_active_selector() {
+        let before = fixture();
+        let mut after = before.clone();
+        let mut raw = after.lighting.raw().to_vec();
+        raw[4] = (raw[4] & 0x0f) | 0x10;
+        after.lighting = Lighting::decode(&raw).unwrap();
+        assert!(plan(&before, &after).unwrap().lighting);
+        after.picture[0] = [1, 2, 3];
+        assert!(
+            plan(&before, &after)
+                .unwrap_err()
+                .contains("picture colors and lighting selector")
+        );
+        assert!(
+            plan(&after, &before)
+                .unwrap_err()
+                .contains("picture colors and lighting selector")
+        );
+
+        after.lighting = before.lighting.clone();
+        raw = after.lighting.raw().to_vec();
+        raw[3] = raw[3].saturating_add(1);
+        after.lighting = Lighting::decode(&raw).unwrap();
+        assert_eq!(plan(&before, &after).unwrap().picture_keys, 1);
     }
 
     #[test]

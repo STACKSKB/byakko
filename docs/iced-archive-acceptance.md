@@ -11,6 +11,10 @@ limit. A write or connection change invalidates a review.
 The Nia87 archive contains both full keymaps, all 50 raw macro slots, global
 lighting, all 128 picture triples and four settings replies. Its existing
 capture makes two complete sweeps and requires them to match. The read-only
+picture section records only the response under the active lighting selector.
+Preflight rejects a restore that both changes this selector and writes picture
+colors; the target option can be selected and captured separately first.
+The read-only
 capture at `Research/captures/archive-phase1-20260923.json` completed all
 100 macro reads and matched
 `Research/captures/configuration-getter-trace-baseline.json` exactly: both
