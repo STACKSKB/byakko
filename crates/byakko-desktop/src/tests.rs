@@ -53,12 +53,122 @@ fn ready() -> Desktop {
         repeat_input: String::new(),
         session,
         executor,
+        discovery: Discovery::spawn(|| Availability::Ready { id: "demo".into() }).unwrap(),
+        presence: Some(Availability::Ready { id: "demo".into() }),
+        selected_device: Some("demo".into()),
+        auto_read: AutoRead::Enabled,
+        executor_live: true,
         layer: "Typing".into(),
         selected: Some("Alpha".into()),
         search: String::new(),
         notice: None,
         closing: Closing::Open,
     }
+}
+
+#[test]
+fn automatic_reconnect_preserves_staged_draft_and_ignores_late_completion() {
+    let mut app = ready();
+    app.stage(1);
+    let draft = app.session.draft().cloned();
+    let baseline = app.session.baseline().cloned().unwrap();
+    let old_generation = app.session.generation();
+    app.accept_availability(Availability::Missing);
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert_eq!(app.session.draft(), draft.as_ref());
+    app.accept_availability(Availability::Ready {
+        id: "demo-2".into(),
+    });
+    let byakko_core::session::Activity::Read { operation } = app.session.activity() else {
+        panic!("automatic reconnect did not read");
+    };
+    let operation = *operation;
+    assert_ne!(old_generation, app.session.generation());
+    let _ = app.complete(Completion::Read {
+        generation: old_generation,
+        operation,
+        result: Ok(baseline.clone()),
+    });
+    assert!(app.session.busy());
+    let _ = app.complete(Completion::Read {
+        generation: app.session.generation(),
+        operation,
+        result: Ok(baseline),
+    });
+    assert_eq!(app.session.status(), &Status::Ready);
+    assert_eq!(app.session.draft(), draft.as_ref());
+    assert_eq!(app.session.changes().len(), 1);
+}
+
+#[test]
+fn changed_configuration_path_forces_new_read() {
+    let mut app = ready();
+    let generation = app.session.generation();
+    app.accept_availability(Availability::Ready {
+        id: "another-path".into(),
+    });
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::Read { .. }
+    ));
+    assert!(app.session.generation() > generation);
+    assert_eq!(app.selected_device.as_deref(), Some("another-path"));
+}
+
+#[test]
+fn ambiguous_and_enumeration_failure_block_automatic_reads() {
+    let mut app = ready();
+    app.accept_availability(Availability::Ambiguous { count: 2 });
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert!(!app.session.busy());
+    assert!(view::status(&app).contains("2 matching"));
+    app.accept_availability(Availability::Error("permission denied".into()));
+    assert!(!app.session.busy());
+    assert!(view::status(&app).contains("permission denied"));
+}
+
+#[test]
+fn failed_write_does_not_restart_automatically_after_reappearance() {
+    let mut app = ready();
+    app.stage(1);
+    let Command::Apply {
+        generation,
+        operation,
+        ..
+    } = app.session.request_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    let _ = app.complete(Completion::Apply {
+        generation,
+        operation,
+        result: Err(ApplyFailure {
+            message: "uncertain write".into(),
+            recovery: Recovery::Unverified,
+        }),
+    });
+    app.accept_availability(Availability::Missing);
+    assert_eq!(app.auto_read, AutoRead::ManualOnly);
+    app.accept_availability(Availability::Ready {
+        id: "demo-2".into(),
+    });
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert!(!app.session.busy());
+    assert!(
+        app.notice
+            .as_deref()
+            .is_some_and(|message| message.contains("uncertain write"))
+    );
+}
+
+#[test]
+fn passive_discovery_tick_keeps_dirty_close_confirmation_open() {
+    let mut app = ready();
+    app.stage(1);
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
+    let _ = app.update(Message::Scan);
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
 }
 
 #[test]

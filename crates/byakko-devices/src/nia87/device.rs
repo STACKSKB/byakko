@@ -10,7 +10,9 @@ use apply_error::{
 use serde::{Deserialize, Serialize};
 
 pub use configuration::{apply_configuration, apply_configuration_detailed, capture_configuration};
-pub use transport::{Candidate, candidates, descriptor, inspect, open_unique};
+pub use transport::{
+    Availability, Candidate, availability, candidates, descriptor, inspect, open_unique,
+};
 use transport::{FeatureSetter, Session, read_payload, transaction_lock};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
