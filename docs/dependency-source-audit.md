@@ -1,5 +1,23 @@
 # Target dependency source-license audit
 
+## Current Iced desktop metadata gate (2026-09-23)
+
+`python tools/check_dependency_licenses.py --package byakko-desktop`
+passes for the locked, offline Windows MSVC and Linux GNU normal/build graphs:
+126 and 175 third-party package/version entries respectively. The matching
+four checker unit tests pass. No selected package metadata requires a
+copyleft-only license. `self_cell 1.3.0` offers Apache-2.0 in addition to GPL,
+and the Iced desktop graph has no legacy eframe or bundled
+`epaint_default_fonts` asset. Its dependency choices include MIT, Apache-2.0,
+BSD, Zlib, BSL, ISC, and Unicode-3.0 obligations; this is a metadata result,
+not a complete source-header, native-library, or distribution-notice audit.
+The release bundle must include required third-party license and attribution
+texts. The project owner's own license choice is still open.
+
+The historical audit below describes the retained root research package,
+which has a different dependency graph. Do not use its counts or font notices
+as a desktop release inventory.
+
 Date: 2026-09-22. This is a local source and metadata check, not legal clearance or a distribution notice. Commands used `cargo tree --locked --offline --target x86_64-pc-windows-msvc --edges normal,build` and the corresponding `x86_64-unknown-linux-gnu` target, with unique package/version entries (including proc macros). The Windows graph has **124** entries and the Linux graph **210**. These counts include build dependencies; they are not runtime-only counts or the platform-wide lockfile count.
 
 In both selected graphs, the only package metadata with a GPL/LGPL/AGPL/MPL term is `self_cell 1.3.0`, declared `Apache-2.0 OR GPL-2.0-only`. The Apache choice is available; that expression does not force the GPL option. No selected package metadata declares a copyleft-only license.
