@@ -427,3 +427,13 @@ embedded native bytes have SHA-256
 identical to both preceding CLI captures. The read-only command completed
 without setters. This establishes continued stability of the currently observed
 effect-1 configuration; it does not validate host streaming or archive recovery.
+
+A further read-only capture from the current CLI source on 2026-09-23 saved
+`Research/captures/archive-readonly-20260923-late.json` after two matching
+sweeps. The exported wrapper has SHA-256
+`74EA2CDB64822AEDEAA3CE8FB5E8F3F638B71FBA6C16F77A54F83D9ACA9688D6`,
+identical to the prior CLI export; `compare-archives` returned `[]`. Comparing
+its decoded native sections with the older pre-drift archive found the full
+keymaps, all macro slots, per-key colors and settings unchanged. The sole
+difference is lighting raw byte 1, `5 -> 1`; all other lighting bytes match.
+This repeat read does not establish why the effect changed.
