@@ -232,6 +232,31 @@ fn rejected_input_is_atomic_and_sequence_edits_clear_replacement_target() {
 }
 
 #[test]
+fn staging_repeat_count_preserves_an_unsubmitted_event_edit() {
+    let mut app = loaded();
+    send(&mut app, Macro::Inspect(0));
+    send(&mut app, Macro::Form(Input::Wait("37".into())));
+    send(&mut app, Macro::RepeatInput("03".into()));
+    send(&mut app, Macro::StageRepeat);
+
+    assert!(app.notice.is_none());
+    assert_eq!(app.repeat_input, "3");
+    assert_eq!(app.macro_form.target, Some(0));
+    assert_eq!(app.macro_form.wait, "37");
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        3
+    );
+
+    send(&mut app, Macro::StageEvent);
+    assert!(app.notice.is_none());
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().events[0].delay_ms,
+        37
+    );
+}
+
+#[test]
 fn macro_failure_prevents_close_and_stale_success_cannot_hide_it() {
     let mut app = loaded();
     send(&mut app, Macro::Edit(Edit::Clear));

@@ -97,7 +97,13 @@ impl Desktop {
             },
             Message::RepeatInput(value) => self.repeat_input = value,
             Message::StageRepeat => match number(&self.repeat_input, "Repeat count") {
-                Ok(count) => self.stage_macro(Edit::Repeat(count)),
+                Ok(count) => {
+                    self.notice = self.session.edit_macro(Edit::Repeat(count)).err();
+                    if self.notice.is_none() {
+                        // Changing the count leaves the event being composed intact.
+                        self.repeat_input = count.to_string();
+                    }
+                }
                 Err(reason) => self.notice = Some(reason),
             },
         }
