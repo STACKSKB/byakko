@@ -9,6 +9,9 @@ pub mod editor;
 pub struct Capabilities {
     pub backend_id: String,
     pub keys: Vec<String>,
+    /// An advertised onboard lighting effect that displays stored key colors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lighting_effect: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -79,6 +82,10 @@ pub fn validate_capabilities(caps: &Capabilities, descriptor: &Descriptor) -> Re
     if caps.backend_id.is_empty()
         || caps.backend_id != descriptor.backend_id
         || caps.keys.is_empty()
+        || caps
+            .lighting_effect
+            .as_ref()
+            .is_some_and(|id| id.trim().is_empty())
     {
         return Err("Invalid picture backend or empty key catalog".into());
     }
@@ -105,4 +112,25 @@ pub fn validate_snapshot(caps: &Capabilities, snapshot: &Snapshot) -> Result<(),
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Capabilities;
+
+    #[test]
+    fn optional_display_effect_preserves_older_catalog_json() {
+        let old = serde_json::json!({"backend_id": "memory", "keys": ["a"]});
+        let caps: Capabilities = serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(caps.lighting_effect, None);
+        assert_eq!(serde_json::to_value(&caps).unwrap(), old);
+        let with_effect = Capabilities {
+            lighting_effect: Some("per-key".into()),
+            ..caps
+        };
+        assert_eq!(
+            serde_json::to_value(with_effect).unwrap()["lighting_effect"],
+            "per-key"
+        );
+    }
 }

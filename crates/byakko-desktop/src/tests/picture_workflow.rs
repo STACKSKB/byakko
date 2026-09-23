@@ -19,6 +19,155 @@ fn loaded() -> Desktop {
     app
 }
 
+fn settle_live(app: &mut Desktop) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while app.busy() || app.live_picture.has_pending() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "live picture worker timed out"
+        );
+        let _ = app.poll();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+fn wait_for_live_write(app: &mut Desktop) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::ApplyPicture { .. }
+    ) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "live picture write did not start"
+        );
+        let _ = app.poll();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+#[test]
+fn live_color_edits_coalesce_while_a_write_is_in_flight() {
+    let mut app = loaded();
+    send(
+        &mut app,
+        Picture::Live(Edit::Color {
+            key: "Alpha".into(),
+            color: [10, 20, 30],
+        }),
+    );
+    wait_for_live_write(&mut app);
+    send(
+        &mut app,
+        Picture::Live(Edit::Color {
+            key: "Alpha".into(),
+            color: [11, 21, 31],
+        }),
+    );
+    assert_eq!(
+        crate::picture::projected_colors(&app).unwrap()["Alpha"],
+        [11, 21, 31]
+    );
+    settle_live(&mut app);
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Alpha"],
+        [11, 21, 31]
+    );
+    assert!(!app.session.picture().unwrap().dirty());
+    assert!(!app.live_picture.has_pending());
+    assert_eq!(app.session.status(), &Status::Ready);
+}
+
+#[test]
+fn live_color_refreshes_a_stale_picture_without_a_manual_read() {
+    let mut app = loaded();
+    let _ = app.update(Message::Lighting(crate::lighting::Message::Live(
+        byakko_core::lighting::Edit::Brightness(20),
+    )));
+    macro_workflow::settle(&mut app);
+    send(
+        &mut app,
+        Picture::Live(Edit::Color {
+            key: "Alpha".into(),
+            color: [90, 12, 43],
+        }),
+    );
+    settle_live(&mut app);
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Alpha"],
+        [90, 12, 43]
+    );
+}
+
+#[test]
+fn live_channel_edit_waits_briefly_and_replaces_only_its_channel() {
+    let mut app = loaded();
+    send(
+        &mut app,
+        Picture::Live(Edit::Channel {
+            key: "Alpha".into(),
+            channel: Channel::Red,
+            value: 90,
+        }),
+    );
+    send(
+        &mut app,
+        Picture::Live(Edit::Channel {
+            key: "Alpha".into(),
+            channel: Channel::Green,
+            value: 91,
+        }),
+    );
+    assert!(!app.busy());
+    assert_eq!(
+        crate::picture::projected_colors(&app).unwrap()["Alpha"],
+        [90, 91, 56]
+    );
+    settle_live(&mut app);
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Alpha"],
+        [90, 91, 56]
+    );
+}
+
+#[test]
+fn failed_live_write_keeps_intent_without_automatic_retry() {
+    let mut app = loaded();
+    send(
+        &mut app,
+        Picture::Live(Edit::Color {
+            key: "Alpha".into(),
+            color: [8, 9, 10],
+        }),
+    );
+    wait_for_live_write(&mut app);
+    let byakko_core::session::Activity::ApplyPicture { operation } = app.session.activity() else {
+        panic!("expected picture apply")
+    };
+    let operation = *operation;
+    let _ = app.complete(Completion::ApplyPicture {
+        generation: app.session.generation(),
+        operation,
+        result: Err(ApplyFailure {
+            message: "restore mismatch".into(),
+            recovery: Recovery::Failed,
+        }),
+    });
+    assert!(!app.flush_live_picture());
+    assert!(app.live_picture.blocked);
+    assert!(!app.live_picture.has_pending());
+    assert_eq!(
+        crate::picture::projected_colors(&app).unwrap()["Alpha"],
+        [8, 9, 10]
+    );
+    assert!(matches!(
+        app.session.picture().unwrap().status(),
+        PictureStatus::Unverified {
+            problem: byakko_core::session::Problem::Apply(_)
+        }
+    ));
+}
+
 #[test]
 fn entering_colors_does_not_issue_reads_and_connection_preloads_once() {
     let mut app = ready();

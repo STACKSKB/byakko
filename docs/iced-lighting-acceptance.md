@@ -89,3 +89,29 @@ existing backend backup, pacing and readback; transaction duration is unchanged.
 The rebuilt Windows release was opened for user validation. Rendering and new
 physical acceptance are not inferred from headless tests. Native tests and
 Clippy passed; core WebAssembly and Linux devices cross-checks passed.
+
+The user confirmed the rebuilt workspace was "Visible and usable": keyboard
+persistence across tabs and onboard effect color controls were confirmed in the
+running Windows release. They had not yet applied a color in that build, so
+this is rendered UX acceptance, not new physical lighting-write acceptance.
+
+## 2026-09-23 live-control UX revision (awaiting user review)
+
+The keyboard remains centered above a bounded workspace. Key actions wrap into
+compact buttons; numeric controls and settings cards no longer stretch across the
+window. Global and per-key lighting use a native HSV color field, hue strip,
+preview and palette swatches. Repeated key labels, hex readouts and RGB sliders
+are removed. Onboard effects apply on selection; color/slider gestures coalesce
+for 120 ms and retain the newest input during serialized device work. Normal
+lighting interaction needs no Read or Apply click. Per-key edits select the
+backend-advertised picture effect automatically before reading its color context.
+
+Verified scalar/picture saves retain unrelated caches; backend expected-state,
+backup and readback checks remain. Failed writes retain intent and stop automatic
+retries. The discard confirmation is a centered modal and blocks background
+edits. Macro editing can start through a foreground slot read while the library
+scan continues independently. No new physical LED-write acceptance is claimed;
+USB transaction latency has not been measured or reduced in this revision.
+
+Scope ends with this UX build and tests. Further UX design and hardware acceptance
+require the user's next review; do not resume unrelated parity work autonomously.

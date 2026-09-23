@@ -204,3 +204,15 @@ read-only-first device acceptance sequence there.
 - Coordinate physical interaction with the user when available. Keep hardware
   writes backed up and bounded; retain the recorded recovery failure as an open
   acceptance gate. Do not revive deferred work without authorization.
+
+## UX review boundary (2026-09-23)
+
+The user has requested that work stop after the specifically flagged UX fixes.
+Do not resume parity work or further UX redesign without their next instruction.
+Lighting now sends user choices automatically through coalesced intent queues;
+normal use does not require Read/Apply. The native color picker replaces RGB
+sliders. Verified writes retain unrelated cached baselines while backend fresh
+expected-state checks still protect each write. The discard prompt is modal.
+Macro creation can foreground-read an unbound candidate while discovery remains
+passive; unknown slots must never be assumed empty. Physical LED response and
+final rendered layout remain for the user's review when they return.

@@ -1,5 +1,6 @@
 //! Render capability-projected lighting controls; device policy lives in core.
 mod host;
+pub(crate) mod live;
 pub(crate) mod screen;
 use super::{Desktop, Message as AppMessage};
 use crate::{
@@ -8,10 +9,10 @@ use crate::{
 };
 use byakko_core::lighting::{
     Color, Content, Edit,
-    controls::{self, ChoiceEdit, Control},
+    controls::{self, ChoiceEdit, Control, LevelEdit},
     editor::{Editor, Status},
 };
-use byakko_core::session::Status as SessionStatus;
+use byakko_core::session::{Activity, Status as SessionStatus};
 pub(crate) use host::HostInput;
 use iced::{
     Element, Fill, FillPortion,
@@ -28,10 +29,16 @@ pub(crate) enum Panel {
 #[derive(Clone, Debug)]
 pub(super) enum Message {
     Panel(Panel),
+    #[cfg(test)]
     Read,
+    #[cfg(test)]
     Apply,
+    #[cfg(test)]
     Revert,
+    #[cfg(test)]
     Edit(Edit),
+    Live(Edit),
+    Retry,
     SelectHost(String),
     EditHost(Edit),
     StartHost(String),
@@ -45,27 +52,138 @@ impl Desktop {
             let editable = !self.busy();
             return self.screen_capture.update(message, editable);
         }
+        if let Message::Live(edit) = message {
+            if self.host.is_some() || self.session.status() == &SessionStatus::Disconnected {
+                return iced::Task::none();
+            }
+            let Some(editor) = self.session.lighting() else {
+                return iced::Task::none();
+            };
+            let mut proposed = self.live_lighting.clone();
+            proposed.push(edit, std::time::Instant::now());
+            match proposed.projected(editor) {
+                Ok(Some(_)) => {
+                    self.live_lighting = proposed;
+                    self.notice = None;
+                    if !self.busy()
+                        && self.session.lighting().is_some_and(|editor| {
+                            matches!(
+                                editor.status(),
+                                Status::Unverified { .. } | Status::Conflict { .. }
+                            )
+                        })
+                    {
+                        self.reload_lighting_intent();
+                    } else {
+                        self.flush_live_lighting();
+                    }
+                }
+                Ok(None) => self.notice = Some("Lighting is not editable".into()),
+                Err(reason) => self.notice = Some(reason),
+            }
+            return iced::Task::none();
+        }
         match message {
             Message::Panel(panel) => self.lighting_panel = panel,
             Message::StopHost => self.stop_host(),
             Message::StartHost(mode_id) if !self.busy() => self.start_host(mode_id),
             _ if self.busy() => (),
+            #[cfg(test)]
             Message::Read => {
                 let request = self.session.request_lighting_read();
                 self.submit(request);
             }
+            Message::Retry if !self.busy() => {
+                self.live_lighting.retry();
+                self.reload_lighting_intent();
+            }
+            #[cfg(test)]
             Message::Apply => {
                 let request = self.session.request_lighting_apply();
                 self.submit(request);
             }
+            #[cfg(test)]
             Message::Revert => self.notice = self.session.revert_lighting().err(),
+            #[cfg(test)]
             Message::Edit(edit) => self.notice = self.session.edit_lighting(edit).err(),
             Message::SelectHost(id) => self.notice = self.session.select_host_mode(&id).err(),
             Message::EditHost(edit) => self.notice = self.session.edit_host_setting(edit).err(),
             Message::StartHost(_) => {}
             Message::Screen(_) => unreachable!(),
+            Message::Live(_) => unreachable!(),
+            Message::Retry => {}
         }
         iced::Task::none()
+    }
+
+    pub(crate) fn flush_live_lighting(&mut self) -> bool {
+        if self.busy() || !self.live_lighting.ready(std::time::Instant::now()) {
+            return false;
+        }
+        if self.session.status() == &SessionStatus::Disconnected {
+            self.live_lighting.block();
+            return false;
+        }
+        let Some(editor) = self.session.lighting() else {
+            self.live_lighting.clear();
+            return false;
+        };
+        if editor.status() != &Status::Ready {
+            if matches!(
+                editor.status(),
+                Status::Unverified {
+                    problem: byakko_core::session::Problem::ReadRequired
+                }
+            ) {
+                self.reload_lighting_intent();
+                return true;
+            }
+            self.live_lighting.block();
+            return false;
+        }
+        let desired = match self.live_lighting.projected(editor) {
+            Ok(Some(setting)) => setting,
+            Ok(None) => return false,
+            Err(reason) => {
+                self.notice = Some(reason);
+                self.live_lighting.block();
+                return false;
+            }
+        };
+        if editor.draft() == Some(&desired) && !editor.dirty() {
+            self.live_lighting.clear();
+            return false;
+        }
+        if let Err(reason) = self.session.stage_lighting(desired) {
+            self.notice = Some(reason);
+            self.live_lighting.block();
+            return false;
+        }
+        let command = match self.session.request_lighting_apply() {
+            Ok(command) => command,
+            Err(reason) => {
+                self.notice = Some(reason);
+                self.live_lighting.block();
+                return false;
+            }
+        };
+        self.submit(Ok(command));
+        true
+    }
+
+    fn reload_lighting_intent(&mut self) {
+        if let Err(reason) = self.session.revert_lighting() {
+            self.notice = Some(reason);
+            self.live_lighting.block();
+            return;
+        }
+        match self.session.request_lighting_read() {
+            Ok(command) => self.submit(Ok(command)),
+            Err(reason) => {
+                self.notice = Some(reason);
+                self.live_lighting.block();
+            }
+        }
     }
 }
 
@@ -73,7 +191,10 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     let Some(editor) = app.session.lighting() else {
         return text("Lighting is unavailable on this device").into();
     };
-    let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
+    let editable = app.host.is_none()
+        && app.session.status() != &SessionStatus::Disconnected
+        && editor.draft().is_some()
+        && matches!(editor.status(), Status::Ready | Status::Unverified { .. });
     let style = &app.ui;
     let selector = row![
         panels::selectable_button(
@@ -91,13 +212,24 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         ),
     ]
     .spacing(style.spacing.s);
-    let mut content = column![
-        toolbar(app, editor, editable),
-        selector,
-        text(status(app, editor))
-    ]
-    .spacing(style.spacing.s)
-    .height(Fill);
+    let retry = (app.live_lighting.blocked()
+        || matches!(
+            editor.status(),
+            Status::Unverified { .. } | Status::Conflict { .. }
+        ))
+    .then(|| {
+        button("Reload & retry").on_press_maybe(
+            (!app.busy() && app.session.status() != &SessionStatus::Disconnected)
+                .then_some(AppMessage::Lighting(Message::Retry)),
+        )
+    });
+    let mut feedback = row![text(status(app, editor))].spacing(style.spacing.s);
+    if let Some(retry) = retry {
+        feedback = feedback.push(retry);
+    }
+    let mut content = column![selector, feedback]
+        .spacing(style.spacing.s)
+        .height(Fill);
     if app.lighting_panel == Panel::Host && !editor.capabilities().host_modes.is_empty() {
         return content.push(host_controls(app, editor)).into();
     }
@@ -111,7 +243,9 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
                         scrollable(choice_buttons(
                             &app.ui,
                             &controls::effect_choices(editor.capabilities(), None),
-                            !app.busy() && *editor.status() == Status::Ready,
+                            app.host.is_none()
+                                && app.session.status() != &SessionStatus::Disconnected
+                                && *editor.status() == Status::Ready,
                         ))
                         .height(Fill)
                         .into(),
@@ -123,18 +257,32 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         }
         return content.into();
     };
-    let projected = match controls::controls(editor.capabilities(), draft) {
+    let projected_setting = app.live_lighting.projected(editor).ok().flatten();
+    let shown = projected_setting.as_ref().unwrap_or(draft);
+    let projected = match controls::controls(editor.capabilities(), shown) {
         Ok(projected) => projected,
         Err(reason) => return content.push(text(reason)).into(),
     };
     let effects = projected.effects;
-    let settings = projected.settings;
-    let swatches = match draft.color {
-        Some(Color::Rgb(rgb)) => control_widgets::color_presets(
+    let settings: Vec<_> = projected
+        .settings
+        .into_iter()
+        .filter(|control| {
+            !matches!(
+                control,
+                Control::Level {
+                    edit: LevelEdit::Channel(_),
+                    ..
+                }
+            )
+        })
+        .collect();
+    let swatches = match shown.color {
+        Some(Color::Rgb(rgb)) => crate::color_picker::view(
             style,
             rgb,
             editable
-                .then_some(|rgb| AppMessage::Lighting(Message::Edit(Edit::Color(Color::Rgb(rgb))))),
+                .then_some(|rgb| AppMessage::Lighting(Message::Live(Edit::Color(Color::Rgb(rgb))))),
         ),
         _ => column![].into(),
     };
@@ -153,7 +301,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
             scrollable(
                 column![
                     swatches,
-                    setting_controls(style, &settings, editable, Message::Edit)
+                    setting_controls(style, &settings, editable, Message::Live)
                 ]
                 .spacing(style.spacing.s)
             )
@@ -196,19 +344,36 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
                 .then_some(AppMessage::Lighting(Message::SelectHost(mode.id.clone()))),
         }),
     );
-    let settings = selected.parameters.as_ref().map(|parameters| {
-        let setting = app
-            .session
+    let selected_setting = selected.parameters.as_ref().map(|parameters| {
+        app.session
             .host_draft()
             .filter(|draft| draft.mode_id == selected.id)
             .and_then(|draft| draft.setting.as_ref())
-            .unwrap_or(&parameters.default);
-        controls::parameter_controls(&parameters.schema, setting)
+            .unwrap_or(&parameters.default)
     });
-    let parameters = match settings {
-        Some(Ok(projected)) => {
+    let settings = selected.parameters.as_ref().map(|parameters| {
+        controls::parameter_controls(
+            &parameters.schema,
+            selected_setting.expect("selected parameter setting"),
+        )
+    });
+    let host_color = match selected_setting.and_then(|setting| setting.color.as_ref()) {
+        Some(Color::Rgb(rgb)) => crate::color_picker::view(
+            &app.ui,
+            *rgb,
+            (!app.busy()).then_some(|rgb| {
+                AppMessage::Lighting(Message::EditHost(Edit::Color(Color::Rgb(rgb))))
+            }),
+        ),
+        _ => column![].into(),
+    };
+    let parameters: Element<'static, AppMessage> = match settings {
+        Some(Ok(projected)) => column![
+            host_color,
             setting_controls(&app.ui, &projected, !app.busy(), Message::EditHost)
-        }
+        ]
+        .spacing(app.ui.spacing.s)
+        .into(),
         Some(Err(reason)) => text(reason).into(),
         None => text("This mode has no parameters").into(),
     };
@@ -242,27 +407,27 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
     .into()
 }
 
-fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {
-    control_widgets::transaction_toolbar(
-        &app.ui,
-        "Read lighting",
-        (!app.busy()).then_some(AppMessage::Lighting(Message::Read)),
-        (!app.busy() && editor.dirty()).then_some(AppMessage::Lighting(Message::Revert)),
-        (editable && editor.dirty()).then_some(AppMessage::Lighting(Message::Apply)),
-        if editor.dirty() {
-            "Staged changes"
-        } else {
-            "No staged changes"
-        },
-    )
-}
-
 fn status(app: &Desktop, editor: &Editor) -> String {
+    if matches!(app.session.activity(), Activity::ApplyLighting { .. }) {
+        return "Updating lighting…".into();
+    }
+    if app.live_lighting.has_pending() {
+        return "Updating lighting…".into();
+    }
+    if app.live_lighting.blocked() && app.live_lighting.has_queued() {
+        return format!(
+            "{} · requested changes kept; reload before retrying",
+            match editor.status() {
+                Status::Unverified { problem } => super::view::problem_label(problem),
+                _ => "Lighting update paused".into(),
+            }
+        );
+    }
     if app.busy() {
         return super::view::status(app);
     }
     match editor.status() {
-        Status::Unloaded => "Read lighting to begin".into(),
+        Status::Unloaded => "Loading lighting…".into(),
         Status::Ready
             if matches!(
                 editor.baseline().map(|snapshot| &snapshot.content),
@@ -271,7 +436,7 @@ fn status(app: &Desktop, editor: &Editor) -> String {
         {
             "Host lighting is active · select an onboard effect to return to local lighting".into()
         }
-        Status::Ready => "Readback verified · edits are staged until applied".into(),
+        Status::Ready => "Saved on keyboard".into(),
         Status::Conflict { .. } => "Lighting changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => super::view::problem_label(problem),
     }
@@ -288,7 +453,7 @@ fn choice_buttons(
         source.iter().cloned().map(|choice| Choice {
             label: choice.label,
             selected: choice.selected,
-            message: editable.then_some(AppMessage::Lighting(Message::Edit(choice.edit))),
+            message: editable.then_some(AppMessage::Lighting(Message::Live(choice.edit))),
         }),
     )
 }
@@ -299,31 +464,45 @@ fn setting_controls(
     editable: bool,
     message: fn(Edit) -> Message,
 ) -> Element<'static, AppMessage> {
-    column(source.iter().cloned().map(|control| match control {
-        Control::Choices { label, choices } => control_widgets::choices(
-            style,
-            label,
-            choices.into_iter().map(|choice| Choice {
-                label: choice.label,
-                selected: choice.selected,
-                message: editable.then_some(AppMessage::Lighting(message(choice.edit))),
+    column(
+        source
+            .iter()
+            .filter(|control| {
+                !matches!(
+                    control,
+                    Control::Level {
+                        edit: LevelEdit::Channel(_),
+                        ..
+                    }
+                )
+            })
+            .cloned()
+            .map(|control| match control {
+                Control::Choices { label, choices } => control_widgets::choices(
+                    style,
+                    label,
+                    choices.into_iter().map(|choice| Choice {
+                        label: choice.label,
+                        selected: choice.selected,
+                        message: editable.then_some(AppMessage::Lighting(message(choice.edit))),
+                    }),
+                ),
+                Control::Level {
+                    label,
+                    range,
+                    value,
+                    edit,
+                } => control_widgets::level(
+                    style,
+                    label,
+                    range,
+                    value,
+                    editable.then_some(move |value| {
+                        AppMessage::Lighting(message(edit.edit(value).expect("projected range")))
+                    }),
+                ),
             }),
-        ),
-        Control::Level {
-            label,
-            range,
-            value,
-            edit,
-        } => control_widgets::level(
-            style,
-            label,
-            range,
-            value,
-            editable.then_some(move |value| {
-                AppMessage::Lighting(message(edit.edit(value).expect("projected range")))
-            }),
-        ),
-    }))
+    )
     .spacing(style.spacing.l)
     .into()
 }

@@ -1,6 +1,7 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
 mod archive;
 mod audio_stream;
+mod color_picker;
 mod control_widgets;
 pub mod discovery;
 mod lighting;
@@ -93,6 +94,9 @@ struct Desktop {
     screen_capture: lighting::screen::Controls,
     lighting_panel: lighting::Panel,
     initial_reads: std::collections::VecDeque<Page>,
+    picture_activation: Option<(u64, u64)>,
+    live_lighting: lighting::live::Pending,
+    live_picture: picture::Pending,
     page: Page,
     macro_form: macro_form::Form,
     repeat_input: String,
@@ -135,6 +139,9 @@ pub fn run(
         screen_capture: Default::default(),
         lighting_panel: Default::default(),
         initial_reads: Default::default(),
+        picture_activation: None,
+        live_lighting: Default::default(),
+        live_picture: Default::default(),
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),
@@ -284,8 +291,30 @@ impl Desktop {
     }
 
     fn read_initial_sections(&mut self) {
-        if self.busy() || *self.session.status() != Status::Ready {
+        if self.busy() {
             return;
+        }
+        if !self.session.reconnect_cautions().is_empty() {
+            return;
+        }
+        if matches!(
+            self.session.status(),
+            Status::Unverified {
+                problem: Problem::ReadRequired
+            }
+        ) {
+            let request = self.session.request_read();
+            self.submit(request);
+            return;
+        }
+        if *self.session.status() != Status::Ready
+            || self.live_lighting.has_pending()
+            || self.live_picture.has_pending()
+        {
+            return;
+        }
+        if self.initial_reads.is_empty() {
+            self.initial_reads = [Page::Lighting, Page::Settings, Page::Picture].into();
         }
         while let Some(page) = self.initial_reads.pop_front() {
             let request = match page {
@@ -354,6 +383,9 @@ impl Desktop {
             return task;
         }
         self.poll_host_input();
+        if !self.busy() && (self.flush_live_lighting() || self.flush_live_picture()) {
+            return Task::none();
+        }
         let Some(executor) = &self.executor else {
             return Task::none();
         };
@@ -457,6 +489,14 @@ impl Desktop {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        let activated_picture = match &completion {
+            Completion::ApplyLighting {
+                generation,
+                operation,
+                ..
+            } => self.picture_activation == Some((*generation, *operation)),
+            _ => false,
+        };
         let macro_draft_before_read = match &completion {
             Completion::ReadMacro { .. } => Some(
                 self.session
@@ -556,8 +596,18 @@ impl Desktop {
                 return self.close();
             }
         }
+        if activated_picture {
+            self.picture_activation = None;
+            if verified && !self.busy() {
+                let request = self.session.request_picture_read();
+                self.submit(request);
+                return Task::none();
+            }
+        }
         if verified {
-            self.read_initial_sections();
+            if !self.flush_live_lighting() && !self.flush_live_picture() {
+                self.read_initial_sections();
+            }
         } else {
             self.initial_reads.clear();
         }
@@ -577,7 +627,10 @@ impl Desktop {
         }
         if self.busy() {
             self.closing = Closing::Waiting;
-        } else if self.session.dirty() {
+        } else if self.session.dirty()
+            || self.live_lighting.has_queued()
+            || self.live_picture.has_queued()
+        {
             self.closing = Closing::ConfirmDiscard;
         } else {
             return iced::exit();
@@ -592,10 +645,14 @@ impl Desktop {
         if self.closing == Closing::ConfirmDiscard
             && !matches!(
                 message,
-                Message::DiscardAndClose | Message::Close | Message::Poll | Message::Scan
+                Message::DiscardAndClose
+                    | Message::KeepEditing
+                    | Message::Close
+                    | Message::Poll
+                    | Message::Scan
             )
         {
-            self.closing = Closing::Open;
+            return Task::none();
         }
         match message {
             Message::Archive(message) => return self.update_archive(message),
@@ -654,17 +711,28 @@ impl Desktop {
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         if self.closing == Closing::ConfirmDiscard {
-            return close;
+            let cancel = iced::event::listen_with(|event, _, _| match event {
+                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                    ..
+                }) => Some(Message::KeepEditing),
+                _ => None,
+            });
+            return Subscription::batch([close, cancel]);
         }
         if self.session.recording() {
             Subscription::batch([close, recording::subscription()])
-        } else if (self.busy() || self.session.macro_catalog_scanning())
+        } else if (self.busy()
+            || self.session.macro_catalog_scanning()
+            || self.live_lighting.has_pending()
+            || self.live_picture.has_pending())
             && !matches!(
                 self.session.activity(),
                 byakko_core::session::Activity::MacroFile { .. }
             )
         {
-            let poll = iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll);
+            let interval = if self.busy() { 25 } else { 100 };
+            let poll = iced::time::every(Duration::from_millis(interval)).map(|_| Message::Poll);
             if self.host.is_some() {
                 let focus = iced::event::listen_with(|event, _, _| {
                     matches!(event, iced::Event::Window(window::Event::Unfocused))

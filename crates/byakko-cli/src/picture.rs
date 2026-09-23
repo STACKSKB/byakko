@@ -113,6 +113,7 @@ mod tests {
         let caps = Capabilities {
             backend_id: "memory".into(),
             keys: vec!["one".into(), "two".into()],
+            lighting_effect: None,
         };
         let colors = Snapshot {
             backend_id: "memory".into(),

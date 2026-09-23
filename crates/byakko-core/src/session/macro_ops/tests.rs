@@ -359,6 +359,23 @@ fn catalog_is_complete_and_read_only_across_dirty_draft() {
 }
 
 #[test]
+fn foreground_empty_slot_is_available_before_catalog_finishes() {
+    let mut session = ready();
+    let _catalog = session.request_macro_catalog_read().unwrap();
+    assert!(session.macro_catalog_scanning());
+    assert_eq!(session.next_free_macro_slot(), Some("scene"));
+    session.select_macro("second").unwrap();
+    assert_eq!(session.next_free_macro_slot(), None);
+    let mut empty = snapshot(2, 1);
+    empty.slot = "second".into();
+    read(&mut session, empty);
+    assert_eq!(session.next_free_macro_slot(), Some("second"));
+    assert!(session.macro_library_slots().is_none());
+    session.edit_macro(Edit::Repeat(2)).unwrap();
+    assert!(session.macros().unwrap().dirty());
+}
+
+#[test]
 fn catalog_rejects_incomplete_result_and_old_generation() {
     let mut session = ready();
     let Command::ReadMacroCatalog {

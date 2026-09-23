@@ -6,7 +6,7 @@ use byakko_core::settings::{
     editor::{Editor, Status},
 };
 use iced::{
-    Element, Fill, FillPortion, Size,
+    Element, Fill, Length, Size,
     widget::{button, checkbox, column, container, responsive, row, scrollable, slider, text},
 };
 use std::collections::BTreeMap;
@@ -101,18 +101,16 @@ fn settings_grid(
             field.label.clone(),
             control(style, field, value, can_edit),
         ))
-        .width(FillPortion(1));
+        .width(Length::Fixed(style.fields.regular as f32));
         pair.push(card.into());
         if pair.len() == columns {
             grid = grid.push(
-                row(std::mem::take(&mut pair))
-                    .spacing(style.spacing.s)
-                    .width(Fill),
+                container(row(std::mem::take(&mut pair)).spacing(style.spacing.s)).center_x(Fill),
             );
         }
     }
     if !pair.is_empty() {
-        grid = grid.push(row(pair).spacing(style.spacing.s).width(Fill));
+        grid = grid.push(container(row(pair).spacing(style.spacing.s)).center_x(Fill));
     }
     grid.into()
 }

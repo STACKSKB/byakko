@@ -1,4 +1,4 @@
-use super::{Activity, Command, Problem, Session, Status};
+use super::{Activity, Command, Session, Status};
 use crate::picture::{Capabilities, Edit, editor::Editor, validate_capabilities};
 
 impl Session {
@@ -47,12 +47,7 @@ impl Session {
         let (expected, desired) = self.picture_editor()?.request_apply()?;
         let operation = self.operation()?;
         self.activity = Activity::ApplyPicture { operation };
-        self.status = Status::Unverified {
-            problem: Problem::ReadRequired,
-        };
-        self.invalidate_macros();
-        self.invalidate_lighting();
-        self.invalidate_settings();
+        self.macro_catalog_operation = None;
         self.invalidate_archive();
         Ok(Command::ApplyPicture {
             generation: self.generation,
@@ -66,6 +61,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::Problem;
     use crate::{
         Action, Descriptor, Layer, PhysicalKey, State,
         picture::{Channel, Content, Snapshot},
@@ -102,6 +98,7 @@ mod tests {
         Capabilities {
             backend_id: "memory".into(),
             keys: vec!["a".into(), "fn".into()],
+            lighting_effect: None,
         }
     }
     fn snapshot(revision: u8, rgb: [u8; 3]) -> Snapshot {
@@ -140,6 +137,14 @@ mod tests {
                 .with_picture(caps())
                 .is_ok()
         );
+        let mut blank_effect = caps();
+        blank_effect.lighting_effect = Some("  ".into());
+        assert!(
+            Session::new(descriptor())
+                .unwrap()
+                .with_picture(blank_effect)
+                .is_err()
+        );
         for keys in [
             vec!["a".into(), "a".into()],
             vec!["a".into(), "missing".into()],
@@ -149,7 +154,8 @@ mod tests {
                     .unwrap()
                     .with_picture(Capabilities {
                         backend_id: "memory".into(),
-                        keys
+                        keys,
+                        lighting_effect: None,
                     })
                     .is_err()
             );

@@ -58,7 +58,10 @@ fn macro_scan_is_passive_and_navigation_keeps_the_same_scan() {
     assert!(app.session.macro_catalog_scanning());
     assert!(!app.busy());
     let _ = app.update(Message::Page(Page::Macros));
-    assert_eq!(app.session.activity(), &byakko_core::session::Activity::Idle);
+    assert_eq!(
+        app.session.activity(),
+        &byakko_core::session::Activity::Idle
+    );
     let _ = app.update(Message::Page(Page::Keys));
     let _ = app.update(Message::SelectKey("Alpha".into()));
     app.stage(1);
@@ -66,10 +69,78 @@ fn macro_scan_is_passive_and_navigation_keeps_the_same_scan() {
     let draft = app.session.draft().cloned();
     settle(&mut app);
     assert_eq!(app.session.draft(), draft.as_ref());
-    assert_eq!(app.session.macros().unwrap().configured_slots().unwrap().len(), 3);
+    assert_eq!(
+        app.session
+            .macros()
+            .unwrap()
+            .configured_slots()
+            .unwrap()
+            .len(),
+        3
+    );
     let _ = app.update(Message::Page(Page::Macros));
     assert!(!app.session.macro_catalog_scanning());
     assert!(!app.busy());
+}
+
+#[test]
+fn slot_editor_opens_during_background_catalog_scan() {
+    let mut app = ready();
+    app.read_macro_catalog_in_background();
+    assert!(app.session.macro_catalog_scanning());
+    assert!(app.session.macros().unwrap().catalog().is_none());
+    let _ = app.update(Message::Page(Page::Macros));
+    drop(app.view());
+    send(&mut app, Macro::Select("intro".into()));
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::ReadMacro { .. }
+    ));
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while app.busy() {
+        assert!(std::time::Instant::now() < deadline);
+        let _ = app.poll();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
+    assert!(app.session.macros().unwrap().draft().is_some());
+    drop(app.view());
+}
+
+#[test]
+fn add_checks_candidates_before_catalog_completes() {
+    let mut app = ready();
+    let _ = app.update(Message::Page(Page::Macros));
+    assert!(app.session.macros().unwrap().catalog().is_none());
+    let first = app
+        .session
+        .next_macro_candidate_after(None)
+        .unwrap()
+        .to_owned();
+    send(&mut app, Macro::Add);
+    assert_eq!(app.macro_new_slot.as_deref(), Some(first.as_str()));
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::ReadMacro { .. }
+    ));
+    settle(&mut app);
+    let editor = app.session.macros().unwrap();
+    assert_eq!(editor.status(), &MacroStatus::Ready);
+    assert_eq!(editor.slot(), first);
+    let still_scanning = editor.catalog().is_none();
+    if still_scanning
+        && matches!(editor.baseline().map(|snapshot| &snapshot.content), Some(Content::Editable(program)) if !program.events.is_empty())
+    {
+        let next = app
+            .session
+            .next_macro_candidate_after(Some(&first))
+            .unwrap()
+            .to_owned();
+        send(&mut app, Macro::Add);
+        assert_eq!(app.macro_new_slot.as_deref(), Some(next.as_str()));
+        settle(&mut app);
+        assert_eq!(app.session.macros().unwrap().slot(), next);
+    }
 }
 #[test]
 fn failed_read_preserves_unsubmitted_form_input() {
@@ -123,7 +194,11 @@ fn send(app: &mut Desktop, message: Macro) {
 
 pub(super) fn settle(app: &mut Desktop) {
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
-    while app.busy() || app.session.macro_catalog_scanning() {
+    while app.busy()
+        || app.session.macro_catalog_scanning()
+        || app.live_lighting.has_pending()
+        || app.live_picture.has_pending()
+    {
         assert!(
             std::time::Instant::now() < deadline,
             "memory worker timed out"

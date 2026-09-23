@@ -916,6 +916,7 @@ mod tests {
         let caps = picture::Capabilities {
             backend_id: "memory".into(),
             keys: vec!["editable".into()],
+            lighting_effect: None,
         };
         let initial = picture::Snapshot {
             backend_id: "memory".into(),
@@ -987,6 +988,7 @@ mod tests {
         let caps = picture::Capabilities {
             backend_id: "memory".into(),
             keys: vec!["editable".into()],
+            lighting_effect: None,
         };
         let snapshot = picture::Snapshot {
             backend_id: "memory".into(),

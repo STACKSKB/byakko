@@ -22,6 +22,7 @@ pub fn capabilities() -> picture::Capabilities {
     picture::Capabilities {
         backend_id: BACKEND_ID.into(),
         keys: key_by_slot().into_values().collect(),
+        lighting_effect: Some("13".into()),
     }
 }
 
@@ -132,6 +133,20 @@ fn not_attempted(message: String) -> ApplyFailure {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn advertised_picture_effect_exists_in_lighting_catalog() {
+        let effect = capabilities()
+            .lighting_effect
+            .expect("Nia87 picture effect");
+        assert_eq!(effect, "13");
+        assert!(
+            crate::nia87::lighting_adapter::capabilities()
+                .effects
+                .iter()
+                .any(|choice| choice.id == effect && choice.label == "LightUserPicture")
+        );
+    }
 
     #[test]
     fn every_physical_key_has_a_unique_picture_slot() {

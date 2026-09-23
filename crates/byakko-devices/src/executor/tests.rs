@@ -494,11 +494,12 @@ fn full_queue_returns_correlated_rejection_to_core() {
         changes: vec![],
     };
     worker.try_submit(apply(2)).unwrap();
+    worker.try_submit(apply(3)).unwrap();
     assert!(matches!(
-        *worker.try_submit(apply(3)).unwrap_err(),
+        *worker.try_submit(apply(4)).unwrap_err(),
         Completion::Apply {
             generation: 1,
-            operation: 3,
+            operation: 4,
             result: Err(ApplyFailure {
                 recovery: Recovery::NotAttempted,
                 ..
@@ -507,6 +508,10 @@ fn full_queue_returns_correlated_rejection_to_core() {
     ));
     worker.set_generation(0);
     release.send(()).unwrap();
+    worker
+        .completions
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
     worker
         .completions
         .recv_timeout(Duration::from_secs(2))

@@ -246,6 +246,7 @@ pub fn device() -> Result<MemoryDevice, String> {
     let picture = byakko_core::picture::Capabilities {
         backend_id: "memory".into(),
         keys: vec!["Alpha".into(), "Fixed".into()],
+        lighting_effect: Some("per-key".into()),
     };
     let colors = std::collections::BTreeMap::from([
         ("Alpha".into(), [12, 34, 56]),
@@ -331,6 +332,14 @@ fn lighting_capabilities() -> byakko_core::lighting::Capabilities {
                 speed: None,
                 options: vec![],
                 color: Some(ColorCapability::Fixed),
+            },
+            Effect {
+                id: "per-key".into(),
+                label: "Per-key colors".into(),
+                brightness: None,
+                speed: None,
+                options: vec![],
+                color: None,
             },
             Effect {
                 id: "sweep".into(),

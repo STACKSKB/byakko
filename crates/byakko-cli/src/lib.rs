@@ -277,6 +277,7 @@ mod tests {
         let capabilities = picture::Capabilities {
             backend_id: "synthetic".into(),
             keys: vec!["one".into()],
+            lighting_effect: None,
         };
         let colors = picture::Snapshot {
             backend_id: "synthetic".into(),

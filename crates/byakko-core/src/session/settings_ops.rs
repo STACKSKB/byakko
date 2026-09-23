@@ -1,4 +1,4 @@
-use super::{Activity, Command, Problem, Session, Status};
+use super::{Activity, Command, Session, Status};
 use crate::settings::{Capabilities, Edit, editor::Editor};
 
 impl Session {
@@ -49,12 +49,9 @@ impl Session {
         let (expected, edit) = self.settings_editor()?.request_apply()?;
         let operation = self.operation()?;
         self.activity = Activity::ApplySetting { operation };
-        self.status = Status::Unverified {
-            problem: Problem::ReadRequired,
-        };
-        self.invalidate_macros();
-        self.invalidate_lighting();
-        self.invalidate_picture();
+        // A one-field settings transaction checks its own snapshot. Other
+        // editors retain their last observed values and guarded write paths.
+        self.macro_catalog_operation = None;
         self.invalidate_archive();
         Ok(Command::ApplySetting {
             generation: self.generation,
@@ -69,8 +66,8 @@ impl Session {
 mod tests {
     use super::*;
     use crate::{
-        Descriptor, Layer, PhysicalKey,
-        session::{Acceptance, ApplyFailure, Completion, Recovery},
+        Action, Descriptor, Layer, PhysicalKey, State,
+        session::{Acceptance, ApplyFailure, Completion, Problem, Recovery},
         settings::{Content, Field, Kind, Snapshot, Value},
     };
     use std::collections::BTreeMap;
@@ -148,6 +145,58 @@ mod tests {
                 result: Ok(snapshot)
             }),
             Acceptance::Accepted
+        );
+    }
+    fn read_keymap(session: &mut Session) {
+        let Command::Read {
+            generation,
+            operation,
+        } = session.request_read().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::Read {
+            generation,
+            operation,
+            result: Ok(State {
+                revision: vec![1],
+                bindings: BTreeMap::from([(
+                    "base".into(),
+                    BTreeMap::from([("a".into(), Action::Disabled)]),
+                )]),
+            }),
+        });
+        assert_eq!(session.status(), &Status::Ready);
+    }
+    #[test]
+    fn successful_setting_apply_preserves_last_observed_keymap() {
+        let mut session = session();
+        session.connect().unwrap();
+        read_keymap(&mut session);
+        read(&mut session, snapshot(1, 10));
+        session
+            .edit_setting(edit("timer", Value::Number(20)))
+            .unwrap();
+        let original = session.baseline().cloned();
+        let Command::ApplySetting {
+            generation,
+            operation,
+            ..
+        } = session.request_setting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(session.status(), &Status::Ready);
+        session.accept(Completion::ApplySetting {
+            generation,
+            operation,
+            result: Ok(snapshot(2, 20)),
+        });
+        assert_eq!(session.status(), &Status::Ready);
+        assert_eq!(session.baseline(), original.as_ref());
+        assert_eq!(
+            session.settings().unwrap().status(),
+            &crate::settings::editor::Status::Ready
         );
     }
     fn edit(id: &str, value: Value) -> Edit {
@@ -300,6 +349,7 @@ mod tests {
             crate::settings::editor::Status::Conflict { .. }
         ));
         read(&mut session, snapshot(1, 10));
+        read_keymap(&mut session);
         let Command::ApplySetting {
             generation,
             operation,
@@ -320,6 +370,12 @@ mod tests {
             session.settings().unwrap().draft().unwrap()["timer"],
             Value::Number(20)
         );
+        assert!(matches!(
+            session.status(),
+            Status::Unverified {
+                problem: Problem::ReadRequired
+            }
+        ));
         assert!(session.request_setting_apply().is_err());
     }
 }
