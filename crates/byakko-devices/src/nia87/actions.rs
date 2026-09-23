@@ -111,6 +111,18 @@ pub fn presets() -> &'static [ActionPreset] {
             label: "Fn",
             bytes: [10, 1, 0, 0],
         },
+        ActionPreset {
+            label: "System Power",
+            bytes: [2, 0x81, 0, 0],
+        },
+        ActionPreset {
+            label: "System Sleep",
+            bytes: [2, 0x82, 0, 0],
+        },
+        ActionPreset {
+            label: "Computer Wake",
+            bytes: [2, 0x83, 0, 0],
+        },
         // Visible Nia87 actions; wire facts and limits are recorded in
         // Research/action-coverage.md. Host behavior depends on the OS.
         ActionPreset {
@@ -290,5 +302,25 @@ mod tests {
         assert!(!all.iter().any(|p| p.label.contains("DPI")
             || p.label.contains("Profile")
             || p.label.contains("Open App")));
+    }
+
+    #[test]
+    fn system_controls_are_advertised_with_their_exact_catalog_bindings() {
+        let descriptor = crate::nia87::adapter::descriptor();
+        for (label, bytes) in [
+            ("System Power", [2, 0x81, 0, 0]),
+            ("System Sleep", [2, 0x82, 0, 0]),
+            ("Computer Wake", [2, 0x83, 0, 0]),
+        ] {
+            let choice = descriptor
+                .actions
+                .iter()
+                .find(|choice| choice.label == label);
+            let choice = choice.expect("system action should be advertised");
+            assert_eq!(
+                crate::nia87::adapter::raw_from_action(&choice.action),
+                Ok(bytes)
+            );
+        }
     }
 }
