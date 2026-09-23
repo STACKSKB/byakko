@@ -399,6 +399,7 @@ impl Desktop {
                 return self.close();
             }
         }
+        self.read_picture_on_entry();
         Task::none()
     }
 
@@ -442,7 +443,10 @@ impl Desktop {
             Message::Settings(message) => self.update_settings(message),
             Message::File(message) => return self.update_macro_files(message),
             Message::Record(message) => self.update_recording(message),
-            Message::Page(page) => self.page = page,
+            Message::Page(page) => {
+                self.page = page;
+                self.read_picture_on_entry();
+            }
             Message::Macro(message) => self.update_macro(message),
             Message::SelectLayer(layer) => self.layer = layer,
             Message::SelectKey(key) => self.selected = Some(key),

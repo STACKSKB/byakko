@@ -8,12 +8,12 @@ use std::time::Duration;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments.len() > 1 {
-        return Err("Usage: byakko-cli <devices|describe|read>".into());
+        return Err("Usage: byakko-cli <devices|describe|read|read-colors>".into());
     }
     match arguments.first().map(String::as_str) {
         None | Some("--help") => {
             println!(
-                "Usage: byakko-cli <devices|describe|read>\n\nread exports the verified USB keymap as JSON; no command writes to the device."
+                "Usage: byakko-cli <devices|describe|read|read-colors>\n\nRead commands export verified USB state as JSON; no command writes to the device."
             );
         }
         Some("devices") => match nia87::device::availability() {
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             nia87::device::Availability::EnumerationFailed(reason) => return Err(reason.into()),
         },
         Some("describe") => println!("{}", serde_json::to_string_pretty(&nia87::descriptor())?),
-        Some("read") => {
+        Some("read" | "read-colors") => {
             let candidate = match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => candidate,
                 nia87::device::Availability::Unavailable => {
@@ -51,9 +51,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let executor = Executor::spawn(BoundNia87Adapter::new(target), backups)?;
             let mut session = nia87::application::session()?;
             let state = byakko_cli::read_keymap(&mut session, &executor, Duration::from_secs(30))?;
-            println!("{}", serde_json::to_string_pretty(&state)?);
+            if arguments[0] == "read-colors" {
+                let colors =
+                    byakko_cli::read_colors(&mut session, &executor, Duration::from_secs(30))?;
+                println!("{}", serde_json::to_string_pretty(&colors)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&state)?);
+            }
         }
-        _ => return Err("Usage: byakko-cli <devices|describe|read>".into()),
+        _ => return Err("Usage: byakko-cli <devices|describe|read|read-colors>".into()),
     }
     Ok(())
 }

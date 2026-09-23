@@ -10,13 +10,67 @@ fn send(app: &mut Desktop, message: Picture) {
 fn loaded() -> Desktop {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Picture));
-    send(&mut app, Picture::Read);
     settle(&mut app);
     assert_eq!(
         app.session.picture().unwrap().status(),
         &PictureStatus::Ready
     );
     app
+}
+
+#[test]
+fn entering_colors_reads_once_and_waits_for_a_pending_keymap_read() {
+    let mut app = ready();
+    let _ = app.update(Message::Page(Page::Picture));
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::ReadPicture { .. }
+    ));
+    settle(&mut app);
+    assert_eq!(
+        app.session.picture().unwrap().status(),
+        &PictureStatus::Ready
+    );
+    let _ = app.update(Message::Page(Page::Keys));
+    let _ = app.update(Message::Page(Page::Picture));
+    assert!(!app.busy());
+
+    let mut app = ready();
+    let _ = app.update(Message::Read);
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::Read { .. }
+    ));
+    let _ = app.update(Message::Page(Page::Picture));
+    settle(&mut app);
+    assert_eq!(
+        app.session.picture().unwrap().status(),
+        &PictureStatus::Ready
+    );
+}
+
+#[test]
+fn failed_automatic_color_read_waits_for_an_explicit_retry() {
+    let mut app = ready();
+    let _ = app.update(Message::Page(Page::Picture));
+    let byakko_core::session::Activity::ReadPicture { operation } = app.session.activity() else {
+        panic!("expected automatic color read");
+    };
+    let _ = app.complete(Completion::ReadPicture {
+        generation: app.session.generation(),
+        operation: *operation,
+        result: Err("USB read failed".into()),
+    });
+    assert!(!app.busy());
+    let _ = app.update(Message::Page(Page::Keys));
+    let _ = app.update(Message::Page(Page::Picture));
+    assert!(!app.busy());
+    assert!(matches!(
+        app.session.picture().unwrap().status(),
+        PictureStatus::Unverified {
+            problem: byakko_core::session::Problem::Read(_)
+        }
+    ));
 }
 
 #[test]

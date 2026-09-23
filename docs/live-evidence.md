@@ -254,7 +254,9 @@ per-key color selectors were changed to render the advertised physical
 coordinates through one device-neutral Iced board widget. The user then
 launched the rebuilt release app and confirmed that the Keys page showed a
 TKL-shaped board and clicking a key selected it. No Apply action or device
-setter was used in this UI check. Visual acceptance of the per-key color page,
+setter was used in this UI check. The user also confirmed the same behavior
+after the shared widget switched to coordinate-pinned placement for taller
+future keys. Visual acceptance of the per-key color page,
 Linux runtime and live write recovery remain open.
 
 ## Independent CLI read (2026-09-23)
@@ -269,3 +271,30 @@ This exercises a second frontend through a physical USB getter; it does not
 prove a CLI apply workflow or Linux runtime behavior. Windows and Linux-target
 Clippy checks pass. A Linux release link from this Windows host remains
 unverified because this environment has no `cc` cross-linker.
+
+## Automatic color-page read and idle resource sample (2026-09-23)
+
+The Iced page transition now requests a per-key color read when its editor is
+unloaded or invalidated and the keymap is ready. If keymap read is still active,
+the color read starts after that completion. It does not repeat on every page
+visit or silently retry a failed/uncertain read. Memory-backend tests cover
+these transitions; the Iced window itself has not been visually rechecked for
+this change. `byakko-cli read-colors` made a live read-only pass through the
+same core session and executor and returned 87 color entries (ignored capture
+`Research/captures/cli-colors-20260923.json`, SHA-256
+`2B28FD8A0AE7A419AE6CC5BF8BF065F52CABA914A16827B3C0C6BA038D83A018`).
+
+With the native release app open at idle on the Keys page, a 15-second
+`Get-Process` sample showed 23.6 MiB working set, 9.9 MiB private bytes,
+seven threads, 235 handles and 0.188 CPU-seconds/minute extrapolated from the
+CPU counter delta. No comparable Sharkfin or official-app process was running,
+so this is a baseline measurement, not a performance comparison. Windows
+Graphics Capture could not return a window screenshot (`SetIsBorderRequired`
+failed with `0x80004002`); accessibility exposed only the Iced title bar. A
+single authorized 640×480 webcam frame, captured with the existing local
+OpenCV runtime, visibly showed pink/purple light between the Nia87 keycaps
+(`Research/captures/webcam-20260923.png`, SHA-256
+`DDCE56AB1E63F079F3ACCAC1B4086860FE4EFEDF7DAC3EB234504826BDF1657C`).
+This is a visual baseline, not evidence of a lighting change or of UI color
+readback. The portable core compiles for `wasm32-unknown-unknown`; no browser
+app has been built.

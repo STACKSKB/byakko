@@ -23,6 +23,18 @@ research baseline, not the structure to port.
   configurator parity objective; QMK/VIA and 2.4 GHz are later capabilities.
 - Original implementation and UX. Do not copy vendor, Sharkfin, GPL or other
   copyleft source. Review dependency and asset licenses separately.
+- Finish functional parity or reach a genuine user-input blocker before visual
+  polish. The later visual direction is a white-tiger identity with no gradients,
+  consistent spacing and alignment, a clear attention hierarchy, concise text,
+  and useful SVG/Unicode symbols. Keep it legible to first-time GUI users while
+  retaining fast expert workflows; do not imitate either reference app.
+- Plan an i18n catalog instead of treating English literals as permanent UI
+  data. Required initial languages include English, Hindi, Bengali, Kannada,
+  Telugu, Tamil, Marathi and Japanese. Do not begin translation polish ahead
+  of functional work, but avoid new protocol or state logic keyed to UI text.
+- Profile idle and active CPU and memory under comparable workloads against
+  Sharkfin and the official app. State the measurement method and limits; do
+  not infer efficiency from toolkit choice or an unmatched process snapshot.
 
 ## Architecture and functional discipline
 
@@ -117,6 +129,9 @@ research baseline, not the structure to port.
   and per-key color views; keep future selectors device-neutral and styled by
   `UiStyle` tokens. On 2026-09-23 the user confirmed the rebuilt Iced Keys page
   showed a TKL board and key selection worked after a physical USB replug.
+  Entering the per-key color page should automatically read a stale or unloaded
+  color snapshot once the keymap is ready; an explicit retry remains necessary
+  after a failed read or uncertain write.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and
   the root sampler module is a compatibility re-export.
