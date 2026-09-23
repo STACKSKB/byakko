@@ -23,8 +23,10 @@ stream and restoration transaction.
    restoration in order. It must accept Stop while the stream loop runs, and
    reject other device commands until restoration completes. Do not create a
    second worker or let a frame loop reopen an arbitrary unique device.
-   The screen/audio sampler stays above `devices` and sends owned RGB or band
-   frames through a bounded input slot. Band count is a backend capability;
+   The screen/audio sampler stays outside the keyboard backend and sends owned
+   RGB or band frames through a bounded input slot. OS sampler adapters can
+   live in the devices package, separate from HID drivers and controlled by
+   the desktop. Band count is a backend capability;
    only the Nia87 adapter assumes 32 bands. A full slot may drop a frame; it must
    not delay Stop. The device-side host session only sends frames and restores
    its verified baseline. Do not make a device backend pull screen or audio
