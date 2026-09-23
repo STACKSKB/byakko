@@ -109,8 +109,9 @@ research baseline, not the structure to port.
   automatic recovery remains open. Iced now has a read-only, bounded USB
   discovery worker and an idle reconnect flow. Each desktop executor holds an
   immutable Nia87 HID target, including recovery opens; never fall back to an
-  arbitrary unique match after a target check fails. Physical unplug/replug
-  and Linux runtime acceptance remain open. Before an automatic reconnect,
+  arbitrary unique match after a target check fails. A user-assisted physical
+  unplug/replug and fresh read were observed on 2026-09-23; Linux runtime
+  acceptance remains open. Before an automatic reconnect,
   preserve feature-specific conflict or failed-write diagnostics and require
   a deliberate manual read; keymap status alone does not cover other editors.
   Iced screen-average lighting now

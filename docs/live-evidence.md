@@ -270,7 +270,8 @@ executor completion capture exactly. The CLI export SHA-256 is
 This exercises a second frontend through a physical USB getter; it does not
 prove a CLI apply workflow or Linux runtime behavior. Windows and Linux-target
 Clippy checks pass. A Linux release link from this Windows host remains
-unverified because this environment has no `cc` cross-linker.
+unverified with plain Cargo because this environment has no `cc` cross-linker;
+the retained Zig toolchain later cross-linked both the desktop and CLI.
 
 ## Automatic color-page read and idle resource sample (2026-09-23)
 
@@ -298,3 +299,70 @@ OpenCV runtime, visibly showed pink/purple light between the Nia87 keycaps
 This is a visual baseline, not evidence of a lighting change or of UI color
 readback. The portable core compiles for `wasm32-unknown-unknown`; no browser
 app has been built.
+
+## Linux release cross-link and competitor idle sample (2026-09-23)
+
+The current Iced desktop and read-only CLI cross-linked for
+`x86_64-unknown-linux-gnu` with Zig 0.15.2 and cargo-zigbuild 0.23.4 using
+`--release --locked --offline`. Both files have ELF magic `7F454C46`.
+After the subsequent CLI and Windows entry-point changes, the refreshed
+desktop is 10,087,584 bytes (SHA-256
+`98FC1138D09FCA0D1631955D0E365693FE6AC401DD575B940EAF1FBF9E88EF83`);
+the CLI is 1,480,152 bytes (SHA-256
+`91E966C7FC898E0D746D92602FEA8055A7AE6EEEADAA9D3D6C3DE52365D681C0`).
+This proves linking, not Linux startup or HID access.
+
+The user located the installed Sharkfin at
+`C:\Users\two\AppData\Local\sharkfin`. Its connected Nia87 Lighting page was
+left idle, with no settings touched. We sampled its main process and the six
+WebView2 descendants belonging to it, excluding unrelated WebView2 processes.
+The first Byakko build used the Windows console subsystem, creating an
+additional `conhost.exe` that the initial one-process baseline omitted.
+Adding the GUI subsystem to the desktop entry point removed that child.
+`tools/measure_process_tree.ps1` then sampled each app's complete descendant
+tree using `Win32_Process` working set, private pages, and cumulative
+user+kernel CPU time 15 seconds apart after launch:
+
+| Idle app/page | Processes | Working set | Private pages | CPU delta, extrapolated per minute |
+| --- | ---: | ---: | ---: | ---: |
+| Byakko / Keys | 1 | 23.4 MiB | 9.6 MiB | 0.25 CPU-seconds |
+| Sharkfin / Lighting | 7 | 476.2 MiB | 283.6 MiB | 5.625 CPU-seconds |
+
+This is an observed idle footprint advantage for this Windows session, not
+an active-use benchmark: the pages differ, 15-second CPU deltas are noisy,
+and memory changes with uptime and renderer state. An earlier 15-second pair
+using the same Windows counters gave 23.3/490.4 MiB working sets and
+0.812/2.25 CPU-seconds per minute, illustrating CPU variation. The official app was not
+profiled; starting its retained installer could launch its helper on the
+connected keyboard. No app control or device setter was activated in this
+comparison. A second webcam frame afterward still showed pink/purple light
+between the keycaps (`Research/captures/webcam-after-profile-20260923.png`,
+SHA-256 `85103B6D819A37548D9F52901D6C4061DD37D516DF9B93BE972F1930CD0BB4F5`),
+but changed room exposure prevents a quantitative before/after lighting
+comparison.
+
+## Read-only lighting and settings CLI follow-up (2026-09-23)
+
+The independent CLI's `read-lighting` and `read-settings` commands now drive
+the same keymap-first session, executor and accepted-completion path as Iced.
+Both completed against the attached USB keyboard with no setter. Their ignored
+JSON captures are `Research/captures/cli-lighting-20260923.json` (SHA-256
+`52F90144A8875F06D6F241C72E642CEDF9EC2E543070BBFB24BCD3BB0F08252C`)
+and `Research/captures/cli-settings-20260923.json` (SHA-256
+`F386EC90F827E8F3A931DA9A3379426DC6BE82439265143D0C76599567E3F433`).
+The settings decode reports debounce 1, auto-OS off, backlight on, normal
+sleep 2 minutes and deep sleep 10 minutes on both radios.
+
+The lighting result was stable across a second read, but its effect byte was
+1 rather than the saved baseline's 5. To bound the difference, a full
+two-sweep read-only configuration and transport trace completed after the
+Sharkfin profiling launch. Compared with the earlier restored archive, both
+keymaps, all 50 macros, all 128 picture colors and settings were identical;
+only lighting byte 1 differed (`5 -> 1`). The new ignored archive is
+`Research/captures/configuration-after-sharkfin-launch-20260923.json`
+(SHA-256 `31C9B1C5CBF8E41A7018355E114361FC967C54732A4D5DA88E5A690506FAD3C8`).
+The timing suggests a possible app-startup effect, but the reads cannot assign
+causality. No restore write was attempted while the user was AFK, because
+unexpected collateral changes in the earlier archive recovery remain
+unexplained. The on-device lighting baseline is now effect 1 for subsequent
+tests; do not assume the older effect-5 archive still describes current state.

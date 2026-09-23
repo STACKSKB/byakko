@@ -6,14 +6,16 @@ use byakko_devices::{
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    const USAGE: &str =
+        "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings>";
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments.len() > 1 {
-        return Err("Usage: byakko-cli <devices|describe|read|read-colors>".into());
+        return Err(USAGE.into());
     }
     match arguments.first().map(String::as_str) {
         None | Some("--help") => {
             println!(
-                "Usage: byakko-cli <devices|describe|read|read-colors>\n\nRead commands export verified USB state as JSON; no command writes to the device."
+                "{USAGE}\n\nRead commands export verified USB state as JSON; no command writes to the device."
             );
         }
         Some("devices") => match nia87::device::availability() {
@@ -31,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             nia87::device::Availability::EnumerationFailed(reason) => return Err(reason.into()),
         },
         Some("describe") => println!("{}", serde_json::to_string_pretty(&nia87::descriptor())?),
-        Some("read" | "read-colors") => {
+        Some("read" | "read-colors" | "read-lighting" | "read-settings") => {
             let candidate = match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => candidate,
                 nia87::device::Availability::Unavailable => {
@@ -51,15 +53,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let executor = Executor::spawn(BoundNia87Adapter::new(target), backups)?;
             let mut session = nia87::application::session()?;
             let state = byakko_cli::read_keymap(&mut session, &executor, Duration::from_secs(30))?;
-            if arguments[0] == "read-colors" {
-                let colors =
-                    byakko_cli::read_colors(&mut session, &executor, Duration::from_secs(30))?;
-                println!("{}", serde_json::to_string_pretty(&colors)?);
-            } else {
-                println!("{}", serde_json::to_string_pretty(&state)?);
-            }
+            let json = match arguments[0].as_str() {
+                "read" => serde_json::to_string_pretty(&state)?,
+                "read-colors" => serde_json::to_string_pretty(&byakko_cli::read_colors(
+                    &mut session,
+                    &executor,
+                    Duration::from_secs(30),
+                )?)?,
+                "read-lighting" => serde_json::to_string_pretty(&byakko_cli::read_lighting(
+                    &mut session,
+                    &executor,
+                    Duration::from_secs(30),
+                )?)?,
+                "read-settings" => serde_json::to_string_pretty(&byakko_cli::read_settings(
+                    &mut session,
+                    &executor,
+                    Duration::from_secs(30),
+                )?)?,
+                _ => unreachable!("read command matched above"),
+            };
+            println!("{json}");
         }
-        _ => return Err("Usage: byakko-cli <devices|describe|read|read-colors>".into()),
+        _ => return Err(USAGE.into()),
     }
     Ok(())
 }

@@ -1,4 +1,5 @@
 //! Native composition only; the desktop library never imports Nia87 details.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 mod demo;
 
 use byakko_core::session::Session;

@@ -10,14 +10,21 @@ before a write is attempted. Device apply uses the existing backup, readback
 and restore transaction and reports recovery with a typed outcome.
 
 This RGB storage feature is separate from the global lighting control that
-selects a built-in picture effect. Host-driven effects need their own stream
-lifecycle and remain later work. 2.4 GHz configuration also remains deferred
+selects a built-in picture effect. Host-driven effects use a separate stream
+lifecycle and still need physical Iced acceptance. 2.4 GHz configuration remains deferred
 until USB support and receiver capability are established.
+
+Opening the per-key color page automatically reads the device when its color
+snapshot is unloaded or invalidated and the keymap is ready. If the keymap is
+still reading, it starts after that completion. Page revisits do not repeat a
+verified read, and failed or uncertain reads require an explicit retry.
 
 The memory backend and device adapter tests cover capability validation,
 baseline conflicts, opaque state, executor dispatch, Fn and final-key mapping,
 full 128-slot round trips, reserved-slot preservation, forged content and
 typed recovery. The attached Nia87 was verified read-only for this Iced slice.
+The independent CLI later read all 87 mapped colors through the same session
+and executor; see `live-evidence.md` for its capture and hash.
 The 384-byte result in `Research/captures/picture-core-executor-20260923.json`
 matches `Research/captures/picture-initial.json` exactly. It differs from
 `Research/captures/picture-after-failed-recovery.json` at slot 9 red (current
