@@ -5,8 +5,8 @@ use crate::nia87::{
     layout, macro_adapter,
 };
 use byakko_core::{
-    Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State, macros, validate_changes,
-    validate_state,
+    Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, ShortcutCapabilities, State,
+    UsageChoice, macros, validate_changes, validate_state,
 };
 use std::{collections::BTreeMap, path::Path};
 
@@ -176,6 +176,16 @@ pub fn descriptor() -> Descriptor {
             },
         });
     }
+    let shortcut_keys = choices
+        .iter()
+        .filter_map(|choice| match choice.action {
+            Action::Key(usage) if usage < 224 => Some(UsageChoice {
+                label: choice.label.clone(),
+                usage,
+            }),
+            _ => None,
+        })
+        .collect();
     Descriptor {
         backend_id: BACKEND_ID.into(),
         device_name: "Nia87".into(),
@@ -191,6 +201,18 @@ pub fn descriptor() -> Descriptor {
             },
         ],
         actions: choices,
+        shortcuts: Some(ShortcutCapabilities {
+            modifiers: [("Ctrl", 224), ("Shift", 225), ("Alt", 226), ("Win", 227)]
+                .into_iter()
+                .map(|(label, usage)| UsageChoice {
+                    label: label.into(),
+                    usage,
+                })
+                .collect(),
+            keys: shortcut_keys,
+            min_modifiers: 1,
+            max_modifiers: 2,
+        }),
     }
 }
 
@@ -627,6 +649,41 @@ mod tests {
                 "{}",
                 choice.label
             );
+        }
+    }
+    #[test]
+    fn shortcut_choices_cover_editable_ordinary_keys_and_round_trip() {
+        let descriptor = descriptor();
+        let shortcuts = descriptor.shortcuts.as_ref().unwrap();
+        assert_eq!((shortcuts.min_modifiers, shortcuts.max_modifiers), (1, 2));
+        assert_eq!(
+            shortcuts
+                .modifiers
+                .iter()
+                .map(|choice| choice.usage)
+                .collect::<Vec<_>>(),
+            vec![224, 225, 226, 227]
+        );
+        let advertised_keys: Vec<_> = descriptor
+            .actions
+            .iter()
+            .filter_map(|choice| match choice.action {
+                Action::Key(usage) if usage < 224 => Some((choice.label.as_str(), usage)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            shortcuts
+                .keys
+                .iter()
+                .map(|choice| (choice.label.as_str(), choice.usage))
+                .collect::<Vec<_>>(),
+            advertised_keys
+        );
+        assert!(byakko_core::session::Session::new(descriptor).is_ok());
+        for modifiers in [vec![224], vec![224, 225]] {
+            let action = Action::Shortcut { modifiers, key: 6 };
+            assert_eq!(action_from_raw(raw_from_action(&action).unwrap()), action);
         }
     }
     #[test]

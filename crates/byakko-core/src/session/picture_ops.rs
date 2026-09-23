@@ -95,6 +95,7 @@ mod tests {
                 label: "Base".into(),
             }],
             actions: vec![],
+            shortcuts: None,
         }
     }
     fn caps() -> Capabilities {

@@ -1,7 +1,7 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
 use super::{Closing, Desktop, Message, Page};
 use crate::control_widgets;
-use crate::{panels, physical_board};
+use crate::{panels, physical_board, shortcut};
 use byakko_core::{
     Action,
     session::{Problem, ReconnectCause, ReconnectCaution, ReconnectSurface, Status},
@@ -126,13 +126,12 @@ fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
     panels::split(
         &app.ui,
         || {
-            panels::panel(
-                &app.ui,
-                selected_label(app),
-                column![text(selected_action(app)), search(app)]
-                    .spacing(app.ui.spacing.s)
-                    .into(),
-            )
+            let mut controls =
+                column![text(selected_action(app)), search(app)].spacing(app.ui.spacing.s);
+            if let Some(shortcut) = shortcut::view(app) {
+                controls = controls.push(shortcut);
+            }
+            panels::panel(&app.ui, selected_label(app), controls.into())
         },
         || panels::panel(&app.ui, "Staged changes", staged_edits(app)),
     )
@@ -280,7 +279,13 @@ fn action_label(app: &Desktop, action: &Action) -> String {
         Action::Key(usage) => format!("Key {usage}"),
         Action::Disabled => "Disabled".into(),
         Action::Macro { slot, mode } => format!("Macro {slot} · mode {mode}"),
-        Action::Shortcut { modifiers, key } => format!("Shortcut {modifiers:?} + {key}"),
+        Action::Shortcut { modifiers, key } => app
+            .session
+            .descriptor()
+            .shortcuts
+            .as_ref()
+            .and_then(|caps| shortcut::label(caps, modifiers, *key))
+            .unwrap_or_else(|| format!("Shortcut {modifiers:?} + {key}")),
         Action::Named { id } => id.clone(),
         Action::Opaque { label, .. } => label.clone(),
     }

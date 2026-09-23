@@ -925,7 +925,66 @@ mod tests {
                 label: "Base".into(),
             }],
             actions: Vec::new(),
+            shortcuts: None,
         }
+    }
+
+    #[test]
+    fn shortcut_schema_is_checked_when_session_is_created() {
+        use crate::{ShortcutCapabilities, UsageChoice};
+
+        let mut descriptor = descriptor();
+        descriptor.shortcuts = Some(ShortcutCapabilities {
+            modifiers: vec![
+                UsageChoice {
+                    label: "Ctrl".into(),
+                    usage: 224,
+                },
+                UsageChoice {
+                    label: "Shift".into(),
+                    usage: 225,
+                },
+            ],
+            keys: vec![UsageChoice {
+                label: "C".into(),
+                usage: 6,
+            }],
+            min_modifiers: 1,
+            max_modifiers: 2,
+        });
+        assert!(Session::new(descriptor.clone()).is_ok());
+        let shortcuts = descriptor.shortcuts.as_ref().unwrap();
+        assert_eq!(
+            shortcuts.compose(&[224, 225], 6).unwrap(),
+            Action::Shortcut {
+                modifiers: vec![224, 225],
+                key: 6,
+            }
+        );
+        assert!(shortcuts.compose(&[], 6).is_err());
+        assert!(shortcuts.compose(&[224, 224], 6).is_err());
+        assert!(shortcuts.compose(&[224, 226], 6).is_err());
+        assert!(shortcuts.compose(&[224], 4).is_err());
+
+        let mut invalid = descriptor.clone();
+        invalid.shortcuts.as_mut().unwrap().keys.clear();
+        assert!(Session::new(invalid).is_err());
+
+        let mut invalid = descriptor.clone();
+        invalid.shortcuts.as_mut().unwrap().modifiers[1].usage = 224;
+        assert!(Session::new(invalid).is_err());
+
+        let mut invalid = descriptor.clone();
+        invalid.shortcuts.as_mut().unwrap().keys[0].label = " ".into();
+        assert!(Session::new(invalid).is_err());
+
+        let mut invalid = descriptor.clone();
+        invalid.shortcuts.as_mut().unwrap().min_modifiers = 0;
+        assert!(Session::new(invalid).is_err());
+
+        let mut invalid = descriptor;
+        invalid.shortcuts.as_mut().unwrap().max_modifiers = 3;
+        assert!(Session::new(invalid).is_err());
     }
 
     fn state(revision: u8, usage: u16) -> State {

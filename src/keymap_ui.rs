@@ -482,6 +482,7 @@ mod tests {
                         action: Action::Key(5),
                     },
                 ],
+                shortcuts: None,
             }
         }
         fn read(&self) -> Result<State, String> {

@@ -43,6 +43,7 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
                 },
             },
         ],
+        shortcuts: None,
     };
     let state = State {
         revision: vec![1],

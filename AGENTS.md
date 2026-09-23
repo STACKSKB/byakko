@@ -130,6 +130,10 @@ research baseline, not the structure to port.
   and per-key color views; keep future selectors device-neutral and styled by
   `UiStyle` tokens. On 2026-09-23 the user confirmed the rebuilt Iced Keys page
   showed a TKL board and key selection worked after a physical USB replug.
+  General one- and two-modifier shortcuts now use an optional portable
+  descriptor capability and a staged Iced editor; memory-backend tests cover
+  selection, apply and readback, while Nia87 codec tests cover encoding.
+  Physical shortcut output remains unverified.
   Entering the Macros, Lighting, per-key Color or Settings page automatically
   reads a stale or unloaded snapshot once the keymap is ready; an explicit retry
   remains necessary after a failed read or uncertain write.

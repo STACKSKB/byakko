@@ -25,6 +25,7 @@ fn session() -> Session {
             label: "Layer".into(),
         }],
         actions: vec![],
+        shortcuts: None,
     };
     let capabilities = macros::Capabilities {
         backend_id: "memory".into(),
