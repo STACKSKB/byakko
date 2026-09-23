@@ -40,10 +40,18 @@ The Nia87 adapter retains all four raw 64-byte replies in its revision and
 converts sleep minutes to the device's seconds. The attached keyboard has only
 had a read-only check through this Iced path.
 
+Native archive capture and review use a bounded opaque byte value in core, with
+the backend advertising format ID and maximum size. Iced owns local file
+paths and file work, while the Nia87 adapter owns archive parsing and the
+two-direction restoration plan. The archive page composes the same panels and
+renders backend-supplied section names/counts. It does not inspect vendor
+sections. Reviewed state is invalidated by a write or connection change.
+Apply remains separate until the native recovery path reports typed outcomes.
+
 This is a pre-alpha composition layer, not a frozen visual design. Toolbars
 and compact pane interaction still need rendered UI review. Static interface
 copy currently lives near its view; backend labels and control availability
-come from descriptors and projections. Future archives should use
+come from descriptors and projections. Future capabilities should use
 the same data and control boundaries instead of adding one-off widget trees or
 mutable duplicate drafts. Host-driven effects and 2.4 GHz support remain later
 capabilities.

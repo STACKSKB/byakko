@@ -4,7 +4,7 @@ A native, USB-first Menel Nia87 configurator under investigation. The intended a
 
 ## Current status
 
-The approved architecture migration uses **Iced**. Its keymap, macro, global lighting, per-key picture and scalar settings slices are
+The approved architecture migration uses **Iced**. Its keymap, macro, global lighting, per-key picture, scalar settings and native archive capture/review slices are
 available separately from the retained research GUI:
 
 ```console
@@ -32,7 +32,9 @@ picture effect. This slice has only read-only USB baseline verification, with
 no live picture writes. Settings offer capability-defined toggles and bounded
 values. The Iced editor stages one setting at a time to match the Nia87's
 guarded one-setting transaction; its attached-device check is read-only.
-Host-driven lighting, archives and automatic
+The local configurations page captures, exports a new native backup and
+reviews a chosen archive against a fresh device capture. Applying a reviewed
+archive remains pending typed recovery work. Host-driven lighting and automatic
 hotplug discovery still need migration. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and
@@ -43,6 +45,8 @@ headless verification from writes on the attached keyboard. The
 storage model and physical verification limits. The
 [settings acceptance notes](docs/iced-settings-acceptance.md) record the
 one-setting transaction and read-only comparison. The
+[archive acceptance notes](docs/iced-archive-acceptance.md) record its
+read-only capture and review limits. The
 [desktop UI boundary](docs/desktop-ui-architecture.md) describes the shared
 style data and responsive panels.
 

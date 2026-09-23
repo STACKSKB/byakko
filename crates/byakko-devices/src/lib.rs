@@ -1,6 +1,6 @@
 //! Native effect boundary. One worker owns the backend; the UI owns no HID I/O.
 use byakko_core::{
-    Change, State, lighting, macros, picture,
+    Change, State, archive, lighting, macros, picture,
     session::{ApplyFailure, Command, Completion, Recovery},
     settings,
 };
@@ -97,6 +97,21 @@ pub trait Device: Send + 'static {
             message: "Settings operations are unsupported by this device".into(),
             recovery: Recovery::NotAttempted,
         })
+    }
+
+    fn archive_capabilities(&self) -> Option<archive::ArchiveCapabilities> {
+        None
+    }
+
+    fn capture_archive(&mut self) -> Result<archive::NativeArchive, String> {
+        Err("Native archive operations are unsupported by this device".into())
+    }
+
+    fn review_archive(
+        &mut self,
+        _target: &archive::NativeArchive,
+    ) -> Result<archive::Review, String> {
+        Err("Native archive operations are unsupported by this device".into())
     }
 }
 
@@ -224,6 +239,15 @@ fn token(command: &Command) -> (u64, u64) {
             operation,
             ..
         } => (*generation, *operation),
+        Command::CaptureArchive {
+            generation,
+            operation,
+        }
+        | Command::ReviewArchive {
+            generation,
+            operation,
+            ..
+        } => (*generation, *operation),
     }
 }
 
@@ -281,6 +305,16 @@ fn failure(command: &Command, message: String, recovery: Recovery) -> Completion
             generation,
             operation,
             result: Err(ApplyFailure { message, recovery }),
+        },
+        Command::CaptureArchive { .. } => Completion::CaptureArchive {
+            generation,
+            operation,
+            result: Err(message),
+        },
+        Command::ReviewArchive { .. } => Completion::ReviewArchive {
+            generation,
+            operation,
+            result: Err(message),
         },
     }
 }
@@ -347,6 +381,16 @@ fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Co
             generation,
             operation,
             result: device.apply_setting(expected, edit, backup_dir),
+        },
+        Command::CaptureArchive { .. } => Completion::CaptureArchive {
+            generation,
+            operation,
+            result: device.capture_archive(),
+        },
+        Command::ReviewArchive { target, .. } => Completion::ReviewArchive {
+            generation,
+            operation,
+            result: device.review_archive(target),
         },
     }))
     .unwrap_or_else(|_| {

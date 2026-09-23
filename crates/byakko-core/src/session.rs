@@ -1,4 +1,5 @@
 //! One device lifecycle and command sequence; feature drafts remain deterministic.
+mod archive_ops;
 mod lighting_ops;
 mod macro_files;
 mod macro_ops;
@@ -66,6 +67,15 @@ pub enum Command {
         expected: crate::settings::Snapshot,
         edit: crate::settings::Edit,
     },
+    CaptureArchive {
+        generation: u64,
+        operation: u64,
+    },
+    ReviewArchive {
+        generation: u64,
+        operation: u64,
+        target: crate::archive::NativeArchive,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -121,6 +131,16 @@ pub enum Completion {
         generation: u64,
         operation: u64,
         result: Result<crate::settings::Snapshot, ApplyFailure>,
+    },
+    CaptureArchive {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::archive::NativeArchive, String>,
+    },
+    ReviewArchive {
+        generation: u64,
+        operation: u64,
+        result: Result<crate::archive::Review, String>,
     },
 }
 
@@ -198,6 +218,13 @@ pub enum Activity {
     ApplySetting {
         operation: u64,
     },
+    CaptureArchive {
+        operation: u64,
+    },
+    ReviewArchive {
+        operation: u64,
+        target: crate::archive::NativeArchive,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -218,6 +245,8 @@ pub struct Session {
     lighting: Option<crate::lighting::editor::Editor>,
     picture: Option<crate::picture::editor::Editor>,
     settings: Option<crate::settings::editor::Editor>,
+    archive_capabilities: Option<crate::archive::ArchiveCapabilities>,
+    archive_state: crate::archive::ArchiveState,
 }
 
 /// Compatibility name for consumers using only the keymap surface.
@@ -258,6 +287,8 @@ impl Session {
             lighting: None,
             picture: None,
             settings: None,
+            archive_capabilities: None,
+            archive_state: crate::archive::ArchiveState::Idle,
         })
     }
 
@@ -290,6 +321,7 @@ impl Session {
         self.invalidate_lighting();
         self.invalidate_picture();
         self.invalidate_settings();
+        self.invalidate_archive();
         Ok(self.generation)
     }
 
@@ -305,6 +337,7 @@ impl Session {
         self.invalidate_lighting();
         self.invalidate_picture();
         self.invalidate_settings();
+        self.invalidate_archive();
     }
 
     pub fn changes(&self) -> Vec<Change> {
@@ -387,6 +420,7 @@ impl Session {
         self.invalidate_lighting();
         self.invalidate_picture();
         self.invalidate_settings();
+        self.invalidate_archive();
         Ok(Command::Apply {
             generation: self.generation,
             operation,
@@ -440,6 +474,28 @@ impl Session {
     }
 
     pub fn accept(&mut self, completion: Completion) -> Acceptance {
+        if matches!(&completion, Completion::ReviewArchive { .. }) {
+            let Completion::ReviewArchive {
+                generation,
+                operation,
+                result,
+            } = completion
+            else {
+                unreachable!()
+            };
+            if generation != self.generation
+                || !matches!(&self.activity, Activity::ReviewArchive { operation: pending, .. } if *pending == operation)
+            {
+                return Acceptance::IgnoredStale;
+            }
+            let Activity::ReviewArchive { target, .. } =
+                std::mem::replace(&mut self.activity, Activity::Idle)
+            else {
+                unreachable!()
+            };
+            self.accept_archive_review(target, result);
+            return Acceptance::Accepted;
+        }
         let (generation, expected) = match &completion {
             Completion::Read {
                 generation,
@@ -545,6 +601,17 @@ impl Session {
                     operation: *operation,
                 },
             ),
+            Completion::CaptureArchive {
+                generation,
+                operation,
+                ..
+            } => (
+                *generation,
+                Activity::CaptureArchive {
+                    operation: *operation,
+                },
+            ),
+            Completion::ReviewArchive { .. } => unreachable!(),
         };
         if generation != self.generation || expected != self.activity {
             return Acceptance::IgnoredStale;
@@ -593,6 +660,8 @@ impl Session {
                 .as_mut()
                 .expect("pending settings capability")
                 .accept_apply(result),
+            Completion::CaptureArchive { result, .. } => self.accept_archive_capture(result),
+            Completion::ReviewArchive { .. } => unreachable!(),
         }
         Acceptance::Accepted
     }

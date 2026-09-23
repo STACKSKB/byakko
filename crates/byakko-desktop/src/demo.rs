@@ -257,11 +257,22 @@ pub fn device() -> Result<MemoryDevice, String> {
             ),
         ])),
     };
+    let archive_caps = byakko_core::archive::ArchiveCapabilities {
+        backend_id: "memory".into(),
+        format_id: "memory/native-v1".into(),
+        max_bytes: 4096,
+    };
+    let archive = byakko_core::archive::NativeArchive {
+        backend_id: "memory".into(),
+        format_id: "memory/native-v1".into(),
+        bytes: br#"{"kind":"memory-native","version":1}"#.to_vec(),
+    };
     MemoryDevice::new(descriptor, state)?
         .with_macros(capabilities, snapshots)?
         .with_lighting(lighting, initial)?
         .with_picture(picture, picture_snapshot)?
-        .with_settings(settings, settings_snapshot)
+        .with_settings(settings, settings_snapshot)?
+        .with_archive(archive_caps, archive)
 }
 
 fn lighting_capabilities() -> byakko_core::lighting::Capabilities {

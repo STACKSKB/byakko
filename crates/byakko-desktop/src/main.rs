@@ -3,7 +3,7 @@ mod demo;
 
 use byakko_core::session::Session;
 use byakko_devices::{
-    Executor,
+    Executor, KeymapDevice,
     nia87::{self, Nia87Adapter},
 };
 
@@ -17,7 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .with_macros(nia87::macro_adapter::capabilities())?
                     .with_lighting(nia87::lighting_adapter::capabilities())?
                     .with_picture(nia87::picture_adapter::capabilities())?
-                    .with_settings(nia87::settings_adapter::capabilities())?,
+                    .with_settings(nia87::settings_adapter::capabilities())?
+                    .with_archive(nia87::archive_adapter::capabilities())?,
                 Executor::spawn(Nia87Adapter, backups)?,
             )
         }
@@ -48,6 +49,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .settings_capabilities()
                             .expect("demo settings configured")
                             .clone(),
+                    )?
+                    .with_archive(
+                        device
+                            .archive_capabilities()
+                            .expect("demo archive configured"),
                     )?,
                 Executor::spawn(device, Default::default())?,
             )

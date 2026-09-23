@@ -60,13 +60,16 @@ research baseline, not the structure to port.
 ## Work sequence and evidence
 
 - The pure model, memory backend, Nia87 adapter, and Iced keymap, macro,
-  built-in global lighting, per-key picture and scalar settings workflows now exercise the
+  built-in global lighting, per-key picture, scalar settings and native archive
+  capture/review workflows now exercise the
   approved boundary. The Iced picture flow has only read-only USB baseline
   verification; keep live picture writes pending while physical acceptance is
   unavailable and the earlier recovery discrepancy is unresolved. RGB storage
   is separate from selecting the global picture effect. Settings stage one
   field per native transaction and have read-only USB verification in Iced.
-  Continue archives and discovery one capability at a time. Host-driven effects and
+  Continue typed archive recovery/apply and discovery one capability at a time.
+  Do not expose native archive apply in Iced until recovery outcomes are typed;
+  the earlier failed automatic recovery remains open. Host-driven effects and
   2.4 GHz remain later capabilities. Do not pursue UI polish or accessibility
   work before architecture review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed

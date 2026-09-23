@@ -100,6 +100,7 @@ impl Session {
         self.invalidate_lighting();
         self.invalidate_picture();
         self.invalidate_settings();
+        self.invalidate_archive();
         Ok(Command::ApplyMacro {
             generation: self.generation,
             operation,
