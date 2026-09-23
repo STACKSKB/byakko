@@ -2,11 +2,13 @@
 mod device;
 mod executor;
 
-pub use device::{Device, HostActivity, HostFrame, HostMode, KeymapDevice};
+pub use device::{Device, HostActivity, HostFrame, KeymapDevice};
 pub use executor::{
     Executor, HostEvent, HostFrameError, HostStopResult, HostSubmitError, HostTicket,
 };
 
+pub mod audio_bands;
+pub mod audio_sample;
 pub mod hid;
 pub mod macro_files;
 pub mod memory;

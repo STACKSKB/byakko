@@ -1,15 +1,15 @@
 //! Nia87 host-frame activity behind the portable device contract.
 use crate::{
-    HostActivity, HostFrame, HostMode,
+    HostActivity, HostFrame,
     nia87::{device, lighting as native, lighting_adapter},
 };
 use byakko_core::{
-    lighting::{self, Content, Snapshot},
+    lighting::{self, Content, HostMode, HostSource, Snapshot},
     session::{ApplyFailure, Recovery},
 };
 use std::path::Path;
 
-struct ScreenActivity {
+struct NiaHostActivity {
     session: device::HostLightingSession,
     expected: Snapshot,
     backup_dir: std::path::PathBuf,
@@ -41,8 +41,18 @@ pub(super) fn start(
     backup_dir: &Path,
 ) -> Result<Box<dyn HostActivity>, ApplyFailure> {
     let original = baseline(expected)?;
-    let setting = match mode {
-        HostMode::Screen => native::LightingSetting {
+    let setting = native_mode(&mode)?;
+    let session = access.start_host_lighting_detailed(&original, &setting, backup_dir)?;
+    Ok(Box::new(NiaHostActivity {
+        session,
+        expected: expected.clone(),
+        backup_dir: backup_dir.to_owned(),
+    }))
+}
+
+fn native_mode(mode: &HostMode) -> Result<native::LightingSetting, ApplyFailure> {
+    let setting = match (mode.id.as_str(), mode.source) {
+        ("screen-average", HostSource::ScreenAverage) => native::LightingSetting {
             effect_id: 21,
             value: None,
             speed: None,
@@ -50,21 +60,40 @@ pub(super) fn start(
             rgb: None,
             dazzle: false,
         },
+        ("music-follow-2" | "music-follow-3", HostSource::PlaybackAudio { bands: 32 }) => {
+            native::LightingSetting {
+                effect_id: if mode.id == "music-follow-2" { 22 } else { 20 },
+                value: Some(4),
+                speed: None,
+                option: Some(0),
+                rgb: Some([0, 255, 0]),
+                dazzle: false,
+            }
+        }
+        _ => {
+            return Err(ApplyFailure {
+                message: "Host lighting mode is unavailable on Nia87".into(),
+                recovery: Recovery::NotAttempted,
+            });
+        }
     };
-    let session = access.start_host_lighting_detailed(&original, &setting, backup_dir)?;
-    Ok(Box::new(ScreenActivity {
-        session,
-        expected: expected.clone(),
-        backup_dir: backup_dir.to_owned(),
-    }))
+    Ok(setting)
 }
 
-impl HostActivity for ScreenActivity {
+impl HostActivity for NiaHostActivity {
     fn send_frame(&mut self, frame: HostFrame) -> Result<(), String> {
         match frame {
             HostFrame::Rgb(rgb) => self
                 .session
                 .send_color(rgb)
+                .map_err(|error| error.to_string()),
+            HostFrame::Bands(bands) => self
+                .session
+                .send_music(
+                    bands
+                        .try_into()
+                        .map_err(|_| "Nia87 requires 32 audio bands")?,
+                )
                 .map_err(|error| error.to_string()),
         }
     }
@@ -121,6 +150,29 @@ mod tests {
         });
         assert_eq!(
             baseline(&forged).unwrap_err().recovery,
+            Recovery::NotAttempted
+        );
+    }
+
+    #[test]
+    fn advertised_music_modes_select_distinct_native_effects() {
+        let modes = lighting_adapter::capabilities().host_modes;
+        for (id, effect) in [("music-follow-2", 22), ("music-follow-3", 20)] {
+            let mode = modes.iter().find(|mode| mode.id == id).unwrap();
+            let setting = native_mode(mode).unwrap();
+            assert_eq!(setting.effect_id, effect);
+            assert_eq!(setting.value, Some(4));
+            assert_eq!(setting.option, Some(0));
+            assert_eq!(setting.rgb, Some([0, 255, 0]));
+            assert_eq!(native::write_report(&setting).unwrap()[1], effect);
+        }
+        let unsupported = HostMode {
+            id: "other-backend-mode".into(),
+            label: "Other".into(),
+            source: HostSource::PlaybackAudio { bands: 32 },
+        };
+        assert_eq!(
+            native_mode(&unsupported).unwrap_err().recovery,
             Recovery::NotAttempted
         );
     }

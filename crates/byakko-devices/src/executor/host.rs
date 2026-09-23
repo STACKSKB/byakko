@@ -1,6 +1,6 @@
-use crate::{Device, HostFrame, HostMode};
+use crate::{Device, HostFrame};
 use byakko_core::{
-    lighting,
+    lighting::{self, HostMode},
     session::{ApplyFailure, Recovery},
 };
 use std::{

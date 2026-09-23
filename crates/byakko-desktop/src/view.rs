@@ -281,7 +281,7 @@ pub(super) fn status(app: &Desktop) -> String {
         Activity::HostLighting { phase, .. } => {
             return match phase {
                 byakko_core::session::HostPhase::Starting => "Starting host lighting…".into(),
-                byakko_core::session::HostPhase::Streaming => "Streaming screen color…".into(),
+                byakko_core::session::HostPhase::Streaming => "Streaming host lighting…".into(),
                 byakko_core::session::HostPhase::Stopping => "Restoring saved lighting…".into(),
             };
         }
