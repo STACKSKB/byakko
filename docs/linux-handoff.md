@@ -38,8 +38,11 @@ captures and vendor fixtures under ignored paths are not in Git.
 
 - [ ] After installing the rule as described in `docs/linux-install.md`, verify
   that only the intended hidraw node gets the active-seat ACL. Run the desktop
-  as the normal user. Use `target/release/byakko-cli devices`, `read`,
-  `read-lighting`, `read-settings`, `read-colors`, and `read-macro slot-49` for
+  as the normal user. First run `target/release/byakko-cli devices`, then one
+  `target/release/byakko-cli read` and repeat that read to check stability.
+  If the first read fails, record its exact stderr and the ACL state before
+  changing transport code or trying a setter. Then use `read-lighting`,
+  `read-settings`, `read-colors`, and `read-macro slot-49` for
   initial read-only checks. Capture a new local archive with
   `target/release/byakko-cli capture-archive NEW_PATH.json` and repeat the read
   to establish stability. Compare the two saved files with
@@ -53,6 +56,15 @@ captures and vendor fixtures under ignored paths are not in Git.
   `apply-keymap`, `apply-settings`, `apply-lighting`, `apply-macro`, and
   `apply-colors` are explicit write commands
   and are not part of the initial unattended Linux smoke test.
+
+  The configuration collection has an unnumbered 64-byte Feature report.
+  Linux `HIDIOCSFEATURE` includes a leading zero report-number byte in the
+  65-byte request. For `HIDIOCGFEATURE`, the kernel returns an unnumbered
+  report's payload starting at byte zero; the Linux adapter prepends the
+  host-side zero before passing the 65-byte result to the shared decoder.
+  This matches the [kernel hidraw documentation](https://docs.kernel.org/hid/hidraw.html)
+  but is not yet a successful device I/O test. Do not change that mapping
+  merely because the ioctl returns 64 rather than 65 bytes.
 
 - [ ] Check Linux removal/reconnect, one-device selection, GUI page entry
   reads, and clean shutdown. Record whether X11 and Wayland behave differently.
