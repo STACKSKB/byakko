@@ -72,3 +72,20 @@ Clippy passed; Linux devices cross-check passed. Multi-monitor hardware, Iced
 interaction, physical streaming/restoration and Linux runtime remain pending.
 The retained official evidence establishes selected-display 1x1 downsampling,
 not an exact chosen-coordinate algorithm; point sampling is a Byakko option.
+
+## Persistent keyboard workspace (2026-09-23)
+
+The keyboard remains above all configuration pages. Lighting separates onboard
+effects from host modes, with a dedicated scrollable parameter pane and visible
+fixed-color presets/RGB controls. Host controls no longer push effect parameters
+offscreen. Per-key colors preview the staged RGB map on the same keyboard and
+explain that displaying stored colors requires an onboard per-key lighting effect.
+All scalar settings appear together with toggles and bounded sliders.
+
+Switching pages issues no device command. Connection refresh loads lighting,
+settings and colors once, followed by passive macro discovery. Explicit Refresh/
+Read controls remain for invalidated or failed snapshots. Writes still use the
+existing backend backup, pacing and readback; transaction duration is unchanged.
+The rebuilt Windows release was opened for user validation. Rendering and new
+physical acceptance are not inferred from headless tests. Native tests and
+Clippy passed; core WebAssembly and Linux devices cross-checks passed.

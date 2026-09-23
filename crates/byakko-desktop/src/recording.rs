@@ -71,6 +71,9 @@ impl Desktop {
                     .and_then(|policy| self.session.start_macro_recording(policy))
                     .err();
                 if self.notice.is_none() {
+                    if let Some(executor) = &self.executor {
+                        executor.cancel_macro_catalog();
+                    }
                     self.page = Page::Macros;
                 }
             }

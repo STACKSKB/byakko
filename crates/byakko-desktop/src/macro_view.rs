@@ -24,7 +24,10 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
     if editor.catalog().is_none() {
         let pending = editor.catalog_error();
         let message = pending.map_or_else(
-            || "Reading stored macros…".to_owned(),
+            || {
+                "Loading macros in the background. You can keep configuring the keyboard."
+                    .to_owned()
+            },
             |error| format!("Could not read the macro library: {error}"),
         );
         let body = column![

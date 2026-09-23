@@ -79,6 +79,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
             .spacing(app.ui.spacing.m),
         ),
     };
+    content = content.push(keys(app));
     content = content.push(match app.page {
         Page::Archive => super::archive::view(app),
         Page::Keys => keymap(app),
@@ -115,26 +116,34 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
         (ready && !dirty.is_empty()).then_some(Message::Apply),
         format!("{} staged", dirty.len()),
     );
-    let content = column![toolbar, text(status(app)), layers]
+    column![toolbar, text(status(app)), layers]
         .spacing(app.ui.spacing.m)
-        .push(panels::panel(&app.ui, "Physical keys", keys(app)))
-        .push(keymap_detail(app));
-    scrollable(content).height(Fill).into()
+        .push(keymap_detail(app))
+        .height(Fill)
+        .into()
 }
 
 fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
-    panels::split(
-        &app.ui,
-        || {
-            let mut controls =
-                column![text(selected_action(app)), search(app)].spacing(app.ui.spacing.s);
-            if let Some(shortcut) = shortcut::view(app) {
-                controls = controls.push(shortcut);
-            }
-            panels::panel(&app.ui, selected_label(app), controls.into())
-        },
-        || panels::panel(&app.ui, "Staged changes", staged_edits(app)),
-    )
+    let mut extra = column![text("Changes to save"), staged_edits(app)].spacing(app.ui.spacing.s);
+    if let Some(shortcut) = shortcut::view(app) {
+        extra = extra.push(shortcut);
+    }
+    row![
+        container(
+            column![
+                text(selected_label(app)),
+                text(selected_action(app)),
+                text("Choose an action below, then Apply to save it to the keyboard."),
+                search(app),
+            ]
+            .spacing(app.ui.spacing.s)
+        )
+        .width(iced::FillPortion(app.ui.panes.detail)),
+        container(scrollable(extra).height(Fill)).width(iced::FillPortion(app.ui.panes.sidebar)),
+    ]
+    .spacing(app.ui.spacing.m)
+    .height(Fill)
+    .into()
 }
 
 fn staged_edits(app: &Desktop) -> Element<'_, Message> {
@@ -177,6 +186,19 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
         .iter()
         .filter(|key| key.visible)
         .collect();
+    if app.page == Page::Picture {
+        let colors = app
+            .session
+            .picture()
+            .and_then(|editor| editor.draft())
+            .cloned()
+            .unwrap_or_default();
+        return physical_board::colored_view(&app.ui, keys, app.selected.clone(), colors, |key| {
+            Some(Message::Picture(super::picture::Message::Select(
+                key.id.clone(),
+            )))
+        });
+    }
     physical_board::view(&app.ui, keys, app.selected.clone(), |key| {
         Some(Message::SelectKey(key.id.clone()))
     })
@@ -235,7 +257,7 @@ fn search(app: &Desktop) -> Element<'_, Message> {
             .enumerate()
             .filter(|(_, choice)| choice.label.to_lowercase().contains(&query))
             .map(|(index, choice)| {
-                button(text(&choice.label))
+                button(text(format!("Assign {}", choice.label)))
                     .width(Fill)
                     .on_press_maybe(editable.then_some(Message::Stage(index)))
                     .into()
@@ -244,7 +266,7 @@ fn search(app: &Desktop) -> Element<'_, Message> {
     .spacing(app.ui.spacing.xs);
     column![
         text_input("Find an action…", &app.search).on_input(Message::Search),
-        scrollable(actions).height(Length::Fixed(app.ui.list_preview_height))
+        scrollable(actions).height(Fill)
     ]
     .spacing(app.ui.spacing.s)
     .height(Fill)

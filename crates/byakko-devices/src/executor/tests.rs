@@ -23,6 +23,195 @@ struct CatalogDevice {
     reads: Arc<AtomicUsize>,
 }
 
+struct GatedCatalogDevice {
+    entered: Sender<()>,
+    release: Receiver<()>,
+    slots_read: Arc<AtomicUsize>,
+}
+
+impl KeymapDevice for GatedCatalogDevice {
+    fn read(&mut self) -> Result<State, String> {
+        Ok(State {
+            revision: vec![1],
+            bindings: BTreeMap::new(),
+        })
+    }
+    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+        unreachable!()
+    }
+    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
+        if self.slots_read.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+        }
+        Ok(macros::Snapshot {
+            backend_id: "test".into(),
+            slot: slot.into(),
+            revision: vec![1],
+            content: macros::Content::Editable(macros::Program {
+                repeat_count: 1,
+                events: vec![],
+            }),
+        })
+    }
+}
+
+#[test]
+fn foreground_read_runs_between_catalog_slots() {
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let slots_read = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        GatedCatalogDevice {
+            entered: entered_tx,
+            release: release_rx,
+            slots_read: slots_read.clone(),
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    worker
+        .try_submit(Command::ReadMacroCatalog {
+            generation: 1,
+            operation: 1,
+            slots: vec!["first".into(), "second".into()],
+        })
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker
+        .try_submit(Command::ReadMacro {
+            generation: 1,
+            operation: 2,
+            slot: "selected".into(),
+        })
+        .unwrap();
+    release_tx.send(()).unwrap();
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion::ReadMacro {
+            generation: 1,
+            operation: 2,
+            result: Ok(_),
+            ..
+        }
+    ));
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion::ReadMacroCatalog {
+            generation: 1,
+            operation: 1,
+            result: Ok(_)
+        }
+    ));
+    assert_eq!(slots_read.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn keymap_refresh_cancels_unfinished_catalog() {
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let slots_read = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        GatedCatalogDevice {
+            entered: entered_tx,
+            release: release_rx,
+            slots_read: slots_read.clone(),
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    worker
+        .try_submit(Command::ReadMacroCatalog {
+            generation: 1,
+            operation: 1,
+            slots: vec!["first".into(), "second".into()],
+        })
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker
+        .try_submit(Command::Read {
+            generation: 1,
+            operation: 2,
+        })
+        .unwrap();
+    release_tx.send(()).unwrap();
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion::Read {
+            generation: 1,
+            operation: 2,
+            result: Ok(_)
+        }
+    ));
+    assert_eq!(slots_read.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        worker.completions.try_recv(),
+        Err(TryRecvError::Empty)
+    ));
+}
+
+#[test]
+fn explicit_cancel_stops_catalog_after_current_slot() {
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let slots_read = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        GatedCatalogDevice {
+            entered: entered_tx,
+            release: release_rx,
+            slots_read: slots_read.clone(),
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    worker
+        .try_submit(Command::ReadMacroCatalog {
+            generation: 1,
+            operation: 1,
+            slots: vec!["first".into(), "second".into()],
+        })
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker.cancel_macro_catalog();
+    worker
+        .try_submit(Command::ReadMacro {
+            generation: 1,
+            operation: 2,
+            slot: "selected".into(),
+        })
+        .unwrap();
+    release_tx.send(()).unwrap();
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion::ReadMacro {
+            generation: 1,
+            operation: 2,
+            result: Ok(_),
+            ..
+        }
+    ));
+    assert_eq!(slots_read.load(Ordering::SeqCst), 2);
+    assert!(matches!(
+        worker.completions.try_recv(),
+        Err(TryRecvError::Empty)
+    ));
+}
+
 impl KeymapDevice for CatalogDevice {
     fn read(&mut self) -> Result<State, String> {
         unreachable!()

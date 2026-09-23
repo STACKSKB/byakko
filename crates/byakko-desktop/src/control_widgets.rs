@@ -6,6 +6,53 @@ use iced::{
 };
 use std::ops::RangeInclusive;
 
+/// Shared visible RGB presets for lighting and individual keys.
+pub fn color_presets<Message: Clone + 'static>(
+    style: &UiStyle,
+    selected: [u8; 3],
+    on_change: Option<impl Fn([u8; 3]) -> Message>,
+) -> Element<'static, Message> {
+    let presets = [
+        ("Red", [255, 0, 0]),
+        ("Orange", [255, 128, 0]),
+        ("Yellow", [255, 255, 0]),
+        ("Green", [0, 255, 0]),
+        ("Blue", [0, 0, 255]),
+        ("Violet", [128, 0, 255]),
+        ("White", [255, 255, 255]),
+        ("Off", [0, 0, 0]),
+    ];
+    row(presets.into_iter().map(|(label, rgb)| {
+        let foreground = if u32::from(rgb[0]) * 299
+            + u32::from(rgb[1]) * 587
+            + u32::from(rgb[2]) * 114
+            > 128_000
+        {
+            iced::Color::BLACK
+        } else {
+            iced::Color::WHITE
+        };
+        button(text(if selected == rgb {
+            format!("● {label}")
+        } else {
+            label.into()
+        }))
+        .on_press_maybe(on_change.as_ref().map(|on_change| on_change(rgb)))
+        .style(move |theme, status| {
+            let mut appearance = button::secondary(theme, status);
+            appearance.background = Some(iced::Background::Color(iced::Color::from_rgb8(
+                rgb[0], rgb[1], rgb[2],
+            )));
+            appearance.text_color = foreground;
+            appearance
+        })
+        .into()
+    }))
+    .spacing(style.spacing.xs)
+    .wrap()
+    .into()
+}
+
 #[derive(Clone)]
 pub struct Choice<Message> {
     pub label: String,

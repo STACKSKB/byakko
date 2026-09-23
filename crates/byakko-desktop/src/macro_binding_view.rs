@@ -1,5 +1,5 @@
 //! Binding choices are advertised actions, not UI-generated firmware codes.
-use super::{Desktop, Message, Page, macro_editor::Message as Macro, panels};
+use super::{Desktop, Message, macro_editor::Message as Macro, panels};
 use byakko_core::{
     macros::{
         Edit,
@@ -30,7 +30,7 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
     let layer = descriptor.layers.iter().find(|layer| layer.id == app.layer);
     let target = match (key, layer) {
         (Some(key), Some(layer)) => format!("Bind to {} / {}", layer.label, key.label),
-        _ => "Choose a target on the Keys page".into(),
+        _ => "Select a key on the keyboard above".into(),
     };
     let ready = !app.busy()
         && *app.session.status() == Status::Ready
@@ -62,13 +62,11 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
     }))
     .spacing(app.ui.spacing.m);
     let mut content = column![
-        row![
-            text(target),
-            button("Choose key").on_press(Message::Page(Page::Keys)),
-        ]
-        .spacing(app.ui.spacing.m),
+        row![text(target),].spacing(app.ui.spacing.m),
         modes,
-        text("Binding stages a keymap change. Review and apply it on Keys.")
+        button("Apply key binding")
+            .on_press_maybe((ready && !app.session.changes().is_empty()).then_some(Message::Apply)),
+        text("Choose a playback mode to assign this macro to the selected key.")
             .size(app.ui.type_scale.body)
     ]
     .spacing(app.ui.spacing.s);

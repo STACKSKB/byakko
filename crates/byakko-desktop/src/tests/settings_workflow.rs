@@ -20,9 +20,11 @@ fn loaded() -> Desktop {
 }
 
 #[test]
-fn settings_page_reads_once_on_entry_and_after_pending_keymap() {
+fn settings_page_uses_explicit_read_and_keeps_verified_snapshot_across_navigation() {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Settings));
+    assert!(!app.busy());
+    send(&mut app, Settings::Read);
     assert!(matches!(
         app.session.activity(),
         byakko_core::session::Activity::ReadSettings { .. }
@@ -35,11 +37,6 @@ fn settings_page_reads_once_on_entry_and_after_pending_keymap() {
     let _ = app.update(Message::Page(Page::Keys));
     let _ = app.update(Message::Page(Page::Settings));
     assert!(!app.busy());
-
-    let mut app = ready();
-    let _ = app.update(Message::Read);
-    let _ = app.update(Message::Page(Page::Settings));
-    settle(&mut app);
     assert_eq!(
         app.session.settings().unwrap().status(),
         &SettingsStatus::Ready
@@ -50,8 +47,6 @@ fn settings_page_reads_once_on_entry_and_after_pending_keymap() {
 fn generic_settings_stage_one_field_and_save_through_executor() {
     let mut app = loaded();
     let original = app.session.settings().unwrap().draft().unwrap().clone();
-    send(&mut app, Settings::Select("repeat_delay".into()));
-    assert_eq!(app.settings_selected.as_deref(), Some("repeat_delay"));
     send(
         &mut app,
         Settings::Edit(Edit {

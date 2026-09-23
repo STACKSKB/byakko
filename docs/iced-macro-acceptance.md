@@ -103,3 +103,20 @@ when the Macros page first needs a catalog or after invalidation. Rendered inter
 physical playback, Linux runtime and power-cycle persistence remain unverified;
 the screenshot helper failure documented in `iced-keymap-acceptance.md` remains
 open. The earlier injected-failure recovery problem is also still open.
+
+## Passive library discovery (2026-09-23)
+
+The full catalog now scans in the background after the initial connection reads.
+It has a separate correlated ticket and does not make the session busy. The one
+device executor reads a single slot per step and services queued foreground
+commands before the next slot. Navigation and draft edits continue during a scan;
+the scan does not automatically select or read a macro when it completes.
+Writes, reconnect, host streaming and recording cancel stale scans. Recording
+cancels the worker scan after the current slot and polls only local input.
+
+Core tests cover independent catalog and foreground completions, draft retention
+and recording cancellation. Executor tests hold a slot read open to prove queued
+foreground reads run before the remaining slots and cancellation prevents the
+next slot. The 50-slot Nia87 scan still requires about 24 seconds of fixed read
+delays in total; this change removes the UI lockout, not that protocol cost.
+Physical background scan/foreground interaction acceptance is pending.

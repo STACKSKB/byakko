@@ -305,7 +305,17 @@ fn catalog_is_complete_and_read_only_across_dirty_draft() {
         unreachable!()
     };
     assert_eq!(slots, vec!["scene", "second", "third"]);
-    assert!(session.request_macro_read().is_err());
+    assert!(session.macro_catalog_scanning());
+    assert!(!session.busy());
+    let Command::ReadMacro {
+        generation: read_generation,
+        operation: read_operation,
+        slot,
+    } = session.request_macro_read().unwrap()
+    else {
+        unreachable!()
+    };
+    assert!(session.busy());
     assert!(session.macros().unwrap().catalog().is_none());
     let occupied = Snapshot {
         slot: "second".into(),
@@ -323,6 +333,15 @@ fn catalog_is_complete_and_read_only_across_dirty_draft() {
     };
     assert_eq!(session.accept(completion.clone()), Acceptance::Accepted);
     assert_eq!(session.accept(completion), Acceptance::IgnoredStale);
+    assert!(!session.macro_catalog_scanning());
+    assert!(session.busy());
+    session.accept(Completion::ReadMacro {
+        generation: read_generation,
+        operation: read_operation,
+        slot,
+        result: Ok(snapshot(1, 1)),
+    });
+    assert!(!session.busy());
     let editor = session.macros().unwrap();
     assert_eq!(editor.catalog().unwrap().len(), 3);
     assert_eq!(
@@ -379,6 +398,56 @@ fn catalog_rejects_incomplete_result_and_old_generation() {
         Acceptance::IgnoredStale
     );
     assert!(session.macros().unwrap().catalog().is_none());
+}
+
+#[test]
+fn keymap_refresh_invalidates_background_catalog_ticket() {
+    let mut session = ready();
+    let Command::ReadMacroCatalog {
+        generation,
+        operation,
+        ..
+    } = session.request_macro_catalog_read().unwrap()
+    else {
+        unreachable!()
+    };
+    assert!(session.macro_catalog_scanning());
+    let _ = session.request_read().unwrap();
+    assert!(!session.macro_catalog_scanning());
+    assert_eq!(
+        session.accept(Completion::ReadMacroCatalog {
+            generation,
+            operation,
+            result: Ok(vec![]),
+        }),
+        Acceptance::IgnoredStale
+    );
+}
+
+#[test]
+fn recording_invalidates_background_catalog_ticket() {
+    let mut session = ready();
+    let Command::ReadMacroCatalog {
+        generation,
+        operation,
+        ..
+    } = session.request_macro_catalog_read().unwrap()
+    else {
+        unreachable!()
+    };
+    session
+        .start_macro_recording(macros::recorder::DelayPolicy::Measured { terminal_ms: 50 })
+        .unwrap();
+    assert!(session.recording());
+    assert!(!session.macro_catalog_scanning());
+    assert_eq!(
+        session.accept(Completion::ReadMacroCatalog {
+            generation,
+            operation,
+            result: Ok(vec![]),
+        }),
+        Acceptance::IgnoredStale
+    );
 }
 
 #[test]

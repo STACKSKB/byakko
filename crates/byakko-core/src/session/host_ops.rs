@@ -124,6 +124,8 @@ impl Session {
             phase: HostPhase::Starting,
             expected: expected.clone(),
         };
+        // The executor yields to host streaming and drops an unfinished catalog scan.
+        self.macro_catalog_operation = None;
         Ok(HostStart {
             ticket,
             mode,

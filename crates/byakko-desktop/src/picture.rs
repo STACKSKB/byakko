@@ -1,13 +1,13 @@
 //! Per-key RGB controls over a device-neutral physical-key catalog.
 use super::{Desktop, Message as AppMessage};
-use crate::{control_widgets, panels, physical_board};
+use crate::{control_widgets, panels};
 use byakko_core::picture::{
     self, Content, Edit,
     editor::{Editor, Status},
 };
 use iced::{
     Element, Fill,
-    widget::{column, scrollable, text},
+    widget::{button, column, scrollable, text},
 };
 
 #[derive(Clone, Debug)]
@@ -32,6 +32,7 @@ impl Desktop {
                     .is_some_and(|editor| editor.capabilities().keys.contains(&key))
                 {
                     self.picture_selected = Some(key);
+                    self.selected = self.picture_selected.clone();
                 }
             }
             Message::Read => {
@@ -86,9 +87,6 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         .map_or(selected.clone(), |key| key.label.clone());
     let style = &app.ui;
     let selected_id = selected.clone();
-    let board = physical_board::view(style, physical, Some(selected_id.clone()), |key| {
-        (!app.busy()).then(|| AppMessage::Picture(Message::Select(key.id.clone())))
-    });
     let controls = column(picture::channels(color).into_iter().map(|channel| {
         let key = selected_id.clone();
         control_widgets::level(
@@ -106,18 +104,31 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         )
     }))
     .spacing(style.spacing.l);
+    let key = selected_id.clone();
+    let presets = control_widgets::color_presets(
+        style,
+        color,
+        editable.then_some(move |color| {
+            AppMessage::Picture(Message::Edit(Edit::Color {
+                key: key.clone(),
+                color,
+            }))
+        }),
+    );
     content = content
-        .push(panels::panel(style, "Physical keys", board))
         .push(panels::panel(
             style,
             title,
             column![
                 text(format!("#{:02X}{:02X}{:02X}", color[0], color[1], color[2])),
+                presets,
                 controls
             ]
             .spacing(style.spacing.m)
             .into(),
-        ));
+        ))
+        .push(text("Stored key colors are shown by the onboard per-key lighting effect. Choose that effect before editing colors."))
+        .push(button("Choose lighting effect").on_press(AppMessage::Page(super::Page::Lighting)));
     scrollable(content).height(Fill).into()
 }
 
