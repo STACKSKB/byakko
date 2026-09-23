@@ -29,10 +29,14 @@ pub(crate) struct HostInput {
 }
 
 impl HostInput {
-    fn spawn(mode: LightingHostMode) -> Result<Self, String> {
+    fn spawn(
+        mode: LightingHostMode,
+        capture: byakko_devices::screen_sample::ScreenCapture,
+    ) -> Result<Self, String> {
         let stream = match mode.source {
             HostSource::ScreenAverage => Sampler::Screen(
-                crate::screen_stream::ScreenStream::spawn().map_err(|error| error.to_string())?,
+                crate::screen_stream::ScreenStream::spawn(capture)
+                    .map_err(|error| error.to_string())?,
             ),
             HostSource::PlaybackAudio { bands: 32 } => Sampler::Audio(
                 crate::audio_stream::AudioStream::spawn().map_err(|error| error.to_string())?,
@@ -94,7 +98,7 @@ impl Desktop {
             self.notice = Some("Read verified lighting and save staged edits first".into());
             return;
         };
-        match HostInput::spawn(mode) {
+        match HostInput::spawn(mode, self.screen_capture.capture.clone()) {
             Ok(host) => self.host = Some(host),
             Err(error) => self.notice = Some(format!("Could not start host capture: {error}")),
         }

@@ -91,6 +91,7 @@ struct Desktop {
     clock: std::time::Instant,
     recording_options: recording::Options,
     host: Option<lighting::HostInput>,
+    screen_capture: lighting::screen::Controls,
     page: Page,
     macro_form: macro_form::Form,
     repeat_input: String,
@@ -131,6 +132,7 @@ pub fn run(
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         host: None,
+        screen_capture: Default::default(),
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),
@@ -611,7 +613,7 @@ impl Desktop {
         }
         match message {
             Message::Archive(message) => return self.update_archive(message),
-            Message::Lighting(message) => self.update_lighting(message),
+            Message::Lighting(message) => return self.update_lighting(message),
             Message::Picture(message) => self.update_picture(message),
             Message::Settings(message) => self.update_settings(message),
             Message::File(message) => return self.update_macro_files(message),
