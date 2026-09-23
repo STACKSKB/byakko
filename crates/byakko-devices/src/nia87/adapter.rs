@@ -33,6 +33,13 @@ pub fn key_id(slot: usize) -> String {
     format!("slot-{slot:03}")
 }
 
+fn preset_id(bytes: [u8; 4]) -> String {
+    format!(
+        "{BACKEND_ID}:{:02X}{:02X}{:02X}{:02X}",
+        bytes[0], bytes[1], bytes[2], bytes[3]
+    )
+}
+
 pub fn action_from_raw(raw: [u8; 4]) -> Action {
     if raw == [0; 4] {
         return Action::Disabled;
@@ -48,7 +55,7 @@ pub fn action_from_raw(raw: [u8; 4]) -> Action {
     }
     if let Some(preset) = actions::presets().iter().find(|p| p.bytes == raw) {
         return Action::Named {
-            id: preset.label.to_owned(),
+            id: preset_id(preset.bytes),
         };
     }
     if raw[0] == 0 && (224..=227).contains(&raw[1]) {
@@ -106,7 +113,7 @@ pub fn raw_from_action(action: &Action) -> Result<[u8; 4], String> {
         }
         Action::Named { id } => actions::presets()
             .iter()
-            .find(|preset| preset.label == id)
+            .find(|preset| preset_id(preset.bytes) == *id || preset.label == id)
             .map(|preset| preset.bytes)
             .ok_or_else(|| format!("Unknown Nia87 action: {id}")),
         Action::Opaque {
@@ -574,7 +581,7 @@ mod tests {
         assert_eq!(
             state.bindings["base"]["slot-009"],
             Action::Named {
-                id: "Play/Pause".into()
+                id: "nia87:0300CD00".into()
             }
         );
         assert_eq!(to_snapshot(&state).unwrap(), raw);
@@ -670,6 +677,31 @@ mod tests {
                 choice.label
             );
         }
+    }
+    #[test]
+    fn preset_identity_is_independent_of_its_display_label() {
+        let raw = [3, 0, 205, 0];
+        let named = action_from_raw(raw);
+        assert_eq!(
+            named,
+            Action::Named {
+                id: "nia87:0300CD00".into()
+            }
+        );
+        assert_eq!(raw_from_action(&named).unwrap(), raw);
+        assert_eq!(
+            raw_from_action(&Action::Named {
+                id: "Play/Pause".into()
+            })
+            .unwrap(),
+            raw
+        );
+        let choice = descriptor()
+            .actions
+            .into_iter()
+            .find(|choice| choice.label == "Play/Pause")
+            .unwrap();
+        assert_eq!(choice.action, named);
     }
     #[test]
     fn shortcut_choices_cover_editable_ordinary_keys_and_round_trip() {

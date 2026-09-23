@@ -48,6 +48,9 @@ come from the [USB-IF Keyboard/Keypad usage table](https://usb.org/sites/default
 they use the existing ordinary-key action encoding and round-trip in offline
 tests. This verifies the configurator choice and wire representation, not the
 keyboard's physical output for each usage.
+Named Nia87 presets now use a stable backend ID derived from their four-byte
+binding, while labels remain display data. The adapter still accepts the old
+English-label IDs on input for compatibility.
 
 ## Remaining acceptance
 
