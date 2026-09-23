@@ -88,13 +88,17 @@ research baseline, not the structure to port.
   discovery worker and an idle reconnect flow. Each desktop executor holds an
   immutable Nia87 HID target, including recovery opens; never fall back to an
   arbitrary unique match after a target check fails. Physical unplug/replug
-  and Linux runtime acceptance remain open. The retained host-lighting stream
-  now binds setup and restoration to one selected HID target; the Iced executor
-  still needs to own its lifecycle before controls are enabled. Host-driven
-  effects and 2.4 GHz remain later capabilities. Do not pursue UI polish or
-  accessibility work before architecture review checkpoints.
+  and Linux runtime acceptance remain open. Iced screen-average lighting now
+  has a pure session lifecycle, a bounded frame path through the selected
+  device executor, and a separate OS sampler. It advertises Start only from a
+  verified editable lighting baseline and requires verified restoration on
+  Stop/close. This is headless-verified only: physical Iced streaming, focus
+  loss, disconnect behavior and Linux capture/runtime acceptance remain open.
+  Music playback lighting and 2.4 GHz remain later capabilities. Do not pursue
+  UI polish or accessibility work before architecture review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
-  codecs selectively; do not move whole screen controllers into new packages.
+  codecs selectively; screen sampling is an OS effect separate from HID and
+  the root sampler module is a compatibility re-export.
 - Test invariants and failure boundaries: stale results, conflicts, rejected
   edits, unchanged drafts on failure, exact encoding and verified readback.
   Headless tests do not prove physical playback or Linux hardware behavior.

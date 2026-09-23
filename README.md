@@ -39,8 +39,11 @@ guarded one-setting transaction; its attached-device check is read-only.
 The local configurations page captures, exports a new native backup and
 reviews a chosen archive against a fresh device capture. A changed review can
 be applied with a durable backup, complete readback and typed recovery result;
-this Iced path has not had a live archive write. Host-driven lighting still
-needs migration. The following feature inventory and
+this Iced path has not had a live archive write. Iced screen-average lighting
+now streams through the same selected-device executor with a bounded frame
+queue and verified restore on Stop or close. Its lifecycle has headless tests,
+but this Iced path has not had a live stream; playback music remains in the
+retained research GUI. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and
 [current boundary](docs/backend-architecture.md). The
@@ -73,7 +76,7 @@ Validated on the attached Windows keyboard: `3151:4015`, configuration collectio
 
 The built-in Nia87 slot profile comes from our observed default map, independently checked against the supplied vendor fixture. It does not depend on current key assignments or require repeated layout setup. 2.4 GHz configuration is deferred until USB works and receiver capability is measured.
 
-The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a [focused keyboard/mouse-button macro recorder](docs/macro-recording.md). The shared Keys editor now uses a backend boundary with dynamic layouts, layers, typed actions, and lossless opaque bindings; macros, lighting, picture, settings, and archive panels remain Nia87-specific. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Four wireless sleep timers have native controls and passed complete write/readback/restoration tests. The backlight option has a native control; other option semantics remain limited to the verified subset. A captured official Fn media binding now passes native write/readback/restoration. USB access recovered after a replug; the pending test binding was restored, and Fn editing is enabled. Mixed edits to both layers of the same slot are now supported and verified by readback/restoration.
+The workbench has keyboard shortcuts for its five pages (Ctrl+1–5), local keymap import/export, and a [focused keyboard/mouse-button macro recorder](docs/macro-recording.md). The Iced pages use backend capabilities and portable state; the Nia87 report details remain in its device adapter. Debounce and automatic OS detection have native controls and passed reversible device readback tests. Four wireless sleep timers have native controls and passed complete write/readback/restoration tests. The backlight option has a native control; other option semantics remain limited to the verified subset. A captured official Fn media binding now passes native write/readback/restoration. USB access recovered after a replug; the pending test binding was restored, and Fn editing is enabled. Mixed edits to both layers of the same slot are now supported and verified by readback/restoration.
 
 Linux desktop permission setup is documented in [Linux installation](docs/linux-install.md). The native helper and narrow udev rule are included; their real Linux device behavior remains unverified.
 
