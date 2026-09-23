@@ -1,4 +1,5 @@
 //! Synchronous CLI adapter for the same owned session commands used by Iced.
+mod keymap;
 use byakko_core::{
     State,
     archive::{ArchiveState, NativeArchive, Review},
@@ -9,6 +10,7 @@ use byakko_core::{
     settings::{Snapshot as SettingsSnapshot, editor::Status as SettingsStatus},
 };
 use byakko_devices::Executor;
+pub use keymap::{apply_keymap, plan_keymap};
 use std::{
     sync::mpsc::TryRecvError,
     time::{Duration, Instant},
@@ -22,7 +24,7 @@ pub fn read_keymap(
     let generation = session.connect()?;
     executor.set_generation(generation);
     let command = session.request_read()?;
-    submit_and_wait(session, executor, command, timeout)?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
     match session.status() {
         Status::Ready => session
             .baseline()
@@ -53,7 +55,7 @@ pub fn read_macro(
         executor.set_generation(session.connect()?);
     }
     let command = session.request_macro_read()?;
-    submit_and_wait(session, executor, command, timeout)?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
     let editor = session.macros().ok_or("Device does not support macros")?;
     match editor.status() {
         MacroStatus::Ready => editor
@@ -73,7 +75,7 @@ pub fn read_colors(
         return Err("Read the keymap before reading colors".into());
     }
     let command = session.request_picture_read()?;
-    submit_and_wait(session, executor, command, timeout)?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
     let editor = session.picture().ok_or("No per-key color capability")?;
     match editor.status() {
         PictureStatus::Ready => editor
@@ -93,7 +95,7 @@ pub fn read_lighting(
         return Err("Read the keymap before reading lighting".into());
     }
     let command = session.request_lighting_read()?;
-    submit_and_wait(session, executor, command, timeout)?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
     let editor = session.lighting().ok_or("No lighting capability")?;
     match editor.status() {
         LightingStatus::Ready => editor
@@ -113,7 +115,7 @@ pub fn read_settings(
         return Err("Read the keymap before reading settings".into());
     }
     let command = session.request_settings_read()?;
-    submit_and_wait(session, executor, command, timeout)?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
     let editor = session.settings().ok_or("No settings capability")?;
     match editor.status() {
         SettingsStatus::Ready => editor
@@ -133,7 +135,7 @@ pub fn capture_archive(
         return Err("Read the keymap before capturing an archive".into());
     }
     let command = session.request_archive_capture()?;
-    submit_and_wait(session, executor, command, timeout)?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
     match session.archive() {
         Some(ArchiveState::Captured(snapshot)) => Ok(snapshot.clone()),
         Some(state) => Err(format!("Archive capture failed: {state:?}")),
@@ -151,7 +153,7 @@ pub fn review_archive(
         return Err("Read the keymap before reviewing an archive".into());
     }
     let command = session.request_archive_review(target)?;
-    submit_and_wait(session, executor, command, timeout)?;
+    submit_and_wait(session, executor, command, Some(timeout))?;
     match session.archive() {
         Some(ArchiveState::Ready(review)) => Ok(review.clone()),
         Some(state) => Err(format!("Archive review failed: {state:?}")),
@@ -159,17 +161,17 @@ pub fn review_archive(
     }
 }
 
-fn submit_and_wait(
+pub(crate) fn submit_and_wait(
     session: &mut Session,
     executor: &Executor,
     command: Command,
-    timeout: Duration,
+    timeout: Option<Duration>,
 ) -> Result<(), String> {
     if let Err(rejected) = executor.try_submit(command) {
         session.accept(*rejected);
         return Err(format!("Device request rejected: {:?}", session.status()));
     }
-    let deadline = Instant::now() + timeout;
+    let deadline = timeout.map(|limit| Instant::now() + limit);
     loop {
         match executor.try_receive() {
             Ok(completion) => {
@@ -179,8 +181,8 @@ fn submit_and_wait(
                 return Ok(());
             }
             Err(TryRecvError::Disconnected) => return Err("Device executor stopped".into()),
-            Err(TryRecvError::Empty) if Instant::now() >= deadline => {
-                return Err("Device read timed out; no configuration was written".into());
+            Err(TryRecvError::Empty) if deadline.is_some_and(|end| Instant::now() >= end) => {
+                return Err("Device operation timed out; its outcome is unknown".into());
             }
             Err(TryRecvError::Empty) => std::thread::sleep(Duration::from_millis(10)),
         }

@@ -287,7 +287,8 @@ pub fn to_snapshot(state: &State) -> Result<Snapshot, String> {
 }
 
 pub fn draft_snapshot(expected: &State, changes: &[Change]) -> Result<Snapshot, String> {
-    validate_changes(&descriptor(), changes)?;
+    let descriptor = descriptor();
+    validate_changes(&descriptor, changes)?;
     // Match the complete wire state represented by the revision. This also
     // accepts older clients whose named IDs were English display labels.
     let original = revision_snapshot(expected)?;
@@ -296,6 +297,27 @@ pub fn draft_snapshot(expected: &State, changes: &[Change]) -> Result<Snapshot, 
     }
     let mut draft = expected.clone();
     for change in changes {
+        match &change.action {
+            Action::Opaque { .. } => {
+                return Err("Opaque Nia87 bindings are archival and cannot be staged".into());
+            }
+            Action::Key(_)
+                if !descriptor
+                    .actions
+                    .iter()
+                    .any(|choice| choice.action == change.action) =>
+            {
+                return Err("Nia87 key usage is not in the advertised action catalog".into());
+            }
+            Action::Shortcut { key, .. }
+                if !descriptor.shortcuts.as_ref().is_some_and(|shortcuts| {
+                    shortcuts.keys.iter().any(|choice| choice.usage == *key)
+                }) =>
+            {
+                return Err("Nia87 shortcut key is not in the advertised action catalog".into());
+            }
+            _ => {}
+        }
         raw_from_action(&change.action)?;
         draft
             .bindings
@@ -624,6 +646,50 @@ mod tests {
                 }]
             )
             .is_err()
+        );
+    }
+    #[test]
+    fn rejects_new_opaque_and_unadvertised_actions_but_preserves_raw_baseline() {
+        let mut raw = snapshot();
+        raw.base[9] = [250, 0, 0, 0];
+        let state = from_snapshot(&raw).unwrap();
+        assert_eq!(to_snapshot(&state).unwrap(), raw);
+        for action in [
+            Action::Opaque {
+                backend_id: BACKEND_ID.into(),
+                data: vec![251, 0, 0, 0],
+                label: "Raw [FB, 00, 00, 00]".into(),
+            },
+            Action::Key(255),
+            Action::Shortcut {
+                modifiers: vec![224],
+                key: 222,
+            },
+        ] {
+            assert!(
+                draft_snapshot(
+                    &state,
+                    &[Change {
+                        layer: "base".into(),
+                        key: key_id(9),
+                        action,
+                    }]
+                )
+                .is_err()
+            );
+        }
+        assert_eq!(
+            draft_snapshot(
+                &state,
+                &[Change {
+                    layer: "base".into(),
+                    key: key_id(9),
+                    action: Action::Key(5),
+                }]
+            )
+            .unwrap()
+            .base[9],
+            [0, 0, 5, 0]
         );
     }
     #[test]
