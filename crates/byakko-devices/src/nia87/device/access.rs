@@ -151,6 +151,16 @@ impl Access {
         )
     }
 
+    pub fn start_host_lighting_detailed(
+        &self,
+        expected: &crate::nia87::lighting::Lighting,
+        setting: &crate::nia87::lighting::LightingSetting,
+        backup_dir: &std::path::Path,
+    ) -> std::result::Result<lighting::HostLightingSession, byakko_core::session::ApplyFailure>
+    {
+        detailed(self.start_host_lighting(expected, setting, backup_dir))
+    }
+
     pub fn apply_setting(
         &self,
         expected: &crate::nia87::settings::Settings,

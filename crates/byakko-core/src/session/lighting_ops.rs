@@ -83,6 +83,7 @@ mod tests {
     fn caps() -> Capabilities {
         Capabilities {
             backend_id: "memory".into(),
+            host_modes: vec![],
             effects: vec![Effect {
                 id: "pulse".into(),
                 label: "Pulse".into(),

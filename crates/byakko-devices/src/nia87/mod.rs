@@ -8,6 +8,7 @@ pub mod board;
 pub mod configuration;
 pub mod configuration_plan;
 pub mod device;
+mod host_adapter;
 pub mod host_lighting;
 pub mod layout;
 pub mod lighting;

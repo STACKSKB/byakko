@@ -1,5 +1,9 @@
 //! One bounded worker serializes commands against a connected device.
-use crate::Device;
+mod host;
+pub use host::{HostEvent, HostFrameError, HostStopResult, HostSubmitError, HostTicket};
+
+use crate::{Device, HostFrame, HostMode};
+use byakko_core::lighting;
 use byakko_core::session::{ApplyFailure, Command, Completion, Recovery};
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
@@ -11,47 +15,107 @@ use std::{
     },
 };
 
-/// Both queues are bounded. Closing the window must wait for an outstanding
-/// operation: dropping the executor cannot cancel a write already in progress.
+enum Request {
+    Finite(Command),
+    HostStart {
+        ticket: HostTicket,
+        mode: HostMode,
+        expected: lighting::Snapshot,
+    },
+}
+
+/// Commands, finite completions, and host frames use bounded queues. Closing
+/// the window must wait for restoration; dropping an executor requests Stop.
 pub struct Executor {
-    commands: SyncSender<Command>,
+    commands: SyncSender<Request>,
     pub(crate) completions: Receiver<Completion>,
+    frames: SyncSender<host::Frame>,
+    host_events: Receiver<HostEvent>,
+    host: Arc<host::Control>,
     generation: Arc<AtomicU64>,
 }
 
 impl Executor {
     pub fn spawn(mut device: impl Device, backup_dir: PathBuf) -> std::io::Result<Self> {
-        let (commands, requests) = mpsc::sync_channel::<Command>(1);
+        let (commands, requests) = mpsc::sync_channel::<Request>(1);
         let (responses, completions) = mpsc::sync_channel(1);
+        let (frames, incoming_frames) = mpsc::sync_channel(1);
+        // A Started event cannot block restoration if the caller stops polling.
+        let (host_responses, host_events) = mpsc::channel();
         let generation = Arc::new(AtomicU64::new(0));
         let active_generation = generation.clone();
+        let host = Arc::new(host::Control::new());
+        let active_host = host.clone();
         std::thread::Builder::new()
             .name("byakko-device".into())
             .spawn(move || {
                 let mut latest = None;
-                for command in requests {
-                    let token = token(&command);
-                    let completion = if token.0 == 0
-                        || token.0 != active_generation.load(Ordering::Acquire)
-                        || latest.is_some_and(|previous| token <= previous)
-                    {
-                        failure(
-                            &command,
-                            "Stale or duplicate device command".into(),
-                            Recovery::NotAttempted,
-                        )
-                    } else {
-                        latest = Some(token);
-                        execute(&mut device, &command, &backup_dir)
-                    };
-                    if responses.send(completion).is_err() {
-                        break;
+                for request in requests {
+                    match request {
+                        Request::Finite(command) => {
+                            let token = token(&command);
+                            let completion = if token.0 == 0
+                                || token.0 != active_generation.load(Ordering::Acquire)
+                                || latest.is_some_and(|previous| token <= previous)
+                            {
+                                failure(
+                                    &command,
+                                    "Stale or duplicate device command".into(),
+                                    Recovery::NotAttempted,
+                                )
+                            } else {
+                                latest = Some(token);
+                                execute(&mut device, &command, &backup_dir)
+                            };
+                            if responses.send(completion).is_err() {
+                                break;
+                            }
+                        }
+                        Request::HostStart {
+                            ticket,
+                            mode,
+                            expected,
+                        } => {
+                            if ticket.generation != active_generation.load(Ordering::Acquire)
+                                || latest.is_some_and(|previous| {
+                                    (ticket.generation, ticket.operation) <= previous
+                                })
+                            {
+                                active_host.clear();
+                                let _ = host_responses.send(HostEvent::StartFailed {
+                                    ticket,
+                                    failure: ApplyFailure {
+                                        message: "Stale or duplicate host activity".into(),
+                                        recovery: Recovery::NotAttempted,
+                                    },
+                                });
+                            } else {
+                                latest = Some((ticket.generation, ticket.operation));
+                                host::run(
+                                    &mut device,
+                                    mode,
+                                    &expected,
+                                    host::Run {
+                                        ticket,
+                                        backup_dir: &backup_dir,
+                                        generation: &active_generation,
+                                        control: &active_host,
+                                        frames: &incoming_frames,
+                                        events: &host_responses,
+                                    },
+                                );
+                            }
+                            active_host.clear();
+                        }
                     }
                 }
             })?;
         Ok(Self {
             commands,
             completions,
+            frames,
+            host_events,
+            host,
             generation,
         })
     }
@@ -65,13 +129,94 @@ impl Executor {
     /// Feed a rejected completion back into the core just like a worker result,
     /// so a full/closed queue cannot strand its pending operation.
     pub fn try_submit(&self, command: Command) -> Result<(), Box<Completion>> {
-        self.commands.try_send(command).map_err(|error| {
-            let (command, message) = match error {
-                TrySendError::Full(command) => (command, "Device command queue is full"),
-                TrySendError::Disconnected(command) => (command, "Device executor is closed"),
-            };
-            Box::new(failure(&command, message.into(), Recovery::NotAttempted))
-        })
+        let phase = self.host.phase.lock().unwrap();
+        if !matches!(*phase, host::Phase::Idle) {
+            return Err(Box::new(failure(
+                &command,
+                "Host lighting is active".into(),
+                Recovery::NotAttempted,
+            )));
+        }
+        self.commands
+            .try_send(Request::Finite(command))
+            .map_err(|error| {
+                let (command, message) = match error {
+                    TrySendError::Full(Request::Finite(command)) => {
+                        (command, "Device command queue is full")
+                    }
+                    TrySendError::Disconnected(Request::Finite(command)) => {
+                        (command, "Device executor is closed")
+                    }
+                    _ => unreachable!("only finite commands were submitted"),
+                };
+                Box::new(failure(&command, message.into(), Recovery::NotAttempted))
+            })
+    }
+
+    pub fn try_start_host(
+        &self,
+        ticket: HostTicket,
+        mode: HostMode,
+        expected: lighting::Snapshot,
+    ) -> Result<(), HostSubmitError> {
+        if ticket.generation == 0 || ticket.generation != self.generation.load(Ordering::Acquire) {
+            return Err(HostSubmitError::Stale);
+        }
+        let mut phase = self.host.phase.lock().unwrap();
+        if !matches!(*phase, host::Phase::Idle) {
+            return Err(HostSubmitError::Busy);
+        }
+        *phase = host::Phase::Starting(ticket);
+        if let Err(error) = self.commands.try_send(Request::HostStart {
+            ticket,
+            mode,
+            expected,
+        }) {
+            *phase = host::Phase::Idle;
+            return Err(match error {
+                TrySendError::Full(_) => HostSubmitError::QueueFull,
+                TrySendError::Disconnected(_) => HostSubmitError::Closed,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn try_send_host_frame(
+        &self,
+        ticket: HostTicket,
+        frame: HostFrame,
+    ) -> Result<(), HostFrameError> {
+        let phase = self.host.phase.lock().unwrap();
+        match *phase {
+            host::Phase::Streaming(active) if active == ticket => {}
+            host::Phase::Starting(active) if active == ticket => {
+                return Err(HostFrameError::NotReady);
+            }
+            host::Phase::StartStopping(active) | host::Phase::Stopping(active)
+                if active == ticket =>
+            {
+                return Err(HostFrameError::Stopping);
+            }
+            host::Phase::Idle => return Err(HostFrameError::NotActive),
+            _ => return Err(HostFrameError::WrongTicket),
+        }
+        self.frames
+            .try_send(host::Frame {
+                ticket,
+                value: frame,
+            })
+            .map_err(|error| match error {
+                TrySendError::Full(_) => HostFrameError::QueueFull,
+                TrySendError::Disconnected(_) => HostFrameError::Closed,
+            })
+    }
+
+    pub fn try_stop_host(&self, ticket: HostTicket) -> HostStopResult {
+        self.host.stop(ticket)
+    }
+
+    pub fn try_receive_host(&self) -> Result<HostEvent, TryRecvError> {
+        self.host_events.try_recv()
     }
 
     pub fn try_receive(&self) -> Result<Completion, TryRecvError> {
@@ -82,6 +227,19 @@ impl Executor {
 impl Drop for Executor {
     fn drop(&mut self) {
         self.generation.store(0, Ordering::Release);
+        if let Ok(phase) = self.host.phase.lock() {
+            let ticket = match *phase {
+                host::Phase::Starting(ticket)
+                | host::Phase::StartStopping(ticket)
+                | host::Phase::Streaming(ticket)
+                | host::Phase::Stopping(ticket) => Some(ticket),
+                host::Phase::Idle => None,
+            };
+            drop(phase);
+            if let Some(ticket) = ticket {
+                self.host.stop(ticket);
+            }
+        }
     }
 }
 
@@ -313,5 +471,8 @@ fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Co
     })
 }
 
+#[cfg(test)]
+#[path = "executor/host_tests.rs"]
+mod host_tests;
 #[cfg(test)]
 mod tests;

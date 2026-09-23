@@ -279,6 +279,7 @@ fn lighting_capabilities() -> byakko_core::lighting::Capabilities {
     use byakko_core::lighting::{Capabilities, Choice, ColorCapability, Effect};
     Capabilities {
         backend_id: "memory".into(),
+        host_modes: vec![],
         effects: vec![
             Effect {
                 id: "off".into(),

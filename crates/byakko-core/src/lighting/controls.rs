@@ -139,6 +139,7 @@ mod tests {
     fn caps() -> Capabilities {
         Capabilities {
             backend_id: "synthetic".into(),
+            host_modes: vec![],
             effects: vec![
                 Effect {
                     id: "static".into(),

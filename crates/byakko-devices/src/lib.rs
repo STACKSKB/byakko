@@ -2,8 +2,10 @@
 mod device;
 mod executor;
 
-pub use device::{Device, KeymapDevice};
-pub use executor::Executor;
+pub use device::{Device, HostActivity, HostFrame, HostMode, KeymapDevice};
+pub use executor::{
+    Executor, HostEvent, HostFrameError, HostStopResult, HostSubmitError, HostTicket,
+};
 
 pub mod hid;
 pub mod macro_files;
@@ -14,4 +16,5 @@ pub mod research_fault;
 #[cfg(feature = "research-tools")]
 pub mod research_trace;
 pub mod rongyuan;
+pub mod screen_sample;
 pub mod storage;

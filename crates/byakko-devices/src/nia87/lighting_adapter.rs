@@ -2,7 +2,8 @@
 use crate::nia87::{device, lighting as native};
 use byakko_core::{
     lighting::{
-        self, Capabilities, Choice, Color, ColorCapability, Content, Effect, Setting, Snapshot,
+        self, Capabilities, Choice, Color, ColorCapability, Content, Effect, HostMode, HostSource,
+        Setting, Snapshot,
     },
     session::{ApplyFailure, Recovery},
 };
@@ -37,6 +38,11 @@ pub fn capabilities() -> Capabilities {
                 },
             })
             .collect(),
+        host_modes: vec![HostMode {
+            id: "screen-average".into(),
+            label: "Screen average".into(),
+            source: HostSource::ScreenAverage,
+        }],
     }
 }
 

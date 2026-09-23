@@ -1,5 +1,6 @@
 //! One device lifecycle and command sequence; feature drafts remain deterministic.
 mod archive_ops;
+mod host_ops;
 mod lighting_ops;
 mod macro_files;
 mod macro_ops;
@@ -170,6 +171,26 @@ pub struct ApplyFailure {
     pub recovery: Recovery,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostTicket {
+    pub generation: u64,
+    pub operation: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostStart {
+    pub ticket: HostTicket,
+    pub mode: crate::lighting::HostMode,
+    pub expected: crate::lighting::Snapshot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum HostPhase {
+    Starting,
+    Streaming,
+    Stopping,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Problem {
     ReadRequired,
@@ -191,6 +212,11 @@ pub enum Status {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Activity {
     Idle,
+    HostLighting {
+        ticket: HostTicket,
+        phase: HostPhase,
+        expected: crate::lighting::Snapshot,
+    },
     MacroFile {
         ticket: FileTicket,
     },
