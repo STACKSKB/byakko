@@ -492,6 +492,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "byakko-cli"
+version = "0.1.0"
+dependencies = [
+ "byakko-core",
+ "byakko-devices",
+ "serde_json",
+]
+
+[[package]]
 name = "byakko-core"
 version = "0.1.0"
 dependencies = [

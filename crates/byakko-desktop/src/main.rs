@@ -22,12 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let data = byakko_devices::storage::user_data_dir()?;
             let backups = data.join("backups");
             (
-                Session::new(nia87::descriptor())?
-                    .with_macros(nia87::macro_adapter::capabilities())?
-                    .with_lighting(nia87::lighting_adapter::capabilities())?
-                    .with_picture(nia87::picture_adapter::capabilities())?
-                    .with_settings(nia87::settings_adapter::capabilities())?
-                    .with_archive(nia87::archive_adapter::capabilities())?,
+                nia87::application::session()?,
                 Box::new(|| match nia87::device::availability() {
                     nia87::device::Availability::Unavailable => Availability::Missing,
                     nia87::device::Availability::Available(candidate) => {
