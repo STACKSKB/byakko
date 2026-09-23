@@ -287,9 +287,10 @@ pub fn to_snapshot(state: &State) -> Result<Snapshot, String> {
 
 pub fn draft_snapshot(expected: &State, changes: &[Change]) -> Result<Snapshot, String> {
     validate_changes(&descriptor(), changes)?;
-    // Enforce that the purported expected bindings are the state represented by the revision.
+    // Match the complete wire state represented by the revision. This also
+    // accepts older clients whose named IDs were English display labels.
     let original = revision_snapshot(expected)?;
-    if from_snapshot(&original)?.bindings != expected.bindings {
+    if to_snapshot(expected)? != original {
         return Err("Nia87 state differs from its revision; reload before editing".into());
     }
     let mut draft = expected.clone();
@@ -702,6 +703,29 @@ mod tests {
             .find(|choice| choice.label == "Play/Pause")
             .unwrap();
         assert_eq!(choice.action, named);
+    }
+    #[test]
+    fn legacy_named_expected_state_still_passes_exact_revision_preflight() {
+        let mut state = from_snapshot(&snapshot()).unwrap();
+        state.bindings.get_mut("base").unwrap().insert(
+            key_id(9),
+            Action::Named {
+                id: "Play/Pause".into(),
+            },
+        );
+        let change = Change {
+            layer: "base".into(),
+            key: key_id(9),
+            action: Action::Disabled,
+        };
+        assert_eq!(draft_snapshot(&state, &[change]).unwrap().base[9], [0; 4]);
+
+        state
+            .bindings
+            .get_mut("base")
+            .unwrap()
+            .insert(key_id(9), Action::Named { id: "Mute".into() });
+        assert!(draft_snapshot(&state, &[]).is_err());
     }
     #[test]
     fn shortcut_choices_cover_editable_ordinary_keys_and_round_trip() {

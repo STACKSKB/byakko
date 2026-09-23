@@ -50,7 +50,10 @@ tests. This verifies the configurator choice and wire representation, not the
 keyboard's physical output for each usage.
 Named Nia87 presets now use a stable backend ID derived from their four-byte
 binding, while labels remain display data. The adapter still accepts the old
-English-label IDs on input for compatibility.
+English-label IDs on input for compatibility, and compares their complete
+encoded before-image with the revision before a write. A read-only run of the
+current CLI on 2026-09-23 decoded the attached board with the new IDs (for
+example `nia87:0A010000` and `nia87:03007000`) and sent no setters.
 
 ## Remaining acceptance
 
