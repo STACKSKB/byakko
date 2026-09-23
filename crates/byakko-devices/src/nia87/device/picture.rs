@@ -181,6 +181,9 @@ pub(super) fn apply_picture_with(
                 if read_picture_unlocked(selection)? != expected {
                     return Err("Picture restoration mismatch".into());
                 }
+                if let Some(expected) = expected_context {
+                    picture_context_matches(selection, expected)?;
+                }
                 Ok(())
             })();
             Err(picture_apply_error(&error, restore, &path).into())
