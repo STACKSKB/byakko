@@ -556,3 +556,20 @@ accepts physical CLI storage and recovery for this case, but does not test
 macro playback, timing, persistence after power cycle, or the Iced click path.
 The local before/proposal/restore files and complete archives are under ignored
 `Research/captures/macro-cli-*-20260923.json` paths.
+
+## CLI keymap write and full restoration (2026-09-23)
+
+The attached board's base `slot-009` was `Key(4)` (A). A fresh complete archive
+and keymap state were saved before the test. The independent CLI planned one
+change to `Key(5)` (B), applied it with its durable before-image and full
+readback, then a fresh keymap read confirmed the slot held B. A new revision
+was used to plan and apply only the reverse change to A. Both guarded writes
+completed verified readback. A complete archive after restoration compared
+with the before archive as `[]`: base/Fn keymaps, macros, lighting, colors and
+settings were unchanged. The ignored files are
+`Research/captures/keymap-cli-before-20260923.json`,
+`keymap-cli-state-before-20260923.json`,
+`keymap-cli-proposal-20260923.json`,
+`keymap-cli-restore-20260923.json`, and
+`keymap-cli-after-20260923.json`. No physical key output or power-cycle
+persistence was checked.
