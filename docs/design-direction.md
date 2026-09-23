@@ -14,7 +14,7 @@ The user requests an original interface informed by McMaster-Carr's information 
 
 ## Implementation boundaries
 
-Rust with native egui rendering; no JavaScript, Electron, embedded browser, or vendor helper in the product or its build. Research copies of the supplied official application remain outside distributable source. No vendor or Sharkfin artwork, layout assets, source components, or interaction flows are incorporated.
+Rust with native Iced rendering; no JavaScript, Electron, embedded browser, or vendor helper in the desktop product or its build. The retained egui application is a research baseline, not the product UI. Research copies of the supplied official application remain outside distributable source. No vendor or Sharkfin artwork, layout assets, source components, or interaction flows are incorporated.
 
 ## Review criteria
 
