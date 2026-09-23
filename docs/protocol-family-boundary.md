@@ -11,7 +11,10 @@ establish that every Rongyuan PCB accepts those writes.
 describe at least two command families, `yc500` and `gen2`. Several opcode
 numbers collide while their meaning or payload shape differs. In particular,
 a `yc500` matrix write opcode is a `gen2` options write opcode. The notes also
-describe boards within one family that lack the individual-key setter. This
+describe boards within one family that lack the individual-key setter. Their
+macro notes suggest a shared page shape with different family write opcodes;
+we keep our present codec scoped to the captured Nia87/`yc500` path until a
+second board can validate a wider interface. This
 document uses those findings to draw boundaries; implementation and test
 vectors must come from our own captures or independently constructed cases.
 No Sharkfin source or UX is incorporated.

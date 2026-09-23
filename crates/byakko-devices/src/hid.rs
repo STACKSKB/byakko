@@ -3,6 +3,8 @@
 
 use std::ffi::{CStr, CString};
 
+pub mod selection;
+
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[cfg(target_os = "windows")]
@@ -31,6 +33,17 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
+    pub fn identity(&self) -> selection::Identity {
+        selection::Identity {
+            path: self.path.to_string_lossy().into_owned(),
+            vendor_id: self.vid,
+            product_id: self.pid,
+            interface: self.interface,
+            usage_page: self.usage_page,
+            usage: self.usage,
+        }
+    }
+
     pub fn path(&self) -> &CStr {
         &self.path
     }

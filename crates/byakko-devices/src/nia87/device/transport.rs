@@ -1,5 +1,8 @@
 use super::Result;
-use crate::hid::{HidApi, HidDevice};
+use crate::hid::{
+    HidApi, HidDevice,
+    selection::{self, Identity},
+};
 use serde::{Deserialize, Serialize};
 
 // OS-held lock survives neither crashes nor process exit. The empty lock file
@@ -33,36 +36,35 @@ pub struct Candidate {
     pub product: Option<String>,
 }
 
+impl Candidate {
+    fn identity(&self) -> Identity {
+        Identity {
+            path: self.path.clone(),
+            vendor_id: self.vid,
+            product_id: self.pid,
+            interface: self.interface,
+            usage_page: self.usage_page,
+            usage: self.usage,
+        }
+    }
+}
+
 /// Stable collection identity selected by discovery. Display strings are
 /// deliberately excluded because they can be absent or vary by OS locale.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Target {
-    path: String,
-    vid: u16,
-    pid: u16,
-    interface: i32,
-    usage_page: u16,
-    usage: u16,
+    inner: selection::Target,
 }
 
 impl Target {
     pub fn from_candidate(
         candidate: &Candidate,
     ) -> std::result::Result<Self, TargetSelectionError> {
-        if candidate.vid != 0x3151
-            || !matches!(candidate.pid, 0x4011 | 0x4015)
-            || candidate.usage_page != 0xffff
-            || candidate.usage != 2
-        {
+        if !is_nia87_configuration_candidate(&candidate.identity()) {
             return Err(TargetSelectionError::Unsupported);
         }
         Ok(Self {
-            path: candidate.path.clone(),
-            vid: candidate.vid,
-            pid: candidate.pid,
-            interface: candidate.interface,
-            usage_page: candidate.usage_page,
-            usage: candidate.usage,
+            inner: selection::Target::from_identity(candidate.identity()),
         })
     }
 }
@@ -100,40 +102,41 @@ impl Target {
         &self,
         candidates: &[Candidate],
     ) -> std::result::Result<Candidate, TargetSelectionError> {
-        let [candidate] = candidates else {
-            return Err(if candidates.is_empty() {
-                TargetSelectionError::Missing
-            } else {
-                TargetSelectionError::Ambiguous(candidates.len())
-            });
-        };
-        if self.matches(candidate) {
-            Ok(candidate.clone())
-        } else {
-            Err(TargetSelectionError::Changed)
+        let identities = candidates
+            .iter()
+            .map(Candidate::identity)
+            .collect::<Vec<_>>();
+        self.inner
+            .select(&identities)
+            .map_err(TargetSelectionError::from)?;
+        candidates
+            .first()
+            .cloned()
+            .ok_or(TargetSelectionError::Missing)
+    }
+}
+
+impl From<selection::SelectionError> for TargetSelectionError {
+    fn from(error: selection::SelectionError) -> Self {
+        match error {
+            selection::SelectionError::Missing => Self::Missing,
+            selection::SelectionError::Ambiguous(count) => Self::Ambiguous(count),
+            selection::SelectionError::Changed => Self::Changed,
         }
     }
+}
 
-    fn matches(&self, candidate: &Candidate) -> bool {
-        self.path == candidate.path
-            && self.vid == candidate.vid
-            && self.pid == candidate.pid
-            && self.interface == candidate.interface
-            && self.usage_page == candidate.usage_page
-            && self.usage == candidate.usage
-    }
+fn is_nia87_configuration_candidate(identity: &Identity) -> bool {
+    identity.vendor_id == 0x3151
+        && matches!(identity.product_id, 0x4011 | 0x4015)
+        && identity.usage_page == 0xffff
+        && identity.usage == 2
 }
 
 /// Result of a read-only OS HID enumeration for the Nia87 configuration
 /// collection. Callers can decide how to present discovery without parsing
 /// diagnostics or inferring state from a candidate count.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum Availability {
-    Unavailable,
-    Available(Candidate),
-    Ambiguous(Vec<Candidate>),
-    EnumerationFailed(String),
-}
+pub type Availability = selection::Availability<Candidate>;
 
 /// Enumerate matching collections without opening a handle or sending reports.
 pub fn availability() -> Availability {
@@ -141,14 +144,7 @@ pub fn availability() -> Availability {
 }
 
 fn classify(result: Result<Vec<Candidate>>) -> Availability {
-    match result {
-        Ok(candidates) => match candidates.as_slice() {
-            [] => Availability::Unavailable,
-            [candidate] => Availability::Available(candidate.clone()),
-            _ => Availability::Ambiguous(candidates),
-        },
-        Err(error) => Availability::EnumerationFailed(error.to_string()),
-    }
+    selection::classify(result)
 }
 
 pub fn candidates() -> Result<Vec<Candidate>> {
@@ -158,12 +154,7 @@ pub fn candidates() -> Result<Vec<Candidate>> {
 
 fn matching_candidates(api: &HidApi) -> Vec<Candidate> {
     api.device_list()
-        .filter(|d| {
-            d.vendor_id() == 0x3151
-                && matches!(d.product_id(), 0x4011 | 0x4015)
-                && d.usage_page() == 0xffff
-                && d.usage() == 2
-        })
+        .filter(|d| is_nia87_configuration_candidate(&d.identity()))
         .map(|d| Candidate {
             path: d.path().to_string_lossy().into_owned(),
             vid: d.vendor_id(),
