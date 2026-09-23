@@ -149,11 +149,24 @@ pub fn draft(expected: &Snapshot, desired: &Setting) -> Result<native::LightingS
 }
 
 pub fn read() -> Result<Snapshot, String> {
-    let raw = device::read_lighting().map_err(|error| error.to_string())?;
+    read_with(&device::Access::unique())
+}
+
+pub(super) fn read_with(access: &device::Access) -> Result<Snapshot, String> {
+    let raw = access.read_lighting().map_err(|error| error.to_string())?;
     Ok(from_native(&raw))
 }
 
 pub fn apply(
+    expected: &Snapshot,
+    desired: &Setting,
+    backup: &Path,
+) -> Result<Snapshot, ApplyFailure> {
+    apply_with(&device::Access::unique(), expected, desired, backup)
+}
+
+pub(super) fn apply_with(
+    access: &device::Access,
     expected: &Snapshot,
     desired: &Setting,
     backup: &Path,
@@ -167,7 +180,7 @@ pub fn apply(
             message,
             recovery: Recovery::NotAttempted,
         })?;
-    let actual = device::apply_lighting_detailed(&expected_native, &native_setting, backup)?;
+    let actual = access.apply_lighting_detailed(&expected_native, &native_setting, backup)?;
     let snapshot = from_native(&actual);
     if snapshot.content != Content::Editable(desired.clone()) {
         return Err(ApplyFailure {

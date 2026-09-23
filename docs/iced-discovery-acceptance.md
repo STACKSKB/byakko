@@ -3,8 +3,10 @@
 The Nia87 composition root maps its read-only HID configuration-collection
 enumeration to a backend-neutral desktop availability state. The discovery
 worker has one outstanding scan and never opens a device or sends a feature
-report. At startup Iced scans, then reads a unique match through the existing
-serialized device executor. Idle scans notice removal and retry a read after
+report. At startup Iced scans, then attaches a serialized executor with an
+immutable native target for the unique match. Every later device open checks
+the selected path and HID collection metadata, including setter-handle reopens
+and archive recovery readback. Idle scans notice removal and retry a read after
 reconnection. Ambiguous matches and enumeration errors do not choose a device.
 
 The session preserves staged drafts on disconnect. On reconnection a complete
@@ -19,6 +21,7 @@ read-only enumeration on the attached Windows machine returned exactly one
 `3151:4015` configuration collection at interface 2 and usage `FFFF:0002`.
 It sent no HID reports. Physical unplug/replug, Linux runtime permissions,
 multiple-device identity and clean
-machine startup still need acceptance. Native write transactions currently
-re-enumerate rather than pinning a selected configuration path; candidate
-pinning is a remaining safety gate before treating hotplug as fully verified.
+machine startup still need acceptance. An OS path reused by another physically
+identical board cannot be distinguished by this HID metadata alone, so native
+writes still require complete expected-state checks. The new bound path has
+not had a live Iced write acceptance run.

@@ -14,7 +14,9 @@ cargo run -p byakko-desktop --release --locked -- --demo
 
 Normal startup discovers and reads the Nia87 automatically. Idle USB scans
 notice removal and retry reads after reconnection without choosing between
-multiple matching interfaces; scans send no HID reports. The demo uses an
+multiple matching interfaces; scans send no HID reports. Each accepted
+connection gets an executor bound to the selected HID collection, and later
+opens reject a different collection. The demo uses an
 in-memory, three-layer keyboard and performs no hardware or file writes. Both use the
 same portable session model and serialized executor. The Iced screen supports
 key/layer selection, action search, staged-change review, apply with readback,

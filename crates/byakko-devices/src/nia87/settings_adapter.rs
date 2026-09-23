@@ -157,9 +157,12 @@ fn checked_native(snapshot: &Snapshot) -> Result<native::Settings, String> {
 }
 
 pub fn read() -> Result<Snapshot, String> {
-    Ok(project(
-        &device::read_settings().map_err(|error| error.to_string())?,
-    ))
+    read_with(&device::Access::unique())
+}
+
+pub(super) fn read_with(access: &device::Access) -> Result<Snapshot, String> {
+    let settings = access.read_settings().map_err(|error| error.to_string())?;
+    Ok(project(&settings))
 }
 
 fn native_setting(expected: &native::Settings, edit: &Edit) -> Result<native::Setting, String> {
@@ -199,13 +202,22 @@ fn native_setting(expected: &native::Settings, edit: &Edit) -> Result<native::Se
 }
 
 pub fn apply(expected: &Snapshot, edit: &Edit, backup: &Path) -> Result<Snapshot, ApplyFailure> {
+    apply_with(&device::Access::unique(), expected, edit, backup)
+}
+
+pub(super) fn apply_with(
+    access: &device::Access,
+    expected: &Snapshot,
+    edit: &Edit,
+    backup: &Path,
+) -> Result<Snapshot, ApplyFailure> {
     let expected_native = checked_native(expected).map_err(not_attempted)?;
     if !matches!(expected.content, Content::Editable(_)) {
         return Err(not_attempted("Opaque Nia87 settings are read-only".into()));
     }
     settings::validate_value(&capabilities(), edit).map_err(not_attempted)?;
     let setting = native_setting(&expected_native, edit).map_err(not_attempted)?;
-    let actual = device::apply_setting_detailed(&expected_native, setting, backup)?;
+    let actual = access.apply_setting_detailed(&expected_native, setting, backup)?;
     let snapshot = project(&actual);
     if !matches!(&snapshot.content, Content::Editable(values) if values.get(&edit.id) == Some(&edit.value))
     {

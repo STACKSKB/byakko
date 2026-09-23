@@ -23,6 +23,12 @@ research baseline, not the structure to port.
 - Three boundaries: `core` owns domain values and deterministic transitions;
   `devices` executes effects and owns firmware/OS details; `desktop` renders
   state and emits messages. Core imports neither outer layer.
+- Within `devices`, put reusable observed Rongyuan wire/transaction behavior
+  in a protocol-family driver and Nia87 identity/layout/capabilities in a
+  declarative profile. Treat cross-board compatibility as unverified until a
+  second PCB supplies evidence. QMK/VIA is the next independent backend and
+  should reuse the portable contract, not emulate Rongyuan reports. Follow
+  `docs/protocol-family-boundary.md`; do not build a general report interpreter.
 - Implement in `crates/byakko-{core,devices,desktop}`. The legacy root package
   may depend on these packages; the new desktop must not depend on the legacy
   package. Nia87 implementations belong under `byakko-devices::nia87`, with
@@ -63,16 +69,18 @@ research baseline, not the structure to port.
   built-in global lighting, per-key picture, scalar settings and native archive
   capture/review/apply workflows now exercise the approved boundary. The Iced
   picture flow has only read-only USB baseline verification; keep live picture
-  writes pending while physical acceptance is
-  unavailable and the earlier recovery discrepancy is unresolved. RGB storage
+  writes pending while physical acceptance is unavailable and the earlier
+  recovery discrepancy is unresolved. RGB storage
   is separate from selecting the global picture effect. Settings stage one
   field per native transaction and have read-only USB verification in Iced.
   Native archive apply now has typed recovery outcomes and a reviewed Iced
   action, but has no live write acceptance in this slice; the earlier failed
   automatic recovery remains open. Iced now has a read-only, bounded USB
-  discovery worker and an idle reconnect flow; physical unplug/replug and Linux
-  runtime acceptance remain open. Host-driven effects and 2.4 GHz remain later
-  capabilities. Do not pursue UI polish or accessibility work before
+  discovery worker and an idle reconnect flow. Each desktop executor holds an
+  immutable Nia87 HID target, including recovery opens; never fall back to an
+  arbitrary unique match after a target check fails. Physical unplug/replug
+  and Linux runtime acceptance remain open. Host-driven effects and 2.4 GHz
+  remain later capabilities. Do not pursue UI polish or accessibility work before
   architecture review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; do not move whole screen controllers into new packages.

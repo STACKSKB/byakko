@@ -11,11 +11,28 @@ use serde::{Deserialize, Serialize};
 
 pub use configuration::{apply_configuration, apply_configuration_detailed, capture_configuration};
 pub use transport::{
-    Availability, Candidate, availability, candidates, descriptor, inspect, open_unique,
+    Availability, Candidate, Target, TargetSelectionError, availability, candidates, descriptor,
+    inspect, open_expected, open_unique,
 };
 use transport::{FeatureSetter, Session, read_payload, transaction_lock};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[derive(Clone, Copy)]
+pub(super) enum Selection<'a> {
+    Unique,
+    Expected(&'a Target),
+}
+
+impl Selection<'_> {
+    pub(super) fn open(self) -> Result<(Candidate, HidDevice)> {
+        match self {
+            Self::Unique => open_unique(),
+            Self::Expected(target) => open_expected(target),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Snapshot {
     pub format_version: u32,
@@ -23,6 +40,174 @@ pub struct Snapshot {
     pub profile: u8,
     pub base: Vec<[u8; 4]>,
     pub function: Vec<[u8; 4]>,
+}
+
+/// Immutable device-selection policy shared by adapters and feature reads.
+/// `Unique` preserves the legacy CLI discovery behavior; `Bound` never falls
+/// back from the selected HID collection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Access {
+    Unique,
+    Bound(Target),
+}
+
+impl Access {
+    pub fn unique() -> Self {
+        Self::Unique
+    }
+
+    pub fn bound(target: Target) -> Self {
+        Self::Bound(target)
+    }
+
+    fn selection(&self) -> Selection<'_> {
+        match self {
+            Self::Unique => Selection::Unique,
+            Self::Bound(target) => Selection::Expected(target),
+        }
+    }
+
+    pub fn snapshot(&self) -> Result<Snapshot> {
+        snapshot_with(self.selection())
+    }
+
+    pub fn read_macro(&self, slot: u8) -> Result<Vec<u8>> {
+        read_macro_with(self.selection(), slot)
+    }
+
+    pub fn read_picture(&self) -> Result<Vec<[u8; 3]>> {
+        read_picture_with(self.selection())
+    }
+
+    pub fn read_lighting(&self) -> Result<crate::nia87::lighting::Lighting> {
+        read_lighting_with(self.selection())
+    }
+
+    pub fn read_settings(&self) -> Result<crate::nia87::settings::Settings> {
+        read_settings_with(self.selection())
+    }
+
+    pub fn apply_keymaps(
+        &self,
+        expected: &Snapshot,
+        base: &[[u8; 4]],
+        function: &[[u8; 4]],
+        backup_dir: &std::path::Path,
+    ) -> Result<Snapshot> {
+        apply_keymaps_with(self.selection(), expected, base, function, backup_dir)
+    }
+
+    pub fn apply_keymaps_detailed(
+        &self,
+        expected: &Snapshot,
+        base: &[[u8; 4]],
+        function: &[[u8; 4]],
+        backup_dir: &std::path::Path,
+    ) -> std::result::Result<Snapshot, byakko_core::session::ApplyFailure> {
+        detailed(self.apply_keymaps(expected, base, function, backup_dir))
+    }
+
+    pub fn apply_macro(
+        &self,
+        slot: u8,
+        expected: &[u8],
+        new_macro: &crate::nia87::macros::Macro,
+        backup_dir: &std::path::Path,
+    ) -> Result<Vec<u8>> {
+        apply_macro_with(self.selection(), slot, expected, new_macro, backup_dir)
+    }
+
+    pub fn apply_macro_detailed(
+        &self,
+        slot: u8,
+        expected: &[u8],
+        new_macro: &crate::nia87::macros::Macro,
+        backup_dir: &std::path::Path,
+    ) -> std::result::Result<Vec<u8>, byakko_core::session::ApplyFailure> {
+        detailed(self.apply_macro(slot, expected, new_macro, backup_dir))
+    }
+
+    pub fn apply_picture(
+        &self,
+        expected: &[[u8; 3]],
+        desired: &[[u8; 3]],
+        backup_dir: &std::path::Path,
+    ) -> Result<Vec<[u8; 3]>> {
+        apply_picture_with(self.selection(), expected, desired, backup_dir)
+    }
+
+    pub fn apply_picture_detailed(
+        &self,
+        expected: &[[u8; 3]],
+        desired: &[[u8; 3]],
+        backup_dir: &std::path::Path,
+    ) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
+        detailed(self.apply_picture(expected, desired, backup_dir))
+    }
+
+    pub fn apply_lighting(
+        &self,
+        expected: &crate::nia87::lighting::Lighting,
+        setting: &crate::nia87::lighting::LightingSetting,
+        backup_dir: &std::path::Path,
+    ) -> Result<crate::nia87::lighting::Lighting> {
+        apply_lighting_with(self.selection(), expected, setting, backup_dir)
+    }
+
+    pub fn apply_lighting_detailed(
+        &self,
+        expected: &crate::nia87::lighting::Lighting,
+        setting: &crate::nia87::lighting::LightingSetting,
+        backup_dir: &std::path::Path,
+    ) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::session::ApplyFailure>
+    {
+        detailed(self.apply_lighting(expected, setting, backup_dir))
+    }
+
+    pub fn apply_setting(
+        &self,
+        expected: &crate::nia87::settings::Settings,
+        setting: crate::nia87::settings::Setting,
+        backup_dir: &std::path::Path,
+    ) -> Result<crate::nia87::settings::Settings> {
+        apply_setting_with(self.selection(), expected, setting, backup_dir)
+    }
+
+    pub fn apply_setting_detailed(
+        &self,
+        expected: &crate::nia87::settings::Settings,
+        setting: crate::nia87::settings::Setting,
+        backup_dir: &std::path::Path,
+    ) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::session::ApplyFailure>
+    {
+        detailed(self.apply_setting(expected, setting, backup_dir))
+    }
+
+    pub fn capture_configuration(
+        &self,
+        progress: impl FnMut(usize, usize),
+    ) -> Result<crate::nia87::configuration::Configuration> {
+        configuration::capture_selected(self.selection(), progress)
+    }
+
+    pub fn apply_configuration_detailed(
+        &self,
+        expected: &crate::nia87::configuration::Configuration,
+        target: &crate::nia87::configuration::Configuration,
+        backup_dir: &std::path::Path,
+        progress: impl FnMut(&str),
+    ) -> std::result::Result<
+        crate::nia87::configuration::Configuration,
+        byakko_core::session::ApplyFailure,
+    > {
+        configuration::apply_detailed_selected(
+            self.selection(),
+            expected,
+            target,
+            backup_dir,
+            progress,
+        )
+    }
 }
 
 fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>> {
@@ -45,12 +230,20 @@ fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>
 }
 
 pub fn snapshot() -> Result<Snapshot> {
-    let session = Session::open()?;
+    snapshot_with(Selection::Unique)
+}
+
+pub fn snapshot_for(target: &Target) -> Result<Snapshot> {
+    snapshot_with(Selection::Expected(target))
+}
+
+fn snapshot_with(selection: Selection<'_>) -> Result<Snapshot> {
+    let session = Session::open_for(selection)?;
     snapshot_on_device(session.device())
 }
 
-fn snapshot_unlocked() -> Result<Snapshot> {
-    let (_, device) = open_unique()?;
+fn snapshot_unlocked(selection: Selection<'_>) -> Result<Snapshot> {
+    let (_, device) = selection.open()?;
     snapshot_on_device(&device)
 }
 
@@ -78,12 +271,28 @@ fn snapshot_on_device(device: &HidDevice) -> Result<Snapshot> {
 /// This only sends GET commands (0x80 and 0x87). A matching opcode echo and
 /// identical replies are required before returning the raw-preserving decode.
 pub fn read_lighting() -> Result<crate::nia87::lighting::Lighting> {
-    let session = Session::open()?;
+    read_lighting_with(Selection::Unique)
+}
+
+pub fn read_lighting_for(target: &Target) -> Result<crate::nia87::lighting::Lighting> {
+    read_lighting_with(Selection::Expected(target))
+}
+
+fn read_lighting_with(selection: Selection<'_>) -> Result<crate::nia87::lighting::Lighting> {
+    let session = Session::open_for(selection)?;
     read_lighting_on_device(session.device())
 }
 
 pub fn read_settings() -> Result<crate::nia87::settings::Settings> {
-    let session = Session::open()?;
+    read_settings_with(Selection::Unique)
+}
+
+pub fn read_settings_for(target: &Target) -> Result<crate::nia87::settings::Settings> {
+    read_settings_with(Selection::Expected(target))
+}
+
+fn read_settings_with(selection: Selection<'_>) -> Result<crate::nia87::settings::Settings> {
+    let session = Session::open_for(selection)?;
     read_settings_on_device(session.device())
 }
 
@@ -128,7 +337,7 @@ impl HostLightingSession {
             return Err("Enable the backlight in Settings before starting host lighting".into());
         }
         // apply_lighting performs identity and expected-state checks before mutation.
-        let active = apply_lighting_unlocked(expected, desired, backups)?;
+        let active = apply_lighting_unlocked(Selection::Unique, expected, desired, backups)?;
         Ok(Self {
             session,
             saved: expected.clone(),
@@ -164,7 +373,8 @@ impl HostLightingSession {
             .recognized_setting()
             .ok_or("Unrecognized saved lighting")?;
         // Expected-state checks prevent overwriting settings changed externally.
-        let restored = apply_lighting_unlocked(&self.active, &setting, &self.backups)?;
+        let restored =
+            apply_lighting_unlocked(Selection::Unique, &self.active, &setting, &self.backups)?;
         self.finished = true;
         Ok(restored)
     }
@@ -216,6 +426,24 @@ pub fn apply_setting(
     setting: crate::nia87::settings::Setting,
     backup_dir: &std::path::Path,
 ) -> Result<crate::nia87::settings::Settings> {
+    apply_setting_with(Selection::Unique, expected, setting, backup_dir)
+}
+
+pub fn apply_setting_for(
+    target: &Target,
+    expected: &crate::nia87::settings::Settings,
+    setting: crate::nia87::settings::Setting,
+    backup_dir: &std::path::Path,
+) -> Result<crate::nia87::settings::Settings> {
+    apply_setting_with(Selection::Expected(target), expected, setting, backup_dir)
+}
+
+fn apply_setting_with(
+    selection: Selection<'_>,
+    expected: &crate::nia87::settings::Settings,
+    setting: crate::nia87::settings::Setting,
+    backup_dir: &std::path::Path,
+) -> Result<crate::nia87::settings::Settings> {
     use crate::nia87::settings::{SettingPlan, Settings};
     let _lock = transaction_lock()?;
     let SettingPlan {
@@ -223,7 +451,7 @@ pub fn apply_setting(
         report,
         restore_report,
     } = expected.plan_change(setting)?;
-    let (_, device) = open_unique()?;
+    let (_, device) = selection.open()?;
     let version = read_payload(&device, 0x80, 0, 0)?;
     let profile = read_payload(&device, 0x85, 0, 0)?;
     if version[0] != 0x80 || version[1..3] != [0, 1] || profile[0] != 0x85 || profile[1] != 0 {
@@ -288,6 +516,15 @@ pub fn apply_setting_detailed(
     detailed(apply_setting(expected, setting, backup_dir))
 }
 
+pub fn apply_setting_detailed_for(
+    target: &Target,
+    expected: &crate::nia87::settings::Settings,
+    setting: crate::nia87::settings::Setting,
+    backup_dir: &std::path::Path,
+) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::session::ApplyFailure> {
+    detailed(apply_setting_for(target, expected, setting, backup_dir))
+}
+
 fn read_lighting_on_device(device: &HidDevice) -> Result<crate::nia87::lighting::Lighting> {
     let mut first = None;
     for _ in 0..2 {
@@ -350,8 +587,26 @@ pub fn apply_lighting(
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
 ) -> Result<crate::nia87::lighting::Lighting> {
+    apply_lighting_with(Selection::Unique, expected, setting, backup_dir)
+}
+
+pub fn apply_lighting_for(
+    target: &Target,
+    expected: &crate::nia87::lighting::Lighting,
+    setting: &crate::nia87::lighting::LightingSetting,
+    backup_dir: &std::path::Path,
+) -> Result<crate::nia87::lighting::Lighting> {
+    apply_lighting_with(Selection::Expected(target), expected, setting, backup_dir)
+}
+
+fn apply_lighting_with(
+    selection: Selection<'_>,
+    expected: &crate::nia87::lighting::Lighting,
+    setting: &crate::nia87::lighting::LightingSetting,
+    backup_dir: &std::path::Path,
+) -> Result<crate::nia87::lighting::Lighting> {
     let _lock = transaction_lock()?;
-    apply_lighting_unlocked(expected, setting, backup_dir)
+    apply_lighting_unlocked(selection, expected, setting, backup_dir)
 }
 
 pub fn apply_lighting_detailed(
@@ -362,7 +617,17 @@ pub fn apply_lighting_detailed(
     detailed(apply_lighting(expected, setting, backup_dir))
 }
 
+pub fn apply_lighting_detailed_for(
+    target: &Target,
+    expected: &crate::nia87::lighting::Lighting,
+    setting: &crate::nia87::lighting::LightingSetting,
+    backup_dir: &std::path::Path,
+) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::session::ApplyFailure> {
+    detailed(apply_lighting_for(target, expected, setting, backup_dir))
+}
+
 fn apply_lighting_unlocked(
+    selection: Selection<'_>,
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
@@ -373,7 +638,7 @@ fn apply_lighting_unlocked(
         return Err("Lighting baseline is not a recognized Nia87 LED response".into());
     }
     let target = crate::nia87::lighting::write_report(setting)?;
-    let (_, device) = open_unique()?;
+    let (_, device) = selection.open()?;
     let version = read_payload(&device, 0x80, 0, 0)?;
     let profile = read_payload(&device, 0x85, 0, 0)?;
     if version[0] != 0x80 || profile[0] != 0x85 {
@@ -439,12 +704,20 @@ fn apply_lighting_unlocked(
 }
 
 pub fn read_macro(slot: u8) -> Result<Vec<u8>> {
-    let session = Session::open()?;
+    read_macro_with(Selection::Unique, slot)
+}
+
+pub fn read_macro_for(target: &Target, slot: u8) -> Result<Vec<u8>> {
+    read_macro_with(Selection::Expected(target), slot)
+}
+
+fn read_macro_with(selection: Selection<'_>, slot: u8) -> Result<Vec<u8>> {
+    let session = Session::open_for(selection)?;
     read_macro_on_device(session.device(), slot)
 }
 
-fn read_macro_unlocked(slot: u8) -> Result<Vec<u8>> {
-    let (_, device) = open_unique()?;
+fn read_macro_unlocked(selection: Selection<'_>, slot: u8) -> Result<Vec<u8>> {
+    let (_, device) = selection.open()?;
     read_macro_on_device(&device, slot)
 }
 
@@ -487,12 +760,20 @@ fn stable_macro_reads(mut read: impl FnMut() -> Result<Vec<u8>>) -> Result<Vec<u
 
 /// Read the current custom lighting picture as 128 matrix-indexed RGB values.
 pub fn read_picture() -> Result<Vec<[u8; 3]>> {
-    let session = Session::open()?;
+    read_picture_with(Selection::Unique)
+}
+
+pub fn read_picture_for(target: &Target) -> Result<Vec<[u8; 3]>> {
+    read_picture_with(Selection::Expected(target))
+}
+
+fn read_picture_with(selection: Selection<'_>) -> Result<Vec<[u8; 3]>> {
+    let session = Session::open_for(selection)?;
     read_picture_on_device(session.device())
 }
 
-fn read_picture_unlocked() -> Result<Vec<[u8; 3]>> {
-    let (_, device) = open_unique()?;
+fn read_picture_unlocked(selection: Selection<'_>) -> Result<Vec<[u8; 3]>> {
+    let (_, device) = selection.open()?;
     read_picture_on_device(&device)
 }
 
@@ -535,15 +816,33 @@ pub fn apply_picture(
     desired: &[[u8; 3]],
     backup_dir: &std::path::Path,
 ) -> Result<Vec<[u8; 3]>> {
+    apply_picture_with(Selection::Unique, expected, desired, backup_dir)
+}
+
+pub fn apply_picture_for(
+    target: &Target,
+    expected: &[[u8; 3]],
+    desired: &[[u8; 3]],
+    backup_dir: &std::path::Path,
+) -> Result<Vec<[u8; 3]>> {
+    apply_picture_with(Selection::Expected(target), expected, desired, backup_dir)
+}
+
+fn apply_picture_with(
+    selection: Selection<'_>,
+    expected: &[[u8; 3]],
+    desired: &[[u8; 3]],
+    backup_dir: &std::path::Path,
+) -> Result<Vec<[u8; 3]>> {
     let _lock = transaction_lock()?;
     if expected.len() != 128 || desired.len() != 128 || expected[126..] != desired[126..] {
         return Err("Invalid picture size or reserved-slot modification".into());
     }
-    let identity = snapshot_unlocked()?;
+    let identity = snapshot_unlocked(selection)?;
     if identity.firmware != 0x0100 || identity.profile != 0 {
         return Err("Unverified firmware/profile; no picture writes sent".into());
     }
-    if read_picture_unlocked()? != expected {
+    if read_picture_unlocked(selection)? != expected {
         return Err("Picture changed since load; no writes sent".into());
     }
     let changes: Vec<_> = (0..126).filter(|&i| expected[i] != desired[i]).collect();
@@ -564,7 +863,16 @@ pub fn apply_picture(
         &serde_json::json!({"format_version":1,"colors":expected}),
     )?;
     backup.sync_all()?;
-    let (_, device) = open_unique()?;
+    let (_, device) = selection.open()?;
+    let write_identity = snapshot_on_device(&device)?;
+    if write_identity != identity {
+        return Err(
+            "Keyboard identity or keymaps changed before picture write; no writes sent".into(),
+        );
+    }
+    if read_picture_on_device(&device)? != expected {
+        return Err("Picture changed before picture write; no writes sent".into());
+    }
     let write = |colors: &[[u8; 3]]| -> Result<()> {
         for &slot in &changes {
             let mut host = [0u8; 65];
@@ -580,7 +888,7 @@ pub fn apply_picture(
     };
     let result = (|| -> Result<Vec<[u8; 3]>> {
         write(desired)?;
-        let actual = read_picture_unlocked()?;
+        let actual = read_picture_unlocked(selection)?;
         if actual != desired {
             return Err("Picture readback mismatch".into());
         }
@@ -591,7 +899,7 @@ pub fn apply_picture(
         Err(error) => {
             let restore = (|| -> Result<()> {
                 write(expected)?;
-                if read_picture_unlocked()? != expected {
+                if read_picture_unlocked(selection)? != expected {
                     return Err("Picture restoration mismatch".into());
                 }
                 Ok(())
@@ -608,6 +916,15 @@ pub fn apply_picture_detailed(
     backup_dir: &std::path::Path,
 ) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
     detailed(apply_picture(expected, desired, backup_dir))
+}
+
+pub fn apply_picture_detailed_for(
+    target: &Target,
+    expected: &[[u8; 3]],
+    desired: &[[u8; 3]],
+    backup_dir: &std::path::Path,
+) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
+    detailed(apply_picture_for(target, expected, desired, backup_dir))
 }
 
 fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
@@ -631,7 +948,45 @@ pub fn apply_macro_detailed(
     detailed(apply_macro(slot, expected, new_macro, backup_dir))
 }
 
+pub fn apply_macro_detailed_for(
+    target: &Target,
+    slot: u8,
+    expected: &[u8],
+    new_macro: &crate::nia87::macros::Macro,
+    backup_dir: &std::path::Path,
+) -> std::result::Result<Vec<u8>, byakko_core::session::ApplyFailure> {
+    detailed(apply_macro_for(
+        target, slot, expected, new_macro, backup_dir,
+    ))
+}
+
 pub fn apply_macro(
+    slot: u8,
+    expected: &[u8],
+    new_macro: &crate::nia87::macros::Macro,
+    backup_dir: &std::path::Path,
+) -> Result<Vec<u8>> {
+    apply_macro_with(Selection::Unique, slot, expected, new_macro, backup_dir)
+}
+
+pub fn apply_macro_for(
+    target: &Target,
+    slot: u8,
+    expected: &[u8],
+    new_macro: &crate::nia87::macros::Macro,
+    backup_dir: &std::path::Path,
+) -> Result<Vec<u8>> {
+    apply_macro_with(
+        Selection::Expected(target),
+        slot,
+        expected,
+        new_macro,
+        backup_dir,
+    )
+}
+
+fn apply_macro_with(
+    selection: Selection<'_>,
     slot: u8,
     expected: &[u8],
     new_macro: &crate::nia87::macros::Macro,
@@ -640,7 +995,7 @@ pub fn apply_macro(
     let _lock = transaction_lock()?;
     let target = crate::nia87::macros::encode(new_macro)?;
     crate::nia87::macros::decode(expected)?; // Refuse to overwrite an unrecognized store we cannot restore.
-    if read_macro_unlocked(slot)? != expected {
+    if read_macro_unlocked(selection, slot)? != expected {
         return Err("Macro changed since load; reload before applying".into());
     }
     if target == expected {
@@ -660,7 +1015,7 @@ pub fn apply_macro(
         &serde_json::json!({"slot":slot,"bytes":expected}),
     )?;
     backup.sync_all()?;
-    let (_, device) = open_unique()?;
+    let (_, device) = selection.open()?;
     // The write handle may differ from the one used for the initial read.
     // Validate it before sending any macro reports, including restoration.
     let version = read_payload(&device, 0x80, 0, 0)?;
@@ -674,6 +1029,9 @@ pub fn apply_macro(
             "Write handle is not validated Nia87 firmware 0x0100/profile 0; no macro writes sent"
                 .into(),
         );
+    }
+    if read_macro_on_device(&device, slot)? != expected {
+        return Err("Macro changed before write; no macro writes sent".into());
     }
     let result = (|| -> Result<Vec<u8>> {
         write_macro_bytes(&device, slot, &target)?;
@@ -730,7 +1088,45 @@ pub fn apply_keymaps_detailed(
     detailed(apply_keymaps(expected, base, function, backup_dir))
 }
 
+pub fn apply_keymaps_detailed_for(
+    target: &Target,
+    expected: &Snapshot,
+    base: &[[u8; 4]],
+    function: &[[u8; 4]],
+    backup_dir: &std::path::Path,
+) -> std::result::Result<Snapshot, byakko_core::session::ApplyFailure> {
+    detailed(apply_keymaps_for(
+        target, expected, base, function, backup_dir,
+    ))
+}
+
 pub fn apply_keymaps(
+    expected: &Snapshot,
+    base: &[[u8; 4]],
+    function: &[[u8; 4]],
+    backup_dir: &std::path::Path,
+) -> Result<Snapshot> {
+    apply_keymaps_with(Selection::Unique, expected, base, function, backup_dir)
+}
+
+pub fn apply_keymaps_for(
+    target: &Target,
+    expected: &Snapshot,
+    base: &[[u8; 4]],
+    function: &[[u8; 4]],
+    backup_dir: &std::path::Path,
+) -> Result<Snapshot> {
+    apply_keymaps_with(
+        Selection::Expected(target),
+        expected,
+        base,
+        function,
+        backup_dir,
+    )
+}
+
+fn apply_keymaps_with(
+    selection: Selection<'_>,
     expected: &Snapshot,
     base: &[[u8; 4]],
     function: &[[u8; 4]],
@@ -748,7 +1144,7 @@ pub fn apply_keymaps(
         return Err("Cannot modify reserved padding slots".into());
     }
     let _lock = transaction_lock()?;
-    let current = snapshot_unlocked()?;
+    let current = snapshot_unlocked(selection)?;
     if &current != expected {
         return Err(
             "Keyboard changed since it was loaded. Reload before applying; no writes sent.".into(),
@@ -783,7 +1179,7 @@ pub fn apply_keymaps(
         .open(&path)?;
     serde_json::to_writer_pretty(&mut backup, &current)?;
     backup.sync_all()?;
-    let (_, device) = open_unique()?;
+    let (_, device) = selection.open()?;
     // The write handle is opened after the backup. Recheck its identity too,
     // so a reconnect cannot put these reports onto an unvalidated device.
     let version = read_payload(&device, 0x80, 0, 0)?;
@@ -796,6 +1192,9 @@ pub fn apply_keymaps(
         return Err(
             "Write handle is not validated Nia87 firmware 0x0100/profile 0; no writes sent".into(),
         );
+    }
+    if snapshot_on_device(&device)? != current {
+        return Err("Keyboard changed before keymap write; no writes sent".into());
     }
     let result = (|| -> Result<Snapshot> {
         // The official helper's captured final HID report for a Fn binding is
@@ -811,7 +1210,7 @@ pub fn apply_keymaps(
                 write_binding(&device, true, 0, slot, new)?;
             }
         }
-        let actual = snapshot_unlocked()?;
+        let actual = snapshot_unlocked(selection)?;
         if actual.base != base
             || actual.function != function
             || actual.firmware != current.firmware
@@ -842,7 +1241,7 @@ pub fn apply_keymaps(
                     (true, 0, function, current.function.as_slice()),
                     (false, current.profile, base, current.base.as_slice()),
                 ] {
-                    let observed = snapshot_unlocked().ok();
+                    let observed = snapshot_unlocked(selection).ok();
                     let observed_map = observed.as_ref().map(|snapshot| {
                         if is_fn {
                             snapshot.function.as_slice()
@@ -861,7 +1260,7 @@ pub fn apply_keymaps(
                         write_binding(&device, is_fn, profile, slot, original[slot])?;
                     }
                 }
-                if snapshot_unlocked()? != current {
+                if snapshot_unlocked(selection)? != current {
                     return Err("restored data could not be verified".into());
                 }
                 Ok(())

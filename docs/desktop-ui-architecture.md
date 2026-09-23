@@ -19,7 +19,9 @@ The composition root supplies a backend-specific read-only availability probe
 to Iced. A bounded worker performs HID enumeration and reports a backend-neutral
 missing, single-device, ambiguous or error state. The desktop owns scan timing,
 connection generation changes and user-facing status; core owns drafts and
-conflict detection. Device effects remain in the separate serialized executor.
+conflict detection. Each accepted connection creates a serialized executor
+with an immutable backend target. Its native opens check that same target,
+including readback and recovery, before accessing a HID collection.
 
 Device capability values stay outside widgets. For lighting, the pure
 `byakko_core::lighting::controls` projection turns a validated setting into

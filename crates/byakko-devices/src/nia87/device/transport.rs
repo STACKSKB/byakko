@@ -33,6 +33,97 @@ pub struct Candidate {
     pub product: Option<String>,
 }
 
+/// Stable collection identity selected by discovery. Display strings are
+/// deliberately excluded because they can be absent or vary by OS locale.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Target {
+    path: String,
+    vid: u16,
+    pid: u16,
+    interface: i32,
+    usage_page: u16,
+    usage: u16,
+}
+
+impl Target {
+    pub fn from_candidate(
+        candidate: &Candidate,
+    ) -> std::result::Result<Self, TargetSelectionError> {
+        if candidate.vid != 0x3151
+            || !matches!(candidate.pid, 0x4011 | 0x4015)
+            || candidate.usage_page != 0xffff
+            || candidate.usage != 2
+        {
+            return Err(TargetSelectionError::Unsupported);
+        }
+        Ok(Self {
+            path: candidate.path.clone(),
+            vid: candidate.vid,
+            pid: candidate.pid,
+            interface: candidate.interface,
+            usage_page: candidate.usage_page,
+            usage: candidate.usage,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TargetSelectionError {
+    Missing,
+    Ambiguous(usize),
+    Changed,
+    Unsupported,
+}
+
+impl std::fmt::Display for TargetSelectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing => f.write_str("The selected Nia87 collection is no longer present"),
+            Self::Ambiguous(count) => write!(
+                f,
+                "Expected one Nia87 configuration collection; found {count}"
+            ),
+            Self::Changed => {
+                f.write_str("The selected Nia87 collection identity changed; no device opened")
+            }
+            Self::Unsupported => {
+                f.write_str("The candidate is not a supported Nia87 configuration collection")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TargetSelectionError {}
+
+impl Target {
+    pub fn select(
+        &self,
+        candidates: &[Candidate],
+    ) -> std::result::Result<Candidate, TargetSelectionError> {
+        let [candidate] = candidates else {
+            return Err(if candidates.is_empty() {
+                TargetSelectionError::Missing
+            } else {
+                TargetSelectionError::Ambiguous(candidates.len())
+            });
+        };
+        if self.matches(candidate) {
+            Ok(candidate.clone())
+        } else {
+            Err(TargetSelectionError::Changed)
+        }
+    }
+
+    fn matches(&self, candidate: &Candidate) -> bool {
+        self.path == candidate.path
+            && self.vid == candidate.vid
+            && self.pid == candidate.pid
+            && self.interface == candidate.interface
+            && self.usage_page == candidate.usage_page
+            && self.usage == candidate.usage
+    }
+}
+
 /// Result of a read-only OS HID enumeration for the Nia87 configuration
 /// collection. Callers can decide how to present discovery without parsing
 /// diagnostics or inferring state from a candidate count.
@@ -62,8 +153,11 @@ fn classify(result: Result<Vec<Candidate>>) -> Availability {
 
 pub fn candidates() -> Result<Vec<Candidate>> {
     let api = HidApi::new()?;
-    Ok(api
-        .device_list()
+    Ok(matching_candidates(&api))
+}
+
+fn matching_candidates(api: &HidApi) -> Vec<Candidate> {
+    api.device_list()
         .filter(|d| {
             d.vendor_id() == 0x3151
                 && matches!(d.product_id(), 0x4011 | 0x4015)
@@ -80,7 +174,7 @@ pub fn candidates() -> Result<Vec<Candidate>> {
             manufacturer: d.manufacturer_string().map(str::to_owned),
             product: d.product_string().map(str::to_owned),
         })
-        .collect())
+        .collect()
 }
 
 pub fn open_unique() -> Result<(Candidate, HidDevice)> {
@@ -94,6 +188,17 @@ pub fn open_unique() -> Result<(Candidate, HidDevice)> {
     }
     let candidate = list.into_iter().next().unwrap();
     let api = HidApi::new()?;
+    let path = std::ffi::CString::new(candidate.path.as_str())?;
+    let device = api.open_path(&path)?;
+    Ok((candidate, device))
+}
+
+/// Re-enumerate once, require the selected collection identity to remain
+/// unique, then open that exact path through the same OS enumeration handle.
+pub fn open_expected(target: &Target) -> Result<(Candidate, HidDevice)> {
+    let api = HidApi::new()?;
+    let observed = matching_candidates(&api);
+    let candidate = target.select(&observed)?;
     let path = std::ffi::CString::new(candidate.path.as_str())?;
     let device = api.open_path(&path)?;
     Ok((candidate, device))
@@ -195,8 +300,12 @@ pub(super) struct Session {
 
 impl Session {
     pub(super) fn open() -> Result<Self> {
+        Self::open_for(super::Selection::Unique)
+    }
+
+    pub(super) fn open_for(selection: super::Selection<'_>) -> Result<Self> {
         let lock = transaction_lock()?;
-        let (_, device) = open_unique()?;
+        let (_, device) = selection.open()?;
         Ok(Self {
             device,
             _lock: lock,
@@ -210,7 +319,7 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::{Availability, Candidate, classify, lock_file};
+    use super::{Availability, Candidate, Target, TargetSelectionError, classify, lock_file};
 
     fn candidate(path: &str) -> Candidate {
         Candidate {
@@ -240,6 +349,52 @@ mod tests {
         assert_eq!(
             classify(Ok(vec![first.clone(), second.clone()])),
             Availability::Ambiguous(vec![first, second])
+        );
+    }
+
+    #[test]
+    fn target_selects_only_one_exact_collection_identity() {
+        let expected = candidate("nia87-a");
+        let target = Target::from_candidate(&expected).unwrap();
+        let same_path = candidate("nia87-a");
+        assert_eq!(
+            target.select(std::slice::from_ref(&same_path)),
+            Ok(same_path)
+        );
+        assert_eq!(target.select(&[]), Err(TargetSelectionError::Missing));
+
+        let other_path = candidate("nia87-b");
+        assert_eq!(
+            target.select(std::slice::from_ref(&other_path)),
+            Err(TargetSelectionError::Changed)
+        );
+        assert_eq!(
+            target.select(&[expected.clone(), other_path.clone()]),
+            Err(TargetSelectionError::Ambiguous(2))
+        );
+
+        let changed_metadata = expected;
+        let changes: [fn(&mut Candidate); 5] = [
+            |candidate: &mut Candidate| candidate.vid = 0,
+            |candidate: &mut Candidate| candidate.pid = 0,
+            |candidate: &mut Candidate| candidate.interface = 2,
+            |candidate: &mut Candidate| candidate.usage_page = 0,
+            |candidate: &mut Candidate| candidate.usage = 3,
+        ];
+        for change in changes {
+            let mut changed = changed_metadata.clone();
+            change(&mut changed);
+            assert_eq!(
+                target.select(std::slice::from_ref(&changed)),
+                Err(TargetSelectionError::Changed)
+            );
+        }
+
+        let mut unsupported = candidate("other");
+        unsupported.usage = 1;
+        assert_eq!(
+            Target::from_candidate(&unsupported),
+            Err(TargetSelectionError::Unsupported)
         );
     }
 

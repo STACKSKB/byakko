@@ -1,5 +1,8 @@
 //! Capture and preflight review for complete native Nia87 configuration archives.
-use super::configuration::{self, Configuration};
+use super::{
+    configuration::{self, Configuration},
+    device::Access,
+};
 use byakko_core::archive::{ArchiveCapabilities, NativeArchive, Review, SectionChange};
 use byakko_core::session::{ApplyFailure, Recovery};
 use std::path::Path;
@@ -34,15 +37,25 @@ fn decode(archive: &NativeArchive) -> Result<Configuration, String> {
 }
 
 pub fn capture() -> Result<NativeArchive, String> {
-    let config =
-        super::device::capture_configuration(|_, _| {}).map_err(|error| error.to_string())?;
+    capture_with(&Access::unique())
+}
+
+pub(super) fn capture_with(access: &Access) -> Result<NativeArchive, String> {
+    let config = access
+        .capture_configuration(|_, _| {})
+        .map_err(|error| error.to_string())?;
     encode(&config)
 }
 
 pub fn review(target: &NativeArchive) -> Result<Review, String> {
+    review_with(&Access::unique(), target)
+}
+
+pub(super) fn review_with(access: &Access, target: &NativeArchive) -> Result<Review, String> {
     let target_config = decode(target)?;
-    let before_config =
-        super::device::capture_configuration(|_, _| {}).map_err(|error| error.to_string())?;
+    let before_config = access
+        .capture_configuration(|_, _| {})
+        .map_err(|error| error.to_string())?;
     review_captured(&before_config, target, &target_config)
 }
 
@@ -51,9 +64,18 @@ pub fn apply(
     target: &NativeArchive,
     backup_dir: &Path,
 ) -> Result<NativeArchive, ApplyFailure> {
+    apply_with(&Access::unique(), expected, target, backup_dir)
+}
+
+pub(super) fn apply_with(
+    access: &Access,
+    expected: &NativeArchive,
+    target: &NativeArchive,
+    backup_dir: &Path,
+) -> Result<NativeArchive, ApplyFailure> {
     let expected_config = decode(expected).map_err(not_attempted)?;
     let target_config = decode(target).map_err(not_attempted)?;
-    let actual = super::device::apply_configuration_detailed(
+    let actual = access.apply_configuration_detailed(
         &expected_config,
         &target_config,
         backup_dir,

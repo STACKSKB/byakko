@@ -313,7 +313,6 @@ pub(super) fn status(app: &Desktop) -> String {
             "Draft retained · read manually before editing".into()
         }
         Status::Disconnected if app.presence.is_none() => "Looking for keyboard…".into(),
-        Status::Disconnected if !app.executor_live => "Device worker stopped · restart Byakko".into(),
         Status::Disconnected => "Keyboard found · reading…".into(),
         Status::Ready => "Readback verified · edits are staged until applied".into(),
         Status::Conflict { .. } => "Device changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
