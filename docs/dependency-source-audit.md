@@ -18,6 +18,29 @@ The independent `byakko-cli` graph also passes the same gate with
 `--package byakko-cli`: 13 Windows and 12 Linux third-party package/version
 entries. The checker excludes Byakko's own workspace crates from both counts.
 
+## Offline source-text inventory (2026-09-23)
+
+`tools/audit_release_sources.py --output NEW_PATH.json` joins the two locked,
+target-filtered native application graphs to the local Cargo source cache. It
+records the reviewed metadata choice, source registry, and SHA-256 of each
+top-level license/notice-like file. Output creation is exclusive. The ignored
+local result is `Research/captures/release-source-inventory-20260923.json`.
+
+The Windows/Linux desktop and CLI graphs contain 182 distinct third-party
+package/version entries in union. Of those, 171 have a top-level license or
+notice text in the extracted crate; 11 have none: `clipboard-win 5.4.1` and
+`iced_core`, `iced_debug`, `iced_futures`, `iced_graphics`, `iced_program`,
+`iced_renderer`, `iced_runtime`, `iced_tiny_skia`, `iced_widget`, and
+`iced_winit` at their locked 0.14.x versions. These missing files need
+authoritative source text before a notice bundle can be completed. A metadata
+license expression alone does not supply that text.
+
+This inventory does not choose which of a crate's alternate license files to
+ship, inspect nested attribution or bundled native libraries, or grant a
+license to Byakko itself. Preserve compound obligations such as Unicode-3.0
+when assembling release notices. The project owner's license choice and final
+release packaging remain open.
+
 The historical audit below describes the retained root research package,
 which has a different dependency graph. Do not use its counts or font notices
 as a desktop release inventory.
