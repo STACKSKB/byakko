@@ -37,8 +37,23 @@ mod tests {
         assert_eq!(decode(&data).unwrap(), program);
 
         let reports = write_reports(0, &data).unwrap();
-        assert_eq!(&reports[0][..4], &[0x16, 0, 0, 56]);
-        assert_eq!(&reports[0][8..14], &data[..6]);
+        // The 67-byte HID dump wraps this 64-byte report with a zero report
+        // number and two trailing transport bytes. Pin the complete payload,
+        // including the observed checksum and zero padding.
+        let mut observed = [0u8; 64];
+        observed[..14]
+            .copy_from_slice(&[0x16, 0, 0, 56, 1, 0, 0, 0xb0, 1, 0, 0xf0, 0x81, 0xf0, 0x32]);
+        let native = &reports[0];
+        let differing_offsets = observed
+            .iter()
+            .zip(native)
+            .enumerate()
+            .filter_map(|(offset, (observed, native))| (observed != native).then_some(offset))
+            .collect::<Vec<_>>();
+        // The official short write finishes on page 0. Our replacement keeps
+        // page 0 non-final so four later pages can clear stale macro bytes.
+        assert_eq!(differing_offsets, [4, 7]);
+        assert_eq!((native[4], native[7]), (0, 0xb1));
     }
 
     #[test]
