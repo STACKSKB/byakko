@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 mod draft;
 
+pub mod archive;
 pub mod lighting;
 pub mod macros;
 pub mod picture;

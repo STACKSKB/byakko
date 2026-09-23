@@ -20,6 +20,7 @@ use crate::nia87::{device::Snapshot, lighting::Lighting, settings::Settings};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+pub const ARCHIVE_FORMAT_ID: &str = "byakko-configuration-v1";
 const FORMAT: &str = "byakko-configuration";
 const VERSION: u32 = 1;
 const BOARD_ID: &str = "nia87";
@@ -30,7 +31,7 @@ const MACRO_SLOTS: usize = 50;
 const MACRO_LEN: usize = 256;
 const PICTURE_LEN: usize = 128;
 /// Bound allocation while allowing the complete pretty-printed raw archive.
-const MAX_FILE_BYTES: u64 = 256 * 1024;
+pub const MAX_ARCHIVE_BYTES: u32 = 256 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -113,7 +114,7 @@ pub fn encode(config: &Configuration) -> Result<Vec<u8>> {
         settings: config.settings.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&archive)?;
-    if bytes.len() as u64 > MAX_FILE_BYTES {
+    if bytes.len() > MAX_ARCHIVE_BYTES as usize {
         return Err("configuration archive is too large".into());
     }
     Ok(bytes)
@@ -121,7 +122,7 @@ pub fn encode(config: &Configuration) -> Result<Vec<u8>> {
 
 /// Decode a bounded archive without touching a keyboard.
 pub fn decode(bytes: &[u8]) -> Result<Configuration> {
-    if bytes.len() as u64 > MAX_FILE_BYTES {
+    if bytes.len() > MAX_ARCHIVE_BYTES as usize {
         return Err("configuration archive is too large".into());
     }
     let archive: Archive = serde_json::from_slice(bytes)?;
@@ -157,7 +158,9 @@ pub fn save_new(path: &Path, config: &Configuration) -> Result<()> {
 pub fn load(path: &Path) -> Result<Configuration> {
     let input = File::open(path)?;
     let mut bytes = Vec::new();
-    input.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
+    input
+        .take(u64::from(MAX_ARCHIVE_BYTES) + 1)
+        .read_to_end(&mut bytes)?;
     decode(&bytes)
 }
 
@@ -208,7 +211,7 @@ mod tests {
     fn rejects_wrong_identity_truncation_and_oversize() {
         let bytes = encode(&example()).unwrap();
         assert!(decode(&bytes[..bytes.len() / 2]).is_err());
-        assert!(decode(&vec![b' '; MAX_FILE_BYTES as usize + 1]).is_err());
+        assert!(decode(&vec![b' '; MAX_ARCHIVE_BYTES as usize + 1]).is_err());
         let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         value["board_id"] = "other".into();
         assert!(decode(&serde_json::to_vec(&value).unwrap()).is_err());
@@ -250,7 +253,7 @@ mod tests {
         config.keymaps.function.fill([255; 4]);
         config.picture.fill([255; 3]);
         let bytes = encode(&config).unwrap();
-        assert!(bytes.len() as u64 <= MAX_FILE_BYTES);
+        assert!(bytes.len() <= MAX_ARCHIVE_BYTES as usize);
         assert_eq!(decode(&bytes).unwrap(), config);
     }
 }

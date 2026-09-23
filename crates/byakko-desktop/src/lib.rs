@@ -1,4 +1,5 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
+mod archive;
 mod control_widgets;
 mod lighting;
 mod macro_binding_view;
@@ -25,6 +26,7 @@ use std::{sync::mpsc::TryRecvError, time::Duration};
 
 #[derive(Clone, Debug)]
 enum Message {
+    Archive(archive::Message),
     Lighting(lighting::Message),
     Picture(picture::Message),
     Settings(settings::Message),
@@ -47,6 +49,7 @@ enum Message {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Page {
+    Archive,
     Keys,
     Macros,
     Lighting,
@@ -63,6 +66,8 @@ enum Closing {
 
 struct Desktop {
     ui: panels::UiStyle,
+    archive_file: archive::FileState,
+    archive_path: String,
     picture_selected: Option<String>,
     settings_selected: Option<String>,
     macro_files: macro_files::Fields,
@@ -86,6 +91,8 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
         ui: panels::UiStyle::DEFAULT,
+        archive_file: archive::FileState::Idle,
+        archive_path: String::new(),
         picture_selected: None,
         settings_selected: None,
         macro_files: Default::default(),
@@ -122,7 +129,7 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
 
 impl Desktop {
     fn busy(&self) -> bool {
-        self.session.busy()
+        self.session.busy() || self.archive_file != archive::FileState::Idle
     }
 
     fn read(&mut self) {
@@ -179,6 +186,8 @@ impl Desktop {
                 | Activity::ApplyPicture { .. }
                 | Activity::ReadSettings { .. }
                 | Activity::ApplySetting { .. }
+                | Activity::CaptureArchive { .. }
+                | Activity::ReviewArchive { .. }
         ) {
             return Task::none();
         }
@@ -198,6 +207,10 @@ impl Desktop {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        let archive_result = matches!(
+            completion,
+            Completion::CaptureArchive { .. } | Completion::ReviewArchive { .. }
+        );
         let lighting_result = matches!(
             completion,
             Completion::ReadLighting { .. } | Completion::ApplyLighting { .. }
@@ -217,7 +230,15 @@ impl Desktop {
         if self.session.accept(completion) == Acceptance::IgnoredStale {
             return Task::none();
         }
-        let verified = if settings_result {
+        let verified = if archive_result {
+            self.session.archive().is_some_and(|state| {
+                matches!(
+                    state,
+                    byakko_core::archive::ArchiveState::Captured(_)
+                        | byakko_core::archive::ArchiveState::Ready(_)
+                )
+            })
+        } else if settings_result {
             self.session.settings().is_some_and(|editor| {
                 *editor.status() == byakko_core::settings::editor::Status::Ready
             })
@@ -278,6 +299,7 @@ impl Desktop {
             self.closing = Closing::Open;
         }
         match message {
+            Message::Archive(message) => return self.update_archive(message),
             Message::Lighting(message) => self.update_lighting(message),
             Message::Picture(message) => self.update_picture(message),
             Message::Settings(message) => self.update_settings(message),

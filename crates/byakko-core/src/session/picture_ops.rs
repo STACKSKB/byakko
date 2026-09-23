@@ -53,6 +53,7 @@ impl Session {
         self.invalidate_macros();
         self.invalidate_lighting();
         self.invalidate_settings();
+        self.invalidate_archive();
         Ok(Command::ApplyPicture {
             generation: self.generation,
             operation,

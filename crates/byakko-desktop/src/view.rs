@@ -50,6 +50,14 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
             Some(Message::Page(Page::Settings)),
         ));
     }
+    if app.session.archive().is_some() {
+        navigation = navigation.push(panels::selectable_button(
+            &app.ui,
+            "Local configurations",
+            app.page == Page::Archive,
+            Some(Message::Page(Page::Archive)),
+        ));
+    }
     let mut content = column![
         text(&app.session.descriptor().device_name).size(app.ui.type_scale.page_title),
         navigation
@@ -71,6 +79,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
         ),
     };
     content = content.push(match app.page {
+        Page::Archive => super::archive::view(app),
         Page::Keys => keymap(app),
         Page::Macros => super::macro_view::view(app),
         Page::Lighting => super::lighting::view(app),
@@ -273,7 +282,9 @@ pub(super) fn status(app: &Desktop) -> String {
         | Activity::ReadMacro { .. }
         | Activity::ReadLighting { .. }
         | Activity::ReadPicture { .. }
-        | Activity::ReadSettings { .. } => {
+        | Activity::ReadSettings { .. }
+        | Activity::CaptureArchive { .. }
+        | Activity::ReviewArchive { .. } => {
             return "Reading device…".into();
         }
         Activity::Apply { .. }

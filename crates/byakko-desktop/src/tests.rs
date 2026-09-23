@@ -5,6 +5,7 @@ use byakko_core::{
 };
 use byakko_devices::KeymapDevice;
 
+mod archive_workflow;
 #[path = "demo.rs"]
 mod demo;
 mod lighting_workflow;
@@ -24,6 +25,8 @@ fn ready() -> Desktop {
         .with_picture(device.picture_capabilities().unwrap().clone())
         .unwrap()
         .with_settings(device.settings_capabilities().unwrap().clone())
+        .unwrap()
+        .with_archive(device.archive_capabilities().unwrap())
         .unwrap();
     let generation = session.connect().unwrap();
     let Command::Read { operation, .. } = session.request_read().unwrap() else {
@@ -38,6 +41,8 @@ fn ready() -> Desktop {
     executor.set_generation(generation);
     Desktop {
         ui: panels::UiStyle::DEFAULT,
+        archive_file: archive::FileState::Idle,
+        archive_path: String::new(),
         picture_selected: None,
         settings_selected: None,
         macro_files: Default::default(),

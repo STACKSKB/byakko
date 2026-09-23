@@ -3,6 +3,7 @@ pub mod adapter;
 pub use adapter::*;
 
 pub mod actions;
+pub mod archive_adapter;
 pub mod board;
 pub mod configuration;
 pub mod configuration_plan;

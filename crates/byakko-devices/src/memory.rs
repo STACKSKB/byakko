@@ -2,7 +2,7 @@
 
 use crate::Device;
 use byakko_core::{
-    Change, Descriptor, State, lighting, macros, picture,
+    Change, Descriptor, State, archive, lighting, macros, picture,
     session::{ApplyFailure, Recovery},
     settings, validate_changes, validate_state,
 };
@@ -31,6 +31,7 @@ pub struct MemoryDevice {
     lighting: Option<StoredLighting>,
     picture: Option<StoredPicture>,
     settings: Option<StoredSettings>,
+    archive: Option<StoredArchive>,
 }
 
 struct StoredLighting {
@@ -54,6 +55,11 @@ struct StoredSettings {
     snapshot: settings::Snapshot,
 }
 
+struct StoredArchive {
+    capabilities: archive::ArchiveCapabilities,
+    snapshot: archive::NativeArchive,
+}
+
 impl MemoryDevice {
     pub fn new(descriptor: Descriptor, state: State) -> Result<Self, String> {
         validate_state(&descriptor, &state)?;
@@ -66,6 +72,7 @@ impl MemoryDevice {
             lighting: None,
             picture: None,
             settings: None,
+            archive: None,
         })
     }
 
@@ -198,9 +205,35 @@ impl MemoryDevice {
     pub fn settings_capabilities(&self) -> Option<&settings::Capabilities> {
         self.settings.as_ref().map(|stored| &stored.capabilities)
     }
+
+    pub fn with_archive(
+        mut self,
+        capabilities: archive::ArchiveCapabilities,
+        snapshot: archive::NativeArchive,
+    ) -> Result<Self, String> {
+        if self.archive.is_some() {
+            return Err("Memory device archive is already configured".into());
+        }
+        archive::validate_capabilities(&capabilities)?;
+        if capabilities.backend_id != self.descriptor.backend_id {
+            return Err("Archive capabilities belong to another backend".into());
+        }
+        archive::validate_archive(&capabilities, &snapshot)?;
+        self.archive = Some(StoredArchive {
+            capabilities,
+            snapshot,
+        });
+        Ok(self)
+    }
 }
 
 impl Device for MemoryDevice {
+    fn archive_capabilities(&self) -> Option<archive::ArchiveCapabilities> {
+        self.archive
+            .as_ref()
+            .map(|stored| stored.capabilities.clone())
+    }
+
     fn read(&mut self) -> Result<State, String> {
         Ok(self.state.clone())
     }
@@ -419,6 +452,38 @@ impl Device for MemoryDevice {
         stored.snapshot = next.clone();
         stored.revision_number = next_number;
         Ok(next)
+    }
+
+    fn capture_archive(&mut self) -> Result<archive::NativeArchive, String> {
+        self.archive
+            .as_ref()
+            .map(|stored| stored.snapshot.clone())
+            .ok_or_else(|| "Native archive operations are unsupported by this device".into())
+    }
+
+    fn review_archive(
+        &mut self,
+        target: &archive::NativeArchive,
+    ) -> Result<archive::Review, String> {
+        let stored = self
+            .archive
+            .as_ref()
+            .ok_or("Native archive operations are unsupported by this device")?;
+        archive::validate_archive(&stored.capabilities, target)?;
+        let changes = if target == &stored.snapshot {
+            Vec::new()
+        } else {
+            vec![archive::SectionChange {
+                id: "archive".into(),
+                label: "Native archive".into(),
+                count: None,
+            }]
+        };
+        Ok(archive::Review {
+            before: stored.snapshot.clone(),
+            target: target.clone(),
+            changes,
+        })
     }
 }
 
@@ -1063,6 +1128,70 @@ mod tests {
         assert_eq!(
             session.settings().unwrap().draft().unwrap()["enabled"],
             settings::Value::Toggle(true)
+        );
+    }
+
+    #[test]
+    fn archive_capture_and_review_use_the_serial_executor() {
+        use byakko_core::session::{Acceptance, Session};
+        use std::time::Duration;
+        let (descriptor, state) = fixture();
+        let caps = archive::ArchiveCapabilities {
+            backend_id: "memory".into(),
+            format_id: "memory-archive-v1".into(),
+            max_bytes: 128,
+        };
+        let before = archive::NativeArchive {
+            backend_id: "memory".into(),
+            format_id: "memory-archive-v1".into(),
+            bytes: vec![1, 2, 3],
+        };
+        let target = archive::NativeArchive {
+            bytes: vec![4, 5, 6],
+            ..before.clone()
+        };
+        let device = MemoryDevice::new(descriptor.clone(), state)
+            .unwrap()
+            .with_archive(caps.clone(), before.clone())
+            .unwrap();
+        assert_eq!(Device::archive_capabilities(&device), Some(caps.clone()));
+        let mut session = Session::new(descriptor)
+            .unwrap()
+            .with_archive(caps)
+            .unwrap();
+        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
+        worker.set_generation(session.connect().unwrap());
+        worker
+            .try_submit(session.request_archive_capture().unwrap())
+            .unwrap();
+        let completion = worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(session.accept(completion), Acceptance::Accepted);
+        assert_eq!(
+            session.archive(),
+            Some(&archive::ArchiveState::Captured(before.clone()))
+        );
+        worker
+            .try_submit(session.request_archive_review(target.clone()).unwrap())
+            .unwrap();
+        let completion = worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(session.accept(completion), Acceptance::Accepted);
+        assert_eq!(
+            session.archive(),
+            Some(&archive::ArchiveState::Ready(archive::Review {
+                before,
+                target,
+                changes: vec![archive::SectionChange {
+                    id: "archive".into(),
+                    label: "Native archive".into(),
+                    count: None
+                }],
+            }))
         );
     }
 }
