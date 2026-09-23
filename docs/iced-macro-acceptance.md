@@ -9,6 +9,10 @@ Implemented: select/read slot, inspect and replace events, append, reorder,
 remove, clear, edit stored repeat count, revert, explicit Save & verify, and
 stage a saved macro binding onto the selected key/layer, focused recording,
 and bounded local JSON import/export.
+Opening the Macros page now reads the currently selected slot once its keymap
+is ready when that slot is unloaded or invalidated. Revisiting a ready slot
+does not repeat the request; failed reads still need an explicit retry. The
+entry and pending-keymap behavior is covered by a memory-backend test.
 Action choices and ranges come from capabilities. Keyboard usages and pointer
 movement are numeric inputs in this pre-alpha; pointer buttons and backend
 actions use supplied labels. Wait is after the event. Zero waits remain
