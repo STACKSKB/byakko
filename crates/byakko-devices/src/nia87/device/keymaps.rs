@@ -113,6 +113,12 @@ pub(super) fn apply_keymaps_with(
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
         return Err("Cannot modify reserved padding slots".into());
     }
+    crate::nia87::keymap_policy::validate_changes(
+        &expected.base,
+        &expected.function,
+        base,
+        function,
+    )?;
     let _lock = transaction_lock()?;
     let current = snapshot_unlocked(selection)?;
     if &current != expected {

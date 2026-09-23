@@ -95,6 +95,10 @@ read-only-first device acceptance sequence there.
   repeat count of zero, but the observed counted-mode editor admits 1–65,535.
   Preserve raw zero snapshots; do not stage, save, or bind zero through the
   editor without new physical playback evidence.
+- Nia87 keymap forward writes target only the ordinary slots populated in its
+  observed default matrix, including two unlabeled ISO positions. Preserve the
+  special Fn slot and empty matrix entries verbatim in snapshots and archives;
+  leave recovery able to repair any slot affected by a failed write.
 
 ## Work sequence and evidence
 

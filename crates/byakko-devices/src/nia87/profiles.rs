@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::nia87::device::Snapshot;
+use crate::nia87::{device::Snapshot, keymap_policy};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -99,6 +99,12 @@ pub fn validate_for_device(imported: &Snapshot, current: &Snapshot) -> Result<()
     {
         return Err("Reserved keymap slots differ from the connected keyboard".into());
     }
+    keymap_policy::validate_changes(
+        &current.base,
+        &current.function,
+        &imported.base,
+        &imported.function,
+    )?;
     Ok(())
 }
 
@@ -181,5 +187,19 @@ mod tests {
         imported = current;
         imported.firmware = 0x0101;
         assert!(encode(&imported).is_err());
+    }
+
+    #[test]
+    fn imported_unmapped_slot_is_archival_but_cannot_be_staged_for_write() {
+        let current = snapshot();
+        let mut imported = current.clone();
+        imported.function[6][0] ^= 1;
+        assert_eq!(decode(&encode(&imported).unwrap()).unwrap(), imported);
+        assert!(
+            validate_for_device(&imported, &current)
+                .unwrap_err()
+                .to_string()
+                .contains("unmapped function keymap slot 6")
+        );
     }
 }

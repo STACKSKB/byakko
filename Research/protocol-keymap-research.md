@@ -21,7 +21,7 @@ The JavaScript transport around offsets 7,553,499–7,555,800 sends a 64-byte co
 
 ## Matrix slots and physical keys
 
-`Pft` assigns a 512-byte default matrix near offset 10,717,018 and uses it near 10,719,888. It contains 128 consecutive 4-byte slots. A normal default keyboard key has form `[0, 0, HID-usage, 0]`; zero slots are unused. There are 87 nonzero HID-usage slots plus one special Fn slot at index 59, `[10, 1, 0, 0]`. For example, Esc is slot 0 (`[0,0,41,0]`) and A is slot 9 (`[0,0,4,0]`). The last two slots, 126 and 127, are empty. The Nia87 visual layout is associated with `nF.layout` near offset 6,874,067; UI coordinates are separate from matrix order.
+`Pft` assigns a 512-byte default matrix near offset 10,717,018 and uses it near 10,719,888. It contains 128 consecutive 4-byte slots. A normal default keyboard key has form `[0, 0, HID-usage, 0]`; zero slots are unused. There are 88 nonzero HID-usage slots (including two unlabeled ISO positions) plus one special Fn slot at index 59, `[10, 1, 0, 0]`. For example, Esc is slot 0 (`[0,0,41,0]`) and A is slot 9 (`[0,0,4,0]`). The last two slots, 126 and 127, are empty. The Nia87 visual layout is associated with `nF.layout` near offset 6,874,067; UI coordinates are separate from matrix order.
 
 The matrix walks the board in six-position columns. These labels are a derived index to the vendor default and layout, not a copy of its four-byte array. A dash means the default slot is empty. The two HID usages marked “unlabeled” occur in the matrix but not in `nF.layout`; they should remain addressable by physical slot number.
 
@@ -46,6 +46,8 @@ The matrix walks the board in six-position columns. These labels are a derived i
 | 96–127 | All empty in the vendor default |
 
 The initial base map captured from the connected keyboard in `Research/captures/keymaps-initial.json` matches all 128 vendor default slots byte for byte. This supports using the mapping above as the board's physical slot identity even after a future remap changes the device's current bindings. The captured Fn map has 32 nonzero slots; both captured maps have zeroes in slots 126 and 127.
+
+Byakko offers normal keymap edits only for those 88 ordinary populated slots. The ANSI drawing exposes 86 of them; the two unlabeled ISO positions remain addressable by slot number. The special Fn slot and default-empty positions are retained verbatim in backups, but planned edits to them are rejected before device access. Recovery can still restore an unexpectedly changed raw slot.
 
 For a slot `i`, its raw 4-byte value is at matrix offsets `4i…4i+3`. Read page `floor(i/16)` contains it at response offsets `4(i mod 16)…+3`. The bundled lookup around offset 7,599,894 locates a key by its original HID usage, with an occurrence index for duplicate usages; special composite entries are matched as full four-byte values. The simple setter uses this physical slot index. A product implementation should preserve the four-byte entries and the two trailing zero slots when reading; the default matrix is evidence for locating physical slots, not a substitute for the device's current map.
 

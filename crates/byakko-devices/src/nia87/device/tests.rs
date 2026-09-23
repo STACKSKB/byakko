@@ -41,6 +41,31 @@ mod lighting_tests {
     }
 
     #[test]
+    fn unmapped_keymap_slot_is_rejected_before_device_access() {
+        let expected = super::Snapshot {
+            format_version: 1,
+            firmware: 0x100,
+            profile: 0,
+            base: vec![[0; 4]; 128],
+            function: vec![[0; 4]; 128],
+        };
+        let mut function = expected.function.clone();
+        function[6] = [0, 0, 4, 0];
+        let error = super::apply_keymaps(
+            &expected,
+            &expected.base,
+            &function,
+            std::path::Path::new("unused-backup-path"),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("unmapped function keymap slot 6")
+        );
+    }
+
+    #[test]
     fn reserved_picture_slots_are_rejected_before_device_access() {
         use byakko_core::session::Recovery;
         let expected = vec![[0; 3]; 128];

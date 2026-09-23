@@ -11,6 +11,7 @@ pub mod configuration_plan;
 pub mod device;
 mod host_adapter;
 pub mod host_lighting;
+mod keymap_policy;
 pub mod layout;
 pub mod lighting;
 pub mod lighting_adapter;
