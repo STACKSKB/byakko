@@ -1,7 +1,7 @@
 //! Synchronous CLI adapter for the same owned session commands used by Iced.
 use byakko_core::{
     State,
-    archive::{ArchiveState, NativeArchive},
+    archive::{ArchiveState, NativeArchive, Review},
     lighting::{Snapshot as LightingSnapshot, editor::Status as LightingStatus},
     macros::{Snapshot as MacroSnapshot, editor::Status as MacroStatus},
     picture::{Snapshot as PictureSnapshot, editor::Status as PictureStatus},
@@ -137,6 +137,24 @@ pub fn capture_archive(
     match session.archive() {
         Some(ArchiveState::Captured(snapshot)) => Ok(snapshot.clone()),
         Some(state) => Err(format!("Archive capture failed: {state:?}")),
+        None => Err("No native archive capability".into()),
+    }
+}
+
+pub fn review_archive(
+    session: &mut Session,
+    executor: &Executor,
+    target: NativeArchive,
+    timeout: Duration,
+) -> Result<Review, String> {
+    if *session.status() != Status::Ready {
+        return Err("Read the keymap before reviewing an archive".into());
+    }
+    let command = session.request_archive_review(target)?;
+    submit_and_wait(session, executor, command, timeout)?;
+    match session.archive() {
+        Some(ArchiveState::Ready(review)) => Ok(review.clone()),
+        Some(state) => Err(format!("Archive review failed: {state:?}")),
         None => Err("No native archive capability".into()),
     }
 }
@@ -308,6 +326,22 @@ mod tests {
             capture_archive(&mut session, &executor, Duration::from_secs(1)).unwrap(),
             archive
         );
+        assert!(
+            review_archive(
+                &mut session,
+                &executor,
+                archive.clone(),
+                Duration::from_secs(1)
+            )
+            .unwrap()
+            .changes
+            .is_empty()
+        );
+        let mut changed = archive;
+        changed.bytes[1] = 3;
+        let review =
+            review_archive(&mut session, &executor, changed, Duration::from_secs(1)).unwrap();
+        assert_eq!(review.changes[0].id, "archive");
     }
 
     #[test]
