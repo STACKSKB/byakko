@@ -52,8 +52,8 @@ impl Access {
         macros::read_macros_with(self.selection(), slots)
     }
 
-    pub fn read_picture(&self) -> Result<Vec<[u8; 3]>> {
-        picture::read_picture_with(self.selection())
+    pub fn read_picture_with_context(&self) -> Result<(Vec<[u8; 3]>, [u8; 2])> {
+        picture::read_picture_with_context(self.selection())
     }
 
     pub fn read_lighting(&self) -> Result<crate::nia87::lighting::Lighting> {
@@ -104,22 +104,20 @@ impl Access {
         detailed(self.apply_macro(slot, expected, new_macro, backup_dir))
     }
 
-    pub fn apply_picture(
-        &self,
-        expected: &[[u8; 3]],
-        desired: &[[u8; 3]],
-        backup_dir: &std::path::Path,
-    ) -> Result<Vec<[u8; 3]>> {
-        picture::apply_picture_with(self.selection(), expected, desired, backup_dir)
-    }
-
     pub fn apply_picture_detailed(
         &self,
         expected: &[[u8; 3]],
         desired: &[[u8; 3]],
+        expected_context: [u8; 2],
         backup_dir: &std::path::Path,
     ) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
-        detailed(self.apply_picture(expected, desired, backup_dir))
+        detailed(picture::apply_picture_with(
+            self.selection(),
+            expected,
+            desired,
+            Some(expected_context),
+            backup_dir,
+        ))
     }
 
     pub fn apply_lighting(

@@ -281,6 +281,7 @@ mod tests {
         let colors = picture::Snapshot {
             backend_id: "synthetic".into(),
             revision: vec![2],
+            context_revision: Vec::new(),
             content: picture::Content::Editable(BTreeMap::from([("one".into(), [12, 34, 56])])),
         };
         let lighting_capabilities = lighting::Capabilities {

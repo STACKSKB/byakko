@@ -605,9 +605,14 @@ the separate slot-50 getter probe remains unsafe to promote.
 The guarded effect13 option1 and option2 comparison sent global-lighting
 setters only. Option1's complete index0 RGB response matched the initial
 response. Option2's response differed at 15 RGB entries, and the webcam showed
-a different red-key pattern. Option3 was not tested. The original effect1,
-brightness4 and fixed RGB `(8,8,8)` were restored from a fresh revision; a
-complete archive after restoration compared with the before archive as `[]`.
+a different red-key pattern. A second guarded cycle selected option3: its
+response differed from options1 and2 at 34 and31 RGB slots respectively,
+and the webcam showed a third red-key pattern. The original effect1,
+brightness4 and fixed RGB `(8,8,8)` were restored after each cycle from a
+fresh revision; complete archives before and after each compared `[]`.
 See `Research/picture-selector-audit.md` for the selector boundary and ignored
 evidence filenames. These observations do not yet prove independent writable
-picture banks.
+picture banks. The Nia87 picture snapshot now includes the active effect/option
+context and rejects a stale selector before a per-key write; the new debug CLI
+read-only pass returned 384 color revision bytes and context `[1,0]` on the
+restored board. No per-key setter was sent in either selector cycle.

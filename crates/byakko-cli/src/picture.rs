@@ -21,10 +21,11 @@ pub fn plan_colors(session: &Session, target: &Snapshot) -> Result<Vec<Edit>, St
     let current = editor
         .baseline()
         .ok_or("Verified colors have no baseline")?;
-    if current.backend_id != target.backend_id || current.revision != target.revision {
-        return Err(
-            "Color file backend or revision differs from the connected keyboard; read again".into(),
-        );
+    if current.backend_id != target.backend_id
+        || current.revision != target.revision
+        || current.context_revision != target.context_revision
+    {
+        return Err("Color file or picture selector changed; read colors again".into());
     }
     picture::validate_snapshot(editor.capabilities(), target)?;
     let (Content::Editable(before), Content::Editable(after)) = (&current.content, &target.content)
@@ -116,6 +117,7 @@ mod tests {
         let colors = Snapshot {
             backend_id: "memory".into(),
             revision: vec![2],
+            context_revision: Vec::new(),
             content: if opaque {
                 Content::Opaque {
                     reason: "Unknown bytes".into(),
@@ -173,6 +175,9 @@ mod tests {
         let mut stale = current.clone();
         stale.revision.push(9);
         assert!(plan_colors(&session, &stale).is_err());
+        let mut wrong_context = current.clone();
+        wrong_context.context_revision.push(1);
+        assert!(plan_colors(&session, &wrong_context).is_err());
         let mut foreign = current.clone();
         foreign.backend_id = "other".into();
         assert!(plan_colors(&session, &foreign).is_err());

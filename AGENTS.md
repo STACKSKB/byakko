@@ -119,7 +119,11 @@ read-only-first device acceptance sequence there.
   programs with stored repeat count zero remain unwritable pending playback
   evidence.
   The per-key color file workflow requires a complete advertised map and fresh
-  raw picture revision; it stages changed colors through one session command.
+  raw picture revision and any backend-owned selector context; it stages changed
+  colors through one session command. Nia87 reads the global effect/option
+  around each picture read and rechecks that context inside the guarded color
+  transaction. A matching RGB revision alone does not authorize a write after
+  the picture selector changes.
   Keep physical color writes pending until the earlier recovery concern and
   Iced picture-write acceptance gate can be addressed with user interaction.
   Keep CLI command parsing closed and typed; load only the file associated with

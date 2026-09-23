@@ -920,6 +920,7 @@ mod tests {
         let initial = picture::Snapshot {
             backend_id: "memory".into(),
             revision: vec![0x12, 0x34],
+            context_revision: Vec::new(),
             content: picture::Content::Editable(BTreeMap::from([("editable".into(), [1, 2, 3])])),
         };
         let mut device = MemoryDevice::new(descriptor.clone(), state.clone())
@@ -990,6 +991,7 @@ mod tests {
         let snapshot = picture::Snapshot {
             backend_id: "memory".into(),
             revision: vec![8],
+            context_revision: Vec::new(),
             content: picture::Content::Editable(BTreeMap::from([("editable".into(), [1, 2, 3])])),
         };
         let device = MemoryDevice::new(descriptor.clone(), state)

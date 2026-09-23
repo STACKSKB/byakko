@@ -108,6 +108,7 @@ mod tests {
         Snapshot {
             backend_id: "memory".into(),
             revision: vec![revision],
+            context_revision: Vec::new(),
             content: Content::Editable(BTreeMap::from([
                 ("a".into(), rgb),
                 ("fn".into(), [4, 5, 6]),
@@ -198,6 +199,7 @@ mod tests {
         let opaque = Snapshot {
             backend_id: "memory".into(),
             revision: vec![0, 255, 9],
+            context_revision: Vec::new(),
             content: Content::Opaque {
                 reason: "unknown picture bytes".into(),
             },

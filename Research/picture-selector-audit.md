@@ -45,3 +45,25 @@ independently writable banks. Local ignored evidence files use prefix
 `Research/captures/picture-options-` and webcam stills
 `keyboard-camera-1790161518232179300.png` (option1) and
 `keyboard-camera-1790161630117796700.png` (option2).
+
+## Third option and guarded snapshot context, 2026-09-23
+
+A second guarded cycle selected effect13 option3, again changing only global
+lighting. Its 384-byte index0 picture response differed from option1 at 34
+RGB slots and from option2 at 31 slots. The webcam showed a broad red main-key
+cluster with the arrow cluster dark. The original effect1, brightness4 and
+fixed RGB `(8,8,8)` were restored. Full archives captured immediately before
+and after this cycle compared `[]`. The ignored evidence uses prefix
+`Research/captures/picture-options3-` and still
+`keyboard-camera-1790179925051799000.png`.
+
+The portable picture snapshot now carries an opaque `context_revision` in
+addition to its 384-byte color revision. Nia87 fills that context from the
+global lighting effect ID and option nibble, checks it around each picture
+read, and checks it inside the existing guarded write transaction before
+issuing a per-key setter. Other backends can leave the context empty. This
+prevents applying a draft observed under one active selector after another
+selector is chosen, including when their RGB contents happen to match. It
+does not prove independent writable banks or protect against a different
+process changing the device in the middle of a multi-key write. Physical
+per-key writes remain pending their separate acceptance gate.

@@ -11,6 +11,32 @@ pub(super) fn read_picture_with(selection: Selection<'_>) -> Result<Vec<[u8; 3]>
     read_picture_on_device(session.device())
 }
 
+pub(super) fn read_picture_with_context(
+    selection: Selection<'_>,
+) -> Result<(Vec<[u8; 3]>, [u8; 2])> {
+    let session = Session::open_for(selection)?;
+    read_picture_with_context_on_device(session.device())
+}
+
+fn picture_context(device: &HidDevice) -> Result<[u8; 2]> {
+    let lighting = read_lighting_on_device(device)?;
+    Ok(selector_token(&lighting))
+}
+
+fn selector_token(lighting: &crate::nia87::lighting::Lighting) -> [u8; 2] {
+    [lighting.effect_id(), lighting.raw()[4] >> 4]
+}
+
+fn read_picture_with_context_on_device(device: &HidDevice) -> Result<(Vec<[u8; 3]>, [u8; 2])> {
+    let before = picture_context(device)?;
+    let colors = read_picture_on_device(device)?;
+    let after = picture_context(device)?;
+    if before != after {
+        return Err("Picture selector changed during read; reload before editing".into());
+    }
+    Ok((colors, before))
+}
+
 fn read_picture_unlocked(selection: Selection<'_>) -> Result<Vec<[u8; 3]>> {
     let (_, device) = selection.open()?;
     read_picture_on_device(&device)
@@ -57,13 +83,14 @@ pub fn apply_picture(
     desired: &[[u8; 3]],
     backup_dir: &std::path::Path,
 ) -> Result<Vec<[u8; 3]>> {
-    apply_picture_with(Selection::Unique, expected, desired, backup_dir)
+    apply_picture_with(Selection::Unique, expected, desired, None, backup_dir)
 }
 
 pub(super) fn apply_picture_with(
     selection: Selection<'_>,
     expected: &[[u8; 3]],
     desired: &[[u8; 3]],
+    expected_context: Option<[u8; 2]>,
     backup_dir: &std::path::Path,
 ) -> Result<Vec<[u8; 3]>> {
     if expected.len() != 128 || desired.len() != 128 || expected[126..] != desired[126..] {
@@ -77,6 +104,9 @@ pub(super) fn apply_picture_with(
     let identity = snapshot_unlocked(selection)?;
     if identity.firmware != 0x0100 || identity.profile != 0 {
         return Err("Unverified firmware/profile; no picture writes sent".into());
+    }
+    if let Some(expected) = expected_context {
+        picture_context_matches(selection, expected)?;
     }
     if read_picture_unlocked(selection)? != expected {
         return Err("Picture changed since load; no writes sent".into());
@@ -96,7 +126,11 @@ pub(super) fn apply_picture_with(
         .open(&path)?;
     serde_json::to_writer_pretty(
         &mut backup,
-        &serde_json::json!({"format_version":1,"colors":expected}),
+        &serde_json::json!({
+            "format_version": 2,
+            "colors": expected,
+            "context_revision": expected_context,
+        }),
     )?;
     backup.sync_all()?;
     let (_, device) = selection.open()?;
@@ -105,6 +139,9 @@ pub(super) fn apply_picture_with(
         return Err(
             "Keyboard identity or keymaps changed before picture write; no writes sent".into(),
         );
+    }
+    if let Some(expected) = expected_context {
+        ensure_picture_context(&device, expected)?;
     }
     if read_picture_on_device(&device)? != expected {
         return Err("Picture changed before picture write; no writes sent".into());
@@ -125,6 +162,9 @@ pub(super) fn apply_picture_with(
     let result = (|| -> Result<Vec<[u8; 3]>> {
         write(desired)?;
         let actual = read_picture_unlocked(selection)?;
+        if let Some(expected) = expected_context {
+            picture_context_matches(selection, expected)?;
+        }
         if actual != desired {
             return Err("Picture readback mismatch".into());
         }
@@ -134,6 +174,9 @@ pub(super) fn apply_picture_with(
         Ok(actual) => Ok(actual),
         Err(error) => {
             let restore = (|| -> Result<()> {
+                if let Some(expected) = expected_context {
+                    picture_context_matches(selection, expected)?;
+                }
                 write(expected)?;
                 if read_picture_unlocked(selection)? != expected {
                     return Err("Picture restoration mismatch".into());
@@ -143,6 +186,18 @@ pub(super) fn apply_picture_with(
             Err(picture_apply_error(&error, restore, &path).into())
         }
     }
+}
+
+fn ensure_picture_context(device: &HidDevice, expected: [u8; 2]) -> Result<()> {
+    if picture_context(device)? != expected {
+        return Err("Picture selector changed since load; no writes sent".into());
+    }
+    Ok(())
+}
+
+fn picture_context_matches(selection: Selection<'_>, expected: [u8; 2]) -> Result<()> {
+    let (_, device) = selection.open()?;
+    ensure_picture_context(&device, expected)
 }
 
 /// The guarded picture transaction with an explicit recovery result.
@@ -158,6 +213,31 @@ pub fn apply_picture_detailed(
 mod tests {
     use super::*;
     use byakko_core::session::Recovery;
+
+    #[test]
+    fn picture_context_tracks_effect_and_option_but_not_brightness() {
+        let mut reply = [0u8; 64];
+        reply[0] = crate::nia87::lighting::LED_READ_COMMAND;
+        reply[1] = 13;
+        reply[4] = 0x10;
+        let option_two = crate::nia87::lighting::Lighting::decode(&reply).unwrap();
+        assert_eq!(selector_token(&option_two), [13, 1]);
+        reply[3] = 2;
+        assert_eq!(
+            selector_token(&crate::nia87::lighting::Lighting::decode(&reply).unwrap()),
+            [13, 1]
+        );
+        reply[4] = 0x20;
+        assert_eq!(
+            selector_token(&crate::nia87::lighting::Lighting::decode(&reply).unwrap()),
+            [13, 2]
+        );
+        reply[1] = 1;
+        assert_eq!(
+            selector_token(&crate::nia87::lighting::Lighting::decode(&reply).unwrap()),
+            [1, 2]
+        );
+    }
 
     #[test]
     fn unmapped_picture_slot_is_rejected_before_device_access() {
