@@ -305,11 +305,11 @@ app has been built.
 The current Iced desktop and read-only CLI cross-linked for
 `x86_64-unknown-linux-gnu` with Zig 0.15.2 and cargo-zigbuild 0.23.4 using
 `--release --locked --offline`. Both files have ELF magic `7F454C46`.
-After the subsequent CLI and Windows entry-point changes, the refreshed
-desktop is 10,087,584 bytes (SHA-256
-`98FC1138D09FCA0D1631955D0E365693FE6AC401DD575B940EAF1FBF9E88EF83`);
-the CLI is 1,480,152 bytes (SHA-256
-`91E966C7FC898E0D746D92602FEA8055A7AE6EEEADAA9D3D6C3DE52365D681C0`).
+After the subsequent CLI, page-read and Windows entry-point changes, the
+refreshed desktop is 10,087,712 bytes (SHA-256
+`D849F0B0AC7E687F26F885EF77ABAF9D9DF76E50579D66715F7896616FDD3553`);
+the CLI is 1,496,240 bytes (SHA-256
+`377A89D908E8F7A5F44E6964D9580709329DFAF9F5F3A943C69C7D70D76B8E04`).
 This proves linking, not Linux startup or HID access.
 
 The user located the installed Sharkfin at
@@ -366,3 +366,26 @@ causality. No restore write was attempted while the user was AFK, because
 unexpected collateral changes in the earlier archive recovery remain
 unexplained. The on-device lighting baseline is now effect 1 for subsequent
 tests; do not assume the older effect-5 archive still describes current state.
+
+## Automatic feature-page reads and CLI macro read (2026-09-23)
+
+The Iced Lighting, per-key Color and Settings pages now share one entry-read
+decision: when the selected page has an unloaded or invalidated snapshot, it
+reads once after keymap readiness. Revisiting a verified page does not repeat
+the request; failed reads remain manual retries. Memory-backend tests cover
+each page and preserving a staged color draft through reconnect. The rebuilt
+window has not been visually checked for these new transitions.
+
+The CLI's `read-macro slot-49` completed directly over USB without a setter.
+The complete 256-byte revision was zero and decoded to no events with stored
+repeat count zero, consistent with the earlier unbound empty-slot capture.
+The ignored JSON export `Research/captures/cli-macro49-20260923.json` has
+SHA-256 `9A9FA47A17C3FA2D615E4165141068BCD6E89B4B9262FFE70C5EB92FEFE55306`.
+The CLI preserves that raw zero; the editor still blocks staging or binding
+counted mode zero without physical playback evidence. A repeated CLI settings
+read produced byte-identical JSON to the preceding one.
+
+The updated Windows release launched again as one GUI-subsystem process, with
+no `conhost.exe` child. A read-only lighting CLI check after this launch still
+returned effect 1 and the same first eight raw bytes. This shows no further
+change on that launch; it does not identify the cause of the earlier `5 -> 1`.

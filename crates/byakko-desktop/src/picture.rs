@@ -1,11 +1,10 @@
 //! Per-key RGB controls over a device-neutral physical-key catalog.
-use super::{Desktop, Message as AppMessage, Page};
+use super::{Desktop, Message as AppMessage};
 use crate::{control_widgets, panels, physical_board};
 use byakko_core::picture::{
     self, Content, Edit,
     editor::{Editor, Status},
 };
-use byakko_core::session::{Problem, Status as SessionStatus};
 use iced::{
     Element, Fill,
     widget::{column, scrollable, text},
@@ -21,28 +20,6 @@ pub(super) enum Message {
 }
 
 impl Desktop {
-    pub(super) fn read_picture_on_entry(&mut self) {
-        if self.page != Page::Picture
-            || self.busy()
-            || *self.session.status() != SessionStatus::Ready
-        {
-            return;
-        }
-        let needs_read = self.session.picture().is_some_and(|editor| {
-            matches!(
-                editor.status(),
-                Status::Unloaded
-                    | Status::Unverified {
-                        problem: Problem::ReadRequired
-                    }
-            )
-        });
-        if needs_read {
-            let request = self.session.request_picture_read();
-            self.submit(request);
-        }
-    }
-
     pub(super) fn update_picture(&mut self, message: Message) {
         if self.busy() {
             return;

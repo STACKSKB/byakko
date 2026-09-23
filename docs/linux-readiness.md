@@ -5,10 +5,10 @@
 After the CLI and shared physical-board changes, the Iced desktop and
 `byakko-cli` both cross-linked in release mode for
 `x86_64-unknown-linux-gnu` using the retained Zig 0.15.2 and cargo-zigbuild
-0.23.4 with `--locked --offline`. The respective ELF sizes are 10,087,584 and
-1,480,152 bytes. Their SHA-256 values are
-`98FC1138D09FCA0D1631955D0E365693FE6AC401DD575B940EAF1FBF9E88EF83`
-and `91E966C7FC898E0D746D92602FEA8055A7AE6EEEADAA9D3D6C3DE52365D681C0`.
+0.23.4 with `--locked --offline`. After the feature-page and macro CLI changes,
+the respective ELF sizes are 10,087,712 and 1,496,240 bytes. Their SHA-256
+values are `D849F0B0AC7E687F26F885EF77ABAF9D9DF76E50579D66715F7896616FDD3553`
+and `377A89D908E8F7A5F44E6964D9580709329DFAF9F5F3A943C69C7D70D76B8E04`.
 The core also checks for `wasm32-unknown-unknown`. These are build checks;
 Linux startup, graphics libraries, hidraw permissions and physical USB
 transactions remain untested.

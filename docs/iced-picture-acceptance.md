@@ -18,6 +18,8 @@ Opening the per-key color page automatically reads the device when its color
 snapshot is unloaded or invalidated and the keymap is ready. If the keymap is
 still reading, it starts after that completion. Page revisits do not repeat a
 verified read, and failed or uncertain reads require an explicit retry.
+A memory-backend reconnect test confirms that an automatic keymap and color
+refresh preserves a staged per-key draft.
 
 The memory backend and device adapter tests cover capability validation,
 baseline conflicts, opaque state, executor dispatch, Fn and final-key mapping,

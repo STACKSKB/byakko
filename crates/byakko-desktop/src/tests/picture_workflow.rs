@@ -74,6 +74,35 @@ fn failed_automatic_color_read_waits_for_an_explicit_retry() {
 }
 
 #[test]
+fn color_page_reconnect_refreshes_baseline_without_losing_draft() {
+    let mut app = loaded();
+    send(
+        &mut app,
+        Picture::Edit(Edit::Channel {
+            key: "Alpha".into(),
+            channel: Channel::Red,
+            value: 99,
+        }),
+    );
+    let draft = app.session.picture().unwrap().draft().cloned();
+    app.accept_availability(Availability::Missing);
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert_eq!(app.session.picture().unwrap().draft(), draft.as_ref());
+
+    app.accept_availability(Availability::Ready {
+        id: "demo-2".into(),
+    });
+    settle(&mut app);
+    assert_eq!(app.session.status(), &Status::Ready);
+    assert_eq!(
+        app.session.picture().unwrap().status(),
+        &PictureStatus::Ready
+    );
+    assert_eq!(app.session.picture().unwrap().draft(), draft.as_ref());
+    assert!(app.session.picture().unwrap().dirty());
+}
+
+#[test]
 fn per_key_draft_uses_advertised_keys_and_saves_through_memory_executor() {
     let mut app = loaded();
     let original = app.session.picture().unwrap().draft().unwrap().clone();

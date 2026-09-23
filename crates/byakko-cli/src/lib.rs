@@ -2,6 +2,7 @@
 use byakko_core::{
     State,
     lighting::{Snapshot as LightingSnapshot, editor::Status as LightingStatus},
+    macros::{Snapshot as MacroSnapshot, editor::Status as MacroStatus},
     picture::{Snapshot as PictureSnapshot, editor::Status as PictureStatus},
     session::{Acceptance, Command, Session, Status},
     settings::{Snapshot as SettingsSnapshot, editor::Status as SettingsStatus},
@@ -27,6 +28,38 @@ pub fn read_keymap(
             .cloned()
             .ok_or("Verified read has no baseline".into()),
         status => Err(format!("Device read failed: {status:?}")),
+    }
+}
+
+/// Read one advertised macro slot without interpreting its backend-owned snapshot.
+pub fn read_macro(
+    session: &mut Session,
+    executor: &Executor,
+    slot: &str,
+    timeout: Duration,
+) -> Result<MacroSnapshot, String> {
+    let editor = session.macros().ok_or("Device does not support macros")?;
+    if !editor
+        .capabilities()
+        .slots
+        .iter()
+        .any(|choice| choice.id == slot)
+    {
+        return Err(format!("Unknown macro slot: {slot}"));
+    }
+    session.select_macro(slot)?;
+    if *session.status() == Status::Disconnected {
+        executor.set_generation(session.connect()?);
+    }
+    let command = session.request_macro_read()?;
+    submit_and_wait(session, executor, command, timeout)?;
+    let editor = session.macros().ok_or("Device does not support macros")?;
+    match editor.status() {
+        MacroStatus::Ready => editor
+            .baseline()
+            .cloned()
+            .ok_or("Verified macro read has no baseline".into()),
+        status => Err(format!("Macro read failed: {status:?}")),
     }
 }
 
@@ -122,7 +155,7 @@ fn submit_and_wait(
 mod tests {
     use super::*;
     use byakko_core::{
-        Action, ActionChoice, Descriptor, Layer, PhysicalKey, lighting, picture, settings,
+        Action, ActionChoice, Descriptor, Layer, PhysicalKey, lighting, macros, picture, settings,
     };
     use byakko_devices::memory::MemoryDevice;
     use std::{collections::BTreeMap, path::PathBuf};
@@ -237,6 +270,84 @@ mod tests {
         assert_eq!(
             read_settings(&mut session, &executor, Duration::from_secs(1)).unwrap(),
             settings
+        );
+    }
+
+    #[test]
+    fn cli_reads_macro_snapshot_and_preserves_opaque_revision_bytes() {
+        let descriptor = Descriptor {
+            backend_id: "synthetic".into(),
+            device_name: "One key".into(),
+            keys: vec![PhysicalKey {
+                id: "one".into(),
+                label: "One".into(),
+                x: 0.0,
+                y: 0.0,
+                width: 1.0,
+                height: 1.0,
+                visible: true,
+                writable: true,
+            }],
+            layers: vec![Layer {
+                id: "base".into(),
+                label: "Base".into(),
+            }],
+            actions: vec![ActionChoice {
+                label: "A".into(),
+                action: Action::Key(4),
+            }],
+        };
+        let state = State {
+            revision: vec![1],
+            bindings: BTreeMap::from([(
+                "base".into(),
+                BTreeMap::from([("one".into(), Action::Key(4))]),
+            )]),
+        };
+        let capabilities = macros::Capabilities {
+            byte_budget: None,
+            backend_id: "synthetic".into(),
+            slots: vec![macros::Choice {
+                id: "custom-slot".into(),
+                label: "Custom".into(),
+            }],
+            repeat_counts: 0..=10,
+            editable_repeat_counts: 0..=10,
+            delays_ms: 0..=100,
+            keys: None,
+            buttons: vec![],
+            movement: None,
+            backend_actions: vec![],
+            bindings: vec![],
+        };
+        let snapshot = macros::Snapshot {
+            backend_id: "synthetic".into(),
+            slot: "custom-slot".into(),
+            revision: vec![0, 255, 3, 128],
+            content: macros::Content::Opaque {
+                reason: "Unknown encoding".into(),
+            },
+        };
+        let device = MemoryDevice::new(descriptor.clone(), state)
+            .unwrap()
+            .with_macros(capabilities.clone(), vec![snapshot.clone()])
+            .unwrap();
+        let executor = Executor::spawn(device, PathBuf::new()).unwrap();
+        let mut session = Session::new(descriptor)
+            .unwrap()
+            .with_macros(capabilities)
+            .unwrap();
+
+        assert!(read_macro(&mut session, &executor, "missing", Duration::from_secs(1)).is_err());
+        assert_eq!(
+            read_macro(
+                &mut session,
+                &executor,
+                "custom-slot",
+                Duration::from_secs(1)
+            )
+            .unwrap(),
+            snapshot
         );
     }
 }

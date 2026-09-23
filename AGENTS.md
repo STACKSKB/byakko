@@ -130,9 +130,9 @@ research baseline, not the structure to port.
   and per-key color views; keep future selectors device-neutral and styled by
   `UiStyle` tokens. On 2026-09-23 the user confirmed the rebuilt Iced Keys page
   showed a TKL board and key selection worked after a physical USB replug.
-  Entering the per-key color page should automatically read a stale or unloaded
-  color snapshot once the keymap is ready; an explicit retry remains necessary
-  after a failed read or uncertain write.
+  Entering the Lighting, per-key Color or Settings page automatically reads a
+  stale or unloaded snapshot once the keymap is ready; an explicit retry
+  remains necessary after a failed read or uncertain write.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and
   the root sampler module is a compatibility re-export.

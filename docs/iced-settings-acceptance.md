@@ -15,11 +15,18 @@ unknown and reserved bytes. Noncanonical native values stay opaque. Forged
 snapshots and invalid edits fail before device I/O. Native apply has an exact
 expected-state check, durable backup, readback, rollback and typed recovery.
 
+Opening Settings now reads an unloaded or invalidated snapshot once the
+keymap is ready; a pending keymap read finishes first. Returning to a ready
+page does not repeat it, and failed reads require an explicit retry. A
+memory-backend test covers this page lifecycle.
+
 The read-only capture in
 `Research/captures/settings-core-executor-20260923.json` returned seven
 editable values. Its 256 revision bytes match the settings section of
 `Research/captures/configuration-getter-trace-baseline.json` exactly. No setter
-was sent. Core, memory and device tests cover range validation, one-field
+was sent. A later independent CLI read returned the same seven editable
+values and a repeat returned identical JSON (see `live-evidence.md`). Core,
+memory and device tests cover range validation, one-field
 staging, stale results, conflicts, readback mismatch, raw preservation and
 recovery. Physical write/read/restore for this Iced path, rendered interaction
 and Linux hardware behavior remain open acceptance work.
