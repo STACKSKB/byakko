@@ -226,3 +226,33 @@ This command requires a matching full baseline and performs actual reversible
 device writes. It does not establish physical timing, mouse behavior, repeat
 modes, power-cycle persistence or fault recovery. The selected official reader's
 movement-delay inconsistency is documented in `Research/macro-boundary-audit.md`.
+
+## Read-only USB replug observation (2026-09-23)
+
+With the user physically unplugging and reconnecting the Nia87, a 250 ms
+read-only HID inventory monitor observed its configuration collection disappear
+at 08:51:40 and return at 08:51:47 local time. The same inventory saw seven Nia
+OEM collections before and after, including `3151:4015`, interface 2,
+usage `FFFF:0002`; eleven Wacom collections remained a separate target.
+
+The shared core/executor keymap read completed successfully before and after
+the observed cycle, with no setters. The two ignored completion captures,
+`Research/captures/replug-read-20260923-085045.json` and
+`replug-read-20260923-085205.json`, are byte-identical (SHA-256
+`6ECA5479044CDB2F8A79F3A39AA644C5E13B6D38B88B6C26B89FD17958DB8190`).
+This establishes collection rediscovery and a fresh getter path after one
+physical replug. It does not establish the Iced window's automatic UI state,
+feature-panel refresh or Linux hotplug behavior.
+
+## Native Iced launch and physical layout (2026-09-23)
+
+After the replug, the user confirmed ordinary keys still typed and launched
+`target/release/byakko-desktop.exe` without model setup or browser authorization.
+They reported the Nia87 key layout opened with the “Readback verified” status,
+but the first build displayed keys in a left-hand column. The keymap and
+per-key color selectors were changed to render the advertised physical
+coordinates through one device-neutral Iced board widget. The user then
+launched the rebuilt release app and confirmed that the Keys page showed a
+TKL-shaped board and clicking a key selected it. No Apply action or device
+setter was used in this UI check. Visual acceptance of the per-key color page,
+Linux runtime and live write recovery remain open.

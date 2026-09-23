@@ -11,6 +11,7 @@ pub mod audio_bands;
 pub mod audio_sample;
 pub mod hid;
 pub mod macro_files;
+pub mod macro_labels;
 pub mod memory;
 pub mod nia87;
 #[cfg(feature = "research-tools")]

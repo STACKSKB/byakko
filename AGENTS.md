@@ -9,6 +9,12 @@ research baseline, not the structure to port.
 
 - Native Windows/Linux desktop, Rust + Iced. No JavaScript, Electron, webview,
   QML or vendor helper in the desktop product or its build.
+- Treat the core/session command and completion types as a frontend contract.
+  Iced is one client; a CLI is the next small independent client, and a future
+  static browser SPA may reuse the portable model via WebAssembly. Keep any web
+  bootstrap/transport code out of the native executable and do not require a
+  local Node.js server. Browser HID access still follows browser permissions;
+  do not promise native plug-and-play behavior from a web page.
 - Keep core logic usable from a future browser frontend or a service exposing
   the native backend. Browser support is an architectural requirement now, not
   authorization to add a web stack or server now. Never assume browsers can
@@ -106,7 +112,11 @@ research baseline, not the structure to port.
   portable host-mode schema; the Nia87 adapter alone translates these into
   firmware reports. This is headless verified, with physical and Linux runtime
   acceptance still open. 2.4 GHz remains a later capability. Do not pursue
-  UI polish or accessibility work before architecture review checkpoints.
+  speculative UI polish or accessibility work before architecture review
+  checkpoints. The physical-coordinate key selector is now shared by keymap
+  and per-key color views; keep future selectors device-neutral and styled by
+  `UiStyle` tokens. On 2026-09-23 the user confirmed the rebuilt Iced Keys page
+  showed a TKL board and key selection worked after a physical USB replug.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and
   the root sampler module is a compatibility re-export.
@@ -117,6 +127,6 @@ research baseline, not the structure to port.
   Review their changes. Avoid parallel edits to the same files.
 - Commit after major completed steps. No PRs, issues, messages to others,
   Firefox automation, or file deletion. Use Edge/Codex browser for research.
-- No physical keyboard interaction is available while the user is away. Keep
-  hardware writes backed up and bounded; retain the recorded recovery failure
-  as an open acceptance gate. Do not revive deferred work without authorization.
+- Coordinate physical interaction with the user when available. Keep hardware
+  writes backed up and bounded; retain the recorded recovery failure as an open
+  acceptance gate. Do not revive deferred work without authorization.

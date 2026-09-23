@@ -1,13 +1,13 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
 use super::{Closing, Desktop, Message, Page};
 use crate::control_widgets;
-use crate::panels;
+use crate::{panels, physical_board};
 use byakko_core::{
     Action,
     session::{Problem, ReconnectCause, ReconnectCaution, ReconnectSurface, Status},
 };
 use iced::{
-    Element, Fill,
+    Element, Fill, Length,
     widget::{button, column, container, row, scrollable, text, text_input},
 };
 
@@ -117,15 +117,28 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
     );
     let content = column![toolbar, text(status(app)), layers]
         .spacing(app.ui.spacing.m)
-        .push(panels::split(
-            &app.ui,
-            || panels::panel(&app.ui, "Keys", scrollable(keys(app)).height(Fill).into()),
-            || panels::panel(&app.ui, "Assign & review", keymap_detail(app)),
-        ));
-    content.height(Fill).into()
+        .push(panels::panel(&app.ui, "Physical keys", keys(app)))
+        .push(keymap_detail(app));
+    scrollable(content).height(Fill).into()
 }
 
 fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
+    panels::split(
+        &app.ui,
+        || {
+            panels::panel(
+                &app.ui,
+                selected_label(app),
+                column![text(selected_action(app)), search(app)]
+                    .spacing(app.ui.spacing.s)
+                    .into(),
+            )
+        },
+        || panels::panel(&app.ui, "Staged changes", staged_edits(app)),
+    )
+}
+
+fn staged_edits(app: &Desktop) -> Element<'_, Message> {
     let descriptor = app.session.descriptor();
     let dirty = app.session.changes();
     let edits = column(dirty.iter().map(|change| {
@@ -152,44 +165,22 @@ fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
         .into()
     }))
     .spacing(app.ui.spacing.xs);
-    column![
-        text(selected_label(app)).size(app.ui.type_scale.section_title),
-        search(app),
-        text("Staged changes"),
-        scrollable(edits).height(Fill)
-    ]
-    .spacing(app.ui.spacing.m)
-    .height(Fill)
-    .into()
+    scrollable(edits)
+        .height(Length::Fixed(app.ui.list_preview_height))
+        .into()
 }
 
 fn keys(app: &Desktop) -> Element<'_, Message> {
-    let descriptor = app.session.descriptor();
-    let mut keys: Vec<_> = descriptor.keys.iter().filter(|key| key.visible).collect();
-    keys.sort_by(|a, b| a.y.total_cmp(&b.y).then(a.x.total_cmp(&b.x)));
-    column(keys.into_iter().map(|key| {
-        let binding = app
-            .session
-            .draft()
-            .and_then(|draft| draft.get(&app.layer))
-            .and_then(|layer| layer.get(&key.id));
-        let label = format!(
-            "{}  ·  {}{}",
-            key.label,
-            binding.map_or_else(|| "Unread".into(), |action| action_label(app, action)),
-            if key.writable { "" } else { " (fixed)" }
-        );
-        container(panels::selectable_button(
-            &app.ui,
-            label,
-            app.selected.as_ref() == Some(&key.id),
-            Some(Message::SelectKey(key.id.clone())),
-        ))
-        .width(Fill)
-        .into()
-    }))
-    .spacing(app.ui.spacing.xs)
-    .into()
+    let keys = app
+        .session
+        .descriptor()
+        .keys
+        .iter()
+        .filter(|key| key.visible)
+        .collect();
+    physical_board::view(&app.ui, keys, app.selected.clone(), |key| {
+        Some(Message::SelectKey(key.id.clone()))
+    })
 }
 
 fn selected_label(app: &Desktop) -> String {
@@ -202,6 +193,29 @@ fn selected_label(app: &Desktop) -> String {
             || "Select a key".into(),
             |key| format!("Assign action · {}", key.label),
         )
+}
+
+fn selected_action(app: &Desktop) -> String {
+    let Some(key) = app
+        .session
+        .descriptor()
+        .keys
+        .iter()
+        .find(|key| Some(&key.id) == app.selected.as_ref())
+    else {
+        return "Select a key to inspect its action".into();
+    };
+    let binding = app
+        .session
+        .draft()
+        .and_then(|draft| draft.get(&app.layer))
+        .and_then(|layer| layer.get(&key.id));
+    let action = binding.map_or_else(|| "Unread".into(), |action| action_label(app, action));
+    if key.writable {
+        format!("Current action: {action}")
+    } else {
+        format!("Current action: {action} · fixed")
+    }
 }
 
 fn search(app: &Desktop) -> Element<'_, Message> {
@@ -231,7 +245,7 @@ fn search(app: &Desktop) -> Element<'_, Message> {
     .spacing(app.ui.spacing.xs);
     column![
         text_input("Find an action…", &app.search).on_input(Message::Search),
-        scrollable(actions).height(Fill)
+        scrollable(actions).height(Length::Fixed(app.ui.list_preview_height))
     ]
     .spacing(app.ui.spacing.s)
     .height(Fill)

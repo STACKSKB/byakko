@@ -7,7 +7,7 @@ use byakko_core::{
     },
     session::{Acceptance, FileOperation, FileTicket},
 };
-use byakko_devices::macro_files;
+use byakko_devices::{macro_files, macro_labels};
 use iced::{
     Element, Task,
     widget::{button, column, row, text, text_input},
@@ -21,6 +21,7 @@ pub(super) enum Message {
     Toggle,
     Path(String),
     Name(String),
+    SaveLabels,
     Begin(FileOperation),
     Complete(FileTicket, Result<Option<Box<Document>>, String>),
 }
@@ -30,6 +31,9 @@ pub(super) struct Fields {
     expanded: bool,
     path: String,
     metadata: BTreeMap<String, Metadata>,
+    labels_directory: Option<PathBuf>,
+    labels_loaded: bool,
+    saved_labels: Option<BTreeMap<String, String>>,
 }
 
 struct Metadata {
@@ -38,6 +42,82 @@ struct Metadata {
 }
 
 impl Fields {
+    pub(super) fn with_labels_directory(directory: Option<PathBuf>) -> Self {
+        Self {
+            labels_directory: directory,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn load_labels(&mut self, editor: &Editor) -> Result<(), String> {
+        let Some(directory) = &self.labels_directory else {
+            return Ok(());
+        };
+        if self.labels_loaded {
+            return Ok(());
+        }
+        let loaded = macro_labels::load_latest(
+            directory,
+            &editor.capabilities().backend_id,
+            &editor.capabilities().slots,
+        )?;
+        if let Some(loaded) = loaded {
+            for (slot, name) in loaded {
+                let entry = self.metadata.entry(slot).or_insert(Metadata {
+                    name: String::new(),
+                    binding: None,
+                });
+                entry.name = name;
+            }
+        }
+        self.labels_loaded = true;
+        self.saved_labels = Some(self.names(editor));
+        Ok(())
+    }
+
+    fn names(&self, editor: &Editor) -> BTreeMap<String, String> {
+        editor
+            .capabilities()
+            .slots
+            .iter()
+            .map(|slot| {
+                (
+                    slot.id.clone(),
+                    self.slot_label(&slot.id, &slot.label).to_owned(),
+                )
+            })
+            .collect()
+    }
+
+    pub(super) fn slot_label<'a>(&'a self, id: &str, default: &'a str) -> &'a str {
+        self.metadata
+            .get(id)
+            .map_or(default, |metadata| metadata.name.as_str())
+    }
+
+    fn labels_dirty(&self, editor: &Editor) -> bool {
+        self.labels_directory.is_some()
+            && self
+                .saved_labels
+                .as_ref()
+                .is_none_or(|saved| *saved != self.names(editor))
+    }
+
+    fn save_labels(&mut self, editor: &Editor) -> Result<PathBuf, String> {
+        let directory = self
+            .labels_directory
+            .as_ref()
+            .ok_or("Local labels are unavailable")?;
+        let names = self.names(editor);
+        let path = macro_labels::save_new(
+            directory,
+            &editor.capabilities().backend_id,
+            &editor.capabilities().slots,
+            &names,
+        )?;
+        self.saved_labels = Some(names);
+        Ok(path)
+    }
     pub(super) fn remember_binding(&mut self, editor: &Editor, binding: &str) {
         let name = self.name(editor).to_owned();
         self.metadata
@@ -49,17 +129,13 @@ impl Fields {
             .binding = Some(binding.into());
     }
     fn name<'a>(&'a self, editor: &'a Editor) -> &'a str {
-        self.metadata.get(editor.slot()).map_or_else(
-            || {
-                editor
-                    .capabilities()
-                    .slots
-                    .iter()
-                    .find(|slot| slot.id == editor.slot())
-                    .map_or(editor.slot(), |slot| slot.label.as_str())
-            },
-            |metadata| metadata.name.as_str(),
-        )
+        let default = editor
+            .capabilities()
+            .slots
+            .iter()
+            .find(|slot| slot.id == editor.slot())
+            .map_or(editor.slot(), |slot| slot.label.as_str());
+        self.slot_label(editor.slot(), default)
     }
 
     fn document(&self, editor: &Editor) -> Result<Document, String> {
@@ -99,6 +175,15 @@ impl Desktop {
                         })
                         .name = value;
                 }
+            }
+            Message::SaveLabels => {
+                self.notice = match self.session.macros() {
+                    Some(editor) => match self.macro_files.save_labels(editor) {
+                        Ok(path) => Some(format!("Local labels saved to {}", path.display())),
+                        Err(reason) => Some(format!("Local label save failed: {reason}")),
+                    },
+                    None => Some("Macros are unavailable".into()),
+                };
             }
             Message::Begin(kind) => return self.begin_macro_file(kind),
             Message::Complete(..) => unreachable!("completion handled above"),
@@ -242,8 +327,16 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppM
             text("Local file · import replaces the draft · export creates a new file")
         ]
         .spacing(app.ui.spacing.s),
-        text_input("Macro name (file metadata)", app.macro_files.name(editor))
-            .on_input_maybe(editable.then_some(|value| AppMessage::File(Message::Name(value)))),
+        row![
+            text_input("Macro name (local label)", app.macro_files.name(editor))
+                .on_input_maybe(editable.then_some(|value| AppMessage::File(Message::Name(value)))),
+            button("Save labels").on_press_maybe(
+                app.macro_files
+                    .labels_dirty(editor)
+                    .then_some(AppMessage::File(Message::SaveLabels))
+            ),
+        ]
+        .spacing(app.ui.spacing.s),
         row![
             text_input("Path to macro JSON", &app.macro_files.path).on_input_maybe(
                 (!app.busy()).then_some(|value| AppMessage::File(Message::Path(value)))
