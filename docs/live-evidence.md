@@ -590,3 +590,24 @@ power-cycle persistence was checked. The ignored files are
 `settings-cli-proposal-20260923.json`,
 `settings-cli-restore-20260923.json`, and
 `settings-cli-after-20260923.json`.
+
+## Read-only macro library scan (2026-09-23)
+
+The release CLI's new `list-macros` command read the attached Nia87 keymaps
+and all 50 advertised macro slots through the shared session/executor. It
+returned capacity 50, one configured program (`slot-00` / Macro 1), and
+`slot-01` as the first free unbound slot. No macro or keymap setter was sent.
+The catalog does not claim firmware capacity beyond the official 0–49 range;
+the separate slot-50 getter probe remains unsafe to promote.
+
+## Picture option readback changes without a per-key setter (2026-09-23)
+
+The guarded effect13 option1 and option2 comparison sent global-lighting
+setters only. Option1's complete index0 RGB response matched the initial
+response. Option2's response differed at 15 RGB entries, and the webcam showed
+a different red-key pattern. Option3 was not tested. The original effect1,
+brightness4 and fixed RGB `(8,8,8)` were restored from a fresh revision; a
+complete archive after restoration compared with the before archive as `[]`.
+See `Research/picture-selector-audit.md` for the selector boundary and ignored
+evidence filenames. These observations do not yet prove independent writable
+picture banks.
