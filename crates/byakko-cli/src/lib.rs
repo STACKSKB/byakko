@@ -1,8 +1,10 @@
 //! Synchronous CLI adapter for the same owned session commands used by Iced.
 use byakko_core::{
     State,
+    lighting::{Snapshot as LightingSnapshot, editor::Status as LightingStatus},
     picture::{Snapshot as PictureSnapshot, editor::Status as PictureStatus},
     session::{Acceptance, Command, Session, Status},
+    settings::{Snapshot as SettingsSnapshot, editor::Status as SettingsStatus},
 };
 use byakko_devices::Executor;
 use std::{
@@ -48,6 +50,46 @@ pub fn read_colors(
     }
 }
 
+pub fn read_lighting(
+    session: &mut Session,
+    executor: &Executor,
+    timeout: Duration,
+) -> Result<LightingSnapshot, String> {
+    if *session.status() != Status::Ready {
+        return Err("Read the keymap before reading lighting".into());
+    }
+    let command = session.request_lighting_read()?;
+    submit_and_wait(session, executor, command, timeout)?;
+    let editor = session.lighting().ok_or("No lighting capability")?;
+    match editor.status() {
+        LightingStatus::Ready => editor
+            .baseline()
+            .cloned()
+            .ok_or("Verified lighting read has no baseline".into()),
+        status => Err(format!("Lighting read failed: {status:?}")),
+    }
+}
+
+pub fn read_settings(
+    session: &mut Session,
+    executor: &Executor,
+    timeout: Duration,
+) -> Result<SettingsSnapshot, String> {
+    if *session.status() != Status::Ready {
+        return Err("Read the keymap before reading settings".into());
+    }
+    let command = session.request_settings_read()?;
+    submit_and_wait(session, executor, command, timeout)?;
+    let editor = session.settings().ok_or("No settings capability")?;
+    match editor.status() {
+        SettingsStatus::Ready => editor
+            .baseline()
+            .cloned()
+            .ok_or("Verified settings read has no baseline".into()),
+        status => Err(format!("Settings read failed: {status:?}")),
+    }
+}
+
 fn submit_and_wait(
     session: &mut Session,
     executor: &Executor,
@@ -79,12 +121,14 @@ fn submit_and_wait(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use byakko_core::{Action, ActionChoice, Descriptor, Layer, PhysicalKey, picture};
+    use byakko_core::{
+        Action, ActionChoice, Descriptor, Layer, PhysicalKey, lighting, picture, settings,
+    };
     use byakko_devices::memory::MemoryDevice;
     use std::{collections::BTreeMap, path::PathBuf};
 
     #[test]
-    fn cli_reads_keymap_and_colors_through_shared_executor() {
+    fn cli_reads_keymap_colors_lighting_and_settings_through_shared_executor() {
         let descriptor = Descriptor {
             backend_id: "synthetic".into(),
             device_name: "One key".into(),
@@ -123,14 +167,61 @@ mod tests {
             revision: vec![2],
             content: picture::Content::Editable(BTreeMap::from([("one".into(), [12, 34, 56])])),
         };
+        let lighting_capabilities = lighting::Capabilities {
+            backend_id: "synthetic".into(),
+            effects: vec![lighting::Effect {
+                id: "steady".into(),
+                label: "Steady".into(),
+                brightness: Some(0..=10),
+                speed: None,
+                options: vec![],
+                color: Some(lighting::ColorCapability::Fixed),
+            }],
+            host_modes: vec![],
+        };
+        let lighting = lighting::Snapshot {
+            backend_id: "synthetic".into(),
+            revision: vec![3],
+            content: lighting::Content::Editable(lighting::Setting {
+                effect: "steady".into(),
+                brightness: Some(5),
+                speed: None,
+                option: None,
+                color: Some(lighting::Color::Rgb([12, 34, 56])),
+            }),
+        };
+        let settings_capabilities = settings::Capabilities {
+            backend_id: "synthetic".into(),
+            fields: vec![settings::Field {
+                id: "sleep".into(),
+                label: "Sleep".into(),
+                kind: settings::Kind::Toggle,
+            }],
+        };
+        let settings = settings::Snapshot {
+            backend_id: "synthetic".into(),
+            revision: vec![4],
+            content: settings::Content::Editable(BTreeMap::from([(
+                "sleep".into(),
+                settings::Value::Toggle(true),
+            )])),
+        };
         let device = MemoryDevice::new(descriptor.clone(), state.clone())
             .unwrap()
             .with_picture(capabilities.clone(), colors.clone())
+            .unwrap()
+            .with_lighting(lighting_capabilities.clone(), lighting.clone())
+            .unwrap()
+            .with_settings(settings_capabilities.clone(), settings.clone())
             .unwrap();
         let executor = Executor::spawn(device, PathBuf::new()).unwrap();
         let mut session = Session::new(descriptor)
             .unwrap()
             .with_picture(capabilities)
+            .unwrap()
+            .with_lighting(lighting_capabilities)
+            .unwrap()
+            .with_settings(settings_capabilities)
             .unwrap();
         let observed = read_keymap(&mut session, &executor, Duration::from_secs(1)).unwrap();
         assert_eq!(observed, state);
@@ -138,6 +229,14 @@ mod tests {
         assert_eq!(
             read_colors(&mut session, &executor, Duration::from_secs(1)).unwrap(),
             colors
+        );
+        assert_eq!(
+            read_lighting(&mut session, &executor, Duration::from_secs(1)).unwrap(),
+            lighting
+        );
+        assert_eq!(
+            read_settings(&mut session, &executor, Duration::from_secs(1)).unwrap(),
+            settings
         );
     }
 }
