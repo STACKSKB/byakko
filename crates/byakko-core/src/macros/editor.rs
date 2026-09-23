@@ -5,6 +5,7 @@ use super::{
 };
 use crate::session::{ApplyFailure, Problem};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Status {
@@ -20,6 +21,8 @@ pub struct Editor {
     baseline: Option<Snapshot>,
     draft: Option<Program>,
     status: Status,
+    catalog: Option<BTreeMap<String, Snapshot>>,
+    catalog_error: Option<String>,
 }
 
 impl Editor {
@@ -81,6 +84,8 @@ impl Editor {
             baseline: None,
             draft: None,
             status: Status::Unloaded,
+            catalog: None,
+            catalog_error: None,
         })
     }
 
@@ -98,6 +103,56 @@ impl Editor {
     }
     pub fn status(&self) -> &Status {
         &self.status
+    }
+    /// Complete, validated snapshots for every advertised slot in the current connection.
+    pub fn catalog(&self) -> Option<&BTreeMap<String, Snapshot>> {
+        self.catalog.as_ref()
+    }
+    pub fn catalog_error(&self) -> Option<&str> {
+        self.catalog_error.as_deref()
+    }
+    pub fn configured_slots(&self) -> Option<Vec<&super::Choice>> {
+        let catalog = self.catalog.as_ref()?;
+        Some(
+            self.capabilities
+                .slots
+                .iter()
+                .filter(|choice| {
+                    catalog
+                        .get(&choice.id)
+                        .is_some_and(|snapshot| match &snapshot.content {
+                            Content::Editable(program) => !program.events.is_empty(),
+                            Content::Opaque { .. } => true,
+                        })
+                })
+                .collect(),
+        )
+    }
+    pub(crate) fn accept_catalog(&mut self, result: Result<Vec<Snapshot>, String>) {
+        let validated = result.and_then(|snapshots| {
+            let mut catalog = BTreeMap::new();
+            for snapshot in snapshots {
+                let slot = snapshot.slot.clone();
+                self.validate_snapshot_for(&snapshot, &slot)?;
+                if catalog.insert(slot, snapshot).is_some() {
+                    return Err("Macro catalog contains a duplicate slot".into());
+                }
+            }
+            if catalog.len() != self.capabilities.slots.len() {
+                return Err("Macro catalog is missing declared slots".into());
+            }
+            Ok(catalog)
+        });
+        match validated {
+            Ok(catalog) => {
+                self.catalog = Some(catalog);
+                self.catalog_error = None;
+            }
+            Err(error) => {
+                self.catalog = None;
+                self.catalog_error = Some(error);
+            }
+        }
     }
 
     pub fn dirty(&self) -> bool {
@@ -163,6 +218,8 @@ impl Editor {
     }
 
     pub fn invalidate(&mut self) {
+        self.catalog = None;
+        self.catalog_error = None;
         self.status = Status::Unverified {
             problem: Problem::ReadRequired,
         };
@@ -212,7 +269,18 @@ impl Editor {
     }
 
     fn validate_snapshot(&self, snapshot: &Snapshot) -> Result<(), String> {
-        if snapshot.backend_id != self.capabilities.backend_id || snapshot.slot != self.slot {
+        self.validate_snapshot_for(snapshot, &self.slot)
+    }
+
+    fn validate_snapshot_for(&self, snapshot: &Snapshot, slot: &str) -> Result<(), String> {
+        if snapshot.backend_id != self.capabilities.backend_id
+            || snapshot.slot != slot
+            || !self
+                .capabilities
+                .slots
+                .iter()
+                .any(|choice| choice.id == slot)
+        {
             return Err("Macro result belongs to a different backend or slot".into());
         }
         if let Content::Editable(program) = &snapshot.content {
@@ -228,12 +296,17 @@ impl Editor {
         }) {
             Ok(snapshot) => snapshot,
             Err(reason) => {
+                self.catalog = None;
+                self.catalog_error = Some(reason.clone());
                 self.status = Status::Unverified {
                     problem: Problem::Read(reason),
                 };
                 return;
             }
         };
+        if let Some(catalog) = self.catalog.as_mut() {
+            catalog.insert(snapshot.slot.clone(), snapshot.clone());
+        }
         let dirty = self.dirty();
         if dirty && self.baseline.as_ref() != Some(&snapshot) {
             self.status = Status::Conflict { device: snapshot };
@@ -253,6 +326,8 @@ impl Editor {
         let snapshot = match result {
             Ok(snapshot) => snapshot,
             Err(failure) => {
+                self.catalog = None;
+                self.catalog_error = Some(failure.message.clone());
                 self.status = Status::Unverified {
                     problem: Problem::Apply(failure),
                 };
@@ -260,6 +335,8 @@ impl Editor {
             }
         };
         if let Err(reason) = self.validate_snapshot(&snapshot) {
+            self.catalog = None;
+            self.catalog_error = Some(reason.clone());
             self.status = Status::Unverified {
                 problem: Problem::InvalidApplyResult(reason),
             };
@@ -268,10 +345,15 @@ impl Editor {
         if !matches!((&snapshot.content, &self.draft),
             (Content::Editable(program), Some(draft)) if program == draft)
         {
+            self.catalog = None;
+            self.catalog_error = Some("Macro readback did not match the staged program".into());
             self.status = Status::Unverified {
                 problem: Problem::ApplyReadbackMismatch,
             };
             return;
+        }
+        if let Some(catalog) = self.catalog.as_mut() {
+            catalog.insert(snapshot.slot.clone(), snapshot.clone());
         }
         self.baseline = Some(snapshot);
         self.status = Status::Ready;

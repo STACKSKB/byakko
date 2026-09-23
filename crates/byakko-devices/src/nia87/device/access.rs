@@ -48,6 +48,10 @@ impl Access {
         macros::read_macro_with(self.selection(), slot)
     }
 
+    pub fn read_macros(&self, slots: &[u8]) -> Result<Vec<Vec<u8>>> {
+        macros::read_macros_with(self.selection(), slots)
+    }
+
     pub fn read_picture(&self) -> Result<Vec<[u8; 3]>> {
         picture::read_picture_with(self.selection())
     }

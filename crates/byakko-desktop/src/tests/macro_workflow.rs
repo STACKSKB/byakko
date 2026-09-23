@@ -6,14 +6,68 @@ use crate::{
 use byakko_core::macros::{Content, Edit, editor::Status as MacroStatus};
 
 #[test]
-fn macro_page_reads_selected_slot_once_on_entry_and_after_pending_keymap() {
+fn add_uses_first_free_slot_and_capacity_disables_further_adds() {
+    let mut app = ready();
+    let _ = app.update(Message::Page(Page::Macros));
+    settle(&mut app);
+    let editor = app.session.macros().unwrap();
+    assert_eq!(editor.configured_slots().unwrap().len(), 3);
+    assert_eq!(app.session.next_free_macro_slot(), Some("spare"));
+
+    send(&mut app, Macro::Add);
+    settle(&mut app);
+    assert_eq!(app.macro_new_slot.as_deref(), Some("spare"));
+    assert_eq!(app.session.macros().unwrap().slot(), "spare");
+    send(&mut app, Macro::Edit(Edit::Repeat(1)));
+    send(
+        &mut app,
+        Macro::Edit(Edit::Insert {
+            at: 0,
+            event: byakko_core::macros::Event {
+                action: byakko_core::macros::Action::Key {
+                    usage: 4,
+                    pressed: true,
+                },
+                delay_ms: 10,
+            },
+        }),
+    );
+    send(&mut app, Macro::Apply);
+    settle(&mut app);
+    assert_eq!(app.macro_new_slot, None);
+    assert_eq!(
+        app.session
+            .macros()
+            .unwrap()
+            .configured_slots()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(app.session.next_free_macro_slot(), None);
+    send(&mut app, Macro::Add);
+    assert!(!app.busy());
+    assert_eq!(app.session.macros().unwrap().slot(), "spare");
+}
+
+#[test]
+fn macro_page_reads_catalog_once_on_entry_and_after_pending_keymap() {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Macros));
     assert!(matches!(
         app.session.activity(),
-        byakko_core::session::Activity::ReadMacro { .. }
+        byakko_core::session::Activity::ReadMacroCatalog { .. }
     ));
     settle(&mut app);
+    assert_eq!(
+        app.session
+            .macros()
+            .unwrap()
+            .configured_slots()
+            .unwrap()
+            .len(),
+        3
+    );
     assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
     let _ = app.update(Message::Page(Page::Keys));
     let _ = app.update(Message::Page(Page::Macros));
@@ -23,6 +77,15 @@ fn macro_page_reads_selected_slot_once_on_entry_and_after_pending_keymap() {
     let _ = app.update(Message::Read);
     let _ = app.update(Message::Page(Page::Macros));
     settle(&mut app);
+    assert_eq!(
+        app.session
+            .macros()
+            .unwrap()
+            .configured_slots()
+            .unwrap()
+            .len(),
+        3
+    );
     assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
 }
 

@@ -254,6 +254,24 @@ pub(super) fn read_with(access: &device::Access, slot: &str) -> Result<Snapshot,
     from_bytes(slot, &raw)
 }
 
+pub(super) fn read_catalog_with(
+    access: &device::Access,
+    slots: &[String],
+) -> Result<Vec<Snapshot>, String> {
+    let numbers = slots
+        .iter()
+        .map(|slot| slot_number(slot))
+        .collect::<Result<Vec<_>, _>>()?;
+    let raw = access
+        .read_macros(&numbers)
+        .map_err(|error| error.to_string())?;
+    slots
+        .iter()
+        .zip(raw)
+        .map(|(slot, bytes)| from_bytes(slot, &bytes))
+        .collect()
+}
+
 pub fn apply(
     expected: &Snapshot,
     desired: &Program,

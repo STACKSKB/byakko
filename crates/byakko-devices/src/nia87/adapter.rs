@@ -415,6 +415,10 @@ impl crate::Device for Nia87Adapter {
         macro_adapter::read(slot)
     }
 
+    fn read_macro_catalog(&mut self, slots: &[String]) -> Result<Vec<macros::Snapshot>, String> {
+        macro_adapter::read_catalog_with(&device::Access::unique(), slots)
+    }
+
     fn apply_macro(
         &mut self,
         expected: &macros::Snapshot,
@@ -507,6 +511,10 @@ impl crate::Device for BoundNia87Adapter {
 
     fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
         macro_adapter::read_with(&self.access, slot)
+    }
+
+    fn read_macro_catalog(&mut self, slots: &[String]) -> Result<Vec<macros::Snapshot>, String> {
+        macro_adapter::read_catalog_with(&self.access, slots)
     }
 
     fn apply_macro(

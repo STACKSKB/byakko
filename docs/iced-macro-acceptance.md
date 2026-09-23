@@ -1,18 +1,22 @@
 # Iced macro slice, 2026-09-22
 
 The native composition supplies a core `Session` with Nia87 capabilities and
-the existing device executor. `--demo` supplies the same UI/session with three
-named macro slots, distinct limits, and an opaque fixture. Neither view nor
+the existing device executor. `--demo` supplies the same UI/session with four
+named macro slots, including one vacant slot, distinct limits, and an opaque fixture. Neither view nor
 input controller imports the Nia87 adapter or legacy GUI.
 
 Implemented: select/read slot, inspect and replace events, append, reorder,
 remove, clear, edit stored repeat count, revert, explicit Save & verify, and
 stage a saved macro binding onto the selected key/layer, focused recording,
 and bounded local JSON import/export.
-Opening the Macros page now reads the currently selected slot once its keymap
-is ready when that slot is unloaded or invalidated. Revisiting a ready slot
-does not repeat the request; failed reads still need an explicit retry. The
-entry and pending-keymap behavior is covered by a memory-backend test.
+Opening Macros reads every advertised slot once through a serialized,
+backend-neutral catalog operation after the keymap is ready. The library shows
+stored programs and slots referenced by either the verified or staged keymap;
+an empty bound slot cannot be allocated. Add reads the first free slot and
+disables at the advertised capacity. Selecting a library entry reads that
+slot's editable snapshot. Failed reads require an explicit retry. Memory
+tests cover the catalog, Add, full capacity and pending-keymap behavior.
+The grid reserves layout space for its scrollbar.
 Action choices and ranges come from capabilities. Keyboard usages and pointer
 movement are numeric inputs in this pre-alpha; pointer buttons and backend
 actions use supplied labels. Wait is after the event. Zero waits remain
@@ -91,7 +95,11 @@ from the root package into devices; they are not duplicated in the total.
 
 This is not full acceptance. Iced stores local slot labels separately from
 keyboard macro bytes; file names also travel as document metadata. No hardware
-writes were performed for this UI step. Rendered interaction,
+writes were performed for this UI step. The product CLI's read-only
+`list-macros` command scanned the attached Nia87 and returned capacity 50,
+configured `slot-00` only, and first free `slot-01`. The conservative
+two-complete-copy USB scan took about 29 seconds on this host; it runs only
+when the Macros page first needs a catalog or after invalidation. Rendered interaction,
 physical playback, Linux runtime and power-cycle persistence remain unverified;
 the screenshot helper failure documented in `iced-keymap-acceptance.md` remains
 open. The earlier injected-failure recovery problem is also still open.

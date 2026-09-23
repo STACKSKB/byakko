@@ -6,7 +6,7 @@ use super::{
     panels,
 };
 use byakko_core::macros::{
-    Action, Content, Edit, Event,
+    Action, Choice, Content, Edit, Event,
     editor::{Editor, Status},
 };
 use iced::{
@@ -21,19 +21,60 @@ pub(super) fn view(app: &Desktop) -> Element<'_, Message> {
     let Some(editor) = app.session.macros() else {
         return text("This device has no macro editor").into();
     };
+    if editor.catalog().is_none() {
+        let pending = editor.catalog_error();
+        let message = pending.map_or_else(
+            || "Reading stored macros…".to_owned(),
+            |error| format!("Could not read the macro library: {error}"),
+        );
+        let body = column![
+            text(message),
+            button("Retry read").on_press_maybe(
+                (pending.is_some() && !app.busy()).then_some(Message::Macro(Macro::ReadCatalog))
+            )
+        ]
+        .spacing(app.ui.spacing.s);
+        return panels::panel(&app.ui, "Macros", body.into());
+    }
     panels::split(&app.ui, || slots(app, editor), || detail(app, editor))
 }
 
 fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
     let style = &app.ui;
-    let slots = &editor.capabilities().slots;
+    let configured = app
+        .session
+        .macro_library_slots()
+        .expect("catalog checked by view");
+    let occupied = configured.len();
+    let capacity = editor.capabilities().slots.len();
+    let configured_ids: std::collections::BTreeSet<_> =
+        configured.iter().map(|choice| choice.id.as_str()).collect();
+    let slots: Vec<&Choice> = editor
+        .capabilities()
+        .slots
+        .iter()
+        .filter(|choice| {
+            configured_ids.contains(choice.id.as_str())
+                || app.macro_new_slot.as_deref() == Some(choice.id.as_str())
+        })
+        .collect();
+    let no_slots = slots.is_empty();
     let slot_id = editor.slot();
     let can_select = !app.busy();
+    let can_add =
+        can_select && app.session.next_free_macro_slot().is_some() && app.macro_new_slot.is_none();
+    let toolbar = row![
+        button("Add macro").on_press_maybe(can_add.then_some(Message::Macro(Macro::Add))),
+        text(format!("{occupied} / {capacity}")),
+    ]
+    .spacing(style.spacing.s);
     let min_cell_width = style.choice_grid_min_cell_width;
     let gap = style.spacing.xs;
     let inset = style.scrollbar_inset;
+    let scrollbar_width = style.scrollbar_width;
     let choices = responsive(move |size: Size| {
-        let inner_width = (size.width - f32::from(inset) * 2.0).max(0.0);
+        let inner_width =
+            (size.width - f32::from(inset) * 3.0 - f32::from(scrollbar_width)).max(0.0);
         let columns =
             (((inner_width + gap as f32) / (min_cell_width + gap as f32)).floor() as usize).max(1);
         let rows = slots.chunks(columns).map(|choices| {
@@ -52,16 +93,49 @@ fn slots<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
             .into()
         });
         let grid = column(rows).spacing(gap).width(Fill);
-        container(scrollable(grid).width(Fill).height(Fill))
-            .padding([0.0, f32::from(inset)])
-            .width(Fill)
-            .height(Fill)
-            .into()
+        container(
+            scrollable(grid)
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::new()
+                        .width(u32::from(scrollbar_width))
+                        .spacing(u32::from(inset)),
+                ))
+                .width(Fill)
+                .height(Fill),
+        )
+        .padding([0.0, f32::from(inset)])
+        .width(Fill)
+        .height(Fill)
+        .into()
     });
-    panels::panel(style, "Slots", choices.into())
+    let list: Element<'_, Message> = if no_slots {
+        text("No macros stored yet").into()
+    } else {
+        choices.into()
+    };
+    panels::panel(
+        style,
+        "Macros",
+        column![toolbar, list]
+            .spacing(style.spacing.s)
+            .height(Fill)
+            .into(),
+    )
 }
 
 fn detail<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
+    let selected = app
+        .session
+        .macro_library_slots()
+        .is_some_and(|slots| slots.iter().any(|choice| choice.id == editor.slot()))
+        || app.macro_new_slot.as_deref() == Some(editor.slot());
+    if !selected {
+        return panels::panel(
+            &app.ui,
+            "Macro editor",
+            text("Select a macro or add one to begin").into(),
+        );
+    }
     let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
     let can_save = editable && editor.dirty() && editor.request_apply().is_ok();
     let toolbar = row![

@@ -65,6 +65,7 @@ pub struct UiStyle {
     pub board: BoardGeometry,
     pub list_preview_height: f32,
     pub choice_grid_min_cell_width: f32,
+    pub scrollbar_width: u16,
     pub scrollbar_inset: u16,
     pub palette: SemanticPalette,
 }
@@ -104,6 +105,7 @@ impl UiStyle {
         },
         list_preview_height: 180.0,
         choice_grid_min_cell_width: 104.0,
+        scrollbar_width: 10,
         scrollbar_inset: 8,
         palette: SemanticPalette {
             selected_background: None,

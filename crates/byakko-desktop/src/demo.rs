@@ -128,6 +128,7 @@ pub fn device() -> Result<MemoryDevice, String> {
             ("intro", "Intro sequence"),
             ("pointer", "Pointer sequence"),
             ("archive", "Unknown format"),
+            ("spare", "New macro"),
         ]
         .into_iter()
         .map(|(id, label)| Choice {
@@ -224,6 +225,14 @@ pub fn device() -> Result<MemoryDevice, String> {
             Content::Opaque {
                 reason: "Unrecognized demo macro data; read-only backup".into(),
             },
+        ),
+        snapshot(
+            "spare",
+            4,
+            Content::Editable(Program {
+                repeat_count: 0,
+                events: Vec::new(),
+            }),
         ),
     ];
     let lighting = lighting_capabilities();

@@ -56,6 +56,11 @@ pub trait Device: Send + 'static {
         Err("Macro operations are unsupported by this device".into())
     }
 
+    /// Read every advertised slot within one serialized executor operation.
+    fn read_macro_catalog(&mut self, slots: &[String]) -> Result<Vec<macros::Snapshot>, String> {
+        slots.iter().map(|slot| self.read_macro(slot)).collect()
+    }
+
     fn apply_macro(
         &mut self,
         _expected: &macros::Snapshot,

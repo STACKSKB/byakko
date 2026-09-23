@@ -87,6 +87,7 @@ struct Desktop {
     picture_selected: Option<String>,
     settings_selected: Option<String>,
     macro_files: macro_files::Fields,
+    macro_new_slot: Option<String>,
     clock: std::time::Instant,
     recording_options: recording::Options,
     host: Option<lighting::HostInput>,
@@ -126,6 +127,7 @@ pub fn run(
         picture_selected: None,
         settings_selected: None,
         macro_files: macro_files::Fields::with_labels_directory(labels_directory),
+        macro_new_slot: None,
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         host: None,
@@ -283,16 +285,10 @@ impl Desktop {
         let request = match self.page {
             Page::Macros
                 if self.session.macros().is_some_and(|editor| {
-                    matches!(
-                        editor.status(),
-                        byakko_core::macros::editor::Status::Unloaded
-                            | byakko_core::macros::editor::Status::Unverified {
-                                problem: Problem::ReadRequired
-                            }
-                    )
+                    editor.catalog().is_none() && editor.catalog_error().is_none()
                 }) =>
             {
-                self.session.request_macro_read()
+                self.session.request_macro_catalog_read()
             }
             Page::Lighting
                 if self.session.lighting().is_some_and(|editor| {
@@ -481,6 +477,7 @@ impl Desktop {
             completion,
             Completion::ReadMacro { .. } | Completion::ApplyMacro { .. }
         );
+        let macro_catalog_result = matches!(completion, Completion::ReadMacroCatalog { .. });
         if self.session.accept(completion) == Acceptance::IgnoredStale {
             return Task::none();
         }
@@ -507,6 +504,10 @@ impl Desktop {
             self.session.lighting().is_some_and(|editor| {
                 *editor.status() == byakko_core::lighting::editor::Status::Ready
             })
+        } else if macro_catalog_result {
+            self.session
+                .macros()
+                .is_some_and(|editor| editor.catalog().is_some())
         } else if macro_result {
             let verified = self.session.macros().is_some_and(|editor| {
                 *editor.status() == byakko_core::macros::editor::Status::Ready
@@ -519,6 +520,15 @@ impl Desktop {
             {
                 self.reset_macro_inputs();
             }
+            if verified
+                && self.macro_new_slot.as_ref().is_some_and(|slot| {
+                    self.session
+                        .macro_library_slots()
+                        .is_some_and(|slots| slots.iter().any(|choice| &choice.id == slot))
+                })
+            {
+                self.macro_new_slot = None;
+            }
             verified
         } else {
             *self.session.status() == Status::Ready
@@ -529,6 +539,37 @@ impl Desktop {
                 self.closing = Closing::Open;
             } else {
                 return self.close();
+            }
+        }
+        if macro_catalog_result && verified && self.page == Page::Macros {
+            let needs_read = self.session.macros().is_some_and(|editor| {
+                !editor.dirty()
+                    && matches!(
+                        editor.status(),
+                        byakko_core::macros::editor::Status::Unloaded
+                            | byakko_core::macros::editor::Status::Unverified {
+                                problem: Problem::ReadRequired
+                            }
+                    )
+            });
+            let target = self.session.macro_library_slots().and_then(|slots| {
+                let selected = self.session.macros()?.slot();
+                if slots.iter().any(|slot| slot.id == selected)
+                    || self.macro_new_slot.as_deref() == Some(selected)
+                {
+                    Some(selected.to_owned())
+                } else {
+                    slots.first().map(|slot| slot.id.clone())
+                }
+            });
+            if needs_read && let Some(slot) = target {
+                if let Err(reason) = self.session.select_macro(&slot) {
+                    self.notice = Some(reason);
+                } else {
+                    let request = self.session.request_macro_read();
+                    self.submit(request);
+                    return Task::none();
+                }
             }
         }
         self.read_page_on_entry();
