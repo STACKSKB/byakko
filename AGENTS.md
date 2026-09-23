@@ -88,9 +88,11 @@ research baseline, not the structure to port.
   discovery worker and an idle reconnect flow. Each desktop executor holds an
   immutable Nia87 HID target, including recovery opens; never fall back to an
   arbitrary unique match after a target check fails. Physical unplug/replug
-  and Linux runtime acceptance remain open. Host-driven effects and 2.4 GHz
-  remain later capabilities. Do not pursue UI polish or accessibility work before
-  architecture review checkpoints.
+  and Linux runtime acceptance remain open. The retained host-lighting stream
+  now binds setup and restoration to one selected HID target; the Iced executor
+  still needs to own its lifecycle before controls are enabled. Host-driven
+  effects and 2.4 GHz remain later capabilities. Do not pursue UI polish or
+  accessibility work before architecture review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; do not move whole screen controllers into new packages.
 - Test invariants and failure boundaries: stale results, conflicts, rejected

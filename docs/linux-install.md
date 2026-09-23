@@ -4,14 +4,17 @@ Byakko uses native hidraw access. The application runs as your desktop user;
 installing the device permission rule requires administrator access once.
 No background driver service, browser authorization, or JavaScript is involved.
 
-Build on Linux with Rust and the native dependencies described in
-[Linux readiness](linux-readiness.md):
+Build the Iced desktop and the narrow native permission helper on Linux with
+Rust and the native dependencies described in [Linux readiness](linux-readiness.md):
 
 ```sh
-cargo build --release --locked --bin byakko --bin byakko-hidraw-access
-sudo install -d -m 0755 /usr/local/libexec
+cargo build --release --locked -p byakko-desktop
+cargo build --release --locked -p byakko --no-default-features --bin byakko-hidraw-access
+sudo install -d -m 0755 /usr/local/bin /usr/local/libexec /usr/local/share/applications
+sudo install -o root -g root -m 0755 target/release/byakko-desktop /usr/local/bin/byakko-desktop
 sudo install -o root -g root -m 0755 target/release/byakko-hidraw-access /usr/local/libexec/byakko-hidraw-access
 sudo install -o root -g root -m 0644 packaging/linux/70-byakko-nia87.rules /etc/udev/rules.d/70-byakko-nia87.rules
+sudo install -o root -g root -m 0644 packaging/linux/byakko.desktop /usr/local/share/applications/byakko.desktop
 sudo udevadm control --reload-rules
 ```
 
@@ -21,13 +24,18 @@ and rule root-owned so an unprivileged process cannot replace the permission
 check. The helper is a short-lived native executable invoked by udev, not a
 resident driver.
 
-Reconnect the keyboard, then run the following without sudo:
+Run the desktop from the application menu or a terminal without sudo. Its
+demo mode exercises the UI without a keyboard:
 
 ```sh
-target/release/byakko devices
-target/release/byakko inspect
-target/release/byakko gui
+byakko-desktop --demo
+byakko-desktop
 ```
+
+On the first hardware run, reconnect the keyboard after installing the udev
+rule so the active desktop seat receives the new hidraw ACL. Byakko then
+discovers and loads the Nia87 configuration collection automatically. The
+research CLI is separate from this desktop release.
 
 The rule matches USB `3151:4015` and grants access only if the helper finds the
 exact observed configuration report descriptor. Other HID collections, PID
@@ -37,7 +45,9 @@ not yet been measured. A legitimate but different Linux descriptor will fail
 closed until independently verified. Do not broaden the rule to every hidraw
 device to work around a mismatch.
 
-For diagnosis, identify the candidate `hidrawN` from `devices`, then inspect:
+For diagnosis, identify the candidate `hidrawN` with the optional research
+command `cargo run --locked -p byakko --no-default-features -- devices`, then
+inspect:
 
 ```sh
 udevadm info --attribute-walk --name=/dev/hidrawN

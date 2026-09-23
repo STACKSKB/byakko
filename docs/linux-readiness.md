@@ -1,8 +1,32 @@
 # Linux build and release readiness
 
+## Iced desktop cross-link (2026-09-23)
+
+The current `byakko-desktop` release executable and the root package's
+`byakko-hidraw-access` helper both cross-linked for
+`x86_64-unknown-linux-gnu` using the locally retained Zig 0.15.2 and
+`cargo-zigbuild 0.23.4`, with `--locked --offline`. Their ELF headers are
+`7F 45 4C 46`. The 9,771,040-byte desktop SHA-256 is
+`4137DA66CB9EF92AD2D2BFCF9A4196EF9E0348F29A5FA2203BCEC11170E36DF7`;
+the 381,640-byte helper SHA-256 is
+`38C872B4C5BFA8004ECB1D97DBC99585357ED062BE341A955D5DC2C2A5BEA4E2`.
+This proves linking only. Neither binary has launched on Linux, and linked
+system-library availability, udev ACL behavior, and keyboard transactions
+remain unverified. [Linux installation](linux-install.md) now names the Iced
+desktop rather than the retained egui research GUI.
+
+The locked desktop normal/build dependency metadata has 126 Windows and 175
+Linux packages in the offline license gate. No selected package requires a
+copyleft-only license; `self_cell` offers Apache-2.0 as an alternative to GPL.
+The Iced desktop does not select legacy eframe or its bundled fonts. This
+metadata check is not a complete source/asset audit or a distribution notice
+bundle, so release packaging remains open.
+
 ## Linked build update
 
-The full GUI now cross-links to an ELF64 Linux executable using cargo-zigbuild and Zig. See [the reproducible build record](linux-link-build.md). Linux execution, GUI startup, and physical hidraw access remain untested. The earlier audit below is historical.
+The retained egui research GUI also cross-linked to an ELF64 Linux executable
+using cargo-zigbuild and Zig. See [the earlier build record](linux-link-build.md).
+The earlier audit below is historical and describes the legacy package.
 
 ## Update after native-adapter migration
 
