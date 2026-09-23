@@ -465,6 +465,15 @@ impl crate::Device for BoundNia87Adapter {
         crate::nia87::lighting_adapter::apply_with(&self.access, expected, desired, backup_dir)
     }
 
+    fn start_host_lighting(
+        &mut self,
+        mode: crate::HostMode,
+        expected: &byakko_core::lighting::Snapshot,
+        backup_dir: &Path,
+    ) -> Result<Box<dyn crate::HostActivity>, byakko_core::session::ApplyFailure> {
+        crate::nia87::host_adapter::start(&self.access, mode, expected, backup_dir)
+    }
+
     fn read_picture(&mut self) -> Result<byakko_core::picture::Snapshot, String> {
         crate::nia87::picture_adapter::read_with(&self.access)
     }

@@ -30,10 +30,21 @@ pub struct Effect {
     pub options: Vec<Choice>,
     pub color: Option<ColorCapability>,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum HostSource {
+    ScreenAverage,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostMode {
+    pub id: String,
+    pub label: String,
+    pub source: HostSource,
+}
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
     pub backend_id: String,
     pub effects: Vec<Effect>,
+    pub host_modes: Vec<HostMode>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Setting {
@@ -117,6 +128,11 @@ pub fn validate_capabilities(caps: &Capabilities) -> Result<(), String> {
             if choice.id.is_empty() || !options.insert(&choice.id) {
                 return Err("Invalid lighting option ID".into());
             }
+        }
+    }
+    for mode in &caps.host_modes {
+        if mode.id.is_empty() || mode.label.is_empty() || !ids.insert(&mode.id) {
+            return Err("Invalid host lighting mode ID or label".into());
         }
     }
     Ok(())

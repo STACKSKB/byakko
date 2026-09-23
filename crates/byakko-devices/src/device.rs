@@ -6,6 +6,23 @@ use byakko_core::{
 };
 use std::path::Path;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostMode {
+    Screen,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HostFrame {
+    Rgb([u8; 3]),
+}
+
+/// A temporary effect owned by the device executor. `finish` restores and
+/// verifies the saved lighting; Drop must attempt restoration on unwinding.
+pub trait HostActivity: Send {
+    fn send_frame(&mut self, frame: HostFrame) -> Result<(), String>;
+    fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure>;
+}
+
 /// Implementations must validate expected state, back up, write and verify.
 /// Success means verified device state, not merely successful transmission.
 pub trait Device: Send + 'static {
@@ -45,6 +62,20 @@ pub trait Device: Send + 'static {
     ) -> Result<lighting::Snapshot, ApplyFailure> {
         Err(ApplyFailure {
             message: "Lighting operations are unsupported by this device".into(),
+            recovery: Recovery::NotAttempted,
+        })
+    }
+
+    /// A failed start must recover any mutation before returning its typed
+    /// failure. Success transfers restoration ownership to the executor.
+    fn start_host_lighting(
+        &mut self,
+        _mode: HostMode,
+        _expected: &lighting::Snapshot,
+        _backup_dir: &Path,
+    ) -> Result<Box<dyn HostActivity>, ApplyFailure> {
+        Err(ApplyFailure {
+            message: "Host lighting is unsupported by this device".into(),
             recovery: Recovery::NotAttempted,
         })
     }

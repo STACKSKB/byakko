@@ -1,17 +1,20 @@
 //! Render capability-projected lighting controls; device policy lives in core.
+mod host;
 use super::{Desktop, Message as AppMessage};
 use crate::{
     control_widgets::{self, Choice},
     panels::{self, UiStyle},
 };
 use byakko_core::lighting::{
-    Content, Edit,
+    Content, Edit, HostSource,
     controls::{self, ChoiceEdit, Control},
     editor::{Editor, Status},
 };
+use byakko_core::session::Status as SessionStatus;
+pub(crate) use host::HostScreen;
 use iced::{
     Element, Fill,
-    widget::{column, scrollable, text},
+    widget::{button, column, row, scrollable, text},
 };
 
 #[derive(Clone, Debug)]
@@ -20,14 +23,16 @@ pub(super) enum Message {
     Apply,
     Revert,
     Edit(Edit),
+    StartScreen(String),
+    StopHost,
 }
 
 impl Desktop {
     pub(super) fn update_lighting(&mut self, message: Message) {
-        if self.busy() {
-            return;
-        }
         match message {
+            Message::StopHost => self.stop_host(),
+            Message::StartScreen(mode_id) if !self.busy() => self.start_screen(mode_id),
+            _ if self.busy() => (),
             Message::Read => {
                 let request = self.session.request_lighting_read();
                 self.submit(request);
@@ -38,6 +43,7 @@ impl Desktop {
             }
             Message::Revert => self.notice = self.session.revert_lighting().err(),
             Message::Edit(edit) => self.notice = self.session.edit_lighting(edit).err(),
+            Message::StartScreen(_) => {}
         }
     }
 }
@@ -49,6 +55,9 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
     let mut content = column![toolbar(app, editor, editable), text(status(app, editor))]
         .spacing(app.ui.spacing.m);
+    if !editor.capabilities().host_modes.is_empty() {
+        content = content.push(host_controls(app, editor));
+    }
     let Some(draft) = editor.draft() else {
         if let Some(snapshot) = editor.baseline()
             && let Content::Opaque { reason } = &snapshot.content
@@ -86,6 +95,38 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         },
     );
     content.push(workbench).height(Fill).into()
+}
+
+fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage> {
+    let can_start = !app.busy()
+        && app.session.status() == &SessionStatus::Ready
+        && editor.status() == &Status::Ready
+        && !editor.dirty();
+    let starts = column(
+        editor
+            .capabilities()
+            .host_modes
+            .iter()
+            .filter(|mode| mode.source == HostSource::ScreenAverage)
+            .map(|mode| {
+                button(text(format!("Start {}", mode.label)))
+                    .on_press_maybe(
+                        can_start
+                            .then_some(AppMessage::Lighting(Message::StartScreen(mode.id.clone()))),
+                    )
+                    .into()
+            }),
+    );
+    let stop = button("Stop & restore").on_press_maybe(
+        app.screen
+            .as_ref()
+            .map(|_| AppMessage::Lighting(Message::StopHost)),
+    );
+    panels::panel(
+        &app.ui,
+        "Host lighting",
+        row![starts, stop].spacing(app.ui.spacing.m).into(),
+    )
 }
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {

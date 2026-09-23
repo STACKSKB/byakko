@@ -840,6 +840,7 @@ mod tests {
         let (descriptor, state) = fixture();
         let caps = lighting::Capabilities {
             backend_id: "memory".into(),
+            host_modes: vec![],
             effects: vec![lighting::Effect {
                 id: "steady".into(),
                 label: "Steady".into(),

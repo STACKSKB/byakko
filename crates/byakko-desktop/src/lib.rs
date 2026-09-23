@@ -12,6 +12,7 @@ mod panels;
 mod picture;
 mod recording;
 mod recording_input;
+mod screen_stream;
 mod settings;
 #[cfg(test)]
 mod tests;
@@ -84,6 +85,7 @@ struct Desktop {
     macro_files: macro_files::Fields,
     clock: std::time::Instant,
     recording_options: recording::Options,
+    screen: Option<lighting::HostScreen>,
     page: Page,
     macro_form: macro_form::Form,
     repeat_input: String,
@@ -120,6 +122,7 @@ pub fn run(
         macro_files: Default::default(),
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
+        screen: None,
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),
@@ -152,7 +155,9 @@ pub fn run(
 
 impl Desktop {
     fn busy(&self) -> bool {
-        self.session.busy() || self.archive_file != archive::FileState::Idle
+        self.session.busy()
+            || self.screen.is_some()
+            || self.archive_file != archive::FileState::Idle
     }
 
     fn read(&mut self) {
@@ -221,6 +226,10 @@ impl Desktop {
     }
 
     fn poll(&mut self) -> Task<Message> {
+        if let Some(task) = self.poll_host() {
+            return task;
+        }
+        self.poll_screen();
         let Some(executor) = &self.executor else {
             return Task::none();
         };
@@ -388,6 +397,13 @@ impl Desktop {
     fn close(&mut self) -> Task<Message> {
         if self.session.recording() && !self.finish_recording(std::time::Instant::now()) {
             return Task::none();
+        }
+        if self.screen.is_some() {
+            self.stop_host();
+            if self.session.busy() {
+                self.closing = Closing::Waiting;
+                return Task::none();
+            }
         }
         if self.busy() {
             self.closing = Closing::Waiting;
