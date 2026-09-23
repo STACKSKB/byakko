@@ -247,6 +247,17 @@ produced a 419,201-byte archive with SHA-256
 `compare-archives` returned `[]`. These read-only checks sent no setters and
 changed no permissions. The two local archive files remain in `/tmp`.
 
+## Picture context revision: Linux offline status (2026-09-23, source `9c1a4a0`)
+
+At `9c1a4a0f8814338ba160a2ce47ba1b3a6df17477`, the Linux offline build passed
+for `byakko-core`, `byakko-devices`, `byakko-cli`, and `byakko-desktop`. Their
+pure tests passed (311 total), and Clippy passed with warnings denied. Linux
+runtime verification of the new picture `context_revision` remains pending
+until an Nia87 is attached. The
+`[effect, option]` context and option-3 readback evidence in
+`Research/picture-selector-audit.md` came from the Windows-connected board;
+they are not Linux runtime evidence. No picture setter was sent.
+
 ## Linux device-crate verification (2026-09-23, source `26554e0`)
 
 On Linux at `26554e0919cd73c018db67e5b9c5b99af183883d`,
