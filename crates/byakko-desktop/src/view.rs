@@ -291,7 +291,8 @@ pub(super) fn status(app: &Desktop) -> String {
         | Activity::ApplyMacro { .. }
         | Activity::ApplyLighting { .. }
         | Activity::ApplyPicture { .. }
-        | Activity::ApplySetting { .. } => {
+        | Activity::ApplySetting { .. }
+        | Activity::ApplyArchive { .. } => {
             return "Backing up, applying and verifying…".into();
         }
         Activity::Idle => {}
@@ -308,13 +309,17 @@ pub(super) fn problem_label(problem: &Problem) -> String {
     match problem {
         Problem::ReadRequired => "Read the device before editing".into(),
         Problem::Read(reason) => format!("Read failed: {reason}"),
-        Problem::Apply(failure) => format!(
-            "Apply failed ({:?} recovery): {}",
-            failure.recovery, failure.message
-        ),
+        Problem::Apply(failure) => apply_failure_label(failure),
         Problem::InvalidApplyResult(reason) => format!("Invalid readback: {reason}"),
         Problem::ApplyReadbackMismatch => {
             "Readback differs from the draft; state is unverified".into()
         }
     }
+}
+
+pub(super) fn apply_failure_label(failure: &byakko_core::session::ApplyFailure) -> String {
+    format!(
+        "Apply failed ({:?} recovery): {}",
+        failure.recovery, failure.message
+    )
 }

@@ -113,6 +113,18 @@ pub trait Device: Send + 'static {
     ) -> Result<archive::Review, String> {
         Err("Native archive operations are unsupported by this device".into())
     }
+
+    fn apply_archive(
+        &mut self,
+        _expected: &archive::NativeArchive,
+        _target: &archive::NativeArchive,
+        _backup_dir: &Path,
+    ) -> Result<archive::NativeArchive, ApplyFailure> {
+        Err(ApplyFailure {
+            message: "Native archive operations are unsupported by this device".into(),
+            recovery: Recovery::NotAttempted,
+        })
+    }
 }
 
 pub use Device as KeymapDevice;
@@ -248,6 +260,11 @@ fn token(command: &Command) -> (u64, u64) {
             operation,
             ..
         } => (*generation, *operation),
+        Command::ApplyArchive {
+            generation,
+            operation,
+            ..
+        } => (*generation, *operation),
     }
 }
 
@@ -315,6 +332,11 @@ fn failure(command: &Command, message: String, recovery: Recovery) -> Completion
             generation,
             operation,
             result: Err(message),
+        },
+        Command::ApplyArchive { .. } => Completion::ApplyArchive {
+            generation,
+            operation,
+            result: Err(ApplyFailure { message, recovery }),
         },
     }
 }
@@ -391,6 +413,13 @@ fn execute(device: &mut impl Device, command: &Command, backup_dir: &Path) -> Co
             generation,
             operation,
             result: device.review_archive(target),
+        },
+        Command::ApplyArchive {
+            expected, target, ..
+        } => Completion::ApplyArchive {
+            generation,
+            operation,
+            result: device.apply_archive(expected, target, backup_dir),
         },
     }))
     .unwrap_or_else(|_| {

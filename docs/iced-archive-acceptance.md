@@ -21,11 +21,15 @@ used by the Iced adapter. No setters were sent.
 
 Core/device/desktop tests cover size and identity bounds, stale completions,
 exact target echo, invalidation, malformed imports, two-direction plans,
-section summaries and file-task close failure. The Iced page does not offer
-archive apply yet. The existing native apply reports recovery in error text;
-it needs a typed outcome before this workflow can safely surface it. The
+section summaries, file-task close failure and guarded apply through the
+memory backend. The Iced page offers apply only for a changed review. Native
+apply rechecks the complete before-image, saves a durable backup, writes
+supported changes and captures a complete readback. Its structured result
+distinguishes pre-write rejection (`NotAttempted`), verified restoration,
+definite restoration mismatch and unreadable restoration. Failed apply keeps
+the review visible but requires fresh review before another attempt. The
 earlier injected failure and subsequent explicit restore remain a separate
-physical acceptance gate. Linux hardware and rendered interaction are also
-unverified for this slice.
+physical acceptance gate. No live archive write was made for this Iced slice;
+Linux hardware and rendered interaction are also unverified.
 An interrupted export can leave a partial destination file; the UI reports
 its path and requires a new destination rather than overwriting it.

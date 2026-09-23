@@ -9,7 +9,7 @@ use apply_error::{
 };
 use serde::{Deserialize, Serialize};
 
-pub use configuration::{apply_configuration, capture_configuration};
+pub use configuration::{apply_configuration, apply_configuration_detailed, capture_configuration};
 pub use transport::{Candidate, candidates, descriptor, inspect, open_unique};
 use transport::{FeatureSetter, Session, read_payload, transaction_lock};
 

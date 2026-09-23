@@ -1,4 +1,39 @@
-//! Readback verification after a configuration operation.
+//! Structured readback verification after a configuration operation.
+use std::fmt;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum VerificationFailure {
+    Mismatch {
+        first_read_error: Option<String>,
+    },
+    Unreadable {
+        first_read_error: String,
+        retry_error: String,
+    },
+}
+
+impl fmt::Display for VerificationFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mismatch {
+                first_read_error: None,
+            } => f.write_str("configuration readback did not match expected state"),
+            Self::Mismatch {
+                first_read_error: Some(error),
+            } => write!(
+                f,
+                "configuration readback failed ({error}); retry did not match expected state"
+            ),
+            Self::Unreadable {
+                first_read_error,
+                retry_error,
+            } => write!(
+                f,
+                "configuration readback failed ({first_read_error}); retry failed ({retry_error})"
+            ),
+        }
+    }
+}
 
 /// Verify a complete capture, retrying the capture once only if the first read fails.
 ///
@@ -8,18 +43,21 @@ pub(crate) fn verify<T: PartialEq>(
     expected: &T,
     first: Result<T, String>,
     retry: impl FnOnce() -> Result<T, String>,
-) -> Result<(), String> {
+) -> Result<(), VerificationFailure> {
     match first {
         Ok(actual) if &actual == expected => Ok(()),
-        Ok(_) => Err("configuration readback did not match expected state".to_owned()),
+        Ok(_) => Err(VerificationFailure::Mismatch {
+            first_read_error: None,
+        }),
         Err(original_error) => match retry() {
             Ok(actual) if &actual == expected => Ok(()),
-            Ok(_) => Err(format!(
-                "configuration readback failed ({original_error}); retry did not match expected state"
-            )),
-            Err(retry_error) => Err(format!(
-                "configuration readback failed ({original_error}); retry failed ({retry_error})"
-            )),
+            Ok(_) => Err(VerificationFailure::Mismatch {
+                first_read_error: Some(original_error),
+            }),
+            Err(retry_error) => Err(VerificationFailure::Unreadable {
+                first_read_error: original_error,
+                retry_error,
+            }),
         },
     }
 }
@@ -50,7 +88,12 @@ mod tests {
             Ok(7)
         })
         .unwrap_err();
-        assert!(error.contains("did not match"));
+        assert!(matches!(
+            error,
+            super::VerificationFailure::Mismatch {
+                first_read_error: None
+            }
+        ));
         assert_eq!(calls.get(), 0);
     }
 
@@ -75,8 +118,9 @@ mod tests {
             Ok(8)
         })
         .unwrap_err();
-        assert!(error.contains("first read"));
-        assert!(error.contains("retry did not match"));
+        assert!(
+            matches!(error, super::VerificationFailure::Mismatch { first_read_error: Some(message) } if message == "first read")
+        );
         assert_eq!(calls.get(), 1);
     }
 
@@ -88,8 +132,9 @@ mod tests {
             Err("second read".into())
         })
         .unwrap_err();
-        assert!(error.contains("first read"));
-        assert!(error.contains("second read"));
+        assert!(
+            matches!(error, super::VerificationFailure::Unreadable { first_read_error, retry_error } if first_read_error == "first read" && retry_error == "second read")
+        );
         assert_eq!(calls.get(), 1);
     }
 }

@@ -388,6 +388,15 @@ impl crate::Device for Nia87Adapter {
     ) -> Result<byakko_core::archive::Review, String> {
         crate::nia87::archive_adapter::review(target)
     }
+
+    fn apply_archive(
+        &mut self,
+        expected: &byakko_core::archive::NativeArchive,
+        target: &byakko_core::archive::NativeArchive,
+        backup_dir: &Path,
+    ) -> Result<byakko_core::archive::NativeArchive, byakko_core::session::ApplyFailure> {
+        crate::nia87::archive_adapter::apply(expected, target, backup_dir)
+    }
 }
 
 #[cfg(test)]

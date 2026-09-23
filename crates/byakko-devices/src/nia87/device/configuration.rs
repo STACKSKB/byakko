@@ -5,6 +5,25 @@ use super::{
     read_settings_on_device, snapshot_on_device, write_binding, write_lighting_report,
     write_macro_bytes,
 };
+use byakko_core::session::{ApplyFailure, Recovery};
+use std::fmt;
+
+#[derive(Debug)]
+struct ConfigurationApplyError(ApplyFailure);
+
+impl fmt::Display for ConfigurationApplyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.message)
+    }
+}
+impl std::error::Error for ConfigurationApplyError {}
+
+#[derive(Debug)]
+enum RecoveryResult {
+    Verified(String),
+    Failed(String),
+    Unverified(String),
+}
 /// Capture all supported local configuration data without sending setters.
 /// One handle and lock cover both complete sweeps. Other Byakko processes cannot
 /// intervene; an external configurator must still be closed. Progress counts
@@ -81,9 +100,10 @@ pub fn apply_configuration(
         .as_nanos();
     let path = backup_dir.join(format!("configuration-before-{stamp}.json"));
     crate::nia87::configuration::save_new(&path, expected)?;
+    let mut setter_started = false;
     let result = (|| -> Result<crate::nia87::configuration::Configuration> {
         progress("Writing reviewed configuration changes");
-        write_configuration_changes(device, expected, target, &plan)?;
+        write_configuration_changes(device, expected, target, &plan, &mut setter_started)?;
         progress("Verifying complete configuration");
         let actual = capture_configuration_on_device(device, |_, _| {})?;
         if &actual != target {
@@ -94,19 +114,45 @@ pub fn apply_configuration(
     match result {
         Ok(actual) => Ok(actual),
         Err(error) => {
+            if !setter_started {
+                return Err(error);
+            }
             progress("Restoring original configuration after failure");
             let restore = recover_configuration(device, target, expected, &reverse);
-            Err(format!(
-                "Configuration apply failed: {error}; restore: {}; backup {}",
-                match restore {
-                    Ok(()) => "verified".into(),
-                    Err(e) => e.to_string(),
-                },
-                path.display()
-            )
+            let (recovery, detail) = match restore {
+                RecoveryResult::Verified(message) => (Recovery::Verified, message),
+                RecoveryResult::Failed(message) => (Recovery::Failed, message),
+                RecoveryResult::Unverified(message) => (Recovery::Unverified, message),
+            };
+            Err(ConfigurationApplyError(ApplyFailure {
+                message: format!(
+                    "Configuration apply failed: {error}; recovery: {detail}; backup {}",
+                    path.display()
+                ),
+                recovery,
+            })
             .into())
         }
     }
+}
+
+/// Apply the native archive while preserving whether recovery verified,
+/// definitely failed, or could not establish the original state.
+pub fn apply_configuration_detailed(
+    expected: &crate::nia87::configuration::Configuration,
+    target: &crate::nia87::configuration::Configuration,
+    backup_dir: &std::path::Path,
+    progress: impl FnMut(&str),
+) -> std::result::Result<crate::nia87::configuration::Configuration, ApplyFailure> {
+    apply_configuration(expected, target, backup_dir, progress).map_err(|error| {
+        error.downcast_ref::<ConfigurationApplyError>().map_or_else(
+            || ApplyFailure {
+                message: error.to_string(),
+                recovery: Recovery::NotAttempted,
+            },
+            |typed| typed.0.clone(),
+        )
+    })
 }
 
 fn recover_configuration(
@@ -114,11 +160,17 @@ fn recover_configuration(
     attempted: &crate::nia87::configuration::Configuration,
     original: &crate::nia87::configuration::Configuration,
     reverse: &crate::nia87::configuration_plan::ChangeSummary,
-) -> Result<()> {
-    let version = read_payload(device, 0x80, 0, 0)?;
-    let profile = read_payload(device, 0x85, 0, 0)?;
-    if version[0..3] != [0x80, 0, 1] || profile[0..2] != [0x85, 0] {
-        return Err("Recovery identity check failed; durable archive retained".into());
+) -> RecoveryResult {
+    let identity = (|| -> Result<()> {
+        let version = read_payload(device, 0x80, 0, 0)?;
+        let profile = read_payload(device, 0x85, 0, 0)?;
+        if version[0..3] != [0x80, 0, 1] || profile[0..2] != [0x85, 0] {
+            return Err("Recovery identity check failed; durable archive retained".into());
+        }
+        Ok(())
+    })();
+    if let Err(error) = identity {
+        return RecoveryResult::Unverified(error.to_string());
     }
     let mut failures = Vec::new();
     let mut attempt = |label: String, result: Result<()>| {
@@ -235,13 +287,21 @@ fn recover_configuration(
         let (_, fresh) = open_unique().map_err(|e| e.to_string())?;
         capture_configuration_on_device(&fresh, |_, _| {}).map_err(|e| e.to_string())
     });
+    let section_failures = failures.join("; ");
     match verified {
-        Ok(()) => Ok(()),
-        Err(verification) => Err(format!(
-            "Recovery unverified: {verification}; section failures: {}",
-            failures.join("; ")
-        )
-        .into()),
+        Ok(()) => RecoveryResult::Verified(if section_failures.is_empty() {
+            "original configuration verified".into()
+        } else {
+            format!("original configuration verified after section errors: {section_failures}")
+        }),
+        Err(crate::nia87::recovery_verification::VerificationFailure::Mismatch { .. }) => {
+            RecoveryResult::Failed(format!(
+                "original configuration readback mismatched; section failures: {section_failures}"
+            ))
+        }
+        Err(
+            error @ crate::nia87::recovery_verification::VerificationFailure::Unreadable { .. },
+        ) => RecoveryResult::Unverified(format!("{error}; section failures: {section_failures}")),
     }
 }
 
@@ -250,6 +310,7 @@ fn write_configuration_changes(
     before: &crate::nia87::configuration::Configuration,
     target: &crate::nia87::configuration::Configuration,
     plan: &crate::nia87::configuration_plan::ChangeSummary,
+    setter_started: &mut bool,
 ) -> Result<()> {
     // Revalidate identity on this same handle before apply or recovery.
     let version = read_payload(device, 0x80, 0, 0)?;
@@ -259,6 +320,7 @@ fn write_configuration_changes(
     }
     // Macro contents precede the key bindings that refer to them.
     for &slot in &plan.macro_slots {
+        *setter_started = true;
         write_macro_bytes(device, slot, &target.macros[usize::from(slot)])?;
         if read_macro_on_device(device, slot)? != target.macros[usize::from(slot)] {
             return Err(format!("Macro {slot} readback mismatch").into());
@@ -273,6 +335,7 @@ fn write_configuration_changes(
         };
         for slot in 0..126 {
             if old[slot] != new[slot] {
+                *setter_started = true;
                 write_binding(device, function, 0, slot, new[slot])?;
             }
         }
@@ -290,6 +353,7 @@ fn write_configuration_changes(
                 )?;
                 let mut host = [0u8; 65];
                 host[1..].copy_from_slice(&report);
+                *setter_started = true;
                 device.send_setter(&host)?;
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
@@ -308,6 +372,7 @@ fn write_configuration_changes(
         };
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&report);
+        *setter_started = true;
         device.send_setter(&host)?;
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
@@ -315,6 +380,7 @@ fn write_configuration_changes(
         return Err("Settings section readback mismatch".into());
     }
     if plan.lighting {
+        *setter_started = true;
         write_lighting_report(device, &lighting_restore_report(&target.lighting))?;
         if read_lighting_on_device(device)? != target.lighting {
             return Err("Lighting section readback mismatch".into());

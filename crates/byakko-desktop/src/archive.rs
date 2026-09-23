@@ -1,10 +1,10 @@
 //! Local native archive capture, file effects and review UI.
 use super::{Closing, Desktop, Message as AppMessage};
 use crate::panels;
-use byakko_core::archive::{ArchiveProblem, ArchiveState, NativeArchive};
+use byakko_core::archive::{ArchiveProblem, ArchiveState, NativeArchive, Review};
 use iced::{
     Element, Fill, Task,
-    widget::{button, column, row, scrollable, text, text_input},
+    widget::{button, column, scrollable, text, text_input},
 };
 use std::{
     fs::{File, OpenOptions},
@@ -24,6 +24,7 @@ pub(super) enum Message {
     Path(String),
     Capture,
     ReviewFile,
+    Apply,
     Export,
     FileComplete(FileState, Result<Option<Vec<u8>>, String>),
 }
@@ -48,6 +49,10 @@ impl Desktop {
                 self.submit(request);
             }
             Message::ReviewFile => return self.archive_file_task(true),
+            Message::Apply => {
+                let request = self.session.request_archive_apply();
+                self.submit(request);
+            }
             Message::Export => return self.archive_file_task(false),
             Message::FileComplete(..) => unreachable!("completion handled above"),
         }
@@ -226,19 +231,23 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
 fn file_controls(app: &Desktop) -> Element<'_, AppMessage> {
     let state = app.session.archive().expect("archive capability");
     let can_export = captured(Some(state)).is_some() && !app.busy();
+    let can_apply =
+        !app.busy() && matches!(state, ArchiveState::Ready(review) if !review.changes.is_empty());
     let path = text_input("Path to native configuration JSON", &app.archive_path)
         .on_input_maybe((!app.busy()).then_some(|value| AppMessage::Archive(Message::Path(value))))
         .width(app.ui.fields.regular);
     column![
         text("A native backup keeps device-specific bytes losslessly."),
         path,
-        row![
+        column![
             button("Capture current")
                 .on_press_maybe((!app.busy()).then_some(AppMessage::Archive(Message::Capture))),
             button("Export new file")
                 .on_press_maybe(can_export.then_some(AppMessage::Archive(Message::Export))),
             button("Review file")
                 .on_press_maybe((!app.busy()).then_some(AppMessage::Archive(Message::ReviewFile))),
+            button("Apply reviewed changes")
+                .on_press_maybe(can_apply.then_some(AppMessage::Archive(Message::Apply))),
         ]
         .spacing(app.ui.spacing.s),
         text(status(app, state)),
@@ -249,13 +258,15 @@ fn file_controls(app: &Desktop) -> Element<'_, AppMessage> {
 
 fn review(state: &ArchiveState, style: &panels::UiStyle) -> Element<'static, AppMessage> {
     match state {
-        ArchiveState::Ready(review) => column(review.changes.iter().map(|change| {
-            let count = change
-                .count
-                .map_or(String::new(), |count| format!(" · {count}"));
-            text(format!("{}{}", change.label, count)).into()
-        }))
-        .spacing(style.spacing.s)
+        ArchiveState::Ready(review) => review_changes(review, style),
+        ArchiveState::Unverified {
+            review: Some(review),
+            ..
+        } => column![
+            text("Previous review retained; capture and review again before applying"),
+            review_changes(review, style)
+        ]
+        .spacing(style.spacing.m)
         .into(),
         ArchiveState::Captured(archive) => text(format!(
             "Captured {} bytes; choose a file to review changes",
@@ -263,8 +274,24 @@ fn review(state: &ArchiveState, style: &panels::UiStyle) -> Element<'static, App
         ))
         .into(),
         ArchiveState::Idle => text("Capture or open a configuration to begin").into(),
-        ArchiveState::Unverified { .. } => text("Archive state needs a fresh capture").into(),
+        ArchiveState::Unverified { review: None, .. } => {
+            text("Archive state needs a fresh capture").into()
+        }
     }
+}
+
+fn review_changes(review: &Review, style: &panels::UiStyle) -> Element<'static, AppMessage> {
+    if review.changes.is_empty() {
+        return text("No changes in this configuration").into();
+    }
+    column(review.changes.iter().map(|change| {
+        let count = change
+            .count
+            .map_or(String::new(), |count| format!(" · {count}"));
+        text(format!("{}{}", change.label, count)).into()
+    }))
+    .spacing(style.spacing.s)
+    .into()
 }
 
 fn status(app: &Desktop, state: &ArchiveState) -> String {
@@ -286,11 +313,15 @@ fn status(app: &Desktop, state: &ArchiveState) -> String {
             "Reviewed against current device · {} changed sections",
             review.changes.len()
         ),
-        ArchiveState::Unverified { problem } => match problem {
+        ArchiveState::Unverified { problem, .. } => match problem {
             ArchiveProblem::ReadRequired => "Capture again before reviewing".into(),
             ArchiveProblem::Capture(reason)
             | ArchiveProblem::Review(reason)
             | ArchiveProblem::InvalidResult(reason) => reason.clone(),
+            ArchiveProblem::Apply(failure) => super::view::apply_failure_label(failure),
+            ArchiveProblem::ApplyReadbackMismatch => {
+                "Complete readback differs from the reviewed archive; state is unverified".into()
+            }
         },
     }
 }

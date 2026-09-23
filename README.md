@@ -33,9 +33,10 @@ no live picture writes. Settings offer capability-defined toggles and bounded
 values. The Iced editor stages one setting at a time to match the Nia87's
 guarded one-setting transaction; its attached-device check is read-only.
 The local configurations page captures, exports a new native backup and
-reviews a chosen archive against a fresh device capture. Applying a reviewed
-archive remains pending typed recovery work. Host-driven lighting and automatic
-hotplug discovery still need migration. The following feature inventory and
+reviews a chosen archive against a fresh device capture. A changed review can
+be applied with a durable backup, complete readback and typed recovery result;
+this Iced path has not had a live archive write. Host-driven lighting and
+automatic hotplug discovery still need migration. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and
 [current boundary](docs/backend-architecture.md). The

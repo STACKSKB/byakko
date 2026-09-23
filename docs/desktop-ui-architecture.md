@@ -46,7 +46,10 @@ paths and file work, while the Nia87 adapter owns archive parsing and the
 two-direction restoration plan. The archive page composes the same panels and
 renders backend-supplied section names/counts. It does not inspect vendor
 sections. Reviewed state is invalidated by a write or connection change.
-Apply remains separate until the native recovery path reports typed outcomes.
+The reviewed apply action now uses that typed outcome and requires an exact
+before-image, durable backup and complete readback. A failed apply retains the
+review for inspection but requires a fresh review before retrying. No live
+Iced archive apply has been attempted.
 
 This is a pre-alpha composition layer, not a frozen visual design. Toolbars
 and compact pane interaction still need rendered UI review. Static interface
