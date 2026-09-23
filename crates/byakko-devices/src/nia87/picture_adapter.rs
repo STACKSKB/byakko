@@ -39,7 +39,7 @@ fn decode_revision(bytes: &[u8]) -> Result<Vec<[u8; 3]>, String> {
     Ok(bytes.as_chunks::<3>().0.to_vec())
 }
 
-fn project(colors: &[[u8; 3]]) -> Result<picture::Snapshot, String> {
+fn project(colors: &[[u8; 3]], context: [u8; 2]) -> Result<picture::Snapshot, String> {
     let revision = encode_revision(colors)?;
     let map = key_by_slot();
     let editable = map
@@ -49,21 +49,26 @@ fn project(colors: &[[u8; 3]]) -> Result<picture::Snapshot, String> {
     Ok(picture::Snapshot {
         backend_id: BACKEND_ID.into(),
         revision,
+        context_revision: context.into(),
         content: picture::Content::Editable(editable),
     })
 }
 
-fn checked_native(snapshot: &picture::Snapshot) -> Result<Vec<[u8; 3]>, String> {
+fn checked_native(snapshot: &picture::Snapshot) -> Result<(Vec<[u8; 3]>, [u8; 2]), String> {
     if snapshot.backend_id != BACKEND_ID {
         return Err("Picture snapshot belongs to another backend".into());
     }
     let colors = decode_revision(&snapshot.revision)?;
-    if project(&colors)? != *snapshot {
+    let context: [u8; 2] =
+        snapshot.context_revision.as_slice().try_into().map_err(
+            |_| "Nia87 picture snapshot lacks its lighting selector; reload before editing",
+        )?;
+    if project(&colors, context)? != *snapshot {
         return Err(
             "Nia87 picture snapshot differs from its revision; reload before editing".into(),
         );
     }
-    Ok(colors)
+    Ok((colors, context))
 }
 
 pub fn read() -> Result<picture::Snapshot, String> {
@@ -71,8 +76,10 @@ pub fn read() -> Result<picture::Snapshot, String> {
 }
 
 pub(super) fn read_with(access: &device::Access) -> Result<picture::Snapshot, String> {
-    let colors = access.read_picture().map_err(|error| error.to_string())?;
-    project(&colors)
+    let (colors, context) = access
+        .read_picture_with_context()
+        .map_err(|error| error.to_string())?;
+    project(&colors, context)
 }
 
 pub fn apply(
@@ -89,7 +96,7 @@ pub(super) fn apply_with(
     desired: &BTreeMap<String, [u8; 3]>,
     backup: &Path,
 ) -> Result<picture::Snapshot, ApplyFailure> {
-    let original = checked_native(expected).map_err(not_attempted)?;
+    let (original, context) = checked_native(expected).map_err(not_attempted)?;
     let map = key_by_slot();
     if desired.len() != map.len()
         || desired
@@ -107,8 +114,8 @@ pub(super) fn apply_with(
         };
         target[slot] = *color;
     }
-    let actual = access.apply_picture_detailed(&original, &target, backup)?;
-    project(&actual).map_err(|message| ApplyFailure {
+    let actual = access.apply_picture_detailed(&original, &target, context, backup)?;
+    project(&actual, context).map_err(|message| ApplyFailure {
         message,
         recovery: Recovery::Unverified,
     })
@@ -147,13 +154,16 @@ mod tests {
         let colors: Vec<_> = (0..128)
             .map(|slot| [slot as u8, (slot + 1) as u8, 255])
             .collect();
-        let snapshot = project(&colors).unwrap();
+        let snapshot = project(&colors, [13, 0]).unwrap();
         let picture::Content::Editable(content) = &snapshot.content else {
             unreachable!()
         };
         assert_eq!(content[&adapter::key_id(59)], colors[59]); // physical Fn key
         assert_eq!(content[&adapter::key_id(93)], colors[93]); // final mapped physical key
-        assert_eq!(checked_native(&snapshot).unwrap(), colors);
+        assert_eq!(
+            checked_native(&snapshot).unwrap(),
+            (colors.clone(), [13, 0])
+        );
         assert_eq!(
             &decode_revision(&snapshot.revision).unwrap()[126..],
             &colors[126..]
@@ -164,14 +174,17 @@ mod tests {
     #[test]
     fn forged_content_or_revision_is_rejected_before_native_apply() {
         let colors = vec![[0; 3]; 128];
-        let mut snapshot = project(&colors).unwrap();
+        let mut snapshot = project(&colors, [13, 0]).unwrap();
         if let picture::Content::Editable(ref mut content) = snapshot.content {
             content.insert(adapter::key_id(0), [1, 2, 3]);
         }
         assert!(checked_native(&snapshot).is_err());
-        snapshot = project(&colors).unwrap();
+        snapshot = project(&colors, [13, 0]).unwrap();
         snapshot.revision.pop();
         assert!(checked_native(&snapshot).is_err());
-        assert!(project(&[[0; 3]; 127]).is_err());
+        assert!(project(&[[0; 3]; 127], [13, 0]).is_err());
+        snapshot = project(&colors, [13, 0]).unwrap();
+        snapshot.context_revision.clear();
+        assert!(checked_native(&snapshot).is_err());
     }
 }

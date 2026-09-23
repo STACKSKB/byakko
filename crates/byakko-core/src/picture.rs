@@ -21,6 +21,10 @@ pub enum Content {
 pub struct Snapshot {
     pub backend_id: String,
     pub revision: Vec<u8>,
+    /// Backend-owned state that affects which picture the device reads or writes.
+    /// Empty for backends whose picture address is independent of other settings.
+    #[serde(default)]
+    pub context_revision: Vec<u8>,
     pub content: Content,
 }
 

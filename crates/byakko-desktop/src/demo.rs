@@ -254,6 +254,7 @@ pub fn device() -> Result<MemoryDevice, String> {
     let picture_snapshot = byakko_core::picture::Snapshot {
         backend_id: "memory".into(),
         revision: vec![0xF1],
+        context_revision: Vec::new(),
         content: byakko_core::picture::Content::Editable(colors),
     };
     let settings = byakko_core::settings::Capabilities {
