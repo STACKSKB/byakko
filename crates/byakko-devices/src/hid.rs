@@ -1,5 +1,6 @@
-//! Original minimal native HID adapter for the Nia87 configuration transport.
-//! Operating-system backends implement only enumeration and feature reports.
+//! Native HID collection inventory and the currently Nia87-guarded feature transport.
+//! Inventory is device-neutral; opening a report handle still verifies the
+//! supported Nia87 collection before any feature report can be sent.
 
 use std::ffi::{CStr, CString};
 
@@ -89,6 +90,8 @@ impl HidApi {
     pub fn device_list(&self) -> std::slice::Iter<'_, DeviceInfo> {
         self.devices.iter()
     }
+    /// Open only the validated Nia87 configuration collection. A generic
+    /// inventory entry alone never grants feature-report access.
     pub fn open_path(&self, path: &CStr) -> Result<HidDevice> {
         backend::open(path)
     }
