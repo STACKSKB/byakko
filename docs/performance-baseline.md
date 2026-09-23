@@ -112,3 +112,18 @@ including foreground interaction and sustained use. The official app was not
 running in this sample. The screenshot capture helper still returned
 `SetIsBorderRequired`/`0x80004002`, so Byakko's page was not visually checked
 by this measurement; its open window was observable through the title bar.
+
+## Later Byakko-only idle sample
+
+On 2026-09-23 at 14:37 IST, the same already-running Iced release process
+(PID 25476, executable last written at 10:11) was sampled five times at
+five-second intervals with PowerShell `Get-Process`. Its working set was
+25.61 MiB and private committed memory was 10.58 MiB at every sample.
+Cumulative process CPU time stayed at 18.406 seconds at the displayed
+millisecond precision over the 20-second span. It had six threads and 231
+handles. No editing or host stream ran during this sample.
+
+This confirms a stable warmed idle footprint for that process. It is not a
+new Sharkfin or official-app comparison, and the executable predates the
+stored-host-mode exit change in commit `9d4dfc8`. Startup peaks, foreground
+interaction, matched feature workloads and active streaming remain unmeasured.
