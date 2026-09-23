@@ -32,6 +32,17 @@ class LicenseGateTests(unittest.TestCase):
             [("arrayref", "BSD-2-Clause"), ("tiny-skia", "BSD-3-Clause")],
         )
 
+    def test_cli_package_is_excluded(self):
+        rows = parse_tree(
+            "byakko-cli v0.1.0 (C:\\project\\crates\\byakko-cli)|\n"
+            "byakko-core v0.1.0 (C:\\project\\crates\\byakko-core)|\n"
+            "serde_json v1.0.0|MIT\n"
+        )
+        self.assertEqual(
+            [(row["name"], row["selected"]) for row in rows],
+            [("serde_json", "MIT")],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
