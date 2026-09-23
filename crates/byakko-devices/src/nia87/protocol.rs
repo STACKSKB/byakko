@@ -22,9 +22,15 @@ const NIA87_MATRIX: Yc500MatrixGeometry = Yc500MatrixGeometry {
 
 /// Build a page or identity read request with the Nia87 BIT7 header checksum.
 ///
-/// Callers select the opcode; this function only supplies the common framing.
+/// Callers select an opcode valid for this board; this header layout is not a
+/// family-neutral request format.
 pub fn read_request(opcode: u8, index: u8, page: u8) -> [u8; REPORT_LEN] {
-    report::read_request(opcode, index, page)
+    let mut request = [0; REPORT_LEN];
+    request[0] = opcode;
+    request[1] = index;
+    request[2] = page;
+    report::set_bit7_checksum(&mut request);
+    request
 }
 
 /// Convert exactly eight raw 64-byte page responses into 128 four-byte slots.
