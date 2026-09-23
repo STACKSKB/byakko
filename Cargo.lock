@@ -497,6 +497,7 @@ version = "0.1.0"
 dependencies = [
  "byakko-core",
  "byakko-devices",
+ "serde",
  "serde_json",
 ]
 

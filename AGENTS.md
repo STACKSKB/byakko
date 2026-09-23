@@ -94,7 +94,10 @@ read-only-first device acceptance sequence there.
 - Macro storage limits and editor policy can differ. Nia87 can decode a stored
   repeat count of zero, but the observed counted-mode editor admits 1–65,535.
   Preserve raw zero snapshots; do not stage, save, or bind zero through the
-  editor without new physical playback evidence.
+  editor without new physical playback evidence. An explicit native-backup
+  restore is a separate recovery operation: validate the exact prior bytes,
+  bind the selected HID collection, back up the current slot, and verify the
+  complete restored readback.
 - Nia87 keymap forward writes target only the ordinary slots populated in its
   observed default matrix, including two unlabeled ISO positions. Preserve the
   special Fn slot and empty matrix entries verbatim in snapshots and archives;

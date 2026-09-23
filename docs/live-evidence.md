@@ -529,3 +529,30 @@ setter was sent. The ignored local captures are
 `keyboard-camera-1790158015206627300.png` (restored). This verifies the CLI's
 physical lighting file transaction and restoration on this board; it does not
 verify an Iced window click path or every lighting effect.
+
+## CLI macro write and native-backup restoration (2026-09-23)
+
+Slot 49 was read as an empty, all-zero 256-byte macro with repeat count zero.
+No keymap binding referred to `slot-49`. A complete archive was captured before
+writing. `plan-macro` accepted a proposal with count one and key usage 4
+down/up events, each followed by a 50 ms wait. The guarded `apply-macro` wrote
+a durable backup and returned the complete expected 256-byte readback.
+
+The normal macro editor refused to stage the original count-zero program for
+restoration. The retained research `restore-macro` command restored the exact
+empty bytes; a complete archive comparison returned `[]`. This showed a real
+CLI recovery gap. The product CLI now has separate `plan-restore-macro` and
+`restore-macro` commands for an exact native `macro-*-before-*.json` backup.
+They validate the slot and full codec round trip; the apply path binds the
+selected HID collection, checks the current complete slot before writing,
+creates another durable backup, and verifies the full restoration. It does
+not make repeat zero an authorable macro value.
+
+A second guarded cycle exercised the new product command: `apply-macro`
+verified the two-event program; `plan-restore-macro` reported the intended
+count-one to empty count-zero change; `restore-macro` verified the empty slot.
+A second complete archive again compared with the original as `[]`. This
+accepts physical CLI storage and recovery for this case, but does not test
+macro playback, timing, persistence after power cycle, or the Iced click path.
+The local before/proposal/restore files and complete archives are under ignored
+`Research/captures/macro-cli-*-20260923.json` paths.
