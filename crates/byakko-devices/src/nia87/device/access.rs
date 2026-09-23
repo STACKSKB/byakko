@@ -137,6 +137,20 @@ impl Access {
         detailed(self.apply_lighting(expected, setting, backup_dir))
     }
 
+    pub fn start_host_lighting(
+        &self,
+        expected: &crate::nia87::lighting::Lighting,
+        setting: &crate::nia87::lighting::LightingSetting,
+        backup_dir: &std::path::Path,
+    ) -> Result<lighting::HostLightingSession> {
+        lighting::HostLightingSession::start_mode_with(
+            self.selection(),
+            expected,
+            setting,
+            backup_dir,
+        )
+    }
+
     pub fn apply_setting(
         &self,
         expected: &crate::nia87::settings::Settings,
