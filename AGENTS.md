@@ -119,6 +119,9 @@ read-only-first device acceptance sequence there.
   raw picture revision; it stages changed colors through one session command.
   Keep physical color writes pending until the earlier recovery concern and
   Iced picture-write acceptance gate can be addressed with user interaction.
+  Keep CLI command parsing closed and typed; load only the file associated with
+  that command. Preserve offline archive comparison before device discovery
+  and use the shared bounded JSON reader for snapshot inputs.
   Read-only CLI commands remain appropriate for unattended Linux smoke tests.
 
 ## Work sequence and evidence
