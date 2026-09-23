@@ -422,10 +422,14 @@ mod tests {
             0x06, 0xff, 0xff, 0x09, 0x02, 0xa1, 0x01, 0x09, 0x02, 0x15, 0x80, 0x25, 0x7f, 0x75,
             0x08, 0x95, 0x40, 0xb1, 0x02, 0xc0,
         ];
-        let parsed = parse_descriptor(&descriptor).unwrap();
-        assert!(parsed.target);
-        assert_eq!(parsed.target_feature_count, 1);
-        assert!(parsed.target_feature_shape_valid);
+        let mut linux_order = descriptor;
+        linux_order[13..17].copy_from_slice(&[0x95, 0x40, 0x75, 0x08]);
+        for bytes in [descriptor, linux_order] {
+            let parsed = parse_descriptor(&bytes).unwrap();
+            assert!(parsed.target);
+            assert_eq!(parsed.target_feature_count, 1);
+            assert!(parsed.target_feature_shape_valid);
+        }
     }
 
     #[test]
