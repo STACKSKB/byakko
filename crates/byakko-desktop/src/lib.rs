@@ -393,11 +393,19 @@ impl Desktop {
     }
 
     fn hold_reconnect_if_cautious(&mut self) -> bool {
-        let Some(caution) = self.session.reconnect_caution() else {
+        let cautions = self.session.reconnect_cautions();
+        if cautions.is_empty() {
             return false;
-        };
+        }
         self.auto_read = AutoRead::ManualOnly;
-        self.notice = Some(view::reconnect_caution_label(caution));
+        let labels = cautions
+            .into_iter()
+            .map(view::reconnect_caution_label)
+            .collect::<Vec<_>>();
+        self.notice = Some(format!(
+            "{}\nRead manually after reconnecting.",
+            labels.join("\n")
+        ));
         true
     }
 

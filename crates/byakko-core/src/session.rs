@@ -405,7 +405,7 @@ impl Session {
         &self.status
     }
     /// Capture this before disconnect, which invalidates feature statuses.
-    pub fn reconnect_caution(&self) -> Option<ReconnectCaution<'_>> {
+    pub fn reconnect_cautions(&self) -> Vec<ReconnectCaution<'_>> {
         use crate::archive::{ArchiveProblem, ArchiveState};
         use crate::macros::editor::Status as MacroStatus;
 
@@ -417,58 +417,57 @@ impl Session {
             Status::Unverified { problem } => apply_caution(problem, ReconnectSurface::Keymap),
             Status::Disconnected | Status::Ready => None,
         };
-        keymap
-            .or_else(|| {
-                self.macros
-                    .as_ref()
-                    .and_then(|editor| match editor.status() {
-                        MacroStatus::Conflict { .. } => Some(ReconnectCaution {
-                            surface: ReconnectSurface::Macro,
-                            cause: ReconnectCause::Conflict,
-                        }),
-                        MacroStatus::Unverified { problem } => {
-                            apply_caution(problem, ReconnectSurface::Macro)
-                        }
-                        MacroStatus::Unloaded | MacroStatus::Ready => None,
-                    })
-            })
-            .or_else(|| {
-                self.lighting
-                    .as_ref()
-                    .and_then(|editor| draft_caution(editor.status(), ReconnectSurface::Lighting))
-            })
-            .or_else(|| {
-                self.picture
-                    .as_ref()
-                    .and_then(|editor| draft_caution(editor.status(), ReconnectSurface::Picture))
-            })
-            .or_else(|| {
-                self.settings
-                    .as_ref()
-                    .and_then(|editor| draft_caution(editor.status(), ReconnectSurface::Settings))
-            })
-            .or_else(|| match &self.archive_state {
-                ArchiveState::Unverified { problem, review } => {
-                    let cause = match problem {
-                        ArchiveProblem::Apply(failure) => ReconnectCause::Apply(failure),
-                        ArchiveProblem::ApplyReadbackMismatch => {
-                            ReconnectCause::ApplyReadbackMismatch
-                        }
-                        ArchiveProblem::InvalidResult(reason) if review.is_some() => {
-                            ReconnectCause::InvalidApplyResult(reason)
-                        }
-                        ArchiveProblem::ReadRequired
-                        | ArchiveProblem::Capture(_)
-                        | ArchiveProblem::Review(_)
-                        | ArchiveProblem::InvalidResult(_) => return None,
-                    };
-                    Some(ReconnectCaution {
-                        surface: ReconnectSurface::Archive,
-                        cause,
-                    })
+        let macro_slot = self
+            .macros
+            .as_ref()
+            .and_then(|editor| match editor.status() {
+                MacroStatus::Conflict { .. } => Some(ReconnectCaution {
+                    surface: ReconnectSurface::Macro,
+                    cause: ReconnectCause::Conflict,
+                }),
+                MacroStatus::Unverified { problem } => {
+                    apply_caution(problem, ReconnectSurface::Macro)
                 }
-                ArchiveState::Idle | ArchiveState::Captured(_) | ArchiveState::Ready(_) => None,
-            })
+                MacroStatus::Unloaded | MacroStatus::Ready => None,
+            });
+        let lighting = self
+            .lighting
+            .as_ref()
+            .and_then(|editor| draft_caution(editor.status(), ReconnectSurface::Lighting));
+        let picture = self
+            .picture
+            .as_ref()
+            .and_then(|editor| draft_caution(editor.status(), ReconnectSurface::Picture));
+        let settings = self
+            .settings
+            .as_ref()
+            .and_then(|editor| draft_caution(editor.status(), ReconnectSurface::Settings));
+        let archive = match &self.archive_state {
+            ArchiveState::Unverified { problem, review } => {
+                let cause = match problem {
+                    ArchiveProblem::Apply(failure) => Some(ReconnectCause::Apply(failure)),
+                    ArchiveProblem::ApplyReadbackMismatch => {
+                        Some(ReconnectCause::ApplyReadbackMismatch)
+                    }
+                    ArchiveProblem::InvalidResult(reason) if review.is_some() => {
+                        Some(ReconnectCause::InvalidApplyResult(reason))
+                    }
+                    ArchiveProblem::ReadRequired
+                    | ArchiveProblem::Capture(_)
+                    | ArchiveProblem::Review(_)
+                    | ArchiveProblem::InvalidResult(_) => None,
+                };
+                cause.map(|cause| ReconnectCaution {
+                    surface: ReconnectSurface::Archive,
+                    cause,
+                })
+            }
+            ArchiveState::Idle | ArchiveState::Captured(_) | ArchiveState::Ready(_) => None,
+        };
+        [keymap, macro_slot, lighting, picture, settings, archive]
+            .into_iter()
+            .flatten()
+            .collect()
     }
     pub fn generation(&self) -> u64 {
         self.generation
