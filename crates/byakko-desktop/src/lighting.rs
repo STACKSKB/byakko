@@ -1,5 +1,6 @@
 //! Render capability-projected lighting controls; device policy lives in core.
 mod host;
+pub(crate) mod screen;
 use super::{Desktop, Message as AppMessage};
 use crate::{
     control_widgets::{self, Choice},
@@ -27,10 +28,15 @@ pub(super) enum Message {
     EditHost(Edit),
     StartHost(String),
     StopHost,
+    Screen(screen::Message),
 }
 
 impl Desktop {
-    pub(super) fn update_lighting(&mut self, message: Message) {
+    pub(super) fn update_lighting(&mut self, message: Message) -> iced::Task<AppMessage> {
+        if let Message::Screen(message) = message {
+            let editable = !self.busy();
+            return self.screen_capture.update(message, editable);
+        }
         match message {
             Message::StopHost => self.stop_host(),
             Message::StartHost(mode_id) if !self.busy() => self.start_host(mode_id),
@@ -48,7 +54,9 @@ impl Desktop {
             Message::SelectHost(id) => self.notice = self.session.select_host_mode(&id).err(),
             Message::EditHost(edit) => self.notice = self.session.edit_host_setting(edit).err(),
             Message::StartHost(_) => {}
+            Message::Screen(_) => unreachable!(),
         }
+        iced::Task::none()
     }
 }
 
@@ -160,6 +168,12 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
         Some(Err(reason)) => text(reason).into(),
         None => text("This mode has no parameters").into(),
     };
+    let capture: Element<'static, AppMessage> =
+        if selected.source == byakko_core::lighting::HostSource::ScreenAverage {
+            app.screen_capture.view(&app.ui, !app.busy())
+        } else {
+            column![].into()
+        };
     let start = button("Start").on_press_maybe(can_start.then_some(AppMessage::Lighting(
         Message::StartHost(selected.id.clone()),
     )));
@@ -174,6 +188,7 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
         column![
             modes,
             parameters,
+            capture,
             row![start, stop].spacing(app.ui.spacing.m)
         ]
         .spacing(app.ui.spacing.l)

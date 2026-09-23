@@ -50,6 +50,7 @@ fn ready() -> Desktop {
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         host: None,
+        screen_capture: Default::default(),
         page: Page::Keys,
         macro_form: Default::default(),
         repeat_input: String::new(),

@@ -76,7 +76,7 @@ pub fn capabilities() -> Capabilities {
         host_modes: vec![
             HostMode {
                 id: SCREEN_AVERAGE.into(),
-                label: "Screen average".into(),
+                label: "Screen color".into(),
                 source: HostSource::ScreenAverage,
                 parameters: None,
             },

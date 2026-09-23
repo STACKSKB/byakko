@@ -1,5 +1,5 @@
 //! Screen sampling is an OS effect, never a HID owner. The UI forwards frames.
-use byakko_devices::screen_sample::ScreenSampler;
+use byakko_devices::screen_sample::{ScreenCapture, ScreenSampler};
 use std::{
     sync::{
         Arc,
@@ -26,7 +26,7 @@ pub struct ScreenStream {
 }
 
 impl ScreenStream {
-    pub fn spawn() -> std::io::Result<Self> {
+    pub fn spawn(capture: ScreenCapture) -> std::io::Result<Self> {
         let (sender, events) = mpsc::sync_channel(1);
         let state = Arc::new(AtomicU8::new(PREPARING));
         let control = state.clone();
@@ -34,7 +34,7 @@ impl ScreenStream {
             .name("byakko-screen-sample".into())
             .spawn(move || {
                 let result = (|| -> Result<(), String> {
-                    let mut sampler = ScreenSampler::new()?;
+                    let mut sampler = ScreenSampler::with_capture(capture)?;
                     let first = sampler.sample()?;
                     if control
                         .compare_exchange(PREPARING, READY, Ordering::AcqRel, Ordering::Acquire)

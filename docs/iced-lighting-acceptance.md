@@ -54,3 +54,21 @@ change is unknown; see `live-evidence.md`. No restore setter was attempted.
 Actual Iced lighting writes, rendered GUI interaction, visual behavior on
 this keyboard, power-cycle persistence and Linux runtime remain unverified.
 The earlier injected-failure recovery anomaly remains an open acceptance gate.
+
+## Display source and point sampling (2026-09-23)
+
+Host screen color now offers native display discovery and selection, retaining
+average as the default and adding an optional normalized point (0–1000 per axis).
+Capture options stay local to the OS sampler; the core/HID RGB frame contract is
+unchanged. A missing explicit display fails without substituting another one.
+The Windows sampler uses monitor bounds; X11 uses RandR 1.5 monitors with a root
+screen fallback on older servers. Wayland capture remains unsupported.
+
+Windows read-only `sample_displays` smoke check found DISPLAY1, returned average
+[175,176,178] and center-point [246,246,246], and rejected a nonexistent display.
+The sandbox denied GDI transfer; the same bounded executable succeeded outside
+it. No images were saved and no HID access occurred. Native package tests and
+Clippy passed; Linux devices cross-check passed. Multi-monitor hardware, Iced
+interaction, physical streaming/restoration and Linux runtime remain pending.
+The retained official evidence establishes selected-display 1x1 downsampling,
+not an exact chosen-coordinate algorithm; point sampling is a Byakko option.
