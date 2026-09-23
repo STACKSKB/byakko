@@ -1,5 +1,8 @@
 //! Device-neutral descriptions of the controls for an editable lighting setting.
-use super::{Capabilities, Channel, Color, ColorCapability, Edit, Setting, validate_setting};
+use super::{
+    Capabilities, Channel, Color, ColorCapability, Edit, Effect, Setting, validate_parameters,
+    validate_setting,
+};
 use std::ops::RangeInclusive;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +68,12 @@ pub fn controls(caps: &Capabilities, setting: &Setting) -> Result<Controls, Stri
             edit: Edit::Effect(candidate.id.clone()),
         })
         .collect();
+    let settings = parameter_controls(effect, setting)?;
+    Ok(Controls { effects, settings })
+}
+
+pub fn parameter_controls(effect: &Effect, setting: &Setting) -> Result<Vec<Control>, String> {
+    validate_parameters(effect, setting)?;
     let mut settings = Vec::new();
 
     if let (Some(range), Some(value)) = (&effect.brightness, setting.brightness) {
@@ -128,7 +137,7 @@ pub fn controls(caps: &Capabilities, setting: &Setting) -> Result<Controls, Stri
             });
         }
     }
-    Ok(Controls { effects, settings })
+    Ok(settings)
 }
 
 #[cfg(test)]
@@ -309,6 +318,75 @@ mod tests {
         };
         assert_eq!(
             controls(&caps(), &invalid),
+            Err("Invalid lighting brightness".into())
+        );
+    }
+
+    #[test]
+    fn host_parameters_use_the_same_control_projection() {
+        let schema = Effect {
+            id: "audio_parameters".into(),
+            label: "Audio parameters".into(),
+            brightness: Some(1..=9),
+            speed: None,
+            options: vec![Choice {
+                id: "wide".into(),
+                label: "Wide".into(),
+            }],
+            color: Some(ColorCapability::Fixed),
+        };
+        let setting = Setting {
+            effect: schema.id.clone(),
+            brightness: Some(6),
+            speed: None,
+            option: Some("wide".into()),
+            color: Some(Color::Rgb([1, 2, 3])),
+        };
+        let controls = parameter_controls(&schema, &setting).unwrap();
+        assert!(controls.iter().any(|control| matches!(
+            control,
+            Control::Level {
+                label: "Brightness",
+                value: 6,
+                ..
+            }
+        )));
+        assert!(controls.iter().any(|control| matches!(control, Control::Choices { label: "Option", choices } if choices.len() == 1)));
+        assert_eq!(
+            controls
+                .iter()
+                .filter(|control| matches!(control, Control::Level { .. }))
+                .count(),
+            4
+        );
+        assert!(
+            parameter_controls(
+                &schema,
+                &Setting {
+                    brightness: Some(10),
+                    ..setting
+                }
+            )
+            .is_err()
+        );
+        let mut catalog = caps();
+        catalog.host_modes.push(crate::lighting::HostMode {
+            id: "audio".into(),
+            label: "Audio".into(),
+            source: crate::lighting::HostSource::PlaybackAudio { bands: 32 },
+            parameters: Some(crate::lighting::HostParameters {
+                schema,
+                default: Setting {
+                    effect: "audio_parameters".into(),
+                    brightness: Some(10),
+                    speed: None,
+                    option: Some("wide".into()),
+                    color: Some(Color::Rgb([1, 2, 3])),
+                },
+            }),
+        });
+        assert_eq!(
+            crate::lighting::validate_capabilities(&catalog),
             Err("Invalid lighting brightness".into())
         );
     }

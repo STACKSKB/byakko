@@ -46,6 +46,14 @@ Opening a feature-report handle still performs Nia87-specific identity and
 report-length checks. This external-target check proves the discovery boundary,
 not tablet button/ring decoding or generic write support.
 
+A future Wacom adapter can reuse collection inventory, exact target selection,
+session tickets, draft transitions and capability-rendered controls. Its tablet
+reports and supported button/ring actions need their own evidence and codec.
+Button-like ring steps may fit the current binding descriptor; continuous ring
+values do not yet have a portable domain type. Add that type when a tablet
+backend provides an observed contract, rather than copying Nia87's mouse/wheel
+report bytes or treating every HID collection as a keyboard.
+
 Within each feature, keep the ordered read -> expected-state check -> durable
 backup -> write -> complete readback -> recovery sequence explicit. Shared
 helpers can supply a session and typed failure envelope. They must not hide

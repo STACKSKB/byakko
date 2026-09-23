@@ -1,11 +1,84 @@
 //! Deterministic lifecycle for one temporary host-driven lighting activity.
 use super::{
-    Acceptance, Activity, ApplyFailure, HostPhase, HostStart, HostTicket, Problem, Recovery,
-    Session, Status,
+    Acceptance, Activity, ApplyFailure, HostDraft, HostPhase, HostStart, HostTicket, Problem,
+    Recovery, Session, Status,
 };
-use crate::lighting::{self, Content, Snapshot, editor};
+use crate::lighting::{self, Content, Edit, Snapshot, editor};
 
 impl Session {
+    pub(super) fn select_default_host_mode(&mut self) {
+        self.host_draft = self
+            .lighting
+            .as_ref()
+            .and_then(|editor| editor.capabilities().host_modes.first())
+            .map(|mode| HostDraft {
+                mode_id: mode.id.clone(),
+                setting: mode
+                    .parameters
+                    .as_ref()
+                    .map(|parameters| parameters.default.clone()),
+            });
+    }
+
+    pub fn host_draft(&self) -> Option<&HostDraft> {
+        self.host_draft.as_ref()
+    }
+
+    pub fn select_host_mode(&mut self, mode_id: &str) -> Result<(), String> {
+        self.require_idle()?;
+        let editor = self
+            .lighting
+            .as_ref()
+            .ok_or("Device has no lighting capability")?;
+        let mode = editor
+            .capabilities()
+            .host_modes
+            .iter()
+            .find(|mode| mode.id == mode_id)
+            .ok_or("Host lighting mode is unavailable")?;
+        if self
+            .host_draft
+            .as_ref()
+            .is_some_and(|draft| draft.mode_id == mode_id)
+        {
+            return Ok(());
+        }
+        self.host_draft = Some(HostDraft {
+            mode_id: mode.id.clone(),
+            setting: mode
+                .parameters
+                .as_ref()
+                .map(|parameters| parameters.default.clone()),
+        });
+        Ok(())
+    }
+
+    pub fn edit_host_setting(&mut self, change: Edit) -> Result<(), String> {
+        self.require_idle()?;
+        let draft = self
+            .host_draft
+            .as_ref()
+            .ok_or("Select a host lighting mode first")?;
+        let setting = draft
+            .setting
+            .as_ref()
+            .ok_or("Host lighting mode has no editable parameters")?;
+        let schema = &self
+            .lighting
+            .as_ref()
+            .ok_or("Device has no lighting capability")?
+            .capabilities()
+            .host_modes
+            .iter()
+            .find(|mode| mode.id == draft.mode_id)
+            .and_then(|mode| mode.parameters.as_ref())
+            .ok_or("Host lighting parameters are unavailable")?
+            .schema;
+        let next = lighting::edit_parameters(schema, setting, change)?;
+        self.host_draft.as_mut().expect("selected draft").setting = Some(next);
+        Ok(())
+    }
+
     pub fn request_host_start(&mut self, mode_id: &str) -> Result<HostStart, String> {
         self.require_idle()?;
         if self.status != Status::Ready {
@@ -29,6 +102,19 @@ impl Session {
             .find(|mode| mode.id == mode_id)
             .ok_or("Host lighting mode is unavailable")?
             .clone();
+        let setting = self
+            .host_draft
+            .as_ref()
+            .filter(|draft| draft.mode_id == mode_id)
+            .map(|draft| draft.setting.clone())
+            .unwrap_or_else(|| {
+                mode.parameters
+                    .as_ref()
+                    .map(|parameters| parameters.default.clone())
+            });
+        if let (Some(parameters), Some(setting)) = (&mode.parameters, &setting) {
+            lighting::validate_parameters(&parameters.schema, setting)?;
+        }
         let ticket = HostTicket {
             generation: self.generation,
             operation: self.operation()?,
@@ -41,6 +127,7 @@ impl Session {
         Ok(HostStart {
             ticket,
             mode,
+            setting,
             expected,
         })
     }
@@ -150,7 +237,7 @@ mod tests {
     use super::*;
     use crate::{
         Action, Descriptor, Layer, PhysicalKey, State,
-        lighting::{Capabilities, Effect, HostMode, HostSource, Setting},
+        lighting::{Capabilities, Effect, HostMode, HostParameters, HostSource, Setting},
     };
     use std::collections::BTreeMap;
 
@@ -203,6 +290,23 @@ mod tests {
                 id: "screen".into(),
                 label: "Screen".into(),
                 source: HostSource::ScreenAverage,
+                parameters: Some(HostParameters {
+                    schema: Effect {
+                        id: "screen_params".into(),
+                        label: "Screen parameters".into(),
+                        brightness: Some(1..=10),
+                        speed: None,
+                        options: vec![],
+                        color: None,
+                    },
+                    default: Setting {
+                        effect: "screen_params".into(),
+                        brightness: Some(5),
+                        speed: None,
+                        option: None,
+                        color: None,
+                    },
+                }),
             }],
         })
         .unwrap();
@@ -300,5 +404,57 @@ mod tests {
         assert!(matches!(session.status(), Status::Unverified { .. }));
         assert_ne!(session.lighting().unwrap().status(), &editor::Status::Ready);
         assert!(session.request_host_start("screen").is_err());
+    }
+
+    #[test]
+    fn host_parameters_are_transient_and_rejected_edits_leave_draft_unchanged() {
+        let mut session = loaded();
+        assert!(!session.dirty());
+        assert_eq!(
+            session
+                .request_host_start("screen")
+                .unwrap()
+                .setting
+                .as_ref()
+                .unwrap()
+                .brightness,
+            Some(5)
+        );
+        session.accept_host_start_failed(
+            match session.activity() {
+                Activity::HostLighting { ticket, .. } => *ticket,
+                _ => unreachable!(),
+            },
+            ApplyFailure {
+                message: "no writes".into(),
+                recovery: Recovery::NotAttempted,
+            },
+        );
+        session.select_host_mode("screen").unwrap();
+        assert!(session.edit_host_setting(Edit::Brightness(11)).is_err());
+        assert_eq!(
+            session
+                .host_draft()
+                .unwrap()
+                .setting
+                .as_ref()
+                .unwrap()
+                .brightness,
+            Some(5)
+        );
+        session.edit_host_setting(Edit::Brightness(8)).unwrap();
+        assert!(!session.dirty());
+        assert_eq!(
+            session
+                .request_host_start("screen")
+                .unwrap()
+                .setting
+                .as_ref()
+                .unwrap()
+                .brightness,
+            Some(8)
+        );
+        session.disconnect();
+        assert!(session.host_draft().is_none());
     }
 }

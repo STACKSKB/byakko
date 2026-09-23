@@ -23,6 +23,8 @@ pub(super) enum Message {
     Apply,
     Revert,
     Edit(Edit),
+    SelectHost(String),
+    EditHost(Edit),
     StartHost(String),
     StopHost,
 }
@@ -43,6 +45,8 @@ impl Desktop {
             }
             Message::Revert => self.notice = self.session.revert_lighting().err(),
             Message::Edit(edit) => self.notice = self.session.edit_lighting(edit).err(),
+            Message::SelectHost(id) => self.notice = self.session.select_host_mode(&id).err(),
+            Message::EditHost(edit) => self.notice = self.session.edit_host_setting(edit).err(),
             Message::StartHost(_) => {}
         }
     }
@@ -88,7 +92,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
             panels::panel(
                 style,
                 "Parameters",
-                scrollable(setting_controls(style, &settings, editable))
+                scrollable(setting_controls(style, &settings, editable, Message::Edit))
                     .height(Fill)
                     .into(),
             )
@@ -98,17 +102,50 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
 }
 
 fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage> {
+    let selected_id = app.session.host_draft().map(|draft| draft.mode_id.as_str());
+    let selected = selected_id
+        .and_then(|id| {
+            editor
+                .capabilities()
+                .host_modes
+                .iter()
+                .find(|mode| mode.id == id)
+        })
+        .or_else(|| editor.capabilities().host_modes.first())
+        .expect("nonempty host modes");
     let can_start = !app.busy()
         && app.session.status() == &SessionStatus::Ready
         && editor.status() == &Status::Ready
         && !editor.dirty();
-    let starts = column(editor.capabilities().host_modes.iter().map(|mode| {
-        button(text(format!("Start {}", mode.label)))
-            .on_press_maybe(
-                can_start.then_some(AppMessage::Lighting(Message::StartHost(mode.id.clone()))),
-            )
-            .into()
-    }));
+    let modes = control_widgets::choices(
+        &app.ui,
+        "Mode",
+        editor.capabilities().host_modes.iter().map(|mode| Choice {
+            label: mode.label.clone(),
+            selected: mode.id == selected.id,
+            message: (!app.busy())
+                .then_some(AppMessage::Lighting(Message::SelectHost(mode.id.clone()))),
+        }),
+    );
+    let settings = selected.parameters.as_ref().map(|parameters| {
+        let setting = app
+            .session
+            .host_draft()
+            .filter(|draft| draft.mode_id == selected.id)
+            .and_then(|draft| draft.setting.as_ref())
+            .unwrap_or(&parameters.default);
+        controls::parameter_controls(&parameters.schema, setting)
+    });
+    let parameters = match settings {
+        Some(Ok(projected)) => {
+            setting_controls(&app.ui, &projected, !app.busy(), Message::EditHost)
+        }
+        Some(Err(reason)) => text(reason).into(),
+        None => text("This mode has no parameters").into(),
+    };
+    let start = button("Start").on_press_maybe(can_start.then_some(AppMessage::Lighting(
+        Message::StartHost(selected.id.clone()),
+    )));
     let stop = button("Stop & restore").on_press_maybe(
         app.host
             .as_ref()
@@ -117,7 +154,13 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
     panels::panel(
         &app.ui,
         "Host lighting",
-        row![starts, stop].spacing(app.ui.spacing.m).into(),
+        column![
+            modes,
+            parameters,
+            row![start, stop].spacing(app.ui.spacing.m)
+        ]
+        .spacing(app.ui.spacing.l)
+        .into(),
     )
 }
 
@@ -168,6 +211,7 @@ fn setting_controls(
     style: &UiStyle,
     source: &[Control],
     editable: bool,
+    message: fn(Edit) -> Message,
 ) -> Element<'static, AppMessage> {
     column(source.iter().cloned().map(|control| match control {
         Control::Choices { label, choices } => control_widgets::choices(
@@ -176,7 +220,7 @@ fn setting_controls(
             choices.into_iter().map(|choice| Choice {
                 label: choice.label,
                 selected: choice.selected,
-                message: editable.then_some(AppMessage::Lighting(Message::Edit(choice.edit))),
+                message: editable.then_some(AppMessage::Lighting(message(choice.edit))),
             }),
         ),
         Control::Level {
@@ -190,7 +234,7 @@ fn setting_controls(
             range,
             value,
             editable.then_some(move |value| {
-                AppMessage::Lighting(Message::Edit(edit.edit(value).expect("projected range")))
+                AppMessage::Lighting(message(edit.edit(value).expect("projected range")))
             }),
         ),
     }))

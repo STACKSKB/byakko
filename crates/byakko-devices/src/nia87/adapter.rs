@@ -468,10 +468,11 @@ impl crate::Device for BoundNia87Adapter {
     fn start_host_lighting(
         &mut self,
         mode: byakko_core::lighting::HostMode,
+        setting: Option<byakko_core::lighting::Setting>,
         expected: &byakko_core::lighting::Snapshot,
         backup_dir: &Path,
     ) -> Result<Box<dyn crate::HostActivity>, byakko_core::session::ApplyFailure> {
-        crate::nia87::host_adapter::start(&self.access, mode, expected, backup_dir)
+        crate::nia87::host_adapter::start(&self.access, mode, setting, expected, backup_dir)
     }
 
     fn read_picture(&mut self) -> Result<byakko_core::picture::Snapshot, String> {
