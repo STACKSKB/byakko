@@ -60,5 +60,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => return Err("Usage: byakko-desktop [--demo]".into()),
     };
-    byakko_desktop::run(session, executor)
+    let probe = move || {
+        use byakko_desktop::discovery::Availability;
+        if arguments.as_slice() == ["--demo"] {
+            return Availability::Ready { id: "demo".into() };
+        }
+        match nia87::device::availability() {
+            nia87::device::Availability::Unavailable => Availability::Missing,
+            nia87::device::Availability::Available(candidate) => {
+                Availability::Ready { id: candidate.path }
+            }
+            nia87::device::Availability::Ambiguous(candidates) => Availability::Ambiguous {
+                count: candidates.len(),
+            },
+            nia87::device::Availability::EnumerationFailed(reason) => Availability::Error(reason),
+        }
+    };
+    byakko_desktop::run(session, executor, probe)
 }

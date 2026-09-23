@@ -15,6 +15,12 @@ available width falls below the configured breakpoint. The actual default
 theme still comes from Iced; selected controls retain Iced's active and hover
 styles unless semantic colors are supplied.
 
+The composition root supplies a backend-specific read-only availability probe
+to Iced. A bounded worker performs HID enumeration and reports a backend-neutral
+missing, single-device, ambiguous or error state. The desktop owns scan timing,
+connection generation changes and user-facing status; core owns drafts and
+conflict detection. Device effects remain in the separate serialized executor.
+
 Device capability values stay outside widgets. For lighting, the pure
 `byakko_core::lighting::controls` projection turns a validated setting into
 named effect choices, level ranges and option choices with edit intents. The

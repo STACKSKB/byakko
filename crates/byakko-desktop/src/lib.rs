@@ -1,6 +1,7 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
 mod archive;
 mod control_widgets;
+pub mod discovery;
 mod lighting;
 mod macro_binding_view;
 mod macro_editor;
@@ -18,9 +19,10 @@ mod view;
 
 use byakko_core::{
     Change,
-    session::{Acceptance, Command, Completion, Session, Status},
+    session::{Acceptance, Command, Completion, Problem, Session, Status},
 };
 use byakko_devices::Executor;
+use discovery::{Availability, Discovery};
 use iced::{Element, Subscription, Task, window};
 use std::{sync::mpsc::TryRecvError, time::Duration};
 
@@ -42,6 +44,7 @@ enum Message {
     Apply,
     Revert,
     Poll,
+    Scan,
     Close,
     DiscardAndClose,
     KeepEditing,
@@ -64,6 +67,12 @@ enum Closing {
     ConfirmDiscard,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AutoRead {
+    Enabled,
+    ManualOnly,
+}
+
 struct Desktop {
     ui: panels::UiStyle,
     archive_file: archive::FileState,
@@ -78,6 +87,11 @@ struct Desktop {
     repeat_input: String,
     session: Session,
     executor: Executor,
+    discovery: Discovery,
+    presence: Option<Availability>,
+    selected_device: Option<String>,
+    auto_read: AutoRead,
+    executor_live: bool,
     layer: String,
     selected: Option<String>,
     search: String,
@@ -86,8 +100,14 @@ struct Desktop {
 }
 
 /// The composition root supplies a configured session and its executor together.
-pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(
+    session: Session,
+    executor: Executor,
+    probe: impl Fn() -> Availability + Send + 'static,
+) -> Result<(), Box<dyn std::error::Error>> {
     let layer = session.descriptor().layers[0].id.clone();
+    let mut discovery = Discovery::spawn(probe)?;
+    discovery.request();
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
         ui: panels::UiStyle::DEFAULT,
@@ -103,6 +123,11 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
         repeat_input: String::new(),
         session,
         executor,
+        discovery,
+        presence: None,
+        selected_device: None,
+        auto_read: AutoRead::Enabled,
+        executor_live: true,
         layer,
         selected: None,
         search: String::new(),
@@ -110,11 +135,7 @@ pub fn run(session: Session, executor: Executor) -> Result<(), Box<dyn std::erro
         closing: Closing::Open,
     }));
     iced::application(
-        move || {
-            let mut desktop = initial.borrow_mut().take().expect("single desktop boot");
-            desktop.read();
-            desktop
-        },
+        move || initial.borrow_mut().take().expect("single desktop boot"),
         Desktop::update,
         Desktop::view,
     )
@@ -133,7 +154,7 @@ impl Desktop {
     }
 
     fn read(&mut self) {
-        if self.busy() {
+        if self.busy() || !self.executor_live {
             return;
         }
         let request = self.session.connect().and_then(|generation| {
@@ -147,6 +168,7 @@ impl Desktop {
         self.notice = None;
         match request {
             Ok(command) => {
+                self.discovery.invalidate();
                 if let Err(completion) = self.executor.try_submit(command) {
                     self.session.accept(*completion);
                 }
@@ -173,30 +195,16 @@ impl Desktop {
     }
 
     fn poll(&mut self) -> Task<Message> {
-        use byakko_core::session::Activity;
-        if !matches!(
-            self.session.activity(),
-            Activity::Read { .. }
-                | Activity::Apply { .. }
-                | Activity::ReadMacro { .. }
-                | Activity::ApplyMacro { .. }
-                | Activity::ReadLighting { .. }
-                | Activity::ApplyLighting { .. }
-                | Activity::ReadPicture { .. }
-                | Activity::ApplyPicture { .. }
-                | Activity::ReadSettings { .. }
-                | Activity::ApplySetting { .. }
-                | Activity::CaptureArchive { .. }
-                | Activity::ReviewArchive { .. }
-                | Activity::ApplyArchive { .. }
-        ) {
+        if !self.executor_live {
             return Task::none();
         }
         match self.executor.try_receive() {
             Ok(completion) => return self.complete(completion),
             Err(TryRecvError::Empty) => return Task::none(),
             Err(TryRecvError::Disconnected) => {
+                self.executor.set_generation(0);
                 self.session.disconnect();
+                self.executor_live = false;
                 self.notice = Some(
                     "Device worker stopped; device state is unverified. Restart to reconnect."
                         .into(),
@@ -205,6 +213,65 @@ impl Desktop {
             }
         }
         Task::none()
+    }
+
+    fn scan(&mut self) {
+        // Even after a disconnect, a completion may arrive for the old generation.
+        // Consume it before submitting any command to the bounded worker queue.
+        if !self.busy() {
+            let _ = self.poll();
+        }
+        if let Some(availability) = self.discovery.receive() {
+            self.accept_availability(availability);
+        }
+        if !self.busy() && self.executor_live {
+            self.discovery.request();
+        }
+    }
+
+    fn accept_availability(&mut self, availability: Availability) {
+        if self.busy() {
+            return;
+        }
+        let previous = self.selected_device.as_deref();
+        let changed = matches!(&availability, Availability::Ready { id } if previous.is_some_and(|old| old != id));
+        if changed || !matches!(availability, Availability::Ready { .. }) {
+            if matches!(
+                self.session.status(),
+                Status::Conflict { .. }
+                    | Status::Unverified {
+                        problem: Problem::Apply(_)
+                            | Problem::InvalidApplyResult(_)
+                            | Problem::ApplyReadbackMismatch
+                    }
+            ) {
+                self.auto_read = AutoRead::ManualOnly;
+                self.notice = Some(format!(
+                    "{} · Read manually after reconnecting.",
+                    view::status(self)
+                ));
+            }
+            self.executor.set_generation(0);
+            self.session.disconnect();
+        }
+        match &availability {
+            Availability::Ready { id } => {
+                self.selected_device = Some(id.clone());
+                if self.auto_read == AutoRead::Enabled
+                    && matches!(
+                        self.session.status(),
+                        Status::Disconnected
+                            | Status::Unverified {
+                                problem: Problem::Read(_)
+                            }
+                    )
+                {
+                    self.read();
+                }
+            }
+            _ => self.selected_device = None,
+        }
+        self.presence = Some(availability);
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
@@ -296,7 +363,7 @@ impl Desktop {
         if self.closing == Closing::ConfirmDiscard
             && !matches!(
                 message,
-                Message::DiscardAndClose | Message::Close | Message::Poll
+                Message::DiscardAndClose | Message::Close | Message::Poll | Message::Scan
             )
         {
             self.closing = Closing::Open;
@@ -314,13 +381,18 @@ impl Desktop {
             Message::SelectKey(key) => self.selected = Some(key),
             Message::Search(search) => self.search = search,
             Message::Stage(index) => self.stage(index),
-            Message::Read => self.read(),
+            Message::Read => {
+                self.auto_read = AutoRead::Enabled;
+                self.read();
+            }
             Message::Apply => {
                 let request = self.session.request_apply();
                 self.submit(request);
             }
             Message::Revert => self.notice = self.session.revert().err(),
             Message::Poll => return self.poll(),
+            Message::Scan if self.closing == Closing::ConfirmDiscard => {}
+            Message::Scan => self.scan(),
             Message::Close => return self.close(),
             Message::DiscardAndClose if !self.busy() => return iced::exit(),
             Message::DiscardAndClose => {}
@@ -331,6 +403,9 @@ impl Desktop {
 
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
+        if self.closing == Closing::ConfirmDiscard {
+            return close;
+        }
         if self.session.recording() {
             Subscription::batch([close, recording::subscription()])
         } else if self.busy()
@@ -344,7 +419,15 @@ impl Desktop {
                 iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll),
             ])
         } else {
-            close
+            Subscription::batch([
+                close,
+                iced::time::every(if self.presence.is_none() {
+                    Duration::from_millis(100)
+                } else {
+                    Duration::from_secs(2)
+                })
+                .map(|_| Message::Scan),
+            ])
         }
     }
 

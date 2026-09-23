@@ -12,8 +12,10 @@ cargo run -p byakko-desktop --release --locked
 cargo run -p byakko-desktop --release --locked -- --demo
 ```
 
-Normal startup reads the Nia87 automatically. The demo uses an in-memory,
-three-layer keyboard and performs no hardware or file writes. Both use the
+Normal startup discovers and reads the Nia87 automatically. Idle USB scans
+notice removal and retry reads after reconnection without choosing between
+multiple matching interfaces; scans send no HID reports. The demo uses an
+in-memory, three-layer keyboard and performs no hardware or file writes. Both use the
 same portable session model and serialized executor. The Iced screen supports
 key/layer selection, action search, staged-change review, apply with readback,
 revert and explicit read/reconnect. The Macros page supports capability-driven
@@ -35,8 +37,8 @@ guarded one-setting transaction; its attached-device check is read-only.
 The local configurations page captures, exports a new native backup and
 reviews a chosen archive against a fresh device capture. A changed review can
 be applied with a durable backup, complete readback and typed recovery result;
-this Iced path has not had a live archive write. Host-driven lighting and
-automatic hotplug discovery still need migration. The following feature inventory and
+this Iced path has not had a live archive write. Host-driven lighting still
+needs migration. The following feature inventory and
 `gui` command describe the retained egui research application. See the
 [approved architecture](docs/pre-alpha-proposal.md) and
 [current boundary](docs/backend-architecture.md). The
@@ -48,6 +50,8 @@ storage model and physical verification limits. The
 one-setting transaction and read-only comparison. The
 [archive acceptance notes](docs/iced-archive-acceptance.md) record its
 read-only capture and review limits. The
+[discovery acceptance notes](docs/iced-discovery-acceptance.md) record automatic
+reconnect behavior and limits. The
 [desktop UI boundary](docs/desktop-ui-architecture.md) describes the shared
 style data and responsive panels.
 

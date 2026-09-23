@@ -21,7 +21,7 @@ fn lock_file(path: &std::path::Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     pub path: String,
     pub vid: u16,
@@ -31,6 +31,33 @@ pub struct Candidate {
     pub usage: u16,
     pub manufacturer: Option<String>,
     pub product: Option<String>,
+}
+
+/// Result of a read-only OS HID enumeration for the Nia87 configuration
+/// collection. Callers can decide how to present discovery without parsing
+/// diagnostics or inferring state from a candidate count.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Availability {
+    Unavailable,
+    Available(Candidate),
+    Ambiguous(Vec<Candidate>),
+    EnumerationFailed(String),
+}
+
+/// Enumerate matching collections without opening a handle or sending reports.
+pub fn availability() -> Availability {
+    classify(candidates())
+}
+
+fn classify(result: Result<Vec<Candidate>>) -> Availability {
+    match result {
+        Ok(candidates) => match candidates.as_slice() {
+            [] => Availability::Unavailable,
+            [candidate] => Availability::Available(candidate.clone()),
+            _ => Availability::Ambiguous(candidates),
+        },
+        Err(error) => Availability::EnumerationFailed(error.to_string()),
+    }
 }
 
 pub fn candidates() -> Result<Vec<Candidate>> {
@@ -183,7 +210,49 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::lock_file;
+    use super::{Availability, Candidate, classify, lock_file};
+
+    fn candidate(path: &str) -> Candidate {
+        Candidate {
+            path: path.into(),
+            vid: 0x3151,
+            pid: 0x4011,
+            interface: 1,
+            usage_page: 0xffff,
+            usage: 2,
+            manufacturer: None,
+            product: Some("Nia87".into()),
+        }
+    }
+
+    #[test]
+    fn availability_classifies_zero_one_and_multiple_collections() {
+        assert_eq!(classify(Ok(Vec::new())), Availability::Unavailable);
+
+        let only = candidate("nia87-a");
+        assert_eq!(
+            classify(Ok(vec![only.clone()])),
+            Availability::Available(only)
+        );
+
+        let first = candidate("nia87-a");
+        let second = candidate("nia87-b");
+        assert_eq!(
+            classify(Ok(vec![first.clone(), second.clone()])),
+            Availability::Ambiguous(vec![first, second])
+        );
+    }
+
+    #[test]
+    fn enumeration_failure_is_a_distinct_availability_state() {
+        let failure = classify(Err("permission denied".into()));
+        assert_eq!(
+            failure,
+            Availability::EnumerationFailed("permission denied".into())
+        );
+        assert_ne!(failure, Availability::Unavailable);
+        assert_ne!(failure, Availability::Ambiguous(Vec::new()));
+    }
 
     #[test]
     fn operating_system_lock_excludes_second_handle_and_releases_on_drop() {

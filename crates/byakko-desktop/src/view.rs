@@ -274,6 +274,7 @@ fn action_label(app: &Desktop, action: &Action) -> String {
 }
 
 pub(super) fn status(app: &Desktop) -> String {
+    use crate::discovery::Availability;
     use byakko_core::session::Activity;
     match app.session.activity() {
         Activity::MacroFile { .. } => return "Working with a local macro file…".into(),
@@ -297,8 +298,23 @@ pub(super) fn status(app: &Desktop) -> String {
         }
         Activity::Idle => {}
     }
+    if let Some(presence) = &app.presence {
+        match presence {
+            Availability::Missing => return "Keyboard not connected · draft retained".into(),
+            Availability::Ambiguous { count } => {
+                return format!("{count} matching configuration interfaces · connect one keyboard");
+            }
+            Availability::Error(reason) => return format!("USB discovery failed: {reason}"),
+            Availability::Ready { .. } => {}
+        }
+    }
     match app.session.status() {
-        Status::Disconnected => "Disconnected · draft retained".into(),
+        Status::Disconnected if app.auto_read == super::AutoRead::ManualOnly => {
+            "Draft retained · read manually before editing".into()
+        }
+        Status::Disconnected if app.presence.is_none() => "Looking for keyboard…".into(),
+        Status::Disconnected if !app.executor_live => "Device worker stopped · restart Byakko".into(),
+        Status::Disconnected => "Keyboard found · reading…".into(),
         Status::Ready => "Readback verified · edits are staged until applied".into(),
         Status::Conflict { .. } => "Device changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => problem_label(problem),
