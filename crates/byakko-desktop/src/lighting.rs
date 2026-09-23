@@ -11,7 +11,7 @@ use byakko_core::lighting::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, row, scrollable, text},
+    widget::{column, scrollable, text},
 };
 
 #[derive(Clone, Debug)]
@@ -89,24 +89,18 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
 }
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {
-    row![
-        button("Read lighting")
-            .on_press_maybe((!app.busy()).then_some(AppMessage::Lighting(Message::Read))),
-        button("Revert draft").on_press_maybe(
-            (!app.busy() && editor.dirty()).then_some(AppMessage::Lighting(Message::Revert))
-        ),
-        button("Apply & verify").on_press_maybe(
-            (editable && editor.dirty()).then_some(AppMessage::Lighting(Message::Apply))
-        ),
-        text(if editor.dirty() {
+    control_widgets::transaction_toolbar(
+        &app.ui,
+        "Read lighting",
+        (!app.busy()).then_some(AppMessage::Lighting(Message::Read)),
+        (!app.busy() && editor.dirty()).then_some(AppMessage::Lighting(Message::Revert)),
+        (editable && editor.dirty()).then_some(AppMessage::Lighting(Message::Apply)),
+        if editor.dirty() {
             "Staged changes"
         } else {
             "No staged changes"
-        }),
-    ]
-    .spacing(app.ui.spacing.m)
-    .align_y(iced::Center)
-    .into()
+        },
+    )
 }
 
 fn status(app: &Desktop, editor: &Editor) -> String {

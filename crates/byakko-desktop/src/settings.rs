@@ -10,7 +10,7 @@ use byakko_core::settings::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, pick_list, row, scrollable, text},
+    widget::{column, pick_list, scrollable, text},
 };
 use std::fmt;
 
@@ -124,24 +124,18 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
 }
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {
-    row![
-        button("Read settings")
-            .on_press_maybe((!app.busy()).then_some(AppMessage::Settings(Message::Read))),
-        button("Revert draft").on_press_maybe(
-            (!app.busy() && editor.dirty()).then_some(AppMessage::Settings(Message::Revert))
-        ),
-        button("Apply & verify").on_press_maybe(
-            (editable && editor.dirty()).then_some(AppMessage::Settings(Message::Apply))
-        ),
-        text(if editor.dirty() {
+    control_widgets::transaction_toolbar(
+        &app.ui,
+        "Read settings",
+        (!app.busy()).then_some(AppMessage::Settings(Message::Read)),
+        (!app.busy() && editor.dirty()).then_some(AppMessage::Settings(Message::Revert)),
+        (editable && editor.dirty()).then_some(AppMessage::Settings(Message::Apply)),
+        if editor.dirty() {
             "One setting staged"
         } else {
             "No staged changes"
-        }),
-    ]
-    .spacing(app.ui.spacing.m)
-    .align_y(iced::Center)
-    .into()
+        },
+    )
 }
 
 fn status(app: &Desktop, editor: &Editor) -> String {

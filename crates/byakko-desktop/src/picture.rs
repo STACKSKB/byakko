@@ -10,7 +10,7 @@ use byakko_core::picture::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, row, scrollable, text},
+    widget::{column, scrollable, text},
 };
 
 #[derive(Clone, Debug)]
@@ -153,20 +153,14 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
 }
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {
-    row![
-        button("Read colors")
-            .on_press_maybe((!app.busy()).then_some(AppMessage::Picture(Message::Read))),
-        button("Revert draft").on_press_maybe(
-            (!app.busy() && editor.dirty()).then_some(AppMessage::Picture(Message::Revert))
-        ),
-        button("Apply & verify").on_press_maybe(
-            (editable && editor.dirty()).then_some(AppMessage::Picture(Message::Apply))
-        ),
-        text(format!("{} staged", editor.changes().len())),
-    ]
-    .spacing(app.ui.spacing.m)
-    .align_y(iced::Center)
-    .into()
+    control_widgets::transaction_toolbar(
+        &app.ui,
+        "Read colors",
+        (!app.busy()).then_some(AppMessage::Picture(Message::Read)),
+        (!app.busy() && editor.dirty()).then_some(AppMessage::Picture(Message::Revert)),
+        (editable && editor.dirty()).then_some(AppMessage::Picture(Message::Apply)),
+        format!("{} staged", editor.changes().len()),
+    )
 }
 
 fn status(app: &Desktop, editor: &Editor) -> String {

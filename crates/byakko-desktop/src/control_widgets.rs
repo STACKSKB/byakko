@@ -2,7 +2,7 @@
 use crate::panels::{self, UiStyle};
 use iced::{
     Element, Fill,
-    widget::{column, container, slider, text},
+    widget::{button, column, container, row, slider, text},
 };
 use std::ops::RangeInclusive;
 
@@ -11,6 +11,27 @@ pub struct Choice<Message> {
     pub label: String,
     pub selected: bool,
     pub message: Option<Message>,
+}
+
+/// Render the common staged-edit toolbar used by device-backed feature pages.
+/// The caller owns the page-specific labels, messages, and status copy.
+pub fn transaction_toolbar<Message: Clone + 'static>(
+    style: &UiStyle,
+    read_label: impl Into<String>,
+    read: Option<Message>,
+    revert: Option<Message>,
+    apply: Option<Message>,
+    status: impl Into<String>,
+) -> Element<'static, Message> {
+    row![
+        button(text(read_label.into())).on_press_maybe(read),
+        button("Revert draft").on_press_maybe(revert),
+        button("Apply & verify").on_press_maybe(apply),
+        text(status.into()),
+    ]
+    .spacing(style.spacing.m)
+    .align_y(iced::Center)
+    .into()
 }
 
 pub fn choices<Message: Clone + 'static>(
