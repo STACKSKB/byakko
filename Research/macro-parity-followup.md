@@ -27,4 +27,5 @@ and reader disagree on the latter. Neither difference should be resolved from
 an offline round trip alone.
 
 Offline validation: `compare_macro_capture` matched observed data and header
-prefix; all seven `nia87::macros::tests` passed. No device writes were made.
+prefix. The captured six event bytes and native report prefix are pinned in a
+device-crate regression test. No device writes were made.

@@ -14,6 +14,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn captured_official_mouse_macro_matches_native_event_bytes() {
+        // Research/captures/macro-official-headers-1.log: one captured page for
+        // slot 0. The device-clearing page sequence is verified separately.
+        let program = Macro {
+            repeat_count: 1,
+            events: vec![
+                MacroEvent::MouseButton {
+                    button: 240,
+                    down: true,
+                    delay_ms: 1,
+                },
+                MacroEvent::MouseButton {
+                    button: 240,
+                    down: false,
+                    delay_ms: 50,
+                },
+            ],
+        };
+        let data = encode(&program).unwrap();
+        assert_eq!(&data[..6], &[1, 0, 0xf0, 0x81, 0xf0, 0x32]);
+        assert_eq!(decode(&data).unwrap(), program);
+
+        let reports = write_reports(0, &data).unwrap();
+        assert_eq!(&reports[0][..4], &[0x16, 0, 0, 56]);
+        assert_eq!(&reports[0][8..14], &data[..6]);
+    }
+
+    #[test]
     fn fixed_vector_covers_modifiers_buttons_movement_and_delays() {
         let value = Macro {
             repeat_count: 0x1234,
