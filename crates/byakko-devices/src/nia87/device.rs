@@ -18,26 +18,13 @@ use serde::{Deserialize, Serialize};
 pub use access::Access;
 use access::Selection;
 pub use configuration::{apply_configuration, apply_configuration_detailed, capture_configuration};
-pub use keymaps::{
-    apply_keymaps, apply_keymaps_detailed, apply_keymaps_detailed_for, apply_keymaps_for, snapshot,
-    snapshot_for,
-};
+pub use keymaps::{apply_keymaps, apply_keymaps_detailed, snapshot};
 pub use lighting::{
-    HostLightingSession, ScreenSession, apply_lighting, apply_lighting_detailed,
-    apply_lighting_detailed_for, apply_lighting_for, read_lighting, read_lighting_for,
+    HostLightingSession, ScreenSession, apply_lighting, apply_lighting_detailed, read_lighting,
 };
-pub use macros::{
-    apply_macro, apply_macro_detailed, apply_macro_detailed_for, apply_macro_for, read_macro,
-    read_macro_for,
-};
-pub use picture::{
-    apply_picture, apply_picture_detailed, apply_picture_detailed_for, apply_picture_for,
-    read_picture, read_picture_for,
-};
-pub use settings::{
-    apply_setting, apply_setting_detailed, apply_setting_detailed_for, apply_setting_for,
-    read_settings, read_settings_for,
-};
+pub use macros::{apply_macro, apply_macro_detailed, read_macro};
+pub use picture::{apply_picture, apply_picture_detailed, read_picture};
+pub use settings::{apply_setting, apply_setting_detailed, read_settings};
 pub use transport::{
     Availability, Candidate, Target, TargetSelectionError, availability, candidates, descriptor,
     inspect, open_expected, open_unique,

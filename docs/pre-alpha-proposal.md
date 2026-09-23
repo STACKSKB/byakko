@@ -130,3 +130,19 @@ After human approval:
 The architecture review should approve the toolkit direction, dependency graph,
 state ownership and command/result contract before step 1. The first vertical
 slice is a checkpoint toward the full product, not a new definition of completion.
+
+## Backend readiness checkpoint
+
+The current Iced feature views consume core descriptors, editor projections and
+capabilities. They contain no Nia87 report opcodes or board-specific feature
+branches. Size, spacing and palette defaults live in `desktop::panels::UiStyle`;
+views compose panels using those tokens. The executable composition root still
+constructs only Nia87 and demo sessions. Adding QMK/VIA will require a
+discovery/adapter factory there, plus QMK/VIA descriptors and capability
+catalogs, but should not require a separate keymap view.
+
+The first QMK/VIA backend should implement the existing device contract for
+keymaps before new feature abstractions are introduced. The current settings
+model supports toggles and numbers; a QMK/VIA setting with a finite choice
+catalog will need a new generic choice kind and view projection. Add that when
+the first concrete setting requires it, preserving unknown backend values.

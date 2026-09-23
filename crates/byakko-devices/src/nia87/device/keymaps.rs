@@ -24,10 +24,6 @@ pub fn snapshot() -> Result<Snapshot> {
     snapshot_with(Selection::Unique)
 }
 
-pub fn snapshot_for(target: &Target) -> Result<Snapshot> {
-    snapshot_with(Selection::Expected(target))
-}
-
 pub(super) fn snapshot_with(selection: Selection<'_>) -> Result<Snapshot> {
     let session = Session::open_for(selection)?;
     snapshot_on_device(session.device())
@@ -90,18 +86,6 @@ pub fn apply_keymaps_detailed(
     detailed(apply_keymaps(expected, base, function, backup_dir))
 }
 
-pub fn apply_keymaps_detailed_for(
-    target: &Target,
-    expected: &Snapshot,
-    base: &[[u8; 4]],
-    function: &[[u8; 4]],
-    backup_dir: &std::path::Path,
-) -> std::result::Result<Snapshot, byakko_core::session::ApplyFailure> {
-    detailed(apply_keymaps_for(
-        target, expected, base, function, backup_dir,
-    ))
-}
-
 pub fn apply_keymaps(
     expected: &Snapshot,
     base: &[[u8; 4]],
@@ -109,22 +93,6 @@ pub fn apply_keymaps(
     backup_dir: &std::path::Path,
 ) -> Result<Snapshot> {
     apply_keymaps_with(Selection::Unique, expected, base, function, backup_dir)
-}
-
-pub fn apply_keymaps_for(
-    target: &Target,
-    expected: &Snapshot,
-    base: &[[u8; 4]],
-    function: &[[u8; 4]],
-    backup_dir: &std::path::Path,
-) -> Result<Snapshot> {
-    apply_keymaps_with(
-        Selection::Expected(target),
-        expected,
-        base,
-        function,
-        backup_dir,
-    )
 }
 
 pub(super) fn apply_keymaps_with(
