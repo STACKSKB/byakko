@@ -107,6 +107,9 @@ read-only-first device acceptance sequence there.
   against the Nia87 adapter, then wait for backup, write, and full readback.
   The settings-file workflow follows the same boundary and permits only one
   changed scalar field per apply, matching the backend's one-field transaction.
+  The global-lighting file workflow requires the same fresh raw revision and
+  passes the Nia87 adapter's pure effect preflight before staging through the
+  shared session.
   Read-only CLI commands remain appropriate for unattended Linux smoke tests.
 
 ## Work sequence and evidence

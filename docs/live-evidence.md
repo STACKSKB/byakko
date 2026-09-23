@@ -465,3 +465,15 @@ not run on hardware; memory-backend tests cover its one-field transaction and
 verified reread. Ignored files:
 `Research/captures/cli-settings-plan-smoke-20260923.json` and
 `Research/captures/cli-settings-plan-proposal-20260923.json`.
+
+## CLI lighting plan smoke check (2026-09-23)
+
+The release CLI exported the attached Nia87's current global-lighting
+snapshot: effect 1, brightness 4, fixed RGB `(8,8,8)`. `plan-lighting` returned
+`null` for the unchanged file. A second file changed only brightness from 4
+to 3; planning returned the complete intended setting. Each command freshly
+read keymap and lighting, passed the Nia87 adapter's pure write preflight,
+and sent no setter. `apply-lighting` was not run on hardware; memory-backend
+tests cover its verified transaction and reread. Ignored files:
+`Research/captures/cli-lighting-plan-smoke-20260923.json` and
+`Research/captures/cli-lighting-plan-proposal-20260923.json`.
