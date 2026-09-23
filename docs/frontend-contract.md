@@ -71,7 +71,19 @@ change. `apply-lighting <snapshot-file>` requires a change and uses the same
 guarded session/executor transaction as Iced. The attached board has exercised
 planning only; physical CLI lighting apply remains open.
 
-Later CLI work can expose macro and archive apply workflows. It should
+`read-macro <slot-id>` output is a backend snapshot with the complete raw
+before-image. `plan-macro <snapshot-file>` freshly reads that exact slot,
+checks its backend and revision, validates the proposed program against the
+portable capabilities and Nia87 codec, then displays full before/after
+programs. `apply-macro <snapshot-file>` stages through the same correlated
+macro-file ticket and guarded executor path as Iced. A stored repeat count of
+zero remains readable and can plan as an unchanged no-op, but a changed
+program must use the advertised editable count range. This snapshot workflow
+is distinct from the portable macro document format, whose source slot is
+descriptive rather than an expected-state token. Physical CLI macro apply and
+playback remain open.
+
+Later CLI work can expose archive apply workflows. It should
 show the target identity and operation result, preserve opaque values, and use
 the same expected-state check, durable backup, readback and typed recovery
 outcome as the desktop. CLI flags are presentation; they must not grow a second
