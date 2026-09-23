@@ -71,3 +71,44 @@ the legacy GUI; these measurements do not establish a toolkit performance win.
 No unconditional rendering feature is enabled. Completion polling is subscribed
 only while the core is Loading/Applying; rendered status was not observable in
 this run, so a verified loaded-idle benchmark remains outstanding.
+
+## Attached Nia87: Byakko and Sharkfin warmed idle
+
+Measured on the same Windows host on 2026-09-23 from 13:18:51 to 13:19:07
+IST. The Nia87 was attached over USB. The current Byakko Iced release window
+had been open since 10:13; the installed Sharkfin window had been open since
+13:17 and identified the board as “Menel Nia 87”. No editing, Apply action, or
+lighting stream was started during the sample. Both windows were open during
+measurement; Sharkfin was closed normally afterward. The Byakko executable
+was built earlier that day, before the CLI-only changes at `878b4e8`.
+
+| Measurement | Byakko desktop | Sharkfin plus six WebView2 children |
+| --- | ---: | ---: |
+| Executable size | 6,650,880 bytes | 13,885,440 bytes (host executable only) |
+| Mean working-set sum, 16 one-second samples | 25.6 MiB | 426.7 MiB |
+| Maximum working-set sum | 25.6 MiB | 430.5 MiB |
+| Mean private committed-memory sum | 10.6 MiB | 225.5 MiB |
+| Process CPU time gained over 15.58 seconds | 0.02 seconds | 0.58 seconds |
+
+The Sharkfin process family was identified from Windows parent process IDs:
+`sharkfin.exe` → one browser `msedgewebview2.exe` → five further WebView2
+children. Other WebView2 processes on the machine had a different parent and
+were excluded. `Get-Process` supplied per-process working set, private memory,
+and cumulative CPU time at each sample. The table sums the process family; it
+does not measure GPU memory, system-wide graphics allocation, or energy.
+Working-set sums double-count pages shared between those processes, so private
+committed memory is the more useful cross-process comparison here. The CPU
+interval is short and nearly idle, so its relative percentages are noisy.
+
+SHA-256 of the measured Byakko binary:
+`ee8091a99b7d10e26075e0e7cda8d01d5d0ad156fbcf4b03236e7debc9345df8`.
+SHA-256 of the installed Sharkfin binary:
+`ff0b8e19abb7533c1bec1c9f4ecabaa8a1702a7d4c0c591eaa9d64d7e291e733`.
+
+This establishes a same-host idle footprint, not a full performance ranking.
+The apps were on different pages and have different completed feature sets.
+Repeat with matched keymap, macro, per-key color, and host-stream workloads,
+including foreground interaction and sustained use. The official app was not
+running in this sample. The screenshot capture helper still returned
+`SetIsBorderRequired`/`0x80004002`, so Byakko's page was not visually checked
+by this measurement; its open window was observable through the title bar.
