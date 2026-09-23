@@ -31,3 +31,26 @@ prefix. A device-crate regression now pins the complete observed 64-byte
 payload, including zero padding and checksum, and checks that only the
 intentional final-page flag and its checksum differ from Byakko's first page.
 No device writes were made.
+
+## Slot count on the attached firmware
+
+The selected official configurator sets `MACROMAX` to 50 and normally allocates
+indices 0–49. Its inclusive allocator loop can mention index 50, but the
+preceding capacity check stops ordinary allocation once 50 macros exist. This
+is a configurator policy, not a proven firmware storage boundary.
+
+A read-only research probe on firmware `0x0100`, profile 0, requested all four
+pages of slots 0, 49 and 50 through the validated configuration collection.
+Each page used an identity barrier, and two complete copies had to match.
+Slot 0 decoded as the existing program; slot 49 decoded as an empty program.
+Slot 50 repeatedly returned zeros at the start and `FF` at offsets 42, 45,
+63, 231, 246 and 249. That 256-byte response is distinct from both comparison
+slots and fails the safe macro decoder because nonzero bytes occur beyond its
+usable limit. A complete read-only archive after the probe compared equal to
+the before archive (`[]`). No setter or binding was sent.
+
+The result does not prove whether slot 50 can be safely written or played. In
+particular, a stable getter response could expose adjacent or uninitialized
+storage. Keep the product capability at the official 50 slots (0–49); do not
+promote index 50 from this read alone. The isolated probe is
+`examples/probe_macro_slot50.rs` and is excluded from normal product builds.

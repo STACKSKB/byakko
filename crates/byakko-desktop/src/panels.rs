@@ -1,7 +1,7 @@
 //! Small, reusable layout primitives shared by desktop views.
 
 use iced::widget::{button, column, container, responsive, row, text};
-use iced::{Background, Color, Element, Fill, FillPortion, Size, Theme};
+use iced::{Background, Color, Element, Fill, FillPortion, Length, Size, Theme};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Spacing {
@@ -64,6 +64,8 @@ pub struct UiStyle {
     pub fields: FieldWidths,
     pub board: BoardGeometry,
     pub list_preview_height: f32,
+    pub choice_grid_min_cell_width: f32,
+    pub scrollbar_inset: u16,
     pub palette: SemanticPalette,
 }
 
@@ -101,6 +103,8 @@ impl UiStyle {
             key_label_size: 11,
         },
         list_preview_height: 180.0,
+        choice_grid_min_cell_width: 104.0,
+        scrollbar_inset: 8,
         palette: SemanticPalette {
             selected_background: None,
             selected_text: None,
@@ -157,7 +161,28 @@ pub fn selectable_button<'a, Message: Clone + 'a>(
     selected: bool,
     on_press: Option<Message>,
 ) -> Element<'a, Message> {
-    selectable_button_with_size(style, label, selected, on_press, None)
+    selectable_button_inner(
+        style,
+        label,
+        selected,
+        on_press,
+        ButtonLayout::regular(style, Length::Shrink),
+    )
+}
+
+pub fn selectable_button_fill_width<'a, Message: Clone + 'a>(
+    style: &UiStyle,
+    label: impl Into<String>,
+    selected: bool,
+    on_press: Option<Message>,
+) -> Element<'a, Message> {
+    selectable_button_inner(
+        style,
+        label,
+        selected,
+        on_press,
+        ButtonLayout::regular(style, Fill),
+    )
 }
 
 pub fn selectable_button_with_size<'a, Message: Clone + 'a>(
@@ -167,27 +192,48 @@ pub fn selectable_button_with_size<'a, Message: Clone + 'a>(
     on_press: Option<Message>,
     size: Option<(f32, f32)>,
 ) -> Element<'a, Message> {
-    let palette = style.palette;
-    let (width, height, label_size, padding) = size.map_or(
-        (
-            iced::Length::Shrink,
-            iced::Length::Shrink,
-            style.type_scale.body,
-            style.spacing.control_padding,
-        ),
-        |(width, height)| {
-            (
-                iced::Length::Fixed(width),
-                iced::Length::Fixed(height),
-                style.board.key_label_size,
-                0,
-            )
+    let layout = size.map_or_else(
+        || ButtonLayout::regular(style, Length::Shrink),
+        |(width, height)| ButtonLayout {
+            width: Length::Fixed(width),
+            height: Length::Fixed(height),
+            label_size: style.board.key_label_size,
+            padding: 0,
         },
     );
-    button(text(label.into()).size(label_size).center())
-        .width(width)
-        .height(height)
-        .padding(padding)
+    selectable_button_inner(style, label, selected, on_press, layout)
+}
+
+struct ButtonLayout {
+    width: Length,
+    height: Length,
+    label_size: u32,
+    padding: u16,
+}
+
+impl ButtonLayout {
+    fn regular(style: &UiStyle, width: Length) -> Self {
+        Self {
+            width,
+            height: Length::Shrink,
+            label_size: style.type_scale.body,
+            padding: style.spacing.control_padding,
+        }
+    }
+}
+
+fn selectable_button_inner<'a, Message: Clone + 'a>(
+    style: &UiStyle,
+    label: impl Into<String>,
+    selected: bool,
+    on_press: Option<Message>,
+    layout: ButtonLayout,
+) -> Element<'a, Message> {
+    let palette = style.palette;
+    button(text(label.into()).size(layout.label_size).center())
+        .width(layout.width)
+        .height(layout.height)
+        .padding(layout.padding)
         .on_press_maybe(on_press)
         .style(move |theme: &Theme, status| {
             let mut visual = if selected {
