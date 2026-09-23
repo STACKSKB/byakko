@@ -110,6 +110,11 @@ read-only-first device acceptance sequence there.
   The global-lighting file workflow requires the same fresh raw revision and
   passes the Nia87 adapter's pure effect preflight before staging through the
   shared session.
+  The macro snapshot-file workflow plans against one fresh slot revision and
+  stages through the correlated session import and guarded executor. Do not
+  confuse that backend snapshot with a portable macro document; changed
+  programs with stored repeat count zero remain unwritable pending playback
+  evidence.
   Read-only CLI commands remain appropriate for unattended Linux smoke tests.
 
 ## Work sequence and evidence

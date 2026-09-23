@@ -44,9 +44,9 @@ captures and vendor fixtures under ignored paths are not in Git.
   and uses the same forward/reverse preflight as archive review, so an
   unrepresentable change is an error rather than a raw byte diff. These
   read-only commands send no setters. `plan-keymap` also sends no setter;
-  `plan-settings` and `plan-lighting` accept edited snapshots from the matching
-  read commands and likewise send no setter. `apply-keymap`, `apply-settings`,
-  and `apply-lighting` are explicit write commands
+  `plan-settings`, `plan-lighting`, and `plan-macro` accept edited snapshots from
+  the matching read commands and likewise send no setter. `apply-keymap`,
+  `apply-settings`, `apply-lighting`, and `apply-macro` are explicit write commands
   and are not part of the initial unattended Linux smoke test.
 
 - [ ] Check Linux removal/reconnect, one-device selection, GUI page entry
@@ -68,6 +68,11 @@ captures and vendor fixtures under ignored paths are not in Git.
 - [ ] After those gates, exercise one global-lighting file edit with
   `plan-lighting` and explicit `apply-lighting`; check visible output,
   before-image, full readback and restoration.
+
+- [ ] With physical playback access, exercise one changed macro snapshot with
+  `plan-macro` and explicit `apply-macro`; verify the backup, full slot readback,
+  playback, and restoration. The currently observed empty slot 49 has stored
+  repeat count zero; set a count in the editable range before proposing events.
 
 ## Linux verification record (2026-09-23)
 

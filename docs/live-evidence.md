@@ -477,3 +477,17 @@ and sent no setter. `apply-lighting` was not run on hardware; memory-backend
 tests cover its verified transaction and reread. Ignored files:
 `Research/captures/cli-lighting-plan-smoke-20260923.json` and
 `Research/captures/cli-lighting-plan-proposal-20260923.json`.
+
+## CLI macro plan smoke check (2026-09-23)
+
+The release CLI freshly read attached Nia87 slot 49, whose complete 256-byte
+revision is zero with stored repeat count zero and no events. `plan-macro`
+reported `changed: false` for that unchanged snapshot. A second file proposed
+repeat count one and two key-usage-4 down/up events with 50 ms waits; planning
+showed the complete before/after programs for slot 49. A third file retained
+count zero while changing the events and was rejected before staging. These
+commands sent getters only. `apply-macro` was not run on hardware; the shared
+transaction has memory-backend write/readback tests. Ignored files:
+`Research/captures/cli-macro-plan-smoke-20260923.json`,
+`Research/captures/cli-macro-plan-proposal-20260923.json`, and
+`Research/captures/cli-macro-plan-zero-rejected-20260923.json`.

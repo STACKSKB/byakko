@@ -1,6 +1,9 @@
 //! Nia87 composition root for the native CLI.
 use byakko_core::{
-    State, archive::NativeArchive, lighting::Snapshot as LightingSnapshot,
+    State,
+    archive::NativeArchive,
+    lighting::Snapshot as LightingSnapshot,
+    macros::{Content as MacroContent, Snapshot as MacroSnapshot},
     settings::Snapshot as SettingsSnapshot,
 };
 use byakko_devices::{
@@ -11,7 +14,7 @@ use std::io::Write;
 use std::time::Duration;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>|plan-settings <snapshot-file>|apply-settings <snapshot-file>|plan-lighting <snapshot-file>|apply-lighting <snapshot-file>>";
+    const USAGE: &str = "Usage: byakko-cli <devices|describe|read|read-colors|read-lighting|read-settings|read-macro <slot-id>|capture-archive <new-file>|review-archive <file>|compare-archives <before-file> <after-file>|plan-keymap <state-file>|apply-keymap <state-file>|plan-settings <snapshot-file>|apply-settings <snapshot-file>|plan-lighting <snapshot-file>|apply-lighting <snapshot-file>|plan-macro <snapshot-file>|apply-macro <snapshot-file>>";
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments
         .first()
@@ -45,6 +48,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let lighting_file = arguments
         .first()
         .is_some_and(|command| command == "plan-lighting" || command == "apply-lighting");
+    let macro_file = arguments
+        .first()
+        .is_some_and(|command| command == "plan-macro" || command == "apply-macro");
     if arguments.len() > 2
         || (arguments.len() == 2
             && !(macro_read
@@ -52,13 +58,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 || archive_review
                 || keymap_file
                 || settings_file
-                || lighting_file))
+                || lighting_file
+                || macro_file))
         || ((macro_read
             || archive_capture
             || archive_review
             || keymap_file
             || settings_file
-            || lighting_file)
+            || lighting_file
+            || macro_file)
             && arguments.len() != 2)
     {
         return Err(USAGE.into());
@@ -69,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match arguments.first().map(String::as_str) {
         None | Some("--help") => {
             println!(
-                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. To edit keys, one setting, or global lighting, save the matching read output, change its editable value, run the matching plan command, then explicitly run apply. Apply writes to the device with a durable backup and complete readback."
+                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. To edit keys, one setting, global lighting, or a macro slot, save the matching read output, change its editable value, run the matching plan command, then explicitly run apply. Apply writes to the device with a durable backup and complete readback."
             );
         }
         Some("devices") => match nia87::device::availability() {
@@ -90,7 +98,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(
             "read" | "read-colors" | "read-lighting" | "read-settings" | "read-macro"
             | "capture-archive" | "review-archive" | "plan-keymap" | "apply-keymap"
-            | "plan-settings" | "apply-settings" | "plan-lighting" | "apply-lighting",
+            | "plan-settings" | "apply-settings" | "plan-lighting" | "apply-lighting"
+            | "plan-macro" | "apply-macro",
         ) => {
             let candidate = match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => candidate,
@@ -134,7 +143,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 None
             };
-            let keymap = if macro_read {
+            let macro_target = if macro_file {
+                Some(load_macro(&arguments[1])?)
+            } else {
+                None
+            };
+            let keymap = if macro_read || macro_file {
                 None
             } else {
                 Some(byakko_cli::read_keymap(
@@ -270,6 +284,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )?)?
                     }
                 }
+                "plan-macro" | "apply-macro" => {
+                    let target = macro_target.as_ref().expect("loaded above");
+                    let current = byakko_cli::read_macro(
+                        &mut session,
+                        &executor,
+                        &target.slot,
+                        Duration::from_secs(30),
+                    )?;
+                    let desired = byakko_cli::plan_macro(&session, target)?;
+                    if let Some(ref program) = desired {
+                        nia87::macro_adapter::draft(&current, program)?;
+                    }
+                    if arguments[0] == "plan-macro" {
+                        let MacroContent::Editable(before) = &current.content else {
+                            return Err("Opaque macros are available only as raw backups".into());
+                        };
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "slot": target.slot,
+                            "changed": desired.is_some(),
+                            "before": before,
+                            "after": desired.as_ref().unwrap_or(before),
+                        }))?
+                    } else {
+                        if desired.is_none() {
+                            return Err("Macro file contains no changes".into());
+                        }
+                        eprintln!("Applying macro {} to {}", target.slot, candidate.path);
+                        eprintln!("Before-image backup directory: {}", backups.display());
+                        serde_json::to_string_pretty(&byakko_cli::apply_macro(
+                            &mut session,
+                            &executor,
+                            target,
+                        )?)?
+                    }
+                }
                 _ => unreachable!("read command matched above"),
             };
             println!("{json}");
@@ -299,6 +348,14 @@ fn load_lighting(path: &str) -> Result<LightingSnapshot, Box<dyn std::error::Err
     const MAX_LIGHTING_JSON: u64 = 1024 * 1024;
     if std::fs::metadata(path)?.len() > MAX_LIGHTING_JSON {
         return Err("Lighting snapshot file exceeds the 1 MiB JSON limit".into());
+    }
+    Ok(serde_json::from_slice(&std::fs::read(path)?)?)
+}
+
+fn load_macro(path: &str) -> Result<MacroSnapshot, Box<dyn std::error::Error>> {
+    const MAX_MACRO_JSON: u64 = 64 * 1024;
+    if std::fs::metadata(path)?.len() > MAX_MACRO_JSON {
+        return Err("Macro snapshot file exceeds the 64 KiB JSON limit".into());
     }
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }
