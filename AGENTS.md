@@ -99,9 +99,10 @@ research baseline, not the structure to port.
   Stop/close. This is headless-verified only: physical Iced streaming, focus
   loss, disconnect behavior and Linux capture/runtime acceptance remain open.
   Iced playback music now uses the same host lifecycle with 32-band OS audio
-  sampling and Nia87-only fixed green/upright effect presets; it is headless
-  verified, with physical and Linux runtime acceptance still open. Editable
-  music parameters and 2.4 GHz remain later capabilities. Do not pursue
+  sampling. Its temporary brightness, option and color controls come from a
+  portable host-mode schema; the Nia87 adapter alone translates these into
+  firmware reports. This is headless verified, with physical and Linux runtime
+  acceptance still open. 2.4 GHz remains a later capability. Do not pursue
   UI polish or accessibility work before architecture review checkpoints.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and

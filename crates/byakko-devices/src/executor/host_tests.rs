@@ -85,10 +85,12 @@ impl Device for FakeDevice {
     fn start_host_lighting(
         &mut self,
         mode: HostMode,
+        setting: Option<Setting>,
         expected: &lighting::Snapshot,
         _: &Path,
     ) -> Result<Box<dyn HostActivity>, ApplyFailure> {
         assert_eq!(mode, screen_mode());
+        assert_eq!(setting, None);
         self.entered.send(()).unwrap();
         self.start_release
             .recv_timeout(Duration::from_secs(2))
@@ -181,12 +183,13 @@ fn screen_mode() -> HostMode {
         id: "screen-average".into(),
         label: "Screen average".into(),
         source: HostSource::ScreenAverage,
+        parameters: None,
     }
 }
 
 fn start(h: &Harness) {
     h.executor
-        .try_start_host(ticket(), screen_mode(), baseline())
+        .try_start_host(ticket(), screen_mode(), None, baseline())
         .unwrap();
     h.entered.recv_timeout(Duration::from_secs(2)).unwrap();
     h.start_release.send(()).unwrap();
@@ -203,7 +206,7 @@ fn start(h: &Harness) {
 fn stop_during_start_restores_before_any_frame() {
     let h = harness(false, false, false);
     h.executor
-        .try_start_host(ticket(), screen_mode(), baseline())
+        .try_start_host(ticket(), screen_mode(), None, baseline())
         .unwrap();
     h.entered.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(

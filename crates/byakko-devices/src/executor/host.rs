@@ -128,6 +128,7 @@ pub(super) struct Run<'a> {
 pub(super) fn run(
     device: &mut impl Device,
     mode: HostMode,
+    setting: Option<lighting::Setting>,
     expected: &lighting::Snapshot,
     run: Run<'_>,
 ) {
@@ -140,7 +141,7 @@ pub(super) fn run(
         events,
     } = run;
     let mut activity = match catch_unwind(AssertUnwindSafe(|| {
-        device.start_host_lighting(mode, expected, backup_dir)
+        device.start_host_lighting(mode, setting, expected, backup_dir)
     })) {
         Ok(Ok(activity)) => activity,
         Ok(Err(failure)) => {

@@ -35,8 +35,12 @@ record, not physical acceptance of the Iced path.
 3. The Nia87 adapter routes host activity through
    `Access::start_host_lighting_detailed` using the executor's immutable target.
    The adapter maps the portable screen mode to Nia87 effect 21 and the two
-   music modes to effects 22 and 20. The current music presets use value 4,
-   green RGB and upright option; editable host parameters remain future work.
+   music modes to effects 22 and 20. The core owns a transient host-mode draft
+   using the shared lighting parameter schema and control projection. Music
+   defaults to value 4, green RGB and upright; brightness 0–4, three options,
+   fixed RGB and rainbow are editable before Start. The validated setting
+   travels through the portable executor contract; the Nia87 adapter verifies
+   the exact advertised mode and setting before any device access.
    The same worker owns Stop and recovery; it never opens an arbitrary matching
    collection.
 4. Restoration returns a typed result. A verified restored snapshot may refresh
@@ -48,6 +52,9 @@ record, not physical acceptance of the Iced path.
 
 Iced offers screen and playback Start from backend capabilities only with a
 verified, editable, clean lighting baseline. The active view has Stop & restore.
+A mode selection resets its temporary parameters to that mode's defaults;
+editing them does not stage a persistent device change. The view renders the
+same projected parameter controls used for ordinary lighting settings.
 A close request or window focus loss asks for Stop and waits for a verified
 restoration result. The stream sampler is local, drops frames if its slot is
 full, and stores no captured image
@@ -66,7 +73,10 @@ Linux, including X11 disconnect, Wayland and audio routing.
   waits for restoration, but needs GUI interaction acceptance.
 - Nia87 transport tests: selected-target change fails before opening any other
   collection, both on setup and on recovery; exact frame encodings remain the
-  existing protocol fixtures. Tests use fakes and never drive the keyboard.
+  existing protocol fixtures. Pure adapter tests cover the music brightness
+  bounds, each option and fixed/rainbow report encodings, plus rejection of a
+  forged mode or invalid setting before I/O. Tests use fakes and never drive
+  the keyboard.
 - Physical acceptance: with a backup and the selected USB collection, verify
   start, frames, Stop, close, focus loss, unplug/replug, and restoration
   readback. The earlier failed automatic recovery remains an open gate. Linux

@@ -10,6 +10,7 @@ impl Session {
             return Err("Lighting capabilities belong to a different backend".into());
         }
         self.lighting = Some(Editor::new(capabilities)?);
+        self.select_default_host_mode();
         Ok(self)
     }
     pub fn lighting(&self) -> Option<&Editor> {

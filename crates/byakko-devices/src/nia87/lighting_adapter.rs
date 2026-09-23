@@ -2,8 +2,8 @@
 use crate::nia87::{device, lighting as native};
 use byakko_core::{
     lighting::{
-        self, Capabilities, Choice, Color, ColorCapability, Content, Effect, HostMode, HostSource,
-        Setting, Snapshot,
+        self, Capabilities, Choice, Color, ColorCapability, Content, Effect, HostMode,
+        HostParameters, HostSource, Setting, Snapshot,
     },
     session::{ApplyFailure, Recovery},
 };
@@ -11,49 +11,65 @@ use std::path::Path;
 
 pub const BACKEND_ID: &str = "nia87";
 
+fn effect_schema(id: String, effect: &native::Effect) -> Effect {
+    Effect {
+        id,
+        label: effect.name.into(),
+        brightness: effect.value.then_some(0..=4),
+        speed: effect.speed.then_some(0..=4),
+        options: effect
+            .options
+            .iter()
+            .map(|option| Choice {
+                id: (*option).into(),
+                label: (*option).into(),
+            })
+            .collect(),
+        color: match (effect.rgb, effect.dazzle) {
+            (true, true) => Some(ColorCapability::FixedOrRainbow),
+            (true, false) => Some(ColorCapability::Fixed),
+            (false, true) => Some(ColorCapability::Rainbow),
+            (false, false) => None,
+        },
+    }
+}
+
+fn music_mode(id: &str, label: &str, native_id: u8) -> HostMode {
+    let effect = native::effect_by_id(native_id).expect("known Nia87 music effect");
+    HostMode {
+        id: id.into(),
+        label: label.into(),
+        source: HostSource::PlaybackAudio { bands: 32 },
+        parameters: Some(HostParameters {
+            schema: effect_schema(id.into(), effect),
+            default: Setting {
+                effect: id.into(),
+                brightness: Some(4),
+                speed: None,
+                option: Some("upright".into()),
+                color: Some(Color::Rgb([0, 255, 0])),
+            },
+        }),
+    }
+}
+
 pub fn capabilities() -> Capabilities {
     Capabilities {
         backend_id: BACKEND_ID.into(),
         effects: native::EFFECTS
             .iter()
             .filter(|effect| effect.id <= 19)
-            .map(|effect| Effect {
-                id: effect.id.to_string(),
-                label: effect.name.into(),
-                brightness: effect.value.then_some(0..=4),
-                speed: effect.speed.then_some(0..=4),
-                options: effect
-                    .options
-                    .iter()
-                    .map(|option| Choice {
-                        id: (*option).into(),
-                        label: (*option).into(),
-                    })
-                    .collect(),
-                color: match (effect.rgb, effect.dazzle) {
-                    (true, true) => Some(ColorCapability::FixedOrRainbow),
-                    (true, false) => Some(ColorCapability::Fixed),
-                    (false, true) => Some(ColorCapability::Rainbow),
-                    (false, false) => None,
-                },
-            })
+            .map(|effect| effect_schema(effect.id.to_string(), effect))
             .collect(),
         host_modes: vec![
             HostMode {
                 id: "screen-average".into(),
                 label: "Screen average".into(),
                 source: HostSource::ScreenAverage,
+                parameters: None,
             },
-            HostMode {
-                id: "music-follow-2".into(),
-                label: "Music follow 2 (green, upright)".into(),
-                source: HostSource::PlaybackAudio { bands: 32 },
-            },
-            HostMode {
-                id: "music-follow-3".into(),
-                label: "Music follow 3 (green, upright)".into(),
-                source: HostSource::PlaybackAudio { bands: 32 },
-            },
+            music_mode("music-follow-2", "Music follow 2", 22),
+            music_mode("music-follow-3", "Music follow 3", 20),
         ],
     }
 }

@@ -40,6 +40,12 @@ pub struct HostMode {
     pub id: String,
     pub label: String,
     pub source: HostSource,
+    pub parameters: Option<HostParameters>,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostParameters {
+    pub schema: Effect,
+    pub default: Setting,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {
@@ -73,9 +79,30 @@ pub enum Edit {
 
 pub fn edit(caps: &Capabilities, current: &Setting, change: Edit) -> Result<Setting, String> {
     validate_setting(caps, current)?;
+    match change {
+        Edit::Effect(id) if id != current.effect => default_setting(caps, &id),
+        change => edit_parameters(
+            caps.effects
+                .iter()
+                .find(|effect| effect.id == current.effect)
+                .expect("validated effect"),
+            current,
+            change,
+        ),
+    }
+}
+
+pub fn edit_parameters(
+    effect: &Effect,
+    current: &Setting,
+    change: Edit,
+) -> Result<Setting, String> {
+    validate_parameters(effect, current)?;
     let mut next = current.clone();
     match change {
-        Edit::Effect(id) if id != current.effect => return default_setting(caps, &id),
+        Edit::Effect(id) if id != current.effect => {
+            return Err("Select a mode before editing its parameters".into());
+        }
         Edit::Effect(_) => {}
         Edit::Brightness(value) => next.brightness = Some(value),
         Edit::Speed(value) => next.speed = Some(value),
@@ -92,7 +119,7 @@ pub fn edit(caps: &Capabilities, current: &Setting, change: Edit) -> Result<Sett
             }] = value;
         }
     }
-    validate_setting(caps, &next)?;
+    validate_parameters(effect, &next)?;
     Ok(next)
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -116,20 +143,7 @@ pub fn validate_capabilities(caps: &Capabilities) -> Result<(), String> {
         if effect.id.is_empty() || !ids.insert(&effect.id) {
             return Err("Invalid lighting effect ID".into());
         }
-        if effect
-            .brightness
-            .as_ref()
-            .is_some_and(|range| range.is_empty())
-            || effect.speed.as_ref().is_some_and(|range| range.is_empty())
-        {
-            return Err("Invalid lighting range".into());
-        }
-        let mut options = BTreeSet::new();
-        for choice in &effect.options {
-            if choice.id.is_empty() || !options.insert(&choice.id) {
-                return Err("Invalid lighting option ID".into());
-            }
-        }
+        validate_effect(effect)?;
     }
     for mode in &caps.host_modes {
         if mode.id.is_empty() || mode.label.is_empty() || !ids.insert(&mode.id) {
@@ -137,6 +151,31 @@ pub fn validate_capabilities(caps: &Capabilities) -> Result<(), String> {
         }
         if matches!(mode.source, HostSource::PlaybackAudio { bands: 0 }) {
             return Err("Audio host mode requires a positive band count".into());
+        }
+        if let Some(parameters) = &mode.parameters {
+            validate_effect(&parameters.schema)?;
+            validate_parameters(&parameters.schema, &parameters.default)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_effect(effect: &Effect) -> Result<(), String> {
+    if effect.id.is_empty() {
+        return Err("Invalid lighting effect ID".into());
+    }
+    if effect
+        .brightness
+        .as_ref()
+        .is_some_and(|range| range.is_empty())
+        || effect.speed.as_ref().is_some_and(|range| range.is_empty())
+    {
+        return Err("Invalid lighting range".into());
+    }
+    let mut options = BTreeSet::new();
+    for choice in &effect.options {
+        if choice.id.is_empty() || !options.insert(&choice.id) {
+            return Err("Invalid lighting option ID".into());
         }
     }
     Ok(())
@@ -149,6 +188,14 @@ pub fn validate_setting(caps: &Capabilities, setting: &Setting) -> Result<(), St
         .iter()
         .find(|effect| effect.id == setting.effect)
         .ok_or("Unknown lighting effect")?;
+    validate_parameters(effect, setting)
+}
+
+pub fn validate_parameters(effect: &Effect, setting: &Setting) -> Result<(), String> {
+    validate_effect(effect)?;
+    if effect.id != setting.effect {
+        return Err("Lighting parameter schema does not match setting".into());
+    }
     if !matches!((&effect.brightness, setting.brightness), (None, None))
         && !matches!((&effect.brightness, setting.brightness), (Some(range), Some(value)) if range.contains(&value))
     {
@@ -191,7 +238,11 @@ pub fn default_setting(caps: &Capabilities, effect_id: &str) -> Result<Setting, 
         .iter()
         .find(|effect| effect.id == effect_id)
         .ok_or("Unknown lighting effect")?;
-    Ok(Setting {
+    Ok(default_parameters(effect))
+}
+
+pub fn default_parameters(effect: &Effect) -> Setting {
+    Setting {
         effect: effect.id.clone(),
         brightness: effect.brightness.as_ref().map(|range| *range.end()),
         speed: effect.speed.as_ref().map(|range| *range.start()),
@@ -200,5 +251,5 @@ pub fn default_setting(caps: &Capabilities, effect_id: &str) -> Result<Setting, 
             ColorCapability::Rainbow => Color::Rainbow,
             _ => Color::Rgb([255; 3]),
         }),
-    })
+    }
 }

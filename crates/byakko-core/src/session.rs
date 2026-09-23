@@ -181,7 +181,14 @@ pub struct HostTicket {
 pub struct HostStart {
     pub ticket: HostTicket,
     pub mode: crate::lighting::HostMode,
+    pub setting: Option<crate::lighting::Setting>,
     pub expected: crate::lighting::Snapshot,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HostDraft {
+    pub mode_id: String,
+    pub setting: Option<crate::lighting::Setting>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -283,6 +290,7 @@ pub struct Session {
     activity: Activity,
     macros: Option<crate::macros::editor::Editor>,
     lighting: Option<crate::lighting::editor::Editor>,
+    host_draft: Option<HostDraft>,
     picture: Option<crate::picture::editor::Editor>,
     settings: Option<crate::settings::editor::Editor>,
     archive_capabilities: Option<crate::archive::ArchiveCapabilities>,
@@ -325,6 +333,7 @@ impl Session {
             activity: Activity::Idle,
             macros: None,
             lighting: None,
+            host_draft: None,
             picture: None,
             settings: None,
             archive_capabilities: None,
@@ -362,6 +371,7 @@ impl Session {
         self.invalidate_picture();
         self.invalidate_settings();
         self.invalidate_archive();
+        self.select_default_host_mode();
         Ok(self.generation)
     }
 
@@ -498,6 +508,7 @@ impl Session {
     }
 
     fn invalidate_lighting(&mut self) {
+        self.host_draft = None;
         if let Some(editor) = self.lighting.as_mut() {
             editor.invalidate();
         }

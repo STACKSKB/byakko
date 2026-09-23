@@ -19,7 +19,8 @@ enum Request {
     Finite(Command),
     HostStart {
         ticket: HostTicket,
-        mode: HostMode,
+        mode: Box<HostMode>,
+        setting: Option<lighting::Setting>,
         expected: lighting::Snapshot,
     },
 }
@@ -74,6 +75,7 @@ impl Executor {
                         Request::HostStart {
                             ticket,
                             mode,
+                            setting,
                             expected,
                         } => {
                             if ticket.generation != active_generation.load(Ordering::Acquire)
@@ -93,7 +95,8 @@ impl Executor {
                                 latest = Some((ticket.generation, ticket.operation));
                                 host::run(
                                     &mut device,
-                                    mode,
+                                    *mode,
+                                    setting,
                                     &expected,
                                     host::Run {
                                         ticket,
@@ -157,6 +160,7 @@ impl Executor {
         &self,
         ticket: HostTicket,
         mode: HostMode,
+        setting: Option<lighting::Setting>,
         expected: lighting::Snapshot,
     ) -> Result<(), HostSubmitError> {
         if ticket.generation == 0 || ticket.generation != self.generation.load(Ordering::Acquire) {
@@ -169,7 +173,8 @@ impl Executor {
         *phase = host::Phase::Starting(ticket);
         if let Err(error) = self.commands.try_send(Request::HostStart {
             ticket,
-            mode,
+            mode: Box::new(mode),
+            setting,
             expected,
         }) {
             *phase = host::Phase::Idle;

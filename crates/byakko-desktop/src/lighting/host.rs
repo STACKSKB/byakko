@@ -152,6 +152,7 @@ impl Desktop {
                                     .try_start_host(
                                         device_ticket(request.ticket),
                                         request.mode,
+                                        request.setting,
                                         request.expected,
                                     )
                                     .map_err(|error| {

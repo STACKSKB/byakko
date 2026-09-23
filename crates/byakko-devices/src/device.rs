@@ -67,6 +67,7 @@ pub trait Device: Send + 'static {
     fn start_host_lighting(
         &mut self,
         _mode: lighting::HostMode,
+        _setting: Option<lighting::Setting>,
         _expected: &lighting::Snapshot,
         _backup_dir: &Path,
     ) -> Result<Box<dyn HostActivity>, ApplyFailure> {
