@@ -30,7 +30,7 @@ captures and vendor fixtures under ignored paths are not in Git.
   available in this session. The demo uses an in-memory keyboard and does not
   need USB access.
 
-- [ ] If an Nia87 is attached, enumerate its hidraw collections and compare
+- [x] If an Nia87 is attached, enumerate its hidraw collections and compare
   the configuration collection's report descriptor with the exact 20-byte
   descriptor in `docs/linux-install.md`. Run the native helper against that
   `hidrawN`. The udev rule is deliberately fail-closed: investigate a mismatch
@@ -168,6 +168,31 @@ active-user ACL, so device reads are blocked.
 
 Follow-up after source commit `a4fcb45`: the release builds, workspace tests,
 both Clippy checks, `ldd`, and the X11 demo smoke test were rerun and passed.
+
+## Linux descriptor and access check (2026-09-23, commit `09c9599`)
+
+Rebuilt `byakko-hidraw-access` from this commit. It printed `nia87-config` for
+`hidraw2` only; `hidraw0` and `hidraw1` were rejected. The connected board is
+`3151:4015` and interface `02`; the accepted descriptor is the Linux ordering
+listed in [Linux installation](linux-install.md).
+
+The helper and exact narrow udev rule were not installed. The attempted
+installation was rejected by automatic approval review because it would
+persistently grant active-user device access without authorization for that
+system permission change. No workaround was attempted. The current
+`/dev/hidraw2` ACL remains `root:root` mode `0600` with no active-user ACL.
+
+The latest `byakko-cli devices` identified `/dev/hidraw2` as the Nia87
+configuration interface. The first normal-user `read` failed with:
+`Error: "Device read failed: Unverified { problem: Read(\"Permission denied (os error 13)\") }"`.
+Because that read failed, the repeat read, other section reads, and archive
+stability comparison were not run. No device setters were run.
+
+**Note for the Windows agent:** the updated exact-descriptor helper works on the
+Linux descriptor and accepts only the configuration node. The remaining
+blocker is the absent root-owned helper/rule and active-seat ACL; installation
+needs explicit user authorization. Keep the first Linux device activity
+read-only after access is granted.
 
 ## Known limits to carry forward
 
