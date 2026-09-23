@@ -25,6 +25,9 @@ unsubmitted field text and an optional replacement index, cleared when the
 sequence changes. Stage is local; Save uses the existing expected-state,
 backup, write, readback and typed recovery path. Unknown slots are read-only.
 Failure/conflict keeps the core draft; failed reads also retain form text.
+Rereading an unchanged slot retains unsubmitted event fields; a read that changes
+the draft refreshes the form from the verified program. This is covered by a
+headless memory-backend test, not an OS interaction test.
 Closing waits for any pending command, leaves failures visible and considers
 dirty drafts across both pages before offering discard.
 
