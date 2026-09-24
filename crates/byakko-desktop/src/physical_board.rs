@@ -203,16 +203,16 @@ pub fn colored_view_with_labels<'a, Message: Clone + 'a>(
             });
             board.push(pin(key_button).x(key.x * unit).y(key.y * unit))
         });
-        scrollable(
-            container(
+        container(
+            scrollable(
                 board
                     .width(Length::Fixed(board_width))
                     .height(Length::Fixed(board_height)),
             )
-            .center_x(Fill),
+            .horizontal()
+            .width(Length::Fixed(board_width.min(size.width))),
         )
-        .horizontal()
-        .width(Fill)
+        .center_x(Fill)
         .into()
     }))
     .height(Length::Fixed(

@@ -94,3 +94,10 @@ remain for human review. Stop after this requested iteration.
 Category buttons jump to measured section positions instead of filtering; search
 still spans groups. Action tiles have no tooltip. Keyboard hover uses a small,
 opaque tooltip containing only `physical: <original label>`.
+
+2026-09-24 centering/feedback follow-up: the board and action browser now share
+one centered, bounded workspace. Both catalog columns reserve a scrollbar gutter;
+scrolling derives the active category from rendered section positions. Removed the
+redundant selected-key/current-action text. Shortcut validation is form-local,
+with a reserved warning area under modifiers so it cannot move the keyboard or
+navigation. Desktop tests and Clippy pass; visual acceptance remains with the user.

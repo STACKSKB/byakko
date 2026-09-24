@@ -21,6 +21,8 @@ pub enum Message {
     Capture,
     CancelCapture,
     Captured(u16),
+    Scrolled,
+    VisibleSection(ActionCategory),
 }
 
 #[derive(Default)]
@@ -106,6 +108,66 @@ impl iced::advanced::widget::Operation<AppMessage> for JumpToSection {
     }
 }
 
+#[derive(Default)]
+struct VisibleSection {
+    viewport: Option<(f32, bool)>,
+    sections: Vec<(ActionCategory, f32)>,
+}
+
+fn current_section(
+    sections: &[(ActionCategory, f32)],
+    top: f32,
+    at_end: bool,
+) -> Option<ActionCategory> {
+    sections
+        .iter()
+        .rev()
+        .find(|(_, y)| at_end || *y <= top + 1.0)
+        .or_else(|| sections.first())
+        .map(|(group, _)| *group)
+}
+
+impl iced::advanced::widget::Operation<AppMessage> for VisibleSection {
+    fn traverse(
+        &mut self,
+        operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<AppMessage>),
+    ) {
+        operate(self);
+    }
+
+    fn container(&mut self, id: Option<&iced::advanced::widget::Id>, bounds: iced::Rectangle) {
+        if let Some(group) = GROUPS.iter().find(|group| id == Some(&section_id(**group))) {
+            self.sections.push((*group, bounds.y));
+        }
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        bounds: iced::Rectangle,
+        content: iced::Rectangle,
+        translation: iced::Vector,
+        _: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        if id == Some(&iced::advanced::widget::Id::new("action-catalog")) {
+            self.viewport = Some((
+                content.y + translation.y,
+                content.height > bounds.height
+                    && translation.y >= content.height - bounds.height - 1.0,
+            ));
+        }
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<AppMessage> {
+        use iced::advanced::widget::operation::Outcome;
+        self.viewport
+            .and_then(|(top, end)| current_section(&self.sections, top, end))
+            .map_or(Outcome::None, |group| {
+                Outcome::Some(AppMessage::Catalog(Message::VisibleSection(group)))
+            })
+    }
+}
+
 pub fn group_label(group: ActionCategory) -> &'static str {
     match group {
         ActionCategory::Alphanumeric => "Alphanumeric",
@@ -187,6 +249,8 @@ fn exact_match(actions: &[ActionChoice], browser: &Browser) -> Option<usize> {
 impl Desktop {
     pub fn update_catalog(&mut self, message: Message) -> iced::Task<AppMessage> {
         match message {
+            Message::Scrolled => return iced::advanced::widget::operate(VisibleSection::default()),
+            Message::VisibleSection(group) => self.action_browser.category = Some(group),
             Message::Category(category) => {
                 self.action_browser.category = Some(category);
                 self.action_browser.query.clear();
@@ -348,12 +412,29 @@ pub fn view(app: &Desktop) -> Element<'_, AppMessage> {
             .on_submit_maybe(editable.then_some(AppMessage::Catalog(Message::SubmitSearch))),
         capture,
         row![
-            container(scrollable(groups))
-                .width(style.action_group_width)
-                .height(Fill),
-            container(scrollable(results).id("action-catalog"))
-                .width(Fill)
-                .height(Fill),
+            container(scrollable(container(groups).width(Fill).padding(
+                iced::Padding {
+                    right: f32::from(style.scrollbar_width + style.scrollbar_inset),
+                    ..Default::default()
+                }
+            )))
+            .width(style.action_group_width)
+            .height(Fill),
+            container(
+                scrollable(container(results).width(Fill).padding(iced::Padding {
+                    right: f32::from(style.scrollbar_width + style.scrollbar_inset),
+                    ..Default::default()
+                }))
+                .direction(scrollable::Direction::Vertical(
+                    scrollable::Scrollbar::new()
+                        .width(u32::from(style.scrollbar_width))
+                        .scroller_width(u32::from(style.scrollbar_width))
+                ))
+                .id("action-catalog")
+                .on_scroll(|_| AppMessage::Catalog(Message::Scrolled))
+            )
+            .width(Fill)
+            .height(Fill),
         ]
         .spacing(style.spacing.m)
         .height(Fill),
@@ -366,6 +447,35 @@ pub fn view(app: &Desktop) -> Element<'_, AppMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn highlight_follows_the_top_section_and_the_end_of_the_list() {
+        let sections = [
+            (ActionCategory::Alphanumeric, 100.0),
+            (ActionCategory::Modifiers, 300.0),
+            (ActionCategory::Media, 600.0),
+        ];
+        assert_eq!(
+            current_section(&sections, 100.0, false),
+            Some(ActionCategory::Alphanumeric)
+        );
+        assert_eq!(
+            current_section(&sections, 450.0, false),
+            Some(ActionCategory::Modifiers)
+        );
+        assert_eq!(
+            current_section(&sections, 620.0, false),
+            Some(ActionCategory::Media)
+        );
+        assert_eq!(
+            current_section(&sections, 120.0, false),
+            Some(ActionCategory::Alphanumeric)
+        );
+        assert_eq!(
+            current_section(&sections, 450.0, true),
+            Some(ActionCategory::Media)
+        );
+        assert_eq!(current_section(&[], 0.0, false), None);
+    }
     #[test]
     fn section_jump_uses_rendered_coordinates_not_estimated_row_counts() {
         use iced::advanced::widget::{

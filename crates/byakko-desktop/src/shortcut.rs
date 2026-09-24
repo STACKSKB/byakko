@@ -2,8 +2,8 @@
 use crate::{Desktop, Message as AppMessage, panels};
 use byakko_core::{Action, ShortcutCapabilities};
 use iced::{
-    Element, Fill,
-    widget::{button, column, row, text, text_input},
+    Element, Fill, Length,
+    widget::{button, column, container, row, text, text_input},
 };
 
 #[derive(Clone, Debug)]
@@ -19,6 +19,7 @@ pub(super) struct Form {
     pub modifiers: Vec<u16>,
     pub key: Option<u16>,
     pub query: String,
+    pub error: Option<String>,
 }
 
 impl Form {
@@ -26,6 +27,7 @@ impl Form {
         self.modifiers.clear();
         self.key = None;
         self.query.clear();
+        self.error = None;
         if let (Some(Action::Shortcut { modifiers, key }), Some(caps)) = (action, caps)
             && caps.compose(modifiers, *key).is_ok()
         {
@@ -112,7 +114,17 @@ pub(super) fn view(app: &Desktop) -> Option<Element<'_, AppMessage>> {
             )
         }))
     .spacing(app.ui.spacing.xs)
+    .width(app.ui.fields.regular)
     .wrap();
+    let warning = container(
+        text(app.shortcut.error.as_deref().unwrap_or(" "))
+            .style(text::danger)
+            .size(app.ui.type_scale.body),
+    )
+    .width(Fill)
+    .height(Length::Fixed(
+        (app.ui.type_scale.body * 2 + app.ui.spacing.s) as f32,
+    ));
     let stage = button("Stage shortcut").on_press_maybe(
         (editable && app.shortcut.action(caps).is_ok())
             .then_some(AppMessage::Shortcut(Message::Stage)),
@@ -121,6 +133,7 @@ pub(super) fn view(app: &Desktop) -> Option<Element<'_, AppMessage>> {
         column![
             text("Shortcut"),
             modifiers,
+            warning,
             key,
             matches,
             text(selected),
