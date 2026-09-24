@@ -129,7 +129,12 @@ fn unsupported_input_stops_recording_with_accepted_held_releases() {
     // The memory device deliberately supports only keyboard usages 4..=40.
     send(&mut app, Record::Input(key(Code::F1, true), at));
     assert!(!app.busy());
-    assert!(app.notice.as_ref().unwrap().contains("Recording stopped"));
+    assert!(
+        app.macro_notice
+            .as_ref()
+            .unwrap()
+            .contains("Recording stopped")
+    );
     assert_eq!(
         app.session
             .macros()

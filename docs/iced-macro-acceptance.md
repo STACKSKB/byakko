@@ -120,3 +120,25 @@ foreground reads run before the remaining slots and cancellation prevents the
 next slot. The 50-slot Nia87 scan still requires about 24 seconds of fixed read
 delays in total; this change removes the UI lockout, not that protocol cost.
 Physical background scan/foreground interaction acceptance is pending.
+
+## Macro workflow revision (2026-09-24)
+
+The shared responsive workspace now reserves the same keyboard lane on every
+page. Macros uses an event editor below that keyboard and a compact library and
+binding sidebar; narrow windows place both panes below the keyboard. Recording
+stays in the editor, with Stop in place of Record. Manual event editing and file
+options expand locally. Events use advertised key labels and key choices rather
+than requiring decimal HID usages. Names are editable beside the recording tools.
+
+Playback selection no longer changes the key draft. A single Assign action
+submits the chosen binding through the existing verified keymap transaction and
+keeps the Macros page open. It does not save unrelated key drafts. Explicitly
+creating a macro initializes an empty slot's invalid stored repeat count only in
+the local draft; merely opening an existing raw-zero macro preserves it.
+
+Desktop tests cover the assignment flow, draft retention, new-slot initialization,
+recording, and local file workflows. No protocol pacing or write verification was
+changed. Native screenshot capture failed twice with `SetIsBorderRequired failed:
+No such interface supported (0x80004002)`, so rendered layout, physical recording,
+and save/assign/playback still require user review. No hardware writes were sent
+as part of this revision. Stop after this requested UX revision pending feedback.
