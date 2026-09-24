@@ -125,6 +125,7 @@ pub(super) fn apply_picture_with(
         &serde_json::json!({
             "format_version": 2,
             "colors": expected,
+            "desired": desired,
             "context_revision": expected_context,
         }),
     )?;
@@ -162,7 +163,15 @@ pub(super) fn apply_picture_with(
             picture_context_matches(selection, expected)?;
         }
         if actual != desired {
-            return Err("Picture readback mismatch".into());
+            return Err(mismatch_diagnostic(
+                &path,
+                expected,
+                desired,
+                &actual,
+                expected_context,
+                &changes,
+            )
+            .into());
         }
         Ok(actual)
     })();
@@ -185,6 +194,103 @@ pub(super) fn apply_picture_with(
             Err(picture_apply_error(&error, restore, &path).into())
         }
     }
+}
+
+fn mismatch_diagnostic(
+    backup: &std::path::Path,
+    expected: &[[u8; 3]],
+    desired: &[[u8; 3]],
+    actual: &[[u8; 3]],
+    context: Option<[u8; 2]>,
+    changed_slots: &[usize],
+) -> String {
+    let details = mismatch_details(desired, actual, changed_slots);
+    let evidence = backup.with_extension("failure.json");
+    let save =
+        write_mismatch_evidence(&evidence, expected, desired, actual, context, changed_slots);
+    let evidence_status = match save {
+        Ok(()) => format!("evidence {}", evidence.display()),
+        Err(error) => format!("evidence could not be saved: {error}"),
+    };
+    format!(
+        "Picture readback mismatch: {} edited and {} untouched slots differ; {}; {evidence_status}",
+        details.intended, details.collateral, details.examples
+    )
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct MismatchDetails {
+    intended: usize,
+    collateral: usize,
+    examples: String,
+}
+
+fn mismatch_details(
+    desired: &[[u8; 3]],
+    actual: &[[u8; 3]],
+    changed_slots: &[usize],
+) -> MismatchDetails {
+    let mismatches: Vec<_> = desired
+        .iter()
+        .zip(actual)
+        .enumerate()
+        .filter_map(|(slot, (wanted, got))| (wanted != got).then_some((slot, wanted, got)))
+        .collect();
+    let (intended, collateral) =
+        mismatches
+            .iter()
+            .fold((0, 0), |(intended, collateral), (slot, _, _)| {
+                if changed_slots.contains(slot) {
+                    (intended + 1, collateral)
+                } else {
+                    (intended, collateral + 1)
+                }
+            });
+    let examples = mismatches
+        .iter()
+        .take(4)
+        .map(|(slot, wanted, got)| {
+            let kind = if changed_slots.contains(slot) {
+                "edited"
+            } else {
+                "untouched"
+            };
+            format!("slot {slot} ({kind}): wanted {wanted:?}, got {got:?}")
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    MismatchDetails {
+        intended,
+        collateral,
+        examples,
+    }
+}
+
+fn write_mismatch_evidence(
+    path: &std::path::Path,
+    expected: &[[u8; 3]],
+    desired: &[[u8; 3]],
+    actual: &[[u8; 3]],
+    context: Option<[u8; 2]>,
+    changed_slots: &[usize],
+) -> Result<()> {
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    serde_json::to_writer_pretty(
+        &mut output,
+        &serde_json::json!({
+            "format_version": 1,
+            "expected": expected,
+            "desired": desired,
+            "actual": actual,
+            "context_revision": context,
+            "changed_slots": changed_slots,
+        }),
+    )?;
+    output.sync_all()?;
+    Ok(())
 }
 
 fn ensure_picture_context(device: &HidDevice, expected: [u8; 2]) -> Result<()> {
@@ -212,6 +318,53 @@ pub fn apply_picture_detailed(
 mod tests {
     use super::*;
     use byakko_core::session::Recovery;
+
+    #[test]
+    fn mismatch_details_separate_edited_and_untouched_slots() {
+        let mut desired = vec![[0; 3]; 128];
+        desired[9] = [255, 0, 0];
+        let same = mismatch_details(&desired, &desired, &[9]);
+        assert_eq!(same.intended, 0);
+        assert_eq!(same.collateral, 0);
+
+        let mut actual = desired.clone();
+        actual[9] = [0, 0, 0];
+        let missed_write = mismatch_details(&desired, &actual, &[9]);
+        assert_eq!(missed_write.intended, 1);
+        assert_eq!(missed_write.collateral, 0);
+        assert!(missed_write.examples.contains("slot 9 (edited)"));
+
+        actual[10] = [0, 255, 0];
+        let collateral = mismatch_details(&desired, &actual, &[9]);
+        assert_eq!(collateral.intended, 1);
+        assert_eq!(collateral.collateral, 1);
+        assert!(collateral.examples.contains("slot 10 (untouched)"));
+    }
+
+    #[test]
+    fn mismatch_message_survives_evidence_write_failure() {
+        let missing = std::env::temp_dir().join(format!(
+            "byakko-missing-picture-evidence-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let expected = vec![[0; 3]; 128];
+        let mut desired = expected.clone();
+        desired[1] = [4, 5, 6];
+        let message = mismatch_diagnostic(
+            &missing.join("before.json"),
+            &expected,
+            &desired,
+            &expected,
+            Some([13, 0]),
+            &[1],
+        );
+        assert!(message.contains("Picture readback mismatch"));
+        assert!(message.contains("evidence could not be saved"));
+    }
 
     #[test]
     fn picture_context_tracks_effect_and_option_but_not_brightness() {
