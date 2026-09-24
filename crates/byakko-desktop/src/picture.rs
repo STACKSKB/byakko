@@ -284,11 +284,6 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     let projected = projected_colors(app);
     let editable = projected.is_some() && app.session.status() != &super::Status::Disconnected;
     let mut content = column![text(status(app, editor))].spacing(app.ui.spacing.m);
-    if editor.capabilities().lighting_effect.is_some() && !lighting_enabled(app) {
-        content = content.push(text(
-            "Per-key lighting will be enabled when the next color is sent.",
-        ));
-    }
     if self_needs_retry(app, editor) {
         content = content.push(
             button("Retry color read")
@@ -331,13 +326,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
             }))
         }),
     );
-    content = content.push(picker).push(text(if app.live_picture.blocked {
-        "Color update stopped. Retry after checking the device state."
-    } else if app.live_picture.has_pending() {
-        "Color update pending"
-    } else {
-        "Colors update after the slider settles"
-    }));
+    content = content.push(picker);
     scrollable(content).height(Fill).into()
 }
 
@@ -384,7 +373,7 @@ fn status(app: &Desktop, editor: &Editor) -> String {
     }
     match editor.status() {
         Status::Unloaded => "Loading stored colors".into(),
-        Status::Ready => "Saved on keyboard".into(),
+        Status::Ready => String::new(),
         Status::Conflict { .. } => "Colors changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => super::view::problem_label(problem),
     }

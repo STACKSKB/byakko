@@ -72,13 +72,6 @@ pub(super) fn library(app: &Desktop) -> Element<'_, Message> {
         button("+ New macro").on_press_maybe(can_add.then_some(Message::Macro(Macro::Add)))
     ]
     .spacing(style.spacing.s);
-    if slots.is_empty() {
-        list = list.push(text(if configured.is_some() {
-            "No saved macros yet"
-        } else {
-            "Looking for saved macros…"
-        }));
-    }
     for choice in slots {
         list = list.push(panels::selectable_button_fill_width(
             style,
@@ -103,11 +96,7 @@ pub(super) fn library(app: &Desktop) -> Element<'_, Message> {
     } else {
         list = list.push(text("Finding saved macros…"));
     }
-    panels::panel(
-        style,
-        "Library",
-        scrollable(list).width(Fill).height(Fill).into(),
-    )
+    panels::panel(style, "Library", list.width(Fill).into())
 }
 
 pub(super) fn editor(app: &Desktop) -> Element<'_, Message> {

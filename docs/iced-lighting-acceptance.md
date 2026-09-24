@@ -115,3 +115,21 @@ USB transaction latency has not been measured or reduced in this revision.
 
 Scope ends with this UX build and tests. Further UX design and hardware acceptance
 require the user's next review; do not resume unrelated parity work autonomously.
+
+## Unified lighting and pane cleanup (2026-09-24)
+
+Lighting now has one sidebar for onboard effects, per-key colors, and host modes.
+Per-key selection activates the advertised lighting effect through the existing
+live transaction and refreshes the selector-dependent colors after verification.
+The keyboard and RGB picker stay in the same workspace; there is no separate
+Per-key colors navigation tab. A memory-backend regression test checks activation
+and return to an onboard effect without changing pages.
+
+The macro library has one loading message and flows directly into playback
+choices and Assign, without repeating the selected physical key. Settings keeps
+all scalar cards exposed, with save/revert actions when needed. Keys no longer
+shows a permanent read/staging toolbar. Local configuration files separate
+capture/save from open/review/apply. Routine healthy readback copy was removed;
+error and recovery information remains available. These are UX changes, not
+changes to device verification or pacing. Physical acceptance and visual review
+remain with the user; no hardware writes were performed during this revision.

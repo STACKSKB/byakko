@@ -15,8 +15,8 @@ use byakko_core::lighting::{
 use byakko_core::session::{Activity, Status as SessionStatus};
 pub(crate) use host::HostInput;
 use iced::{
-    Element, Fill, FillPortion,
-    widget::{button, column, container, row, scrollable, text},
+    Element, Fill,
+    widget::{button, column, row, scrollable, text},
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -24,6 +24,7 @@ pub(crate) enum Panel {
     #[default]
     Onboard,
     Host,
+    PerKey,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +54,18 @@ impl Desktop {
             return self.screen_capture.update(message, editable);
         }
         if let Message::Live(edit) = message {
+            if let Edit::Effect(effect) = &edit {
+                self.lighting_panel = if self
+                    .session
+                    .picture()
+                    .and_then(|editor| editor.capabilities().lighting_effect.as_ref())
+                    == Some(effect)
+                {
+                    Panel::PerKey
+                } else {
+                    Panel::Onboard
+                };
+            }
             if self.host.is_some() || self.session.status() == &SessionStatus::Disconnected {
                 return iced::Task::none();
             }
@@ -84,7 +97,17 @@ impl Desktop {
             return iced::Task::none();
         }
         match message {
-            Message::Panel(panel) => self.lighting_panel = panel,
+            Message::Panel(panel) => {
+                self.lighting_panel = panel;
+                if panel == Panel::PerKey
+                    && let Some(effect) = self
+                        .session
+                        .picture()
+                        .and_then(|editor| editor.capabilities().lighting_effect.clone())
+                {
+                    return self.update_lighting(Message::Live(Edit::Effect(effect)));
+                }
+            }
             Message::StopHost => self.stop_host(),
             Message::StartHost(mode_id) if !self.busy() => self.start_host(mode_id),
             _ if self.busy() => (),
@@ -106,7 +129,10 @@ impl Desktop {
             Message::Revert => self.notice = self.session.revert_lighting().err(),
             #[cfg(test)]
             Message::Edit(edit) => self.notice = self.session.edit_lighting(edit).err(),
-            Message::SelectHost(id) => self.notice = self.session.select_host_mode(&id).err(),
+            Message::SelectHost(id) => {
+                self.lighting_panel = Panel::Host;
+                self.notice = self.session.select_host_mode(&id).err();
+            }
             Message::EditHost(edit) => self.notice = self.session.edit_host_setting(edit).err(),
             Message::StartHost(_) => {}
             Message::Screen(_) => unreachable!(),
@@ -167,6 +193,15 @@ impl Desktop {
                 return false;
             }
         };
+        if self.lighting_panel == Panel::PerKey
+            && let byakko_core::session::Command::ApplyLighting {
+                generation,
+                operation,
+                ..
+            } = &command
+        {
+            self.picture_activation = Some((*generation, *operation));
+        }
         self.submit(Ok(command));
         true
     }
@@ -188,6 +223,11 @@ impl Desktop {
 }
 
 pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
+    if app.lighting_panel == Panel::PerKey
+        || (app.session.lighting().is_none() && app.session.picture().is_some())
+    {
+        return super::picture::view(app);
+    }
     let Some(editor) = app.session.lighting() else {
         return text("Lighting is unavailable on this device").into();
     };
@@ -196,22 +236,6 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         && editor.draft().is_some()
         && matches!(editor.status(), Status::Ready | Status::Unverified { .. });
     let style = &app.ui;
-    let selector = row![
-        panels::selectable_button(
-            style,
-            "Onboard effects",
-            app.lighting_panel == Panel::Onboard,
-            Some(AppMessage::Lighting(Message::Panel(Panel::Onboard))),
-        ),
-        panels::selectable_button(
-            style,
-            "Host modes",
-            app.lighting_panel == Panel::Host,
-            (!editor.capabilities().host_modes.is_empty())
-                .then_some(AppMessage::Lighting(Message::Panel(Panel::Host))),
-        ),
-    ]
-    .spacing(style.spacing.s);
     let retry = (app.live_lighting.blocked()
         || matches!(
             editor.status(),
@@ -227,9 +251,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     if let Some(retry) = retry {
         feedback = feedback.push(retry);
     }
-    let mut content = column![selector, feedback]
-        .spacing(style.spacing.s)
-        .height(Fill);
+    let mut content = column![feedback].spacing(style.spacing.s).height(Fill);
     if app.lighting_panel == Panel::Host && !editor.capabilities().host_modes.is_empty() {
         return content.push(host_controls(app, editor)).into();
     }
@@ -263,7 +285,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         Ok(projected) => projected,
         Err(reason) => return content.push(text(reason)).into(),
     };
-    let effects = projected.effects;
+
     let settings: Vec<_> = projected
         .settings
         .into_iter()
@@ -286,35 +308,69 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         ),
         _ => column![].into(),
     };
-    let workbench = row![
-        container(panels::panel(
-            style,
-            "Effects",
-            scrollable(choice_buttons(style, &effects, editable))
-                .height(Fill)
-                .into(),
-        ))
-        .width(FillPortion(style.panes.sidebar)),
-        container(panels::panel(
-            style,
-            "Selected effect · parameters",
+    content
+        .push(
             scrollable(
                 column![
                     swatches,
                     setting_controls(style, &settings, editable, Message::Live)
                 ]
-                .spacing(style.spacing.s)
+                .spacing(style.spacing.m),
             )
-            .height(Fill)
-            .into(),
-        ))
-        .width(FillPortion(style.panes.detail)),
-    ]
-    .spacing(style.spacing.m)
-    .height(Fill);
-    content.push(workbench).height(Fill).into()
+            .height(Fill),
+        )
+        .into()
 }
 
+pub(super) fn modes(app: &Desktop) -> Element<'_, AppMessage> {
+    let mut modes = column![text("Lighting mode")].spacing(app.ui.spacing.s);
+    if app.session.picture().is_some() {
+        modes = modes.push(panels::selectable_button(
+            &app.ui,
+            "Per-key colors",
+            app.lighting_panel == Panel::PerKey,
+            app.host
+                .is_none()
+                .then_some(AppMessage::Lighting(Message::Panel(Panel::PerKey))),
+        ));
+    }
+    if let Some(editor) = app.session.lighting() {
+        let projected = app.live_lighting.projected(editor).ok().flatten();
+        let shown = projected.as_ref().or(editor.draft());
+        let picture_effect = app
+            .session
+            .picture()
+            .and_then(|editor| editor.capabilities().lighting_effect.as_ref());
+        for choice in controls::effect_choices(
+            editor.capabilities(),
+            shown.map(|setting| setting.effect.as_str()),
+        ) {
+            if matches!(&choice.edit, Edit::Effect(id) if Some(id) == picture_effect) {
+                continue;
+            }
+            modes = modes.push(panels::selectable_button(
+                &app.ui,
+                choice.label,
+                app.lighting_panel == Panel::Onboard && choice.selected,
+                (app.host.is_none() && app.session.status() != &SessionStatus::Disconnected)
+                    .then_some(AppMessage::Lighting(Message::Live(choice.edit))),
+            ));
+        }
+        for mode in &editor.capabilities().host_modes {
+            modes = modes.push(panels::selectable_button(
+                &app.ui,
+                &mode.label,
+                app.lighting_panel == Panel::Host
+                    && app
+                        .session
+                        .host_draft()
+                        .is_some_and(|draft| draft.mode_id == mode.id),
+                (!app.busy()).then_some(AppMessage::Lighting(Message::SelectHost(mode.id.clone()))),
+            ));
+        }
+    }
+    scrollable(modes).height(Fill).into()
+}
 fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage> {
     let selected_id = app.session.host_draft().map(|draft| draft.mode_id.as_str());
     let selected = selected_id
@@ -334,16 +390,6 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
             .baseline()
             .is_some_and(|snapshot| matches!(snapshot.content, Content::Editable(_)))
         && !editor.dirty();
-    let modes = control_widgets::choices(
-        &app.ui,
-        "Mode",
-        editor.capabilities().host_modes.iter().map(|mode| Choice {
-            label: mode.label.clone(),
-            selected: mode.id == selected.id,
-            message: (!app.busy())
-                .then_some(AppMessage::Lighting(Message::SelectHost(mode.id.clone()))),
-        }),
-    );
     let selected_setting = selected.parameters.as_ref().map(|parameters| {
         app.session
             .host_draft()
@@ -396,7 +442,7 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
         scrollable(panels::panel(
             &app.ui,
             "Host lighting",
-            column![modes, parameters, capture]
+            column![parameters, capture]
                 .spacing(app.ui.spacing.l)
                 .into(),
         ))
@@ -436,7 +482,7 @@ fn status(app: &Desktop, editor: &Editor) -> String {
         {
             "Host lighting is active · select an onboard effect to return to local lighting".into()
         }
-        Status::Ready => "Saved on keyboard".into(),
+        Status::Ready => String::new(),
         Status::Conflict { .. } => "Lighting changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => super::view::problem_label(problem),
     }

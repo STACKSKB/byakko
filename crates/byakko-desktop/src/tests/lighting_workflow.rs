@@ -305,3 +305,24 @@ fn failed_lighting_write_requires_manual_reconnect_and_keeps_diagnostic() {
             .is_some_and(|notice| notice.contains("lighting readback uncertain"))
     );
 }
+
+#[test]
+fn per_key_mode_activates_in_lighting_and_effect_choice_returns_in_place() {
+    let mut app = loaded();
+    send(&mut app, Lighting::Panel(crate::lighting::Panel::PerKey));
+    settle(&mut app);
+    assert_eq!(app.page, Page::Lighting);
+    assert_eq!(app.lighting_panel, crate::lighting::Panel::PerKey);
+    assert_eq!(
+        app.session.lighting().unwrap().draft().unwrap().effect,
+        "per-key"
+    );
+    send(&mut app, Lighting::Live(Edit::Effect("sweep".into())));
+    settle(&mut app);
+    assert_eq!(app.page, Page::Lighting);
+    assert_eq!(app.lighting_panel, crate::lighting::Panel::Onboard);
+    assert_eq!(
+        app.session.lighting().unwrap().draft().unwrap().effect,
+        "sweep"
+    );
+}
