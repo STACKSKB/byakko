@@ -278,16 +278,22 @@ impl Desktop {
             return;
         }
         match message {
-            shortcut::Message::Search(query) => self.shortcut.query = query,
+            shortcut::Message::Search(query) => {
+                self.shortcut.query = query;
+                self.shortcut.error = None;
+            }
             shortcut::Message::ToggleModifier(usage) => {
-                self.notice = self.shortcut.toggle_modifier(caps, usage).err();
+                self.shortcut.error = self.shortcut.toggle_modifier(caps, usage).err();
             }
             shortcut::Message::SelectKey(usage) => {
-                self.notice = self.shortcut.select_key(caps, usage).err();
+                self.shortcut.error = self.shortcut.select_key(caps, usage).err();
             }
             shortcut::Message::Stage => match self.shortcut.action(caps) {
-                Ok(action) => self.stage_action(action),
-                Err(reason) => self.notice = Some(reason),
+                Ok(action) => {
+                    self.shortcut.error = None;
+                    self.stage_action(action);
+                }
+                Err(reason) => self.shortcut.error = Some(reason),
             },
         }
     }

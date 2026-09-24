@@ -163,6 +163,29 @@ fn stages_general_one_and_two_modifier_shortcuts_from_device_choices() {
 }
 
 #[test]
+fn shortcut_validation_stays_local_and_clears_after_valid_edits_or_load() {
+    let mut app = ready();
+    let mut capped = app.session.descriptor().shortcuts.clone().unwrap();
+    capped.max_modifiers = 1;
+    let mut form = shortcut::Form::default();
+    form.toggle_modifier(&capped, 224).unwrap();
+    assert_eq!(
+        form.toggle_modifier(&capped, 225).unwrap_err(),
+        "This keyboard's shortcut has reached its modifier limit"
+    );
+    assert_eq!(form.modifiers, vec![224]);
+
+    let _ = app.update(Message::Shortcut(shortcut::Message::ToggleModifier(999)));
+    assert!(app.shortcut.error.is_some());
+    assert!(app.notice.is_none());
+    let _ = app.update(Message::Shortcut(shortcut::Message::ToggleModifier(224)));
+    assert!(app.shortcut.error.is_none());
+    let _ = app.update(Message::Shortcut(shortcut::Message::ToggleModifier(999)));
+    let _ = app.update(Message::SelectKey("Beta".into()));
+    assert!(app.shortcut.error.is_none());
+}
+
+#[test]
 fn automatic_reconnect_preserves_staged_draft_and_ignores_late_completion() {
     let mut app = ready();
     app.stage(1);

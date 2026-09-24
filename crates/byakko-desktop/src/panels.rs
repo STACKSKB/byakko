@@ -62,6 +62,7 @@ pub struct UiStyle {
     pub compact_breakpoint: f32,
     pub key_sidebar_breakpoint: f32,
     pub key_sidebar_width: f32,
+    pub workspace_width: f32,
     pub action_group_width: u32,
     pub action_character_width: f32,
     pub panes: PaneRatios,
@@ -96,7 +97,8 @@ impl UiStyle {
         compact_breakpoint: 720.0,
         key_sidebar_breakpoint: 1240.0,
         key_sidebar_width: 440.0,
-        action_group_width: 112,
+        workspace_width: 1280.0,
+        action_group_width: 130,
         action_character_width: 8.0,
         panes: PaneRatios {
             sidebar: 1,

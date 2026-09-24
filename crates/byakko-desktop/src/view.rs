@@ -83,7 +83,10 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
         Page::Picture => super::picture::view(app),
         Page::Settings => super::settings::view(app),
     });
-    let workspace = container(content).width(Fill).height(Fill);
+    let workspace = container(content)
+        .width(Fill)
+        .max_width(app.ui.workspace_width)
+        .height(Fill);
     let base: Element<'_, Message> = container(workspace)
         .padding(app.ui.spacing.page_padding)
         .height(Fill)
@@ -151,8 +154,7 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
 }
 
 fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
-    let mut extra =
-        column![text(selected_label(app)), text(selected_action(app))].spacing(app.ui.spacing.s);
+    let mut extra = column![].spacing(app.ui.spacing.s);
     if let Some(shortcut) = shortcut::view(app) {
         extra = extra.push(shortcut);
     }
@@ -256,41 +258,6 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
     physical_board::view_with_labels(&app.ui, keys, app.selected.clone(), labels, |key| {
         Some(Message::SelectKey(key.id.clone()))
     })
-}
-
-fn selected_label(app: &Desktop) -> String {
-    app.session
-        .descriptor()
-        .keys
-        .iter()
-        .find(|key| Some(&key.id) == app.selected.as_ref())
-        .map_or_else(
-            || "Select a key".into(),
-            |key| format!("Assign action · {}", key.label),
-        )
-}
-
-fn selected_action(app: &Desktop) -> String {
-    let Some(key) = app
-        .session
-        .descriptor()
-        .keys
-        .iter()
-        .find(|key| Some(&key.id) == app.selected.as_ref())
-    else {
-        return "Select a key to inspect its action".into();
-    };
-    let binding = app
-        .session
-        .draft()
-        .and_then(|draft| draft.get(&app.layer))
-        .and_then(|layer| layer.get(&key.id));
-    let action = binding.map_or_else(|| "Unread".into(), |action| action_label(app, action));
-    if key.writable {
-        format!("Current action: {action}")
-    } else {
-        format!("Current action: {action} · fixed")
-    }
 }
 
 fn action_label(app: &Desktop, action: &Action) -> String {
