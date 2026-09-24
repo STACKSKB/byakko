@@ -1,9 +1,7 @@
 use super::apply_error::lighting_apply_error;
 use super::*;
 
-/// Read global lighting state twice with an identity barrier before each read.
-/// This only sends GET commands (0x80 and 0x87). A matching opcode echo and
-/// identical replies are required before returning the raw-preserving decode.
+/// Read one raw-preserving global-lighting response.
 pub fn read_lighting() -> Result<crate::nia87::lighting::Lighting> {
     read_lighting_with(Selection::Unique)
 }
@@ -66,7 +64,6 @@ impl HostLightingSession {
         if !read_settings_on_device(session.device())?.backlight_enabled() {
             return Err("Enable the backlight in Settings before starting host lighting".into());
         }
-        // apply_lighting performs identity and expected-state checks before mutation.
         let active =
             apply_lighting_unlocked(Selection::Expected(&target), expected, desired, backups)?;
         Ok(Self {
@@ -104,7 +101,6 @@ impl HostLightingSession {
             .saved
             .recognized_setting()
             .ok_or("Unrecognized saved lighting")?;
-        // Expected-state checks prevent overwriting settings changed externally.
         let restored = apply_lighting_unlocked(
             Selection::Expected(&self.target),
             &self.active,
@@ -134,27 +130,11 @@ impl Drop for HostLightingSession {
 pub(super) fn read_lighting_on_device(
     device: &HidDevice,
 ) -> Result<crate::nia87::lighting::Lighting> {
-    let mut first = None;
-    for _ in 0..2 {
-        let barrier = read_payload(device, 0x80, 0, 0)?;
-        if barrier[0] != 0x80 {
-            return Err("Lighting read identity barrier failed; close other configurators".into());
-        }
-        let response = read_payload(device, crate::nia87::lighting::LED_READ_COMMAND, 0, 0)?;
-        if response[0] != crate::nia87::lighting::LED_READ_COMMAND {
-            return Err("Lighting read returned an unrelated or stale opcode".into());
-        }
-        if let Some(previous) = first {
-            if previous != response {
-                return Err("Lighting changed between repeated reads".into());
-            }
-        } else {
-            first = Some(response);
-        }
+    let response = read_payload(device, crate::nia87::lighting::LED_READ_COMMAND, 0, 0)?;
+    if response[0] != crate::nia87::lighting::LED_READ_COMMAND {
+        return Err("Lighting read returned an unrelated opcode".into());
     }
-    Ok(crate::nia87::lighting::Lighting::decode(
-        &first.expect("two reads were requested"),
-    )?)
+    Ok(crate::nia87::lighting::Lighting::decode(&response)?)
 }
 
 /// Rebuild only the global setting bytes exposed by PB's LED writer. The
@@ -229,22 +209,8 @@ fn apply_lighting_unlocked(
     }
     let target = crate::nia87::lighting::write_report(setting)?;
     let (_, device) = selection.open()?;
-    let version = read_payload(&device, 0x80, 0, 0)?;
-    let profile = read_payload(&device, 0x85, 0, 0)?;
-    if version[0] != 0x80 || profile[0] != 0x85 {
-        return Err("Identity response mismatch; no lighting write sent".into());
-    }
-    if u16::from_le_bytes([version[1], version[2]]) != 0x0100 || profile[1] != 0 {
-        return Err(
-            "Firmware/profile differs from validated Nia87 0x0100/profile 0; no write sent".into(),
-        );
-    }
-    let current = read_lighting_on_device(&device)?;
-    if &current != expected {
-        return Err("Lighting changed since load; reload before applying. No write sent".into());
-    }
-    if lighting_matches_report(&current, &target, expected) {
-        return Ok(current);
+    if lighting_matches_report(expected, &target, expected) {
+        return Ok(expected.clone());
     }
 
     std::fs::create_dir_all(backup_dir)?;
@@ -262,7 +228,7 @@ fn apply_lighting_unlocked(
             "format_version": 1,
             "firmware": 0x0100,
             "profile": 0,
-            "before": current,
+            "before": expected,
             "target_report": target.as_slice(),
         }),
     )?;

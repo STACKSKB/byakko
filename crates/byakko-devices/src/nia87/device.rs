@@ -41,16 +41,12 @@ pub struct Snapshot {
     pub function: Vec<[u8; 4]>,
 }
 
-use keymaps::{snapshot_on_device, snapshot_unlocked, write_binding};
+use keymaps::{snapshot_on_device, write_binding};
 #[cfg(test)]
 use lighting::lighting_matches_report;
 use lighting::{lighting_restore_report, read_lighting_on_device, write_lighting_report};
-#[cfg(test)]
-use macros::stable_macro_reads;
 use macros::{read_macro_on_device, write_macro_bytes};
 use picture::read_picture_on_device;
-#[cfg(test)]
-use picture::stable_picture_reads;
 use settings::read_settings_on_device;
 
 #[cfg(test)]

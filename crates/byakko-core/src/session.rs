@@ -578,7 +578,6 @@ impl Session {
         }
         let operation = self.operation()?;
         self.activity = Activity::Read { operation };
-        self.invalidate_macros();
         Ok(Command::Read {
             generation: self.generation,
             operation,
@@ -597,10 +596,6 @@ impl Session {
         validate_changes(&self.descriptor, &changes)?;
         let operation = self.operation()?;
         self.activity = Activity::Apply { operation };
-        self.invalidate_macros();
-        self.invalidate_lighting();
-        self.invalidate_picture();
-        self.invalidate_settings();
         self.invalidate_archive();
         Ok(Command::Apply {
             generation: self.generation,
@@ -889,7 +884,15 @@ impl Session {
         self.activity = Activity::Idle;
         match completion {
             Completion::Read { result, .. } => self.accept_read(result),
-            Completion::Apply { result, .. } => self.accept_apply(result),
+            Completion::Apply { result, .. } => {
+                self.accept_apply(result);
+                if self.status != Status::Ready {
+                    self.invalidate_ready_macros();
+                    self.invalidate_ready_lighting();
+                    self.invalidate_ready_picture();
+                    self.invalidate_ready_settings();
+                }
+            }
             Completion::ReadMacro { result, .. } => self
                 .macros
                 .as_mut()
@@ -900,11 +903,16 @@ impl Session {
                 .as_mut()
                 .expect("pending macro capability")
                 .accept_catalog(result),
-            Completion::ApplyMacro { result, .. } => self
-                .macros
-                .as_mut()
-                .expect("pending macro capability")
-                .accept_apply(result),
+            Completion::ApplyMacro { result, .. } => {
+                let editor = self.macros.as_mut().expect("pending macro capability");
+                editor.accept_apply(result);
+                if editor.status() != &crate::macros::editor::Status::Ready {
+                    self.invalidate_ready_keymap();
+                    self.invalidate_ready_lighting();
+                    self.invalidate_ready_picture();
+                    self.invalidate_ready_settings();
+                }
+            }
             Completion::ReadLighting { result, .. } => self
                 .lighting
                 .as_mut()
@@ -912,8 +920,30 @@ impl Session {
                 .accept_read(result),
             Completion::ApplyLighting { result, .. } => {
                 let editor = self.lighting.as_mut().expect("pending lighting capability");
+                let before = editor.baseline().map(|snapshot| &snapshot.content);
+                let selector = before.and_then(|content| match content {
+                    crate::lighting::Content::Editable(setting) => {
+                        Some((setting.effect.clone(), setting.option.clone()))
+                    }
+                    crate::lighting::Content::HostActive { .. }
+                    | crate::lighting::Content::Opaque { .. } => None,
+                });
                 editor.accept_apply(result);
-                if editor.status() != &crate::lighting::editor::Status::Ready {
+                if editor.status() == &crate::lighting::editor::Status::Ready {
+                    let after = editor
+                        .baseline()
+                        .and_then(|snapshot| match &snapshot.content {
+                            crate::lighting::Content::Editable(setting) => {
+                                Some((&setting.effect, &setting.option))
+                            }
+                            crate::lighting::Content::HostActive { .. }
+                            | crate::lighting::Content::Opaque { .. } => None,
+                        });
+                    if selector.as_ref().map(|(effect, option)| (effect, option)) != after {
+                        self.invalidate_picture();
+                    }
+                } else {
+                    self.invalidate_ready_picture();
                     self.invalidate_ready_keymap();
                     self.invalidate_ready_macros();
                     self.invalidate_ready_settings();

@@ -15,29 +15,16 @@ pub(super) fn read_settings_with(
 pub(super) fn read_settings_on_device(
     device: &HidDevice,
 ) -> Result<crate::nia87::settings::Settings> {
-    let mut previous = None;
-    for _ in 0..2 {
-        let mut replies = Vec::new();
-        for opcode in [0x91, 0x97, 0x92, 0x86] {
-            if read_payload(device, 0x80, 0, 0)?[0] != 0x80 {
-                return Err("Settings identity barrier failed".into());
-            }
-            replies.push(read_payload(device, opcode, 0, 0)?);
-        }
-        let settings = crate::nia87::settings::Settings::decode(
-            &replies[0],
-            &replies[1],
-            &replies[2],
-            &replies[3],
-        )?;
-        if let Some(ref first) = previous
-            && first != &settings
-        {
-            return Err("Settings changed between reads".into());
-        }
-        previous = Some(settings);
-    }
-    Ok(previous.expect("two reads"))
+    let replies = [0x91, 0x97, 0x92, 0x86]
+        .into_iter()
+        .map(|opcode| read_payload(device, opcode, 0, 0))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(crate::nia87::settings::Settings::decode(
+        &replies[0],
+        &replies[1],
+        &replies[2],
+        &replies[3],
+    )?)
 }
 
 pub fn apply_setting(
@@ -61,18 +48,10 @@ pub(super) fn apply_setting_with(
         report,
         restore_report,
     } = expected.plan_change(setting)?;
-    let (_, device) = selection.open()?;
-    let version = read_payload(&device, 0x80, 0, 0)?;
-    let profile = read_payload(&device, 0x85, 0, 0)?;
-    if version[0] != 0x80 || version[1..3] != [0, 1] || profile[0] != 0x85 || profile[1] != 0 {
-        return Err("Unverified firmware/profile; no setting written".into());
-    }
-    if &read_settings_on_device(&device)? != expected {
-        return Err("Settings changed since load; no write sent".into());
-    }
     if &target == expected {
         return Ok(target);
     }
+    let (_, device) = selection.open()?;
     std::fs::create_dir_all(backup_dir)?;
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?

@@ -47,7 +47,6 @@ impl Session {
         let (expected, desired) = self.picture_editor()?.request_apply()?;
         let operation = self.operation()?;
         self.activity = Activity::ApplyPicture { operation };
-        self.macro_catalog_operation = None;
         self.invalidate_archive();
         Ok(Command::ApplyPicture {
             generation: self.generation,

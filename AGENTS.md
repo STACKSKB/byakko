@@ -7,6 +7,22 @@ research baseline, not the structure to port.
 For a Linux checkout, start with `docs/linux-handoff.md` and retain the
 read-only-first device acceptance sequence there.
 
+## Read policy amendment (user-directed, 2026-09-24)
+
+Treat the connected configurator session as the owner of device state. Do not
+assume hostile users, competing configurators or hot-swapping between commands.
+This supersedes older requirements below for repeated matching snapshots,
+per-page identity barriers and pre-write fresh-state comparisons. Load each
+feature once, back up the cached before-image, and read the affected feature
+once after a write. Retry only a concrete failure where firmware evidence calls
+for it. Keep exact collection selection, report/schema validation, known setter
+settling delays, correlated completions, and verified recovery. Successful
+feature writes must not invalidate unrelated caches or restart library scans.
+A real selector change still invalidates selector-dependent picture data.
+CLI file workflows may read once to establish the file's current baseline;
+the executor must not repeat that preflight. Archive capture/verification uses
+one complete sweep, not duplicated sweeps and section-by-section rereads.
+
 ## Product constraints
 
 - Native Windows/Linux desktop, Rust + Iced. No JavaScript, Electron, webview,

@@ -716,7 +716,7 @@ mod tests {
         run(&mut session, &worker, apply);
         assert_eq!(session.macros().unwrap().draft(), Some(&program(3)));
         assert!(!session.dirty());
-        assert!(matches!(session.status(), Status::Unverified { .. }));
+        assert_eq!(session.status(), &Status::Ready);
         let read = session.request_read().unwrap();
         run(&mut session, &worker, read);
         assert_eq!(session.status(), &Status::Ready);

@@ -1,5 +1,5 @@
 //! Macro-facing session operations. The parent owns the one operation sequence.
-use super::{Activity, Command, Problem, Session, Status};
+use super::{Activity, Command, Session, Status};
 use crate::{
     Change,
     macros::{Capabilities, Choice, Edit, editor::Editor},
@@ -226,14 +226,6 @@ impl Session {
             operation,
             slot: expected.slot.clone(),
         };
-        // Do not let an earlier keymap baseline authorize a later binding write
-        // after another part of the device has been changed or failed mid-write.
-        self.status = Status::Unverified {
-            problem: Problem::ReadRequired,
-        };
-        self.invalidate_lighting();
-        self.invalidate_picture();
-        self.invalidate_settings();
         self.invalidate_archive();
         Ok(Command::ApplyMacro {
             generation: self.generation,

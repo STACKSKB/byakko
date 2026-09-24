@@ -326,15 +326,6 @@ fn binding_requires_saved_compatible_macro_and_uses_backend_action() {
     send(&mut app, Macro::Apply);
     settle(&mut app);
     send(&mut app, Macro::Assign("hold".into()));
-    assert!(
-        app.macro_notice.is_some(),
-        "keymap must be reread after a macro write"
-    );
-    let _ = app.update(Message::Read);
-    settle(&mut app);
-    send(&mut app, Macro::Read);
-    settle(&mut app);
-    send(&mut app, Macro::Assign("hold".into()));
     settle(&mut app);
     assert!(app.macro_notice.is_none());
     assert_eq!(app.page, Page::Macros);
@@ -444,10 +435,10 @@ fn messages_edit_and_verify_a_memory_slot_without_losing_keymap_draft() {
     assert_eq!(
         app.closing,
         Closing::ConfirmDiscard,
-        "successful macro save can finish close even when keymap trust was invalidated"
+        "successful macro save preserves the unsaved keymap draft"
     );
     assert_eq!(app.session.changes().len(), 1);
-    assert!(matches!(app.session.status(), Status::Unverified { .. }));
+    assert_eq!(app.session.status(), &Status::Ready);
     assert!(!app.session.macros().unwrap().dirty());
     send(&mut app, Macro::Read);
     settle(&mut app);
