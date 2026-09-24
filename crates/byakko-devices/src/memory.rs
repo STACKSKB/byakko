@@ -860,6 +860,7 @@ mod tests {
             color: Some(lighting::Color::Rgb([1, 2, 3])),
         };
         let initial = lighting::Snapshot {
+            evidence: byakko_core::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![9],
             content: lighting::Content::Editable(setting.clone()),
@@ -919,6 +920,7 @@ mod tests {
             lighting_effect: None,
         };
         let initial = picture::Snapshot {
+            evidence: byakko_core::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![0x12, 0x34],
             context_revision: Vec::new(),
@@ -991,6 +993,7 @@ mod tests {
             lighting_effect: None,
         };
         let snapshot = picture::Snapshot {
+            evidence: byakko_core::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![8],
             context_revision: Vec::new(),

@@ -38,7 +38,7 @@ pub fn plan_lighting(session: &Session, target: &Snapshot) -> Result<Option<Sett
     }
 }
 
-/// Stage the reviewed effect and await backup, write, and complete readback.
+/// Stage the reviewed effect and await its backed-up transport submission.
 pub fn apply_lighting(
     session: &mut Session,
     executor: &Executor,
@@ -55,8 +55,8 @@ pub fn apply_lighting(
         LightingStatus::Ready => editor
             .baseline()
             .cloned()
-            .ok_or("Verified lighting apply has no baseline".into()),
-        status => Err(format!("Lighting apply did not verify: {status:?}")),
+            .ok_or("Accepted lighting apply has no baseline".into()),
+        status => Err(format!("Lighting upload did not complete: {status:?}")),
     }
 }
 
@@ -127,6 +127,7 @@ mod tests {
             }],
         };
         let snapshot = Snapshot {
+            evidence: byakko_core::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![2],
             content,

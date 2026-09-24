@@ -241,6 +241,7 @@ pub fn device() -> Result<MemoryDevice, String> {
     ];
     let lighting = lighting_capabilities();
     let initial = byakko_core::lighting::Snapshot {
+        evidence: byakko_core::SnapshotEvidence::Readback,
         backend_id: "memory".into(),
         revision: vec![0xCB],
         content: byakko_core::lighting::Content::Editable(byakko_core::lighting::default_setting(
@@ -257,6 +258,7 @@ pub fn device() -> Result<MemoryDevice, String> {
         ("Fixed".into(), [200, 10, 20]),
     ]);
     let picture_snapshot = byakko_core::picture::Snapshot {
+        evidence: byakko_core::SnapshotEvidence::Readback,
         backend_id: "memory".into(),
         revision: vec![0xF1],
         context_revision: Vec::new(),

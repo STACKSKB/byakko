@@ -8,16 +8,12 @@ use iced::{
     Element, Fill,
     widget::{button, column, scrollable, text},
 };
-use std::{
-    collections::BTreeMap,
-    time::{Duration, Instant},
-};
+use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub(super) struct Pending {
     queued: BTreeMap<String, [u8; 3]>,
     in_flight: Option<BTreeMap<String, [u8; 3]>>,
-    ready_at: Option<Instant>,
     pub(super) blocked: bool,
 }
 
@@ -31,7 +27,6 @@ impl Pending {
 
     fn queue(&mut self, key: String, color: [u8; 3]) {
         self.queued.insert(key, color);
-        self.ready_at = Some(Instant::now() + Duration::from_millis(120));
     }
 
     fn reconcile(&mut self, status: &Status) {
@@ -188,13 +183,6 @@ impl Desktop {
         if self.live_picture.blocked || self.live_picture.queued.is_empty() {
             return false;
         }
-        if self
-            .live_picture
-            .ready_at
-            .is_some_and(|at| Instant::now() < at)
-        {
-            return false;
-        }
         if failed_status(editor.status()) {
             self.live_picture.blocked = true;
             return false;
@@ -319,6 +307,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     let picker = crate::color_picker::view(
         &app.ui,
         color,
+        format!("picture:{selected}"),
         editable.then_some(move |color| {
             AppMessage::Picture(Message::Live(Edit::Color {
                 key: selected_id.clone(),

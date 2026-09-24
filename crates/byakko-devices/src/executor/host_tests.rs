@@ -122,6 +122,7 @@ struct Harness {
 
 fn baseline() -> lighting::Snapshot {
     lighting::Snapshot {
+        evidence: byakko_core::SnapshotEvidence::Readback,
         backend_id: "fake".into(),
         revision: vec![1],
         content: Content::Editable(Setting {

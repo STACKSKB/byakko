@@ -100,7 +100,7 @@ fn live_color_refreshes_a_stale_picture_without_a_manual_read() {
 }
 
 #[test]
-fn live_channel_edit_waits_briefly_and_replaces_only_its_channel() {
+fn live_channel_edit_submits_immediately_and_replaces_only_its_channel() {
     let mut app = loaded();
     send(
         &mut app,
@@ -118,7 +118,7 @@ fn live_channel_edit_waits_briefly_and_replaces_only_its_channel() {
             value: 91,
         }),
     );
-    assert!(!app.busy());
+    assert!(app.busy());
     assert_eq!(
         crate::picture::projected_colors(&app).unwrap()["Alpha"],
         [90, 91, 56]

@@ -105,6 +105,7 @@ mod tests {
             backend_id: "memory".into(),
             revision: vec![revision],
             context_revision: Vec::new(),
+            evidence: crate::picture::Evidence::Readback,
             content: Content::Editable(BTreeMap::from([
                 ("a".into(), rgb),
                 ("fn".into(), [4, 5, 6]),
@@ -205,6 +206,7 @@ mod tests {
             backend_id: "memory".into(),
             revision: vec![0, 255, 9],
             context_revision: Vec::new(),
+            evidence: crate::picture::Evidence::Readback,
             content: Content::Opaque {
                 reason: "unknown picture bytes".into(),
             },
@@ -356,5 +358,73 @@ mod tests {
         );
         session.accept(failure);
         assert_eq!(session.picture().unwrap().draft(), Some(&draft));
+    }
+
+    #[test]
+    fn accepted_write_records_transport_evidence_and_read_requires_readback() {
+        use crate::picture::Evidence;
+        let mut session = Session::new(descriptor())
+            .unwrap()
+            .with_picture(caps())
+            .unwrap();
+        session.connect().unwrap();
+        read(&mut session, snapshot(1, [1, 2, 3]));
+        session
+            .edit_picture(Edit::Color {
+                key: "a".into(),
+                color: [7, 8, 9],
+            })
+            .unwrap();
+        let Command::ApplyPicture {
+            generation,
+            operation,
+            ..
+        } = session.request_picture_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        let accepted = Snapshot {
+            evidence: Evidence::TransportAccepted,
+            ..snapshot(2, [7, 8, 9])
+        };
+        session.accept(Completion::ApplyPicture {
+            generation,
+            operation,
+            result: Ok(accepted.clone()),
+        });
+        assert_eq!(session.picture().unwrap().baseline(), Some(&accepted));
+        assert_eq!(
+            session.picture().unwrap().status(),
+            &crate::picture::editor::Status::Ready
+        );
+
+        let Command::ReadPicture {
+            generation,
+            operation,
+        } = session.request_picture_read().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ReadPicture {
+            generation,
+            operation,
+            result: Ok(accepted.clone()),
+        });
+        assert!(matches!(
+            session.picture().unwrap().status(),
+            crate::picture::editor::Status::Unverified {
+                problem: Problem::Read(_)
+            }
+        ));
+        assert_eq!(session.picture().unwrap().baseline(), Some(&accepted));
+        read(&mut session, snapshot(2, [7, 8, 9]));
+        assert_eq!(
+            session.picture().unwrap().baseline().unwrap().evidence,
+            Evidence::Readback
+        );
+        assert_eq!(
+            session.picture().unwrap().status(),
+            &crate::picture::editor::Status::Ready
+        );
     }
 }

@@ -20,6 +20,8 @@ pub enum Content {
     Opaque { reason: String },
 }
 
+pub use crate::SnapshotEvidence as Evidence;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub backend_id: String,
@@ -28,6 +30,8 @@ pub struct Snapshot {
     /// Empty for backends whose picture address is independent of other settings.
     #[serde(default)]
     pub context_revision: Vec<u8>,
+    #[serde(default)]
+    pub evidence: Evidence,
     pub content: Content,
 }
 
@@ -116,7 +120,8 @@ pub fn validate_snapshot(caps: &Capabilities, snapshot: &Snapshot) -> Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::Capabilities;
+    use super::{Capabilities, Content, Evidence, Snapshot};
+    use std::collections::BTreeMap;
 
     #[test]
     fn optional_display_effect_preserves_older_catalog_json() {
@@ -131,6 +136,30 @@ mod tests {
         assert_eq!(
             serde_json::to_value(with_effect).unwrap()["lighting_effect"],
             "per-key"
+        );
+    }
+
+    #[test]
+    fn picture_evidence_defaults_to_readback_for_legacy_json() {
+        let legacy = serde_json::json!({
+            "backend_id": "memory",
+            "revision": [1],
+            "content": {"Editable": {"a": [1, 2, 3]}}
+        });
+        let read: Snapshot = serde_json::from_value(legacy).unwrap();
+        assert_eq!(read.evidence, Evidence::Readback);
+        assert_eq!(read.context_revision, Vec::<u8>::new());
+        let accepted = Snapshot {
+            evidence: Evidence::TransportAccepted,
+            ..read
+        };
+        assert_eq!(
+            serde_json::from_value::<Snapshot>(serde_json::to_value(&accepted).unwrap()).unwrap(),
+            accepted
+        );
+        assert_eq!(
+            accepted.content,
+            Content::Editable(BTreeMap::from([("a".into(), [1, 2, 3])]))
         );
     }
 }

@@ -64,8 +64,8 @@ pub fn apply_colors(
         PictureStatus::Ready => editor
             .baseline()
             .cloned()
-            .ok_or("Verified color apply has no baseline".into()),
-        status => Err(format!("Color apply did not verify: {status:?}")),
+            .ok_or("Accepted color apply has no baseline".into()),
+        status => Err(format!("Color upload did not complete: {status:?}")),
     }
 }
 
@@ -116,6 +116,7 @@ mod tests {
             lighting_effect: None,
         };
         let colors = Snapshot {
+            evidence: byakko_core::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![2],
             context_revision: Vec::new(),

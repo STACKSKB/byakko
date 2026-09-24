@@ -81,21 +81,13 @@ pub(super) fn lighting_apply_error(
     })
 }
 
-pub(super) fn picture_apply_error(
-    error: &dyn fmt::Display,
-    rollback: Result<()>,
-    backup: &Path,
-) -> ApplyError {
-    let (recovery, restore) = match rollback {
-        Ok(()) => (Recovery::Verified, "original picture verified".to_owned()),
-        Err(error) => (Recovery::Failed, format!("FAILED: {error}")),
-    };
+pub(super) fn picture_submit_error(error: &dyn fmt::Display, backup: &Path) -> ApplyError {
     ApplyError(ApplyFailure {
         message: format!(
-            "Picture apply failed: {error}. Restore result: {restore}. Backup: {}",
+            "Picture upload stopped after a transport error: {error}. Device state is unknown; no automatic restore sent. Backup: {}",
             backup.display()
         ),
-        recovery,
+        recovery: Recovery::Unverified,
     })
 }
 
@@ -162,17 +154,12 @@ mod tests {
     }
 
     #[test]
-    fn picture_recovery_is_typed_and_preserves_diagnostic() {
+    fn picture_transport_error_is_uncertain_without_a_speculative_restore() {
         let path = Path::new("picture-before.json");
-        let restored = picture_apply_error(&"readback mismatch", Ok(()), path);
-        assert_eq!(
-            detailed::<()>(Err(restored.into())).unwrap_err().recovery,
-            Recovery::Verified
-        );
-        let failed = picture_apply_error(&"write failed", Err("restore mismatch".into()), path);
+        let failed = picture_submit_error(&"write failed", path);
         let failure = detailed::<()>(Err(failed.into())).unwrap_err();
-        assert_eq!(failure.recovery, Recovery::Failed);
-        assert!(failure.message.contains("restore mismatch"));
+        assert_eq!(failure.recovery, Recovery::Unverified);
+        assert!(failure.message.contains("no automatic restore"));
         assert!(failure.message.contains("picture-before.json"));
     }
 

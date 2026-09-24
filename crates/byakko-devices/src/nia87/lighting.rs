@@ -7,6 +7,7 @@ pub const REPORT_LEN: usize = 64;
 pub const LED_READ_COMMAND: u8 = 0x87;
 pub const LED_WRITE_COMMAND: u8 = 0x07;
 pub const USER_PICTURE_READ_COMMAND: u8 = 0x8c;
+pub const USER_PICTURE_WRITE_COMMAND: u8 = 0x0c;
 pub const PER_KEY_COLOR_WRITE_COMMAND: u8 = 0x14;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -310,6 +311,31 @@ pub fn user_picture_from_pages(pages: &[[u8; REPORT_LEN]]) -> Result<Vec<[u8; 3]
     Ok(bytes.as_chunks::<3>().0.to_vec())
 }
 
+/// The selected Nia87 picture writer uploads all 128 matrix-indexed RGB
+/// triples in seven 56-byte pages. The final page has eight zero padding bytes.
+/// Reports exclude the host's HID report-ID byte.
+pub fn user_picture_write_reports(colors: &[[u8; 3]]) -> Result<[[u8; REPORT_LEN]; 7], String> {
+    if colors.len() != 128 {
+        return Err(format!(
+            "expected 128 user-picture colors, got {}",
+            colors.len()
+        ));
+    }
+    let bytes: [u8; 384] = std::array::from_fn(|index| colors[index / 3][index % 3]);
+    Ok(std::array::from_fn(|page| {
+        let mut report = [0; REPORT_LEN];
+        report[0] = USER_PICTURE_WRITE_COMMAND;
+        report[2] = 0x80;
+        report[3] = 1;
+        report[4] = page as u8;
+        checksum(&mut report, 7);
+        let start = page * 56;
+        let count = (bytes.len() - start).min(56);
+        report[8..8 + count].copy_from_slice(&bytes[start..start + count]);
+        report
+    }))
+}
+
 /// Inherited CHe simple per-key color command. The caller must map a physical
 /// key to its default-matrix index; passing a HID usage here would be wrong.
 pub fn per_key_color_report(
@@ -389,5 +415,36 @@ mod tests {
         assert_eq!(&report[8..11], &[12, 34, 56]);
         assert!(per_key_color_report(1, 0, [0; 3]).is_err());
         assert!(per_key_color_report(0, 128, [0; 3]).is_err());
+    }
+
+    #[test]
+    fn bulk_picture_reports_have_exact_headers_and_roundtrip_rgb_across_pages() {
+        let colors: Vec<_> = (0..128)
+            .map(|slot| [slot as u8, (slot + 1) as u8, 255 - slot as u8])
+            .collect();
+        let reports = user_picture_write_reports(&colors).unwrap();
+        for (page, report) in reports.iter().enumerate() {
+            assert_eq!(
+                &report[..8],
+                &[0x0c, 0, 0x80, 1, page as u8, 0, 0, 0x72 - page as u8]
+            );
+        }
+        let flat: Vec<_> = colors.iter().flatten().copied().collect();
+        assert_eq!(reports[0][63], flat[55]);
+        assert_eq!(reports[1][8], flat[56]);
+        assert_eq!(reports[6][8..56], flat[336..384]);
+        assert_eq!(&reports[6][56..], &[0; 8]);
+        let uploaded: Vec<_> = reports
+            .iter()
+            .flat_map(|report| report[8..].iter().copied())
+            .take(384)
+            .collect();
+        assert_eq!(uploaded, flat);
+    }
+
+    #[test]
+    fn bulk_picture_requires_exactly_128_rgb_triples() {
+        assert!(user_picture_write_reports(&[[0; 3]; 127]).is_err());
+        assert!(user_picture_write_reports(&[[0; 3]; 129]).is_err());
     }
 }

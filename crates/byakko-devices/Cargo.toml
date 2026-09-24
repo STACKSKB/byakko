@@ -21,6 +21,10 @@ name = "read_picture"
 required-features = ["research-tools"]
 
 [[example]]
+name = "exercise_picture"
+required-features = ["research-tools"]
+
+[[example]]
 name = "read_settings"
 required-features = ["research-tools"]
 

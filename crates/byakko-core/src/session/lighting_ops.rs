@@ -101,6 +101,7 @@ mod tests {
         Snapshot {
             backend_id: "memory".into(),
             revision: vec![revision],
+            evidence: lighting::Evidence::Readback,
             content: Content::Editable(setting(value)),
         }
     }
@@ -197,6 +198,53 @@ mod tests {
         );
     }
     #[test]
+    fn accepted_lighting_write_records_evidence_but_read_requires_readback() {
+        let mut session = session();
+        session.connect().unwrap();
+        read(&mut session, Ok(snapshot(1, 10)));
+        session.stage_lighting(setting(5)).unwrap();
+        let Command::ApplyLighting {
+            generation,
+            operation,
+            ..
+        } = session.request_lighting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        let accepted = Snapshot {
+            evidence: lighting::Evidence::TransportAccepted,
+            ..snapshot(2, 5)
+        };
+        session.accept(Completion::ApplyLighting {
+            generation,
+            operation,
+            result: Ok(accepted.clone()),
+        });
+        assert_eq!(session.lighting().unwrap().baseline(), Some(&accepted));
+        assert_eq!(
+            session.lighting().unwrap().status(),
+            &lighting::editor::Status::Ready
+        );
+
+        read(&mut session, Ok(accepted.clone()));
+        assert!(matches!(
+            session.lighting().unwrap().status(),
+            lighting::editor::Status::Unverified {
+                problem: Problem::Read(_)
+            }
+        ));
+        assert_eq!(session.lighting().unwrap().baseline(), Some(&accepted));
+        read(&mut session, Ok(snapshot(2, 5)));
+        assert_eq!(
+            session.lighting().unwrap().baseline().unwrap().evidence,
+            lighting::Evidence::Readback
+        );
+        assert_eq!(
+            session.lighting().unwrap().status(),
+            &lighting::editor::Status::Ready
+        );
+    }
+    #[test]
     fn brightness_write_keeps_picture_verified_but_selector_write_invalidates_it() {
         use crate::picture::{self, Content as PictureContent};
         let mut session = session()
@@ -212,6 +260,7 @@ mod tests {
             backend_id: "memory".into(),
             revision: vec![1],
             context_revision: vec![1],
+            evidence: picture::Evidence::Readback,
             content: PictureContent::Editable(std::collections::BTreeMap::from([(
                 "a".into(),
                 [1, 2, 3],
@@ -302,6 +351,7 @@ mod tests {
             result: Ok(Snapshot {
                 backend_id: "memory".into(),
                 revision: vec![2],
+                evidence: lighting::Evidence::Readback,
                 content: Content::Editable(desired),
             }),
         });
@@ -470,6 +520,7 @@ mod tests {
         let opaque = Snapshot {
             backend_id: "memory".into(),
             revision: vec![0, 255],
+            evidence: lighting::Evidence::Readback,
             content: Content::Opaque {
                 reason: "unrecognized bytes".into(),
             },

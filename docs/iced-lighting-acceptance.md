@@ -1,5 +1,16 @@
 # Iced global lighting slice, 2026-09-23
 
+## 2026-09-24 update
+
+The historical ordinary-write verification policy below is superseded by the
+[official-app capture and physical acceptance](../Research/official-picture-capture-20260924.md).
+Ordinary effects and colors now send one backed-up setter and retain a
+transport-accepted baseline without an immediate getter or rollback. Host-mode
+restoration still requires readback. The UI merges per-key colors into Lighting,
+and color drags commit on release. The rebuilt steady effect, red preset and
+hue drag were observed on the physical F-row. The remainder records the earlier
+slice rather than the current ordinary-edit workflow.
+
 The native Iced application now supplies a core lighting catalog and draft to
 the same serialized device worker as keymaps and macros. The desktop renders
 backend-advertised effects, ranges, options and color choices; it does not

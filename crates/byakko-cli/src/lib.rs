@@ -281,6 +281,7 @@ mod tests {
             lighting_effect: None,
         };
         let colors = picture::Snapshot {
+            evidence: byakko_core::SnapshotEvidence::Readback,
             backend_id: "synthetic".into(),
             revision: vec![2],
             context_revision: Vec::new(),
@@ -299,6 +300,7 @@ mod tests {
             host_modes: vec![],
         };
         let lighting = lighting::Snapshot {
+            evidence: byakko_core::SnapshotEvidence::Readback,
             backend_id: "synthetic".into(),
             revision: vec![3],
             content: lighting::Content::Editable(lighting::Setting {

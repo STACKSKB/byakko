@@ -159,6 +159,7 @@ pub fn from_native(value: &native::Lighting) -> Snapshot {
     Snapshot {
         backend_id: BACKEND_ID.into(),
         revision: value.raw().into(),
+        evidence: lighting::Evidence::Readback,
         content,
     }
 }
@@ -171,7 +172,8 @@ pub fn draft(expected: &Snapshot, desired: &Setting) -> Result<native::LightingS
     if expected.backend_id != BACKEND_ID {
         return Err("Lighting snapshot belongs to another backend".into());
     }
-    let projected = from_bytes(&expected.revision)?;
+    let mut projected = from_bytes(&expected.revision)?;
+    projected.evidence = expected.evidence;
     if &projected != expected {
         return Err("Lighting snapshot differs from its revision; reload before editing".into());
     }
@@ -232,10 +234,15 @@ pub(super) fn apply_with(
             recovery: Recovery::NotAttempted,
         })?;
     let actual = access.apply_lighting_detailed(&expected_native, &native_setting, backup)?;
-    let snapshot = from_native(&actual);
+    let mut snapshot = from_native(&actual);
+    if snapshot.revision != expected.revision {
+        snapshot.evidence = lighting::Evidence::TransportAccepted;
+    } else {
+        snapshot.evidence = expected.evidence;
+    }
     if snapshot.content != Content::Editable(desired.clone()) {
         return Err(ApplyFailure {
-            message: "Lighting readback cannot be represented as requested".into(),
+            message: "Submitted lighting cannot be represented as requested".into(),
             recovery: Recovery::Unverified,
         });
     }
@@ -245,6 +252,25 @@ pub(super) fn apply_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transport_accepted_revision_remains_editable_but_cannot_forge_content() {
+        let mut raw = [0u8; 64];
+        raw[..8].copy_from_slice(&[135, 1, 4, 4, 7, 9, 8, 7]);
+        let mut baseline = from_bytes(&raw).unwrap();
+        let Content::Editable(mut desired) = baseline.content.clone() else {
+            panic!("expected editable lighting")
+        };
+        baseline.evidence = lighting::Evidence::TransportAccepted;
+        desired.brightness = Some(3);
+        assert!(draft(&baseline, &desired).is_ok());
+
+        baseline.content = Content::HostActive {
+            mode_id: "forged".into(),
+        };
+        assert!(draft(&baseline, &desired).is_err());
+    }
+
     #[test]
     fn catalog_excludes_host_effects_and_codec_round_trips() {
         let caps = capabilities();

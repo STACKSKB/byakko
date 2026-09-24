@@ -1,7 +1,7 @@
 //! Deterministic lighting draft and verified readback.
 use super::{
-    Capabilities, Content, Edit, Setting, Snapshot, default_setting, edit, validate_capabilities,
-    validate_setting, validate_snapshot,
+    Capabilities, Content, Edit, Evidence, Setting, Snapshot, default_setting, edit,
+    validate_capabilities, validate_setting, validate_snapshot,
 };
 use crate::draft::Draft;
 use crate::session::ApplyFailure;
@@ -84,7 +84,13 @@ impl Editor {
     pub fn accept_read(&mut self, result: Result<Snapshot, String>) {
         self.state.accept_read(
             result,
-            |snapshot| validate_snapshot(&self.capabilities, snapshot),
+            |snapshot| {
+                validate_snapshot(&self.capabilities, snapshot)?;
+                if snapshot.evidence != Evidence::Readback {
+                    return Err("Lighting read did not contain device readback".into());
+                }
+                Ok(())
+            },
             editable,
         );
     }
@@ -124,6 +130,7 @@ mod tests {
         let baseline = Snapshot {
             backend_id: "synthetic".into(),
             revision: vec![21],
+            evidence: Evidence::Readback,
             content: Content::HostActive {
                 mode_id: "screen".into(),
             },
