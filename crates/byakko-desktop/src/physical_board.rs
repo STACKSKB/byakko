@@ -180,11 +180,27 @@ pub fn colored_view_with_labels<'a, Message: Clone + 'a>(
                 })
                 .into();
             }
-            let description = assigned.map_or_else(
-                || format!("Physical: {}", key.label),
-                |label| format!("Physical: {}\nAssigned: {}", key.label, label.full),
-            );
-            let key_button = tooltip(key_button, text(description), tooltip::Position::Top);
+            let key_button = tooltip(
+                key_button,
+                text(format!("physical: {}", key.label)).size(style.board.key_label_size),
+                tooltip::Position::Bottom,
+            )
+            .padding(style.spacing.xs as f32)
+            .gap(style.spacing.xs as f32)
+            .style(|theme: &iced::Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(
+                        iced::Color {
+                            a: 1.0,
+                            ..palette.background.strong.color
+                        }
+                        .into(),
+                    ),
+                    text_color: Some(palette.background.strong.text),
+                    ..Default::default()
+                }
+            });
             board.push(pin(key_button).x(key.x * unit).y(key.y * unit))
         });
         scrollable(
