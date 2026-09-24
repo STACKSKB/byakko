@@ -70,7 +70,6 @@ pub struct UiStyle {
     pub color_picker_size: (f32, f32),
     pub color_hue_width: f32,
     pub board: BoardGeometry,
-    pub choice_grid_min_cell_width: f32,
     pub scrollbar_width: u16,
     pub scrollbar_inset: u16,
     pub palette: SemanticPalette,
@@ -116,7 +115,6 @@ impl UiStyle {
             key_gap: 3.0,
             key_label_size: 11,
         },
-        choice_grid_min_cell_width: 104.0,
         scrollbar_width: 10,
         scrollbar_inset: 8,
         palette: SemanticPalette {

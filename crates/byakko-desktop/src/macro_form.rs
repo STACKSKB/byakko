@@ -12,7 +12,7 @@ pub(super) enum Kind {
 impl std::fmt::Display for Kind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Key => "Keyboard usage",
+            Self::Key => "Keyboard key",
             Self::Move => "Pointer movement",
             Self::Button { label, .. } | Self::Backend { label, .. } => label,
         })

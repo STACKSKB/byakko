@@ -1,5 +1,5 @@
 //! Local paths and asynchronous file effects. Validation/staging remain in core.
-use super::{Closing, Desktop, Message as AppMessage, panels};
+use super::{Closing, Desktop, Message as AppMessage};
 use byakko_core::{
     macros::{
         Document,
@@ -177,7 +177,7 @@ impl Desktop {
                 }
             }
             Message::SaveLabels => {
-                self.notice = match self.session.macros() {
+                self.macro_notice = match self.session.macros() {
                     Some(editor) => match self.macro_files.save_labels(editor) {
                         Ok(path) => Some(format!("Local labels saved to {}", path.display())),
                         Err(reason) => Some(format!("Local label save failed: {reason}")),
@@ -193,18 +193,18 @@ impl Desktop {
 
     fn begin_macro_file(&mut self, kind: FileOperation) -> Task<AppMessage> {
         if self.macro_files.path.trim().is_empty() {
-            self.notice = Some("Enter a macro file path".into());
+            self.macro_notice = Some("Enter a macro file path".into());
             return Task::none();
         }
         let path = PathBuf::from(self.macro_files.path.trim());
         let ticket = match self.session.begin_macro_file(kind) {
             Ok(ticket) => ticket,
             Err(reason) => {
-                self.notice = Some(reason);
+                self.macro_notice = Some(reason);
                 return Task::none();
             }
         };
-        self.notice = None;
+        self.macro_notice = None;
         match kind {
             FileOperation::Import => file_task(ticket, move || {
                 macro_files::load(&path).map(|document| Some(Box::new(document)))
@@ -263,7 +263,7 @@ impl Desktop {
         match self.session.finish_macro_file(&ticket, program) {
             Ok(Acceptance::IgnoredStale) => return Task::none(),
             Err(error) => {
-                self.notice = Some(error);
+                self.macro_notice = Some(error);
                 self.closing = Closing::Open;
                 return Task::none();
             }
@@ -271,7 +271,7 @@ impl Desktop {
         }
         match result {
             Err(error) => {
-                self.notice = Some(error);
+                self.macro_notice = Some(error);
                 self.closing = Closing::Open;
             }
             Ok(message) => {
@@ -279,7 +279,7 @@ impl Desktop {
                     self.macro_files.metadata.insert(ticket.slot, metadata);
                     self.reset_macro_inputs();
                 }
-                self.notice = Some(message.into());
+                self.macro_notice = Some(message.into());
                 if self.closing == Closing::Waiting {
                     return self.close();
                 }
@@ -314,29 +314,34 @@ fn file_task(
     )
 }
 
-pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppMessage> {
-    let toggle = button("Macro file…")
-        .on_press_maybe((!app.busy()).then_some(AppMessage::File(Message::Toggle)));
+pub(super) fn name_controls<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppMessage> {
+    let editable = !app.busy() && editor.draft().is_some();
+    let mut controls = row![
+        text("Name"),
+        text_input("Macro name", app.macro_files.name(editor))
+            .on_input_maybe(editable.then_some(|value| AppMessage::File(Message::Name(value))))
+    ]
+    .spacing(app.ui.spacing.s);
+    if app.macro_files.labels_dirty(editor) {
+        controls =
+            controls.push(button("Save name").on_press(AppMessage::File(Message::SaveLabels)));
+    }
+    controls.into()
+}
+
+pub(super) fn file_controls<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppMessage> {
+    let toggle = button(if app.macro_files.expanded {
+        "Hide file options"
+    } else {
+        "Import or export…"
+    })
+    .on_press_maybe((!app.busy()).then_some(AppMessage::File(Message::Toggle)));
     if !app.macro_files.expanded {
         return toggle.into();
     }
     let editable = !app.busy() && editor.draft().is_some();
-    let content = column![
-        row![
-            toggle,
-            text("Local file · import replaces the draft · export creates a new file")
-        ]
-        .spacing(app.ui.spacing.s),
-        row![
-            text_input("Macro name (local label)", app.macro_files.name(editor))
-                .on_input_maybe(editable.then_some(|value| AppMessage::File(Message::Name(value)))),
-            button("Save labels").on_press_maybe(
-                app.macro_files
-                    .labels_dirty(editor)
-                    .then_some(AppMessage::File(Message::SaveLabels))
-            ),
-        ]
-        .spacing(app.ui.spacing.s),
+    column![
+        toggle,
         row![
             text_input("Path to macro JSON", &app.macro_files.path).on_input_maybe(
                 (!app.busy()).then_some(|value| AppMessage::File(Message::Path(value)))
@@ -350,7 +355,8 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppM
             ),
         ]
         .spacing(app.ui.spacing.s),
+        text("Import replaces the draft; export creates a new file"),
     ]
-    .spacing(app.ui.spacing.s);
-    panels::panel(&app.ui, "Macro file", content.into())
+    .spacing(app.ui.spacing.s)
+    .into()
 }

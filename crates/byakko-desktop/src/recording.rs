@@ -1,9 +1,9 @@
 //! Window input and clock adapter for the deterministic core recorder.
-use super::{Desktop, Message as AppMessage, Page, macro_form::number, panels};
+use super::{Desktop, Message as AppMessage, Page, macro_form::number};
 use byakko_core::macros::recorder::{DelayPolicy, StopOutcome};
 use iced::{
-    Element, Event, Fill, Subscription, event,
-    widget::{button, checkbox, column, container, row, text, text_input},
+    Element, Event, Subscription, event,
+    widget::{button, checkbox, row, text, text_input},
 };
 use std::time::Instant;
 
@@ -41,14 +41,14 @@ impl Desktop {
         match self.session.stop_macro_recording(self.timestamp(at)) {
             Ok(outcome) => {
                 self.reset_macro_inputs();
-                self.notice = Some(match outcome {
+                self.macro_notice = Some(match outcome {
                     StopOutcome::Complete => "Recording staged; review events before saving.".into(),
                     StopOutcome::TimingClamped => "Recording stopped; the final held interval exceeded the supported range and was set to zero. Release events are staged.".into(),
                 });
                 true
             }
             Err(error) => {
-                self.notice = Some(error);
+                self.macro_notice = Some(error);
                 false
             }
         }
@@ -67,10 +67,10 @@ impl Desktop {
                         })
                         .ok_or_else(|| "Macros are unavailable".to_string())
                 };
-                self.notice = policy
+                self.macro_notice = policy
                     .and_then(|policy| self.session.start_macro_recording(policy))
                     .err();
-                if self.notice.is_none() {
+                if self.macro_notice.is_none() {
                     if let Some(executor) = &self.executor {
                         executor.cancel_macro_catalog();
                     }
@@ -87,7 +87,7 @@ impl Desktop {
                     && let Err(error) = self.session.record_macro_action(action, self.timestamp(at))
                     && self.finish_recording(at)
                 {
-                    self.notice = Some(format!(
+                    self.macro_notice = Some(format!(
                         "Recording stopped: {error}. Accepted events and held releases remain staged."
                     ));
                 }
@@ -111,9 +111,16 @@ fn captures(event: &Event, status: event::Status) -> bool {
 }
 
 pub(super) fn controls(app: &Desktop, editable: bool) -> Element<'_, AppMessage> {
+    if app.session.recording() {
+        return row![
+            button("Stop recording").on_press(AppMessage::Record(Message::Stop)),
+            text("Recording · type here; stop or leave the window to finish"),
+        ]
+        .spacing(app.ui.spacing.m)
+        .into();
+    }
     row![
-        button("Record input")
-            .on_press_maybe(editable.then_some(AppMessage::Record(Message::Start))),
+        button("Record").on_press_maybe(editable.then_some(AppMessage::Record(Message::Start))),
         checkbox(app.recording_options.fixed)
             .label("Fixed wait")
             .on_toggle_maybe(editable.then_some(|value| AppMessage::Record(Message::Fixed(value)))),
@@ -123,33 +130,9 @@ pub(super) fn controls(app: &Desktop, editable: bool) -> Element<'_, AppMessage>
                 (editable && app.recording_options.fixed)
                     .then_some(|value| AppMessage::Record(Message::Delay(value)))
             ),
-        text("Appends to the draft"),
     ]
     .spacing(app.ui.spacing.m)
     .into()
-}
-
-pub(super) fn capture_view(app: &Desktop) -> Element<'_, AppMessage> {
-    let events = app
-        .session
-        .macros()
-        .and_then(|editor| editor.draft())
-        .map_or(0, |program| program.events.len());
-    let mut content = column![
-        text("Type or click in this window. Keyboard and five mouse buttons are captured."),
-        text("Stop or leave the window to finish. Held inputs receive release events."),
-        text(format!("{events} events in draft · no device writes")),
-        button("Stop recording").on_press(AppMessage::Record(Message::Stop)),
-    ]
-    .spacing(app.ui.spacing.l);
-    if let Some(notice) = &app.notice {
-        content = content.push(text(notice));
-    }
-    container(panels::panel(&app.ui, "Recording input", content.into()))
-        .padding(app.ui.spacing.page_padding)
-        .width(Fill)
-        .height(Fill)
-        .into()
 }
 
 #[cfg(test)]

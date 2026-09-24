@@ -4,6 +4,53 @@ use crate::{
     macro_form::{Input, Kind},
 };
 use byakko_core::macros::{Content, Edit, editor::Status as MacroStatus};
+use byakko_devices::Device;
+
+#[test]
+fn explicit_new_empty_slot_stages_editable_count_without_changing_stored_zero() {
+    let mut app = ready();
+    let mut device = demo::device().unwrap();
+    let mut caps = device.macro_capabilities().unwrap().clone();
+    caps.editable_repeat_counts = 1..=12;
+    let mut session = Session::new(device.descriptor().clone())
+        .unwrap()
+        .with_macros(caps)
+        .unwrap();
+    let generation = session.connect().unwrap();
+    session.select_macro("spare").unwrap();
+    let Command::ReadMacro {
+        operation, slot, ..
+    } = session.request_macro_read().unwrap()
+    else {
+        unreachable!()
+    };
+    session.accept(Completion::ReadMacro {
+        generation,
+        operation,
+        slot,
+        result: device.read_macro("spare"),
+    });
+    app.session = session;
+    app.initialize_new_macro();
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        0
+    );
+
+    app.macro_new_slot = Some("spare".into());
+    app.initialize_new_macro();
+    let editor = app.session.macros().unwrap();
+    assert_eq!(
+        editor.baseline().unwrap().content,
+        Content::Editable(byakko_core::macros::Program {
+            repeat_count: 0,
+            events: vec![]
+        })
+    );
+    assert_eq!(editor.draft().unwrap().repeat_count, 1);
+    assert!(editor.dirty());
+    assert_eq!(app.repeat_input, "1");
+}
 
 #[test]
 fn add_uses_first_free_slot_and_capacity_disables_further_adds() {
@@ -49,6 +96,21 @@ fn add_uses_first_free_slot_and_capacity_disables_further_adds() {
     send(&mut app, Macro::Add);
     assert!(!app.busy());
     assert_eq!(app.session.macros().unwrap().slot(), "spare");
+}
+
+#[test]
+fn reselecting_ready_macro_keeps_candidate_and_does_not_read_again() {
+    let mut app = ready();
+    app.read_macro_catalog_in_background();
+    settle(&mut app);
+    send(&mut app, Macro::Add);
+    settle(&mut app);
+    assert_eq!(app.macro_new_slot.as_deref(), Some("spare"));
+    assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
+    send(&mut app, Macro::Select("spare".into()));
+    assert_eq!(app.macro_new_slot.as_deref(), Some("spare"));
+    assert!(!app.busy());
+    assert_eq!(app.session.macros().unwrap().status(), &MacroStatus::Ready);
 }
 
 #[test]
@@ -217,12 +279,19 @@ pub(crate) fn loaded() -> Desktop {
 }
 
 #[test]
-fn binding_policy_is_explicit_and_saved_binding_uses_backend_action() {
+fn binding_requires_saved_compatible_macro_and_uses_backend_action() {
     let mut app = loaded();
+    let _ = app.update(Message::Page(Page::Macros));
     send(&mut app, Macro::Select("pointer".into()));
     settle(&mut app);
-    send(&mut app, Macro::Bind("hold".into()));
-    assert!(app.notice.is_some());
+    send(&mut app, Macro::ChooseBinding("hold".into()));
+    send(&mut app, Macro::Assign("hold".into()));
+    assert!(
+        app.macro_notice
+            .as_deref()
+            .unwrap()
+            .contains("repeat count")
+    );
     assert!(app.session.changes().is_empty());
     assert_eq!(
         app.session.macros().unwrap().draft().unwrap().repeat_count,
@@ -230,49 +299,48 @@ fn binding_policy_is_explicit_and_saved_binding_uses_backend_action() {
     );
     let _ = app.update(Message::SelectLayer("Studio".into()));
     let _ = app.update(Message::SelectKey("Fixed".into()));
-    send(&mut app, Macro::Bind("play".into()));
-    assert!(app.notice.is_some());
+    send(&mut app, Macro::ChooseBinding("play".into()));
+    send(&mut app, Macro::Assign("play".into()));
+    assert!(app.macro_notice.is_some());
     assert!(app.session.changes().is_empty());
     let _ = app.update(Message::SelectKey("Beta".into()));
-    send(&mut app, Macro::Bind("play".into()));
-    let staged = app.session.changes();
+    send(&mut app, Macro::Assign("play".into()));
+    settle(&mut app);
     assert_eq!(
-        staged,
-        vec![Change {
-            layer: "Studio".into(),
-            key: "Beta".into(),
-            action: Action::Named {
-                id: "sequence/pointer/play".into()
-            },
-        }]
+        app.session.baseline().unwrap().bindings["Studio"]["Beta"],
+        Action::Named {
+            id: "sequence/pointer/play".into()
+        }
     );
+    assert_eq!(app.page, Page::Macros);
+    send(&mut app, Macro::Read);
+    settle(&mut app);
     send(&mut app, Macro::Edit(Edit::Repeat(1)));
-    send(&mut app, Macro::Bind("hold".into()));
+    send(&mut app, Macro::ChooseBinding("hold".into()));
+    send(&mut app, Macro::Assign("hold".into()));
     assert!(
-        app.notice.is_some(),
+        app.macro_notice.is_some(),
         "an unsaved count must not authorize binding"
     );
-    assert_eq!(app.session.changes(), staged);
+    assert!(app.session.changes().is_empty());
     send(&mut app, Macro::Apply);
     settle(&mut app);
-    send(&mut app, Macro::Bind("hold".into()));
+    send(&mut app, Macro::Assign("hold".into()));
     assert!(
-        app.notice.is_some(),
+        app.macro_notice.is_some(),
         "keymap must be reread after a macro write"
     );
     let _ = app.update(Message::Read);
     settle(&mut app);
     send(&mut app, Macro::Read);
     settle(&mut app);
-    send(&mut app, Macro::Bind("hold".into()));
-    assert!(app.notice.is_none());
-    assert_eq!(app.page, Page::Keys);
+    send(&mut app, Macro::Assign("hold".into()));
+    settle(&mut app);
+    assert!(app.macro_notice.is_none());
+    assert_eq!(app.page, Page::Macros);
     let action = Action::Named {
         id: "sequence/pointer/hold".into(),
     };
-    assert_eq!(app.session.changes()[0].action, action);
-    let _ = app.update(Message::Apply);
-    settle(&mut app);
     assert_eq!(
         app.session.baseline().unwrap().bindings["Studio"]["Beta"],
         action
@@ -283,6 +351,52 @@ fn binding_policy_is_explicit_and_saved_binding_uses_backend_action() {
     assert_eq!(
         app.session.macros().unwrap().draft().unwrap().repeat_count,
         1
+    );
+}
+
+#[test]
+fn chosen_playback_assigns_and_verifies_without_leaving_macros() {
+    let mut app = loaded();
+    let _ = app.update(Message::Page(Page::Macros));
+    send(&mut app, Macro::Select("pointer".into()));
+    settle(&mut app);
+    let _ = app.update(Message::SelectLayer("Studio".into()));
+    let _ = app.update(Message::SelectKey("Beta".into()));
+
+    send(&mut app, Macro::ChooseBinding("play".into()));
+    assert!(
+        app.session.changes().is_empty(),
+        "choosing only previews playback"
+    );
+    assert_eq!(app.page, Page::Macros);
+    send(&mut app, Macro::Assign("play".into()));
+    settle(&mut app);
+    assert!(app.macro_notice.is_none());
+    assert_eq!(app.page, Page::Macros);
+    assert!(app.session.changes().is_empty());
+    assert_eq!(
+        app.session.baseline().unwrap().bindings["Studio"]["Beta"],
+        Action::Named {
+            id: "sequence/pointer/play".into()
+        }
+    );
+}
+
+#[test]
+fn assigning_macro_does_not_save_unrelated_key_draft() {
+    let mut app = loaded();
+    let _ = app.update(Message::SelectKey("Beta".into()));
+    app.stage(1);
+    let before = app.session.changes();
+    send(&mut app, Macro::ChooseBinding("play".into()));
+    send(&mut app, Macro::Assign("play".into()));
+    assert_eq!(app.session.changes(), before);
+    assert!(!app.busy());
+    assert!(
+        app.macro_notice
+            .as_deref()
+            .unwrap()
+            .contains("other key assignments")
     );
 }
 
@@ -321,7 +435,7 @@ fn messages_edit_and_verify_a_memory_slot_without_losing_keymap_draft() {
     assert_eq!(desired.events[0].delay_ms, 0);
     assert_eq!(desired.repeat_count, 0);
     send(&mut app, Macro::Select("pointer".into()));
-    assert!(app.notice.is_some());
+    assert!(app.macro_notice.is_some());
     assert_eq!(app.session.macros().unwrap().slot(), "intro");
     send(&mut app, Macro::Apply);
     let _ = app.update(Message::Close);
@@ -350,7 +464,7 @@ fn rejected_input_is_atomic_and_sequence_edits_clear_replacement_target() {
     send(&mut app, Macro::Inspect(0));
     send(&mut app, Macro::Form(Input::Wait("2001".into())));
     send(&mut app, Macro::StageEvent);
-    assert!(app.notice.is_some());
+    assert!(app.macro_notice.is_some());
     assert_eq!(app.macro_form.wait, "2001");
     assert_eq!(app.session.macros().unwrap().draft(), original.as_ref());
     send(&mut app, Macro::Edit(Edit::Move { from: 0, to: 1 }));
@@ -366,7 +480,7 @@ fn rejected_input_is_atomic_and_sequence_edits_clear_replacement_target() {
     send(&mut app, Macro::Edit(Edit::Clear));
     send(&mut app, Macro::Apply);
     assert!(!app.busy());
-    assert!(app.notice.is_some());
+    assert!(app.macro_notice.is_some());
     assert_eq!(app.session.macros().unwrap().baseline(), opaque.as_ref());
 }
 
@@ -378,7 +492,7 @@ fn staging_repeat_count_preserves_an_unsubmitted_event_edit() {
     send(&mut app, Macro::RepeatInput("03".into()));
     send(&mut app, Macro::StageRepeat);
 
-    assert!(app.notice.is_none());
+    assert!(app.macro_notice.is_none());
     assert_eq!(app.repeat_input, "3");
     assert_eq!(app.macro_form.target, Some(0));
     assert_eq!(app.macro_form.wait, "37");
@@ -388,7 +502,7 @@ fn staging_repeat_count_preserves_an_unsubmitted_event_edit() {
     );
 
     send(&mut app, Macro::StageEvent);
-    assert!(app.notice.is_none());
+    assert!(app.macro_notice.is_none());
     assert_eq!(
         app.session.macros().unwrap().draft().unwrap().events[0].delay_ms,
         37

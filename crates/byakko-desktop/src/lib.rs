@@ -89,6 +89,9 @@ struct Desktop {
     picture_selected: Option<String>,
     macro_files: macro_files::Fields,
     macro_new_slot: Option<String>,
+    macro_composer: macro_view::Composer,
+    macro_binding_choice: Option<(String, String)>,
+    macro_notice: Option<String>,
     clock: std::time::Instant,
     recording_options: recording::Options,
     host: Option<lighting::HostInput>,
@@ -134,6 +137,9 @@ pub fn run(
         picture_selected: None,
         macro_files: macro_files::Fields::with_labels_directory(labels_directory),
         macro_new_slot: None,
+        macro_composer: macro_view::Composer::default(),
+        macro_binding_choice: None,
+        macro_notice: None,
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
         host: None,
@@ -575,6 +581,9 @@ impl Desktop {
             let verified = self.session.macros().is_some_and(|editor| {
                 *editor.status() == byakko_core::macros::editor::Status::Ready
             });
+            if verified {
+                self.initialize_new_macro();
+            }
             let current_draft = self.session.macros().and_then(|editor| editor.draft());
             if verified
                 && macro_draft_before_read
@@ -781,10 +790,6 @@ impl Desktop {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        if self.session.recording() {
-            recording::capture_view(self)
-        } else {
-            view::shell(self)
-        }
+        view::shell(self)
     }
 }

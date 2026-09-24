@@ -64,25 +64,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
         navigation
     ]
     .spacing(app.ui.spacing.m);
-    if let Some(notice) = &app.notice {
-        content = content.push(text(notice));
-    }
-    content = match app.closing {
-        Closing::Open => content,
-        Closing::Waiting => content.push(text("Waiting for the device operation before closing…")),
-        Closing::ConfirmDiscard => content,
-    };
-    if app.page != Page::Keys {
-        content = content.push(keys(app));
-    }
-    content = content.push(match app.page {
-        Page::Archive => super::archive::view(app),
-        Page::Keys => key_workspace(app),
-        Page::Macros => super::macro_view::view(app),
-        Page::Lighting => super::lighting::view(app),
-        Page::Picture => super::picture::view(app),
-        Page::Settings => super::settings::view(app),
-    });
+    content = content.push(workspace(app));
     let workspace = container(content)
         .width(Fill)
         .max_width(app.ui.workspace_width)
@@ -164,14 +146,47 @@ fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
     scrollable(extra).height(Fill).into()
 }
 
-fn key_workspace(app: &Desktop) -> Element<'_, Message> {
+fn feature(app: &Desktop) -> Element<'_, Message> {
+    match app.page {
+        Page::Keys => keymap(app),
+        Page::Macros => super::macro_view::editor(app),
+        Page::Archive => super::archive::view(app),
+        Page::Lighting => super::lighting::view(app),
+        Page::Picture => super::picture::view(app),
+        Page::Settings => super::settings::view(app),
+    }
+}
+
+fn macro_sidebar(app: &Desktop) -> Element<'_, Message> {
+    let mut sidebar = column![super::macro_view::library(app)].spacing(app.ui.spacing.m);
+    if let Some(editor) = app.session.macros() {
+        sidebar =
+            sidebar.push(scrollable(super::macro_binding_view::view(app, editor)).height(Fill));
+    }
+    sidebar.height(Fill).into()
+}
+
+fn workspace(app: &Desktop) -> Element<'_, Message> {
     iced::widget::responsive(move |size| {
+        let mut below = column![].spacing(app.ui.spacing.s);
+        if let Some(notice) = &app.notice {
+            below = below.push(text(notice));
+        }
+        if app.closing == Closing::Waiting {
+            below = below.push(text("Waiting for the device operation before closing…"));
+        }
         if size.width >= app.ui.key_sidebar_breakpoint {
+            let sidebar = match app.page {
+                Page::Keys => crate::action_catalog::view(app),
+                Page::Macros => macro_sidebar(app),
+                _ => iced::widget::Space::new().into(),
+            };
             row![
-                column![keys(app), keymap(app)]
+                column![keys(app), below.push(feature(app)).height(Fill)]
                     .spacing(app.ui.spacing.m)
-                    .width(Fill),
-                container(crate::action_catalog::view(app))
+                    .width(Fill)
+                    .height(Fill),
+                container(sidebar)
                     .width(app.ui.key_sidebar_width)
                     .height(Fill)
             ]
@@ -179,20 +194,35 @@ fn key_workspace(app: &Desktop) -> Element<'_, Message> {
             .height(Fill)
             .into()
         } else {
-            column![
-                keys(app),
-                keymap_toolbar(app),
-                row![
-                    container(crate::action_catalog::view(app))
-                        .width(iced::FillPortion(app.ui.panes.detail)),
-                    container(keymap_detail(app)).width(iced::FillPortion(app.ui.panes.sidebar)),
+            let controls = match app.page {
+                Page::Keys => column![
+                    keymap_toolbar(app),
+                    row![
+                        container(crate::action_catalog::view(app))
+                            .width(iced::FillPortion(app.ui.panes.detail)),
+                        container(keymap_detail(app))
+                            .width(iced::FillPortion(app.ui.panes.sidebar)),
+                    ]
+                    .spacing(app.ui.spacing.m)
+                    .height(Fill)
                 ]
                 .spacing(app.ui.spacing.m)
                 .height(Fill)
-            ]
-            .spacing(app.ui.spacing.m)
-            .height(Fill)
-            .into()
+                .into(),
+                Page::Macros => row![
+                    container(super::macro_view::editor(app))
+                        .width(iced::FillPortion(app.ui.panes.detail)),
+                    container(macro_sidebar(app)).width(iced::FillPortion(app.ui.panes.sidebar)),
+                ]
+                .spacing(app.ui.spacing.m)
+                .height(Fill)
+                .into(),
+                _ => feature(app),
+            };
+            column![keys(app), below.push(controls).height(Fill)]
+                .spacing(app.ui.spacing.m)
+                .height(Fill)
+                .into()
         }
     })
     .into()

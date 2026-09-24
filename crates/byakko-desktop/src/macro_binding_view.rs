@@ -1,12 +1,6 @@
 //! Binding choices are advertised actions, not UI-generated firmware codes.
 use super::{Desktop, Message, macro_editor::Message as Macro, panels};
-use byakko_core::{
-    macros::{
-        Edit,
-        editor::{Editor, Status as MacroStatus},
-    },
-    session::Status,
-};
+use byakko_core::{macros::editor::Editor, session::Status};
 use iced::{
     Element,
     widget::{button, column, row, text},
@@ -29,59 +23,68 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
         .find(|key| Some(&key.id) == app.selected.as_ref());
     let layer = descriptor.layers.iter().find(|layer| layer.id == app.layer);
     let target = match (key, layer) {
-        (Some(key), Some(layer)) => format!("Bind to {} / {}", layer.label, key.label),
+        (Some(key), Some(layer)) => format!("Assign to {} / {}", layer.label, key.label),
         _ => "Select a key on the keyboard above".into(),
     };
     let ready = !app.busy()
         && *app.session.status() == Status::Ready
         && key.is_some_and(|key| key.writable);
-    let editable =
-        !app.busy() && *editor.status() == MacroStatus::Ready && editor.draft().is_some();
-    let modes = row(choices.into_iter().map(|choice| {
-        let result = editor.binding_action(&choice.id);
-        let mut mode = column![button(text(&choice.label)).on_press_maybe(
-            (ready && result.is_ok()).then(|| Message::Macro(Macro::Bind(choice.id.clone())))
-        ),]
-        .spacing(app.ui.spacing.xs);
-        if let Some(required) = choice.required_repeat_count {
-            mode = mode.push(
-                text(format!("Requires saved count {required}")).size(app.ui.type_scale.body),
-            );
-            if editor
-                .draft()
-                .is_some_and(|program| program.repeat_count != required)
-            {
-                mode = mode.push(
-                    button(text(format!("Stage count {required}"))).on_press_maybe(
-                        editable.then_some(Message::Macro(Macro::Edit(Edit::Repeat(required)))),
-                    ),
-                );
-            }
-        }
-        mode.into()
+    let selected = app
+        .macro_binding_choice
+        .as_ref()
+        .filter(|(slot, _)| slot == editor.slot())
+        .map(|(_, id)| id.as_str());
+    let modes = row(choices.iter().map(|choice| {
+        panels::selectable_button(
+            &app.ui,
+            &choice.label,
+            selected == Some(choice.id.as_str()),
+            (!app.busy()).then(|| Message::Macro(Macro::ChooseBinding(choice.id.clone()))),
+        )
     }))
-    .spacing(app.ui.spacing.m);
+    .spacing(app.ui.spacing.s)
+    .wrap();
+    let selected_choice = choices
+        .iter()
+        .find(|choice| selected == Some(choice.id.as_str()));
+    let restriction = selected_choice.and_then(|choice| editor.binding_action(&choice.id).err());
+    let can_assign = ready
+        && selected_choice.is_some()
+        && restriction.is_none()
+        && app.session.changes().is_empty();
     let mut content = column![
-        row![text(target),].spacing(app.ui.spacing.m),
+        text(target),
+        text("Playback"),
         modes,
-        button("Apply key binding")
-            .on_press_maybe((ready && !app.session.changes().is_empty()).then_some(Message::Apply)),
-        text("Choose a playback mode to assign this macro to the selected key.")
-            .size(app.ui.type_scale.body)
+        button("Assign to key").on_press_maybe(
+            selected_choice
+                .filter(|_| can_assign)
+                .map(|choice| Message::Macro(Macro::Assign(choice.id.clone())))
+        ),
     ]
     .spacing(app.ui.spacing.s);
+    if let Some(choice) = selected_choice
+        && let Some(required) = choice.required_repeat_count
+    {
+        content = content.push(text(format!(
+            "This mode needs a saved repeat count of {required}."
+        )));
+    }
+    if let Some(reason) = restriction {
+        content = content.push(text(reason));
+    }
+    if !app.session.changes().is_empty() {
+        content = content.push(text(
+            "Save or revert other key assignments before assigning this macro.",
+        ));
+    }
     if *app.session.status() != Status::Ready {
         content = content.push(
             row![
-                text("Read keymaps, then read this slot before binding."),
+                text("Read keymaps before assigning."),
                 button("Read keymaps").on_press_maybe((!app.busy()).then_some(Message::Read)),
             ]
             .spacing(app.ui.spacing.s),
-        );
-    } else if editor.dirty() {
-        content = content.push(
-            text("Save the macro before binding. Its count affects every key using this slot.")
-                .size(app.ui.type_scale.body),
         );
     }
     panels::panel(&app.ui, "Key binding", content.into())

@@ -63,7 +63,12 @@ fn import_stages_only_selected_slot_and_roundtrips_metadata_without_binding() {
         output.binding, None,
         "backend-local binding IDs cannot migrate implicitly"
     );
-    assert!(app.notice.as_ref().unwrap().contains("source binding"));
+    assert!(
+        app.macro_notice
+            .as_ref()
+            .unwrap()
+            .contains("source binding")
+    );
     assert_eq!(
         macro_files::decode(&macro_files::encode(&output).unwrap()).unwrap(),
         output
@@ -102,7 +107,7 @@ fn failed_and_stale_imports_cannot_replace_program_or_metadata_or_close_the_wind
     assert_eq!(app.session.macros().unwrap().draft(), before.as_ref());
     assert_eq!(app.session.macros().unwrap().status(), &Status::Ready);
     assert!(app.macro_files.metadata.is_empty());
-    assert!(app.notice.is_some());
+    assert!(app.macro_notice.is_some());
     let ticket = app.session.begin_macro_file(FileOperation::Import).unwrap();
     let _ = app.update_macro_files(Message::Complete(ticket, Err("Invalid JSON".into())));
     assert!(!app.busy());
@@ -141,7 +146,7 @@ fn labels_save_locally_and_load_on_next_attach_without_device_write() {
     assert_eq!(app.session.baseline(), before_baseline.as_ref());
     assert!(!app.macro_files.labels_dirty(app.session.macros().unwrap()));
     assert!(
-        app.notice
+        app.macro_notice
             .as_deref()
             .unwrap()
             .contains("Local labels saved")
