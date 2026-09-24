@@ -303,6 +303,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         Some(Color::Rgb(rgb)) => crate::color_picker::view(
             style,
             rgb,
+            format!("onboard:{}", shown.effect),
             editable
                 .then_some(|rgb| AppMessage::Lighting(Message::Live(Edit::Color(Color::Rgb(rgb))))),
         ),
@@ -407,6 +408,7 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
         Some(Color::Rgb(rgb)) => crate::color_picker::view(
             &app.ui,
             *rgb,
+            format!("host:{}", selected.id),
             (!app.busy()).then_some(|rgb| {
                 AppMessage::Lighting(Message::EditHost(Edit::Color(Color::Rgb(rgb))))
             }),

@@ -1,5 +1,6 @@
-use super::apply_error::lighting_apply_error;
+use super::apply_error::{ApplyError, lighting_apply_error};
 use super::*;
+use byakko_core::session::{ApplyFailure, Recovery};
 
 /// Read one raw-preserving global-lighting response.
 pub fn read_lighting() -> Result<crate::nia87::lighting::Lighting> {
@@ -25,6 +26,12 @@ pub struct HostLightingSession {
 }
 
 pub type ScreenSession = HostLightingSession;
+
+#[derive(Clone, Copy)]
+enum CompletionPolicy {
+    VerifiedReadback,
+    TransportAccepted,
+}
 
 impl HostLightingSession {
     pub fn start(
@@ -64,8 +71,13 @@ impl HostLightingSession {
         if !read_settings_on_device(session.device())?.backlight_enabled() {
             return Err("Enable the backlight in Settings before starting host lighting".into());
         }
-        let active =
-            apply_lighting_unlocked(Selection::Expected(&target), expected, desired, backups)?;
+        let active = apply_lighting_unlocked(
+            Selection::Expected(&target),
+            expected,
+            desired,
+            backups,
+            CompletionPolicy::VerifiedReadback,
+        )?;
         Ok(Self {
             session,
             target,
@@ -106,6 +118,7 @@ impl HostLightingSession {
             &self.active,
             &setting,
             &self.backups,
+            CompletionPolicy::VerifiedReadback,
         )?;
         self.finished = true;
         Ok(restored)
@@ -167,9 +180,9 @@ pub(super) fn lighting_matches_report(
     actual.raw()[1..8] == report[1..8] && actual.raw()[9..] == original.raw()[9..]
 }
 
-/// Stage-safe global lighting apply with a durable raw backup and restoration
-/// attempt. The target and restore use the statically traced PB BIT8 format;
-/// callers should treat its checksum as unverified until a live readback does.
+/// Submit ordinary global lighting with a durable raw backup. A successful
+/// return means the transport accepted the setter, not that a getter verified
+/// firmware persistence. Host start and restore use the verified path below.
 pub fn apply_lighting(
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
@@ -185,7 +198,13 @@ pub(super) fn apply_lighting_with(
     backup_dir: &std::path::Path,
 ) -> Result<crate::nia87::lighting::Lighting> {
     let _lock = transaction_lock()?;
-    apply_lighting_unlocked(selection, expected, setting, backup_dir)
+    apply_lighting_unlocked(
+        selection,
+        expected,
+        setting,
+        backup_dir,
+        CompletionPolicy::TransportAccepted,
+    )
 }
 
 pub fn apply_lighting_detailed(
@@ -201,6 +220,7 @@ fn apply_lighting_unlocked(
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
+    policy: CompletionPolicy,
 ) -> Result<crate::nia87::lighting::Lighting> {
     if expected.raw()[0] != crate::nia87::lighting::LED_READ_COMMAND
         || expected.recognized_setting().is_none()
@@ -234,6 +254,15 @@ fn apply_lighting_unlocked(
     )?;
     backup.sync_all()?;
 
+    if matches!(policy, CompletionPolicy::TransportAccepted) {
+        // The captured official UI updates its cache after the setter without
+        // a getter. Keep transport acceptance distinct from verified reads.
+        submit_lighting_report(&target, &path, |report| {
+            write_lighting_report(&device, report)
+        })?;
+        return submitted_lighting(expected, &target);
+    }
+
     let result = (|| -> Result<crate::nia87::lighting::Lighting> {
         write_lighting_report(&device, &target)?;
         let actual = read_lighting_on_device(&device)?;
@@ -256,5 +285,73 @@ fn apply_lighting_unlocked(
             })();
             Err(lighting_apply_error(error.as_ref(), restore, &path).into())
         }
+    }
+}
+
+fn submitted_lighting(
+    expected: &crate::nia87::lighting::Lighting,
+    report: &[u8; 64],
+) -> Result<crate::nia87::lighting::Lighting> {
+    let mut submitted = expected.raw().to_vec();
+    submitted[1..8].copy_from_slice(&report[1..8]);
+    Ok(crate::nia87::lighting::Lighting::decode(&submitted)?)
+}
+
+fn submit_lighting_report(
+    report: &[u8; 64],
+    backup: &std::path::Path,
+    mut send: impl FnMut(&[u8; 64]) -> Result<()>,
+) -> Result<()> {
+    send(report).map_err(|error| {
+        ApplyError(ApplyFailure {
+            message: format!(
+                "Lighting upload stopped after a transport error: {error}. Device state is unknown; no automatic restore sent. Backup: {}",
+                backup.display()
+            ),
+            recovery: Recovery::Unverified,
+        })
+        .into()
+    })
+}
+
+#[cfg(test)]
+mod submission_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_submission_sends_once_without_read_or_restore() {
+        let report = [7; 64];
+        let backup = std::path::Path::new("lighting-before.json");
+        let mut sends = 0;
+        submit_lighting_report(&report, backup, |sent| {
+            sends += 1;
+            assert_eq!(sent, &report);
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(sends, 1);
+
+        let failure = detailed(submit_lighting_report(&report, backup, |_| {
+            sends += 1;
+            Err("Disconnected".into())
+        }))
+        .unwrap_err();
+        assert_eq!(sends, 2);
+        assert_eq!(failure.recovery, Recovery::Unverified);
+        assert!(failure.message.contains("Disconnected"));
+        assert!(failure.message.contains("no automatic restore"));
+    }
+
+    #[test]
+    fn submitted_revision_changes_only_known_setting_bytes() {
+        let mut original = [0xa5; 64];
+        original[..8].copy_from_slice(&[0x87, 1, 4, 4, 7, 1, 2, 3]);
+        let expected = crate::nia87::lighting::Lighting::decode(&original).unwrap();
+        let mut report = [0; 64];
+        report[..8].copy_from_slice(&[0x07, 2, 3, 2, 8, 9, 8, 7]);
+        let submitted = submitted_lighting(&expected, &report).unwrap();
+        assert_eq!(submitted.raw()[0], 0x87);
+        assert_eq!(&submitted.raw()[1..8], &report[1..8]);
+        assert_eq!(&submitted.raw()[8..], &original[8..]);
     }
 }

@@ -4,6 +4,7 @@ use std::{collections::BTreeSet, ops::RangeInclusive};
 
 pub mod controls;
 pub mod editor;
+pub use crate::SnapshotEvidence as Evidence;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Choice {
@@ -138,6 +139,8 @@ pub enum Content {
 pub struct Snapshot {
     pub backend_id: String,
     pub revision: Vec<u8>,
+    #[serde(default)]
+    pub evidence: Evidence,
     pub content: Content,
 }
 
@@ -262,5 +265,29 @@ pub fn default_parameters(effect: &Effect) -> Setting {
             ColorCapability::Rainbow => Color::Rainbow,
             _ => Color::Rgb([255; 3]),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Evidence, Snapshot};
+
+    #[test]
+    fn legacy_snapshot_defaults_to_readback_evidence() {
+        let legacy = serde_json::json!({
+            "backend_id": "memory",
+            "revision": [1],
+            "content": {"Opaque": {"reason": "unknown"}}
+        });
+        let snapshot: Snapshot = serde_json::from_value(legacy).unwrap();
+        assert_eq!(snapshot.evidence, Evidence::Readback);
+        let accepted = Snapshot {
+            evidence: Evidence::TransportAccepted,
+            ..snapshot
+        };
+        assert_eq!(
+            serde_json::from_value::<Snapshot>(serde_json::to_value(&accepted).unwrap()).unwrap(),
+            accepted
+        );
     }
 }

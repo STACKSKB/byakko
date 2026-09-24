@@ -48,6 +48,7 @@ fn project(colors: &[[u8; 3]], context: [u8; 2]) -> Result<picture::Snapshot, St
         .map(|(slot, key)| (key.clone(), colors[*slot]))
         .collect();
     Ok(picture::Snapshot {
+        evidence: picture::Evidence::Readback,
         backend_id: BACKEND_ID.into(),
         revision,
         context_revision: context.into(),
@@ -64,7 +65,9 @@ fn checked_native(snapshot: &picture::Snapshot) -> Result<(Vec<[u8; 3]>, [u8; 2]
         snapshot.context_revision.as_slice().try_into().map_err(
             |_| "Nia87 picture snapshot lacks its lighting selector; reload before editing",
         )?;
-    if project(&colors, context)? != *snapshot {
+    let mut projected = project(&colors, context)?;
+    projected.evidence = snapshot.evidence;
+    if projected != *snapshot {
         return Err(
             "Nia87 picture snapshot differs from its revision; reload before editing".into(),
         );
@@ -116,10 +119,19 @@ pub(super) fn apply_with(
         target[slot] = *color;
     }
     let actual = access.apply_picture_detailed(&original, &target, context, backup)?;
-    project(&actual, context).map_err(|message| ApplyFailure {
-        message,
-        recovery: Recovery::Unverified,
-    })
+    project(&actual, context)
+        .map(|mut snapshot| {
+            snapshot.evidence = if target == original {
+                expected.evidence
+            } else {
+                picture::Evidence::TransportAccepted
+            };
+            snapshot
+        })
+        .map_err(|message| ApplyFailure {
+            message,
+            recovery: Recovery::Unverified,
+        })
 }
 
 fn not_attempted(message: String) -> ApplyFailure {

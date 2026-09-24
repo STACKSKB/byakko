@@ -120,7 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Command::Help => {
             println!(
-                "{USAGE}\n\nRead commands export verified USB state as JSON; compare-archives is offline. To edit keys, one setting, global lighting, a macro slot, or per-key colors, save the matching read output, change its editable value, run the matching plan command, then explicitly run apply. Apply writes to the device with a durable backup and complete readback. To recover a previously stored macro, use plan-restore-macro and restore-macro with a native macro-*-before-*.json backup."
+                "{USAGE}\n\nRead commands export USB state as JSON; compare-archives is offline. To edit keys, one setting, global lighting, a macro slot, or per-key colors, save the matching read output, change its editable value, run the matching plan command, then explicitly run apply. Apply writes with a durable backup. Lighting and color uploads return TransportAccepted evidence without an immediate readback; use a separate read command to observe device state. Other apply commands retain readback verification. To recover a previously stored macro, use plan-restore-macro and restore-macro with a native macro-*-before-*.json backup."
             );
             Ok(())
         }

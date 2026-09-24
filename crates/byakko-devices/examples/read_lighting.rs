@@ -54,6 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Content::Opaque { reason } => {
             println!("Read preserved as opaque: {reason}. No setters sent.")
         }
+        Content::HostActive { mode_id } => {
+            println!("Read host lighting mode: {mode_id}. No setters sent.")
+        }
     }
     Ok(())
 }

@@ -1,5 +1,18 @@
 # Iced per-key picture slice, 2026-09-23
 
+## 2026-09-24 update
+
+The historical write/read/restore policy below is superseded for ordinary
+picture edits by the [official-app capture and physical acceptance](../Research/official-picture-capture-20260924.md).
+Writes now use seven complete bulk reports, a cached before-image backup, and
+transport-accepted completion without an immediate getter or automatic rollback.
+The picker commits a drag on release; swatches submit immediately, and edits
+made during an upload coalesce for the next serialized upload. Explicit reads
+remain distinct and carry readback evidence. Physical F1 preset changes and
+twelve consecutive uploads passed; a later read matched the complete final RGB
+image. Power-cycle persistence, Linux hardware operation and recovery remain
+separate acceptance questions. The remainder records the earlier slice.
+
 The Iced desktop now exposes per-key RGB picture storage through the core
 picture capability and serialized device executor. The backend supplies the
 key IDs; Nia87 maps its physical keys to matrix slots. Its native revision

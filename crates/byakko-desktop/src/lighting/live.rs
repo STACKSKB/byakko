@@ -56,10 +56,7 @@ impl Pending {
         }
         let slider = matches!(
             edit,
-            Edit::Brightness(_)
-                | Edit::Speed(_)
-                | Edit::Channel(_, _)
-                | Edit::Color(lighting::Color::Rgb(_))
+            Edit::Brightness(_) | Edit::Speed(_) | Edit::Channel(_, _)
         );
         self.edits.push(edit);
         debug_assert!(self.edits.len() <= 8);

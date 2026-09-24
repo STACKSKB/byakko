@@ -3,7 +3,7 @@ use super::{
     Acceptance, Activity, ApplyFailure, HostDraft, HostPhase, HostStart, HostTicket, Problem,
     Recovery, Session, Status,
 };
-use crate::lighting::{self, Content, Edit, Snapshot, editor};
+use crate::lighting::{self, Content, Edit, Evidence, Snapshot, editor};
 
 impl Session {
     pub(super) fn select_default_host_mode(&mut self) {
@@ -188,7 +188,10 @@ impl Session {
         };
         match result {
             Ok(restored)
-                if restored == expected
+                if restored.evidence == Evidence::Readback
+                    && restored.backend_id == expected.backend_id
+                    && restored.revision == expected.revision
+                    && restored.content == expected.content
                     && lighting::validate_snapshot(
                         self.lighting
                             .as_ref()
@@ -247,9 +250,10 @@ mod tests {
         Snapshot {
             backend_id: "memory".into(),
             revision: vec![1],
+            evidence: Evidence::Readback,
             content: Content::Editable(Setting {
                 effect: "steady".into(),
-                brightness: None,
+                brightness: Some(5),
                 speed: None,
                 option: None,
                 color: None,
@@ -284,7 +288,7 @@ mod tests {
             effects: vec![Effect {
                 id: "steady".into(),
                 label: "Steady".into(),
-                brightness: None,
+                brightness: Some(1..=10),
                 speed: None,
                 options: vec![],
                 color: None,
@@ -407,6 +411,64 @@ mod tests {
         assert!(matches!(session.status(), Status::Unverified { .. }));
         assert_ne!(session.lighting().unwrap().status(), &editor::Status::Ready);
         assert!(session.request_host_start("screen").is_err());
+    }
+
+    #[test]
+    fn transport_acceptance_cannot_complete_host_restoration() {
+        let mut session = loaded();
+        let ticket = session.request_host_start("screen").unwrap().ticket;
+        let accepted = Snapshot {
+            evidence: Evidence::TransportAccepted,
+            ..snapshot()
+        };
+        assert_eq!(
+            session.accept_host_finished(ticket, Ok(accepted)),
+            Acceptance::Accepted
+        );
+        assert!(matches!(session.status(), Status::Unverified { .. }));
+        assert_ne!(session.lighting().unwrap().status(), &editor::Status::Ready);
+    }
+
+    #[test]
+    fn transport_accepted_baseline_can_start_and_matching_readback_restores_host_mode() {
+        let mut session = loaded();
+        session.edit_lighting(Edit::Brightness(4)).unwrap();
+        let Command::ApplyLighting {
+            generation,
+            operation,
+            ..
+        } = session.request_lighting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        let mut accepted = snapshot();
+        accepted.revision = vec![2];
+        accepted.evidence = Evidence::TransportAccepted;
+        let Content::Editable(setting) = &mut accepted.content else {
+            unreachable!()
+        };
+        setting.brightness = Some(4);
+        assert_eq!(
+            session.accept(Completion::ApplyLighting {
+                generation,
+                operation,
+                result: Ok(accepted.clone()),
+            }),
+            Acceptance::Accepted
+        );
+        assert_eq!(session.lighting().unwrap().baseline(), Some(&accepted));
+        let start = session.request_host_start("screen").unwrap();
+        assert_eq!(start.expected, accepted);
+        let restored = Snapshot {
+            evidence: Evidence::Readback,
+            ..accepted
+        };
+        assert_eq!(
+            session.accept_host_finished(start.ticket, Ok(restored.clone())),
+            Acceptance::Accepted
+        );
+        assert_eq!(session.status(), &Status::Ready);
+        assert_eq!(session.lighting().unwrap().baseline(), Some(&restored));
     }
 
     #[test]

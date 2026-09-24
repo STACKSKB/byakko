@@ -1,5 +1,5 @@
 //! Deterministic picture draft and verified readback.
-use super::{Capabilities, Channel, Content, Edit, Snapshot, validate_snapshot};
+use super::{Capabilities, Channel, Content, Edit, Evidence, Snapshot, validate_snapshot};
 use crate::draft::Draft;
 use crate::session::ApplyFailure;
 use std::collections::BTreeMap;
@@ -96,7 +96,13 @@ impl Editor {
     pub fn accept_read(&mut self, result: Result<Snapshot, String>) {
         self.state.accept_read(
             result,
-            |snapshot| validate_snapshot(&self.capabilities, snapshot),
+            |snapshot| {
+                validate_snapshot(&self.capabilities, snapshot)?;
+                if snapshot.evidence != Evidence::Readback {
+                    return Err("Picture read did not contain device readback".into());
+                }
+                Ok(())
+            },
             editable,
         );
     }
