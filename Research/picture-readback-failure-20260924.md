@@ -68,3 +68,36 @@ no vendor or copyleft code was incorporated. Links above track mutable branches.
 Validation: 188 devices tests, 76 desktop tests, 68 core tests and 15 CLI tests
 passed; devices/desktop all-target Clippy passed with warnings denied. The release
 build is `target/ux-review/release/byakko-desktop.exe`.
+
+## Read reduction implemented (2026-09-24)
+
+The user explicitly directed removal of competing-writer and hostile-user
+assumptions. Native transactions now use their session before-image for backup;
+there are no pre-write full rereads, duplicate snapshot passes, or per-page
+identity barriers. A single affected-feature post-write read still checks the
+result, and real failures still preserve diagnostics and attempt verified
+recovery. Bound collection selection, schema checks and setter quiet times stay.
+
+| Operation | Old read requests | New read requests |
+| --- | ---: | ---: |
+| Successful nonempty per-key apply | 216 minimum | 6 |
+| Keymap snapshot | 66 | 18 |
+| Successful keymap apply | 198 minimum | 18 |
+| Macro slot snapshot | 16 minimum | 4 |
+| Successful macro apply | preflight plus repeated snapshots | 4, plus 4 only on mismatch |
+| Lighting snapshot | 4 | 1 |
+| Successful global lighting apply | 10 | 1 |
+| Settings snapshot | 16 | 4 |
+| Successful settings apply | 34 | 4 |
+| Full archive capture | two duplicated sweeps | one sweep (229 requests) |
+
+For a one-key color edit this removes 6.30 seconds of fixed read waiting: 180 ms
+of read waits plus the existing 100 ms setter quiet time remain, excluding OS,
+USB and backup overhead. These are code-derived request counts, not physical
+latency measurements. Initial picture load also needs one selector read (7 total).
+Archive apply uses its reviewed baseline, writes changes, then verifies once with
+a full capture. Successful keymap/macro writes preserve unrelated editor caches;
+lighting brightness/color changes preserve picture state, while actual
+selector changes invalidate it. Unrelated writes preserve the background macro
+catalog ticket. No hardware writes were performed for this change, and the
+intermittent mismatch from the original report is not claimed resolved.

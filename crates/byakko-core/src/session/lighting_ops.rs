@@ -57,10 +57,7 @@ impl Session {
         let operation = self.operation()?;
         self.activity = Activity::ApplyLighting { operation };
         // This transaction verifies lighting only. Keep the last observed
-        // keymap and unrelated drafts; their own later writes compare fresh
-        // device state with their expected snapshots before sending reports.
-        self.macro_catalog_operation = None;
-        self.invalidate_picture();
+        // keymap and unrelated drafts in this single-owner session.
         self.invalidate_archive();
         Ok(Command::ApplyLighting {
             generation: self.generation,
@@ -200,6 +197,120 @@ mod tests {
         );
     }
     #[test]
+    fn brightness_write_keeps_picture_verified_but_selector_write_invalidates_it() {
+        use crate::picture::{self, Content as PictureContent};
+        let mut session = session()
+            .with_picture(picture::Capabilities {
+                backend_id: "memory".into(),
+                keys: vec!["a".into()],
+                lighting_effect: Some("pulse".into()),
+            })
+            .unwrap();
+        session.connect().unwrap();
+        read(&mut session, Ok(snapshot(1, 10)));
+        let picture = picture::Snapshot {
+            backend_id: "memory".into(),
+            revision: vec![1],
+            context_revision: vec![1],
+            content: PictureContent::Editable(std::collections::BTreeMap::from([(
+                "a".into(),
+                [1, 2, 3],
+            )])),
+        };
+        let Command::ReadPicture {
+            generation,
+            operation,
+        } = session.request_picture_read().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ReadPicture {
+            generation,
+            operation,
+            result: Ok(picture.clone()),
+        });
+        session.stage_lighting(setting(5)).unwrap();
+        let Command::ApplyLighting {
+            generation,
+            operation,
+            ..
+        } = session.request_lighting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            session.picture().unwrap().status(),
+            &picture::editor::Status::Ready
+        );
+        session.accept(Completion::ApplyLighting {
+            generation,
+            operation,
+            result: Ok(snapshot(2, 5)),
+        });
+        assert_eq!(session.picture().unwrap().baseline(), Some(&picture));
+        assert_eq!(
+            session.picture().unwrap().status(),
+            &picture::editor::Status::Ready
+        );
+
+        let mut other_caps = caps();
+        other_caps.effects.push(Effect {
+            id: "other".into(),
+            label: "Other".into(),
+            brightness: Some(0..=10),
+            speed: Some(1..=5),
+            options: vec![],
+            color: Some(ColorCapability::FixedOrRainbow),
+        });
+        let mut session = Session::new(session.descriptor().clone())
+            .unwrap()
+            .with_lighting(other_caps)
+            .unwrap()
+            .with_picture(picture::Capabilities {
+                backend_id: "memory".into(),
+                keys: vec!["a".into()],
+                lighting_effect: Some("pulse".into()),
+            })
+            .unwrap();
+        session.connect().unwrap();
+        read(&mut session, Ok(snapshot(1, 10)));
+        let Command::ReadPicture {
+            generation,
+            operation,
+        } = session.request_picture_read().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ReadPicture {
+            generation,
+            operation,
+            result: Ok(picture),
+        });
+        session.edit_lighting(Edit::Effect("other".into())).unwrap();
+        let desired = session.lighting().unwrap().draft().unwrap().clone();
+        let Command::ApplyLighting {
+            generation,
+            operation,
+            ..
+        } = session.request_lighting_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::ApplyLighting {
+            generation,
+            operation,
+            result: Ok(Snapshot {
+                backend_id: "memory".into(),
+                revision: vec![2],
+                content: Content::Editable(desired),
+            }),
+        });
+        assert!(matches!(
+            session.picture().unwrap().status(),
+            picture::editor::Status::Unverified { .. }
+        ));
+    }
+    #[test]
     fn scalar_successes_keep_other_drafts_and_failure_invalidates_ready_caches() {
         use crate::settings::{self, Field, Kind, Value};
         let mut session = session()
@@ -287,6 +398,41 @@ mod tests {
             &lighting::editor::Status::Ready
         );
         assert_eq!(session.status(), &Status::Ready);
+        session
+            .stage(crate::Change {
+                layer: "base".into(),
+                key: "a".into(),
+                action: Action::Key(4),
+            })
+            .unwrap();
+        let Command::Apply {
+            generation,
+            operation,
+            ..
+        } = session.request_apply().unwrap()
+        else {
+            unreachable!()
+        };
+        session.accept(Completion::Apply {
+            generation,
+            operation,
+            result: Ok(State {
+                revision: vec![2],
+                bindings: std::collections::BTreeMap::from([(
+                    "base".into(),
+                    std::collections::BTreeMap::from([("a".into(), Action::Key(4))]),
+                )]),
+            }),
+        });
+        assert_eq!(session.status(), &Status::Ready);
+        assert_eq!(
+            session.lighting().unwrap().status(),
+            &lighting::editor::Status::Ready
+        );
+        assert_eq!(
+            session.settings().unwrap().status(),
+            &settings::editor::Status::Ready
+        );
         session.stage_lighting(setting(4)).unwrap();
         let Command::ApplyLighting {
             generation,

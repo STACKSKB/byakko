@@ -24,55 +24,22 @@ fn picture_context(device: &HidDevice) -> Result<[u8; 2]> {
 }
 
 fn read_picture_with_context_on_device(device: &HidDevice) -> Result<(Vec<[u8; 3]>, [u8; 2])> {
-    let before = picture_context(device)?;
-    let colors = read_picture_on_device(device)?;
-    let after = picture_context(device)?;
-    if before != after {
-        return Err("Picture selector changed during read; reload before editing".into());
-    }
-    Ok((colors, before))
-}
-
-fn read_picture_unlocked(selection: Selection<'_>) -> Result<Vec<[u8; 3]>> {
-    let (_, device) = selection.open()?;
-    read_picture_on_device(&device)
+    let context = picture_context(device)?;
+    Ok((read_picture_on_device(device)?, context))
 }
 
 pub(super) fn read_picture_on_device(device: &HidDevice) -> Result<Vec<[u8; 3]>> {
-    stable_picture_reads(|| {
-        let mut pages = Vec::new();
-        for page in 0..6 {
-            let barrier = read_payload(device, 0x80, 0, 0)?;
-            if barrier[0] != 0x80 {
-                return Err("Picture identity barrier failed".into());
-            }
-            let bytes = read_payload(device, 0x8c, 0, page)?;
-            if bytes == barrier {
-                return Err("Picture read returned stale identity".into());
-            }
-            pages.push(bytes);
-        }
-        Ok(crate::nia87::lighting::user_picture_from_pages(&pages)?)
-    })
+    read_picture_pages(|opcode, index, page| read_payload(device, opcode, index, page))
 }
 
-pub(super) fn stable_picture_reads(
-    mut read: impl FnMut() -> Result<Vec<[u8; 3]>>,
+fn read_picture_pages(
+    mut exchange: impl FnMut(u8, u8, u8) -> Result<[u8; 64]>,
 ) -> Result<Vec<[u8; 3]>> {
-    let mut previous = None;
-    for _ in 0..3 {
-        let colors = read()?;
-        if colors.len() != 128 {
-            return Err("Incomplete picture snapshot".into());
-        }
-        if previous.as_ref() == Some(&colors) {
-            return Ok(colors);
-        }
-        previous = Some(colors);
-    }
-    Err("Picture did not stabilize across three complete reads".into())
+    let pages = (0..6)
+        .map(|page| exchange(0x8c, 0, page))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(crate::nia87::lighting::user_picture_from_pages(&pages)?)
 }
-
 /// Replace custom picture colors, preserving every unedited matrix slot.
 pub fn apply_picture(
     expected: &[[u8; 3]],
@@ -95,17 +62,6 @@ pub(super) fn apply_picture_with(
     let physical_slots = crate::nia87::board::physical_slot_mask();
     if (0..126).any(|slot| expected[slot] != desired[slot] && !physical_slots[slot]) {
         return Err("Picture edit changes an unmapped matrix slot".into());
-    }
-    let _lock = transaction_lock()?;
-    let identity = snapshot_unlocked(selection)?;
-    if identity.firmware != 0x0100 || identity.profile != 0 {
-        return Err("Unverified firmware/profile; no picture writes sent".into());
-    }
-    if let Some(expected) = expected_context {
-        picture_context_matches(selection, expected)?;
-    }
-    if read_picture_unlocked(selection)? != expected {
-        return Err("Picture changed since load; no writes sent".into());
     }
     let changes: Vec<_> = (0..126).filter(|&i| expected[i] != desired[i]).collect();
     if changes.is_empty() {
@@ -130,19 +86,8 @@ pub(super) fn apply_picture_with(
         }),
     )?;
     backup.sync_all()?;
-    let (_, device) = selection.open()?;
-    let write_identity = snapshot_on_device(&device)?;
-    if write_identity != identity {
-        return Err(
-            "Keyboard identity or keymaps changed before picture write; no writes sent".into(),
-        );
-    }
-    if let Some(expected) = expected_context {
-        ensure_picture_context(&device, expected)?;
-    }
-    if read_picture_on_device(&device)? != expected {
-        return Err("Picture changed before picture write; no writes sent".into());
-    }
+    let session = Session::open_for(selection)?;
+    let device = session.device();
     let write = |colors: &[[u8; 3]]| -> Result<()> {
         for &slot in &changes {
             let mut host = [0u8; 65];
@@ -158,10 +103,7 @@ pub(super) fn apply_picture_with(
     };
     let result = (|| -> Result<Vec<[u8; 3]>> {
         write(desired)?;
-        let actual = read_picture_unlocked(selection)?;
-        if let Some(expected) = expected_context {
-            picture_context_matches(selection, expected)?;
-        }
+        let actual = read_picture_on_device(device)?;
         if actual != desired {
             return Err(mismatch_diagnostic(
                 &path,
@@ -179,15 +121,9 @@ pub(super) fn apply_picture_with(
         Ok(actual) => Ok(actual),
         Err(error) => {
             let restore = (|| -> Result<()> {
-                if let Some(expected) = expected_context {
-                    picture_context_matches(selection, expected)?;
-                }
                 write(expected)?;
-                if read_picture_unlocked(selection)? != expected {
+                if read_picture_on_device(device)? != expected {
                     return Err("Picture restoration mismatch".into());
-                }
-                if let Some(expected) = expected_context {
-                    picture_context_matches(selection, expected)?;
                 }
                 Ok(())
             })();
@@ -293,18 +229,6 @@ fn write_mismatch_evidence(
     Ok(())
 }
 
-fn ensure_picture_context(device: &HidDevice, expected: [u8; 2]) -> Result<()> {
-    if picture_context(device)? != expected {
-        return Err("Picture selector changed since load; no writes sent".into());
-    }
-    Ok(())
-}
-
-fn picture_context_matches(selection: Selection<'_>, expected: [u8; 2]) -> Result<()> {
-    let (_, device) = selection.open()?;
-    ensure_picture_context(&device, expected)
-}
-
 /// The guarded picture transaction with an explicit recovery result.
 pub fn apply_picture_detailed(
     expected: &[[u8; 3]],
@@ -318,6 +242,38 @@ pub fn apply_picture_detailed(
 mod tests {
     use super::*;
     use byakko_core::session::Recovery;
+
+    #[test]
+    fn picture_snapshot_reads_each_page_once_without_identity_queries() {
+        let mut calls = Vec::new();
+        let colors = read_picture_pages(|opcode, index, page| {
+            calls.push((opcode, index, page));
+            Ok([page; 64])
+        })
+        .unwrap();
+        assert_eq!(
+            calls,
+            (0..6).map(|page| (0x8c, 0, page)).collect::<Vec<_>>()
+        );
+        assert_eq!(colors.len(), 128);
+        assert_eq!(colors[0], [0; 3]);
+        assert_eq!(colors[127], [5; 3]);
+    }
+
+    #[test]
+    fn picture_read_stops_at_transport_error() {
+        let mut calls = 0;
+        let result = read_picture_pages(|_, _, page| {
+            calls += 1;
+            if page == 2 {
+                Err("Disconnected".into())
+            } else {
+                Ok([0; 64])
+            }
+        });
+        assert_eq!(calls, 3);
+        assert_eq!(result.unwrap_err().to_string(), "Disconnected");
+    }
 
     #[test]
     fn mismatch_details_separate_edited_and_untouched_slots() {

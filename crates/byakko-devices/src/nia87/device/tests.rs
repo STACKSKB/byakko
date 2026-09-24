@@ -3,22 +3,6 @@ use super::*;
 #[cfg(test)]
 mod lighting_tests {
     #[test]
-    fn macro_stability_requires_consecutive_complete_copies() {
-        let mut transitional = vec![0; 256];
-        transitional[..32].fill(1);
-        let complete = vec![1; 256];
-        let mut samples = [transitional.clone(), complete.clone(), complete.clone()].into_iter();
-        assert_eq!(
-            super::stable_macro_reads(|| Ok(samples.next().unwrap())).unwrap(),
-            complete
-        );
-        let mut alternating = [transitional.clone(), complete, transitional].into_iter();
-        assert!(super::stable_macro_reads(|| Ok(alternating.next().unwrap())).is_err());
-        assert!(super::stable_macro_reads(|| Ok(vec![0; 32])).is_err());
-        assert!(super::stable_macro_reads(|| Err("Disconnected".into())).is_err());
-    }
-
-    #[test]
     fn reserved_slot_is_rejected_before_device_access() {
         let expected = super::Snapshot {
             format_version: 1,
@@ -134,20 +118,6 @@ mod lighting_tests {
     }
 
     use super::*;
-
-    #[test]
-    fn picture_requires_two_consecutive_complete_matches() {
-        let old = vec![[0; 3]; 128];
-        let new = vec![[12, 34, 56]; 128];
-        let mut transition = [old.clone(), new.clone(), new.clone()].into_iter();
-        assert_eq!(
-            stable_picture_reads(|| Ok(transition.next().unwrap())).unwrap(),
-            new
-        );
-        let mut oscillating = [old.clone(), new, old].into_iter();
-        assert!(stable_picture_reads(|| Ok(oscillating.next().unwrap())).is_err());
-        assert!(stable_picture_reads(|| Ok(vec![[0; 3]; 127])).is_err());
-    }
 
     #[test]
     fn restore_report_recreates_known_fields_without_sending_opaque_tail() {

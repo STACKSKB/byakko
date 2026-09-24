@@ -19,20 +19,10 @@ pub(super) fn read_macros_with(selection: Selection<'_>, slots: &[u8]) -> Result
         .collect()
 }
 
-fn read_macro_unlocked(selection: Selection<'_>, slot: u8) -> Result<Vec<u8>> {
-    let (_, device) = selection.open()?;
-    read_macro_on_device(&device, slot)
-}
-
 pub(super) fn read_macro_on_device(device: &HidDevice, slot: u8) -> Result<Vec<u8>> {
-    crate::rongyuan::yc500::macro_io::read_stable(slot, |opcode, index, page| {
+    crate::rongyuan::yc500::macro_io::read_complete(slot, |opcode, index, page| {
         read_payload(device, opcode, index, page)
     })
-}
-
-#[cfg(test)]
-pub(super) fn stable_macro_reads(read: impl FnMut() -> Result<Vec<u8>>) -> Result<Vec<u8>> {
-    crate::rongyuan::yc500::macro_io::stable_reads(read)
 }
 
 pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
@@ -75,9 +65,6 @@ pub(super) fn apply_macro_with(
     let _lock = transaction_lock()?;
     let target = crate::nia87::macros::encode(new_macro)?;
     crate::nia87::macros::decode(expected)?; // Refuse to overwrite an unrecognized store we cannot restore.
-    if read_macro_unlocked(selection, slot)? != expected {
-        return Err("Macro changed since load; reload before applying".into());
-    }
     if target == expected {
         return Ok(target);
     }
@@ -96,26 +83,15 @@ pub(super) fn apply_macro_with(
     )?;
     backup.sync_all()?;
     let (_, device) = selection.open()?;
-    // The write handle may differ from the one used for the initial read.
-    // Validate it before sending any macro reports, including restoration.
-    let version = read_payload(&device, 0x80, 0, 0)?;
-    let profile = read_payload(&device, 0x85, 0, 0)?;
-    if version[0] != 0x80
-        || u16::from_le_bytes([version[1], version[2]]) != 0x0100
-        || profile[0] != 0x85
-        || profile[1] != 0
-    {
-        return Err(
-            "Write handle is not validated Nia87 firmware 0x0100/profile 0; no macro writes sent"
-                .into(),
-        );
-    }
-    if read_macro_on_device(&device, slot)? != expected {
-        return Err("Macro changed before write; no macro writes sent".into());
-    }
     let result = (|| -> Result<Vec<u8>> {
         write_macro_bytes(&device, slot, &target)?;
-        let actual = read_macro_on_device(&device, slot)?;
+        let mut actual = read_macro_on_device(&device, slot)?;
+        if actual != target {
+            // The first copy after the setter can straddle a flash transition.
+            // Retry only a mismatch, once, before treating it as a failed save.
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            actual = read_macro_on_device(&device, slot)?;
+        }
         if actual != target {
             return Err("Macro readback mismatch".into());
         }

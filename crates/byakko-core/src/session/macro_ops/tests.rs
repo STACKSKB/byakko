@@ -165,12 +165,7 @@ fn shared_activity_excludes_other_feature_and_rejects_wrong_slot_then_verifies()
     assert!(!session.busy());
     assert!(!session.dirty());
     assert_eq!(session.macros().unwrap().baseline(), Some(&snapshot(2, 2)));
-    assert_eq!(
-        session.status(),
-        &Status::Unverified {
-            problem: Problem::ReadRequired
-        }
-    );
+    assert_eq!(session.status(), &Status::Ready);
     assert!(session.request_apply().is_err());
 }
 
@@ -284,11 +279,9 @@ fn binding_uses_advertised_action_and_preserves_drafts_on_rejection() {
             )]),
         }),
     });
-    // A keymap read invalidates macro trust until its own read completes.
-    assert!(session.stage_macro_binding("layer", "key", "play").is_err());
-    assert_eq!(session.changes(), before);
-    read(&mut session, snapshot(1, 1));
+    // A keymap read leaves the verified macro snapshot available.
     session.stage_macro_binding("layer", "key", "play").unwrap();
+    assert_eq!(session.changes(), before);
 }
 
 #[test]
@@ -418,7 +411,7 @@ fn catalog_rejects_incomplete_result_and_old_generation() {
 }
 
 #[test]
-fn keymap_refresh_invalidates_background_catalog_ticket() {
+fn keymap_refresh_preserves_background_catalog_ticket() {
     let mut session = ready();
     let Command::ReadMacroCatalog {
         generation,
@@ -430,14 +423,14 @@ fn keymap_refresh_invalidates_background_catalog_ticket() {
     };
     assert!(session.macro_catalog_scanning());
     let _ = session.request_read().unwrap();
-    assert!(!session.macro_catalog_scanning());
+    assert!(session.macro_catalog_scanning());
     assert_eq!(
         session.accept(Completion::ReadMacroCatalog {
             generation,
             operation,
             result: Ok(vec![]),
         }),
-        Acceptance::IgnoredStale
+        Acceptance::Accepted
     );
 }
 

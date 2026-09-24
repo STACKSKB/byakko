@@ -51,7 +51,6 @@ impl Session {
         self.activity = Activity::ApplySetting { operation };
         // A one-field settings transaction checks its own snapshot. Other
         // editors retain their last observed values and guarded write paths.
-        self.macro_catalog_operation = None;
         self.invalidate_archive();
         Ok(Command::ApplySetting {
             generation: self.generation,
