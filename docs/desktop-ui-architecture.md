@@ -89,3 +89,8 @@ categories in docs/live-evidence.md. No vendor implementation was copied.
 Automated coverage includes group/search isolation, typed assignment, cancelling
 capture, remapped legends and revert. Final visual layout and physical key output
 remain for human review. Stop after this requested iteration.
+
+2026-09-24 follow-up: the action browser is now one continuous, sectioned list.
+Category buttons jump to measured section positions instead of filtering; search
+still spans groups. Action tiles have no tooltip. Keyboard hover uses a small,
+opaque tooltip containing only `physical: <original label>`.

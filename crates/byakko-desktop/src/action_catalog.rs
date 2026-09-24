@@ -3,7 +3,7 @@ use crate::{Desktop, Message as AppMessage, panels};
 use byakko_core::{Action, ActionCategory, ActionChoice};
 use iced::{
     Element, Event, Fill,
-    widget::{button, column, container, row, scrollable, text, text_input, tooltip},
+    widget::{button, column, container, row, scrollable, text, text_input},
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -42,6 +42,69 @@ const GROUPS: &[ActionCategory] = &[
     ActionCategory::Shortcuts,
     ActionCategory::Other,
 ];
+
+fn section_id(group: ActionCategory) -> iced::advanced::widget::Id {
+    format!("action-section-{group:?}").into()
+}
+
+// Measure the rendered section, so jumps remain accurate after wrapping/resizing.
+struct JumpToSection {
+    target: iced::advanced::widget::Id,
+    content_y: Option<f32>,
+    section_y: Option<f32>,
+}
+
+impl JumpToSection {
+    fn new(group: ActionCategory) -> Self {
+        Self {
+            target: section_id(group),
+            content_y: None,
+            section_y: None,
+        }
+    }
+}
+
+impl iced::advanced::widget::Operation<AppMessage> for JumpToSection {
+    fn traverse(
+        &mut self,
+        operate: &mut dyn FnMut(&mut dyn iced::advanced::widget::Operation<AppMessage>),
+    ) {
+        operate(self);
+    }
+
+    fn container(&mut self, id: Option<&iced::advanced::widget::Id>, bounds: iced::Rectangle) {
+        if id == Some(&self.target) {
+            self.section_y = Some(bounds.y);
+        }
+    }
+
+    fn scrollable(
+        &mut self,
+        id: Option<&iced::advanced::widget::Id>,
+        _: iced::Rectangle,
+        content: iced::Rectangle,
+        _: iced::Vector,
+        _: &mut dyn iced::advanced::widget::operation::Scrollable,
+    ) {
+        if id == Some(&iced::advanced::widget::Id::new("action-catalog")) {
+            self.content_y = Some(content.y);
+        }
+    }
+
+    fn finish(&self) -> iced::advanced::widget::operation::Outcome<AppMessage> {
+        use iced::advanced::widget::operation::{Outcome, scrollable};
+        match (self.content_y, self.section_y) {
+            (Some(origin), Some(section)) => Outcome::Chain(Box::new(scrollable::scroll_to(
+                iced::advanced::widget::Id::new("action-catalog"),
+                scrollable::AbsoluteOffset {
+                    x: None,
+                    y: Some((section - origin).max(0.0)),
+                },
+            ))),
+            _ => Outcome::None,
+        }
+    }
+}
 
 pub fn group_label(group: ActionCategory) -> &'static str {
     match group {
@@ -92,22 +155,10 @@ pub fn results<'a>(
     actions: &'a [ActionChoice],
     browser: &Browser,
 ) -> Vec<(usize, &'a ActionChoice)> {
-    let category = browser.category.or_else(|| {
-        GROUPS
-            .iter()
-            .copied()
-            .find(|group| actions.iter().any(|choice| choice.category == *group))
-    });
     actions
         .iter()
         .enumerate()
-        .filter(|(_, choice)| {
-            if browser.query.trim().is_empty() {
-                Some(choice.category) == category
-            } else {
-                matches(choice, &browser.query)
-            }
-        })
+        .filter(|(_, choice)| matches(choice, &browser.query))
         .collect()
 }
 
@@ -134,16 +185,21 @@ fn exact_match(actions: &[ActionChoice], browser: &Browser) -> Option<usize> {
 }
 
 impl Desktop {
-    pub fn update_catalog(&mut self, message: Message) {
+    pub fn update_catalog(&mut self, message: Message) -> iced::Task<AppMessage> {
         match message {
             Message::Category(category) => {
                 self.action_browser.category = Some(category);
                 self.action_browser.query.clear();
                 self.action_browser.input = InputMode::Browse;
+                return iced::advanced::widget::operate(JumpToSection::new(category));
             }
             Message::Search(query) => {
                 self.action_browser.query = query;
                 self.action_browser.input = InputMode::Browse;
+                return iced::widget::operation::scroll_to(
+                    "action-catalog",
+                    iced::widget::operation::AbsoluteOffset { x: 0.0, y: 0.0 },
+                );
             }
             Message::SubmitSearch => {
                 if let Some(index) =
@@ -157,7 +213,7 @@ impl Desktop {
             Message::Captured(usage) => {
                 if self.action_browser.input != InputMode::Capture || self.page != crate::Page::Keys
                 {
-                    return;
+                    return iced::Task::none();
                 }
                 self.action_browser.input = InputMode::Browse;
                 if let Some(index) = self
@@ -176,6 +232,7 @@ impl Desktop {
                 }
             }
         }
+        iced::Task::none()
     }
 }
 
@@ -233,43 +290,50 @@ pub fn view(app: &Desktop) -> Element<'_, AppMessage> {
     )
     .spacing(style.spacing.xs);
     let choices = results(actions, &app.action_browser);
-    let heading = if app.action_browser.query.trim().is_empty() {
-        selected_group
-            .map(group_label)
-            .unwrap_or("Actions")
-            .to_string()
-    } else {
-        format!("Search results · {}", choices.len())
-    };
     let selected_action = app
         .selected
         .as_ref()
         .and_then(|key| app.session.draft()?.get(&app.layer)?.get(key));
-    let tiles = row(choices.iter().map(|(index, choice)| {
-        let label = compact_label(choice);
-        let width = (label.chars().count() as f32 * style.action_character_width
-            + style.spacing.control_padding as f32 * 2.0)
-            .clamp(style.board.min_unit, style.fields.regular as f32);
-        let tile = panels::selectable_button_with_size(
-            style,
-            label,
-            selected_action == Some(&choice.action),
-            editable.then_some(AppMessage::Stage(*index)),
-            Some((width, style.board.min_unit)),
-        );
-        tooltip(
-            tile,
-            text(&choice.label),
-            iced::widget::tooltip::Position::Top,
+    let sections = column(GROUPS.iter().filter_map(|group| {
+        let group_choices: Vec<_> = choices
+            .iter()
+            .filter(|(_, choice)| choice.category == *group)
+            .collect();
+        if group_choices.is_empty() {
+            return None;
+        }
+        let tiles = row(group_choices.into_iter().map(|(index, choice)| {
+            let label = compact_label(choice);
+            let width = (label.chars().count() as f32 * style.action_character_width
+                + style.spacing.control_padding as f32 * 2.0)
+                .clamp(style.board.min_unit, style.fields.regular as f32);
+            panels::selectable_button_with_size(
+                style,
+                label,
+                selected_action == Some(&choice.action),
+                editable.then_some(AppMessage::Stage(*index)),
+                Some((width, style.board.min_unit)),
+            )
+        }))
+        .spacing(style.spacing.xs)
+        .wrap();
+        Some(
+            container(
+                column![
+                    text(group_label(*group)).size(style.type_scale.section_title),
+                    tiles
+                ]
+                .spacing(style.spacing.s),
+            )
+            .id(section_id(*group))
+            .into(),
         )
-        .into()
     }))
-    .spacing(style.spacing.xs)
-    .wrap();
+    .spacing(style.spacing.l);
     let results: Element<'_, AppMessage> = if choices.is_empty() {
         text("No matching actions").into()
     } else {
-        tiles.into()
+        sections.into()
     };
     let capture = if app.action_browser.input == InputMode::Capture {
         button("Press a key… Esc cancels").on_press(AppMessage::Catalog(Message::CancelCapture))
@@ -287,11 +351,9 @@ pub fn view(app: &Desktop) -> Element<'_, AppMessage> {
             container(scrollable(groups))
                 .width(style.action_group_width)
                 .height(Fill),
-            container(scrollable(
-                column![text(heading), results].spacing(style.spacing.s)
-            ))
-            .width(Fill)
-            .height(Fill),
+            container(scrollable(results).id("action-catalog"))
+                .width(Fill)
+                .height(Fill),
         ]
         .spacing(style.spacing.m)
         .height(Fill),
@@ -304,6 +366,53 @@ pub fn view(app: &Desktop) -> Element<'_, AppMessage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn section_jump_uses_rendered_coordinates_not_estimated_row_counts() {
+        use iced::advanced::widget::{
+            Operation,
+            operation::{
+                Outcome, Scrollable,
+                scrollable::{AbsoluteOffset, RelativeOffset},
+            },
+        };
+        #[derive(Default)]
+        struct ScrollState(Option<f32>);
+        impl Scrollable for ScrollState {
+            fn snap_to(&mut self, _: RelativeOffset<Option<f32>>) {}
+            fn scroll_to(&mut self, offset: AbsoluteOffset<Option<f32>>) {
+                self.0 = offset.y;
+            }
+            fn scroll_by(&mut self, _: AbsoluteOffset, _: iced::Rectangle, _: iced::Rectangle) {}
+        }
+        for section_y in [250.0, 610.0] {
+            let mut jump = JumpToSection::new(ActionCategory::Numpad);
+            let mut state = ScrollState::default();
+            let bounds = iced::Rectangle {
+                y: 50.0,
+                ..Default::default()
+            };
+            let id = iced::advanced::widget::Id::new("action-catalog");
+            jump.scrollable(
+                Some(&id),
+                bounds,
+                bounds,
+                iced::Vector::new(0.0, 100.0),
+                &mut state,
+            );
+            jump.container(
+                Some(&section_id(ActionCategory::Numpad)),
+                iced::Rectangle {
+                    y: section_y,
+                    ..Default::default()
+                },
+            );
+            let Outcome::Chain(mut scroll) = jump.finish() else {
+                panic!("missing jump");
+            };
+            scroll.scrollable(Some(&id), bounds, bounds, iced::Vector::ZERO, &mut state);
+            assert_eq!(state.0, Some(section_y - bounds.y));
+        }
+    }
     fn choices() -> Vec<ActionChoice> {
         vec![
             ActionChoice {
@@ -319,15 +428,15 @@ mod tests {
         ]
     }
     #[test]
-    fn browsing_is_grouped_but_search_crosses_groups_and_accepts_num_alias() {
+    fn browsing_includes_all_sections_and_search_accepts_num_alias() {
         let actions = choices();
         let mut browser = Browser::default();
-        assert_eq!(results(&actions, &browser).len(), 1);
+        assert_eq!(results(&actions, &browser).len(), 2);
         browser.query = "num 9".into();
         assert_eq!(exact_match(&actions, &browser), Some(1));
         browser.query.clear();
         browser.category = Some(ActionCategory::Numpad);
-        assert_eq!(results(&actions, &browser)[0].0, 1);
+        assert_eq!(results(&actions, &browser).len(), 2);
         browser.query = "a".into();
         assert_eq!(exact_match(&actions, &browser), Some(0));
     }

@@ -684,7 +684,7 @@ impl Desktop {
                 self.selected = Some(key);
                 self.sync_shortcut();
             }
-            Message::Catalog(message) => self.update_catalog(message),
+            Message::Catalog(message) => return self.update_catalog(message),
             Message::Stage(index) => self.stage(index),
             Message::Read => {
                 self.auto_read = AutoRead::Enabled;
