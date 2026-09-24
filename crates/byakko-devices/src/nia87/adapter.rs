@@ -5,8 +5,8 @@ use crate::nia87::{
     layout, macro_adapter,
 };
 use byakko_core::{
-    Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, ShortcutCapabilities, State,
-    UsageChoice, macros, validate_changes, validate_state,
+    Action, ActionCategory, ActionChoice, Change, Descriptor, Layer, PhysicalKey,
+    ShortcutCapabilities, State, UsageChoice, macros, validate_changes, validate_state,
 };
 use std::{collections::BTreeMap, path::Path};
 
@@ -167,10 +167,12 @@ pub fn descriptor() -> Descriptor {
     let mut choices = vec![ActionChoice {
         label: "Disabled".into(),
         action: Action::Disabled,
+        category: ActionCategory::Other,
     }];
     choices.extend(actions::presets().iter().map(|preset| ActionChoice {
         label: preset.label.into(),
         action: action_from_raw(preset.bytes),
+        category: preset.category(),
     }));
     let mut usages: Vec<u8> = layout::nia87_keys()
         .into_iter()
@@ -187,6 +189,7 @@ pub fn descriptor() -> Descriptor {
     choices.extend(usages.into_iter().map(|usage| ActionChoice {
         label: layout::usage_label(usage),
         action: Action::Key(usage as u16),
+        category: ActionCategory::for_keyboard_usage(usage as u16),
     }));
     for (label, modifier) in [("Ctrl", 224), ("Shift", 225), ("Alt", 226), ("Win", 227)] {
         choices.push(ActionChoice {
@@ -195,6 +198,7 @@ pub fn descriptor() -> Descriptor {
                 modifiers: vec![modifier],
                 key: 4,
             },
+            category: ActionCategory::Shortcuts,
         });
     }
     let shortcut_keys = choices

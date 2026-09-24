@@ -3,27 +3,29 @@ use crate::{Desktop, Message as AppMessage, panels};
 use byakko_core::{Action, ShortcutCapabilities};
 use iced::{
     Element, Fill,
-    widget::{button, column, pick_list, row, text},
+    widget::{button, column, row, text, text_input},
 };
-use std::fmt;
 
 #[derive(Clone, Debug)]
 pub(super) enum Message {
     ToggleModifier(u16),
     SelectKey(u16),
     Stage,
+    Search(String),
 }
 
 #[derive(Default)]
 pub(super) struct Form {
     pub modifiers: Vec<u16>,
     pub key: Option<u16>,
+    pub query: String,
 }
 
 impl Form {
     pub fn load(&mut self, action: Option<&Action>, caps: Option<&ShortcutCapabilities>) {
         self.modifiers.clear();
         self.key = None;
+        self.query.clear();
         if let (Some(Action::Shortcut { modifiers, key }), Some(caps)) = (action, caps)
             && caps.compose(modifiers, *key).is_ok()
         {
@@ -63,18 +65,6 @@ impl Form {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct KeyItem {
-    usage: u16,
-    label: String,
-}
-
-impl fmt::Display for KeyItem {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.label)
-    }
-}
-
 pub(super) fn view(app: &Desktop) -> Option<Element<'_, AppMessage>> {
     let caps = app.session.descriptor().shortcuts.as_ref()?;
     let editable = !app.busy()
@@ -94,32 +84,51 @@ pub(super) fn view(app: &Desktop) -> Option<Element<'_, AppMessage>> {
         )
     }))
     .spacing(app.ui.spacing.s);
-    let items: Vec<_> = caps
+    let key = text_input("Find shortcut key…", &app.shortcut.query)
+        .on_input_maybe(editable.then_some(|query| AppMessage::Shortcut(Message::Search(query))))
+        .width(app.ui.fields.regular);
+    let selected = caps
         .keys
         .iter()
-        .map(|choice| KeyItem {
-            usage: choice.usage,
-            label: choice.label.clone(),
-        })
-        .collect();
-    let selected = items
+        .find(|choice| Some(choice.usage) == app.shortcut.key)
+        .map_or("Choose a key", |choice| choice.label.as_str());
+    let matches = row(caps
+        .keys
         .iter()
-        .find(|item| Some(item.usage) == app.shortcut.key)
-        .cloned();
-    let key = pick_list(items, selected, |item: KeyItem| {
-        AppMessage::Shortcut(Message::SelectKey(item.usage))
-    })
-    .placeholder("Choose key")
-    .width(app.ui.fields.regular);
+        .filter(|choice| {
+            !app.shortcut.query.trim().is_empty()
+                && choice
+                    .label
+                    .to_lowercase()
+                    .contains(&app.shortcut.query.trim().to_lowercase())
+        })
+        .take(12)
+        .map(|choice| {
+            panels::selectable_button(
+                &app.ui,
+                &choice.label,
+                Some(choice.usage) == app.shortcut.key,
+                editable.then_some(AppMessage::Shortcut(Message::SelectKey(choice.usage))),
+            )
+        }))
+    .spacing(app.ui.spacing.xs)
+    .wrap();
     let stage = button("Stage shortcut").on_press_maybe(
         (editable && app.shortcut.action(caps).is_ok())
             .then_some(AppMessage::Shortcut(Message::Stage)),
     );
     Some(
-        column![text("Shortcut"), modifiers, key, stage]
-            .spacing(app.ui.spacing.s)
-            .width(Fill)
-            .into(),
+        column![
+            text("Shortcut"),
+            modifiers,
+            key,
+            matches,
+            text(selected),
+            stage
+        ]
+        .spacing(app.ui.spacing.s)
+        .width(Fill)
+        .into(),
     )
 }
 

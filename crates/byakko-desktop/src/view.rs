@@ -7,8 +7,8 @@ use byakko_core::{
     session::{Problem, ReconnectCause, ReconnectCaution, ReconnectSurface, Status},
 };
 use iced::{
-    Element, Fill, Length,
-    widget::{button, column, container, row, scrollable, text, text_input},
+    Element, Fill,
+    widget::{button, column, container, row, scrollable, text},
 };
 
 pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
@@ -72,16 +72,18 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
         Closing::Waiting => content.push(text("Waiting for the device operation before closing…")),
         Closing::ConfirmDiscard => content,
     };
-    content = content.push(keys(app));
+    if app.page != Page::Keys {
+        content = content.push(keys(app));
+    }
     content = content.push(match app.page {
         Page::Archive => super::archive::view(app),
-        Page::Keys => keymap(app),
+        Page::Keys => key_workspace(app),
         Page::Macros => super::macro_view::view(app),
         Page::Lighting => super::lighting::view(app),
         Page::Picture => super::picture::view(app),
         Page::Settings => super::settings::view(app),
     });
-    let workspace = container(content).max_width(app.ui.initial_window.0);
+    let workspace = container(content).width(Fill).height(Fill);
     let base: Element<'_, Message> = container(workspace)
         .padding(app.ui.spacing.page_padding)
         .height(Fill)
@@ -115,7 +117,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
     iced::widget::stack![base, iced::widget::opaque(backdrop)].into()
 }
 
-fn keymap(app: &Desktop) -> Element<'_, Message> {
+fn keymap_toolbar(app: &Desktop) -> Element<'_, Message> {
     let descriptor = app.session.descriptor();
     let dirty = app.session.changes();
     let ready = !app.busy() && *app.session.status() == Status::Ready;
@@ -138,33 +140,61 @@ fn keymap(app: &Desktop) -> Element<'_, Message> {
     );
     column![toolbar, text(status(app)), layers]
         .spacing(app.ui.spacing.m)
-        .push(keymap_detail(app))
+        .into()
+}
+
+fn keymap(app: &Desktop) -> Element<'_, Message> {
+    column![keymap_toolbar(app), keymap_detail(app)]
+        .spacing(app.ui.spacing.m)
         .height(Fill)
         .into()
 }
 
 fn keymap_detail(app: &Desktop) -> Element<'_, Message> {
-    let mut extra = column![text("Changes to save"), staged_edits(app)].spacing(app.ui.spacing.s);
+    let mut extra =
+        column![text(selected_label(app)), text(selected_action(app))].spacing(app.ui.spacing.s);
     if let Some(shortcut) = shortcut::view(app) {
         extra = extra.push(shortcut);
     }
-    row![
-        container(
-            column![
-                text(selected_label(app)),
-                text(selected_action(app)),
-                search(app),
-            ]
-            .spacing(app.ui.spacing.s)
-        )
-        .width(iced::FillPortion(app.ui.panes.detail)),
-        container(scrollable(extra).height(Fill)).width(iced::FillPortion(app.ui.panes.sidebar)),
-    ]
-    .spacing(app.ui.spacing.m)
-    .height(Fill)
-    .into()
+    if !app.session.changes().is_empty() {
+        extra = extra.push(text("Changes to save")).push(staged_edits(app));
+    }
+    scrollable(extra).height(Fill).into()
 }
 
+fn key_workspace(app: &Desktop) -> Element<'_, Message> {
+    iced::widget::responsive(move |size| {
+        if size.width >= app.ui.key_sidebar_breakpoint {
+            row![
+                column![keys(app), keymap(app)]
+                    .spacing(app.ui.spacing.m)
+                    .width(Fill),
+                container(crate::action_catalog::view(app))
+                    .width(app.ui.key_sidebar_width)
+                    .height(Fill)
+            ]
+            .spacing(app.ui.spacing.l)
+            .height(Fill)
+            .into()
+        } else {
+            column![
+                keys(app),
+                keymap_toolbar(app),
+                row![
+                    container(crate::action_catalog::view(app))
+                        .width(iced::FillPortion(app.ui.panes.detail)),
+                    container(keymap_detail(app)).width(iced::FillPortion(app.ui.panes.sidebar)),
+                ]
+                .spacing(app.ui.spacing.m)
+                .height(Fill)
+            ]
+            .spacing(app.ui.spacing.m)
+            .height(Fill)
+            .into()
+        }
+    })
+    .into()
+}
 fn staged_edits(app: &Desktop) -> Element<'_, Message> {
     let descriptor = app.session.descriptor();
     let dirty = app.session.changes();
@@ -206,15 +236,24 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
         .iter()
         .filter(|key| key.visible)
         .collect();
+    let labels =
+        physical_board::labels_for_layer(app.session.descriptor(), app.session.draft(), &app.layer);
     if app.page == Page::Picture {
         let colors = super::picture::projected_colors(app).unwrap_or_default();
-        return physical_board::colored_view(&app.ui, keys, app.selected.clone(), colors, |key| {
-            Some(Message::Picture(super::picture::Message::Select(
-                key.id.clone(),
-            )))
-        });
+        return physical_board::colored_view_with_labels(
+            &app.ui,
+            keys,
+            app.selected.clone(),
+            colors,
+            labels,
+            |key| {
+                Some(Message::Picture(super::picture::Message::Select(
+                    key.id.clone(),
+                )))
+            },
+        );
     }
-    physical_board::view(&app.ui, keys, app.selected.clone(), |key| {
+    physical_board::view_with_labels(&app.ui, keys, app.selected.clone(), labels, |key| {
         Some(Message::SelectKey(key.id.clone()))
     })
 }
@@ -252,54 +291,6 @@ fn selected_action(app: &Desktop) -> String {
     } else {
         format!("Current action: {action} · fixed")
     }
-}
-
-fn search(app: &Desktop) -> Element<'_, Message> {
-    let query = app.search.to_lowercase();
-    let editable = !app.busy()
-        && *app.session.status() == Status::Ready
-        && app
-            .session
-            .descriptor()
-            .keys
-            .iter()
-            .any(|key| key.writable && Some(&key.id) == app.selected.as_ref());
-    let filtered: Vec<_> = app
-        .session
-        .descriptor()
-        .actions
-        .iter()
-        .enumerate()
-        .filter(|(_, choice)| choice.label.to_lowercase().contains(&query))
-        .collect();
-    let actions = row(filtered.iter().map(|(index, choice)| {
-        button(text(&choice.label))
-            .width(Length::Fixed(app.ui.fields.regular as f32))
-            .on_press_maybe(editable.then_some(Message::Stage(*index)))
-            .into()
-    }))
-    .spacing(app.ui.spacing.xs)
-    .wrap();
-    let results: Element<'_, Message> = if filtered.is_empty() {
-        text("No matching actions").into()
-    } else {
-        scrollable(actions).height(Fill).into()
-    };
-    column![
-        text("Assign action"),
-        row![
-            text_input("Search actions", &app.search)
-                .on_input(Message::Search)
-                .width(Length::Fixed(app.ui.fields.regular as f32)),
-            text(format!("{} available", filtered.len())),
-        ]
-        .spacing(app.ui.spacing.s)
-        .align_y(iced::Center),
-        results
-    ]
-    .spacing(app.ui.spacing.s)
-    .height(Fill)
-    .into()
 }
 
 fn action_label(app: &Desktop, action: &Action) -> String {

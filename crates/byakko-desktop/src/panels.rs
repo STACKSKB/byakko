@@ -60,6 +60,10 @@ pub struct UiStyle {
     pub spacing: Spacing,
     pub type_scale: TypeScale,
     pub compact_breakpoint: f32,
+    pub key_sidebar_breakpoint: f32,
+    pub key_sidebar_width: f32,
+    pub action_group_width: u32,
+    pub action_character_width: f32,
     pub panes: PaneRatios,
     pub fields: FieldWidths,
     pub color_picker_size: (f32, f32),
@@ -73,7 +77,7 @@ pub struct UiStyle {
 
 impl UiStyle {
     pub const DEFAULT: Self = Self {
-        initial_window: (1140.0, 760.0),
+        initial_window: (1360.0, 800.0),
         theme: Theme::Dark,
         spacing: Spacing {
             xs: 4,
@@ -90,6 +94,10 @@ impl UiStyle {
             page_title: 22,
         },
         compact_breakpoint: 720.0,
+        key_sidebar_breakpoint: 1240.0,
+        key_sidebar_width: 440.0,
+        action_group_width: 112,
+        action_character_width: 8.0,
         panes: PaneRatios {
             sidebar: 1,
             detail: 2,

@@ -264,6 +264,7 @@ mod tests {
             actions: vec![ActionChoice {
                 label: "A".into(),
                 action: Action::Key(4),
+                category: Default::default(),
             }],
             shortcuts: None,
         };
@@ -414,6 +415,7 @@ mod tests {
             actions: vec![ActionChoice {
                 label: "A".into(),
                 action: Action::Key(4),
+                category: Default::default(),
             }],
             shortcuts: None,
         };

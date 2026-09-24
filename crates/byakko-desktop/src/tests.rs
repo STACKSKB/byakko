@@ -69,11 +69,36 @@ fn ready() -> Desktop {
         auto_read: AutoRead::Enabled,
         layer: "Typing".into(),
         selected: Some("Alpha".into()),
-        search: String::new(),
+        action_browser: Default::default(),
         shortcut: shortcut::Form::default(),
         notice: None,
         closing: Closing::Open,
     }
+}
+
+#[test]
+fn typed_assignment_updates_board_legend_and_revert_restores_it() {
+    let mut app = ready();
+    let _ = app.update(Message::Catalog(action_catalog::Message::Search(
+        "B".into(),
+    )));
+    let _ = app.update(Message::Catalog(action_catalog::Message::SubmitSearch));
+    let labels =
+        physical_board::labels_for_layer(app.session.descriptor(), app.session.draft(), &app.layer);
+    assert_eq!(labels["Alpha"].compact, "B");
+    assert_eq!(app.session.descriptor().keys[0].label, "Alpha");
+    let _ = app.update(Message::Revert);
+    let labels =
+        physical_board::labels_for_layer(app.session.descriptor(), app.session.draft(), &app.layer);
+    assert_eq!(labels["Alpha"].compact, "A");
+    let _ = app.update(Message::Catalog(action_catalog::Message::Capture));
+    let _ = app.update(Message::Catalog(action_catalog::Message::Captured(5)));
+    assert_eq!(app.session.changes()[0].action, Action::Key(5));
+    let _ = app.update(Message::Revert);
+    let _ = app.update(Message::Catalog(action_catalog::Message::Capture));
+    let _ = app.update(Message::Catalog(action_catalog::Message::CancelCapture));
+    let _ = app.update(Message::Catalog(action_catalog::Message::Captured(5)));
+    assert!(app.session.changes().is_empty());
 }
 
 #[test]

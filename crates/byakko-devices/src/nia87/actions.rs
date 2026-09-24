@@ -3,12 +3,28 @@
 //! These values are deliberately kept as small data constructors.  The
 //! configurator's action records are four bytes wide; macro contents are a
 //! separate variable-length stream and are not represented here.
+use byakko_core::ActionCategory;
 
 /// A named action that can be offered by a keyboard-oriented remapper.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ActionPreset {
     pub label: &'static str,
     pub bytes: [u8; 4],
+}
+
+impl ActionPreset {
+    /// Group the fixed, reviewed action records by their protocol family.
+    /// Keep this alongside the presets so presentation never parses labels.
+    pub const fn category(self) -> ActionCategory {
+        match self.bytes {
+            [1, ..] => ActionCategory::Mouse,
+            [2 | 6 | 10, ..] => ActionCategory::System,
+            [3, 0, 181..=183 | 205 | 226 | 233 | 234, 0] | [3, 0, 0x83, 1] => ActionCategory::Media,
+            [0, 0, 0xe3 | 0xe5, _] => ActionCategory::Shortcuts,
+            [3, ..] => ActionCategory::System,
+            _ => ActionCategory::Other,
+        }
+    }
 }
 
 /// USB HID modifier usages accepted by the Nia87 combo encoder.
@@ -245,6 +261,21 @@ pub fn presets() -> &'static [ActionPreset] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presets_have_typed_catalog_groups() {
+        let category = |label| {
+            presets()
+                .iter()
+                .find(|preset| preset.label == label)
+                .unwrap()
+                .category()
+        };
+        assert_eq!(category("Mute"), ActionCategory::Media);
+        assert_eq!(category("Mouse Left"), ActionCategory::Mouse);
+        assert_eq!(category("System Sleep"), ActionCategory::System);
+        assert_eq!(category("Win+E"), ActionCategory::Shortcuts);
+    }
 
     #[test]
     fn ordinary_key_round_trips_as_a_four_byte_binding() {

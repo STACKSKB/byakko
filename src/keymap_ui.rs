@@ -476,10 +476,12 @@ mod tests {
                     ActionChoice {
                         label: "A".into(),
                         action: Action::Key(4),
+                        category: Default::default(),
                     },
                     ActionChoice {
                         label: "B".into(),
                         action: Action::Key(5),
+                        category: Default::default(),
                     },
                 ],
                 shortcuts: None,

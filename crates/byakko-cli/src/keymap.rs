@@ -94,6 +94,7 @@ mod tests {
                 .map(|usage| ActionChoice {
                     label: format!("Key {usage}"),
                     action: Action::Key(usage),
+                    category: Default::default(),
                 })
                 .to_vec(),
             shortcuts: None,

@@ -66,3 +66,26 @@ come from descriptors and projections. Future capabilities should use
 the same data and control boundaries instead of adding one-off widget trees or
 mutable duplicate drafts. Host-driven effects and 2.4 GHz support remain later
 capabilities.
+
+## 2026-09-24 grouped key assignment review
+
+The assignment catalog now has typed backend-supplied groups: alphanumeric,
+modifiers, navigation, function keys, numpad, media, mouse, system, shortcuts,
+and other. The default view shows one group. Search spans all groups and Enter
+stages an exact or unique result; `Num 9` is an alias for the numpad key. A
+window-local Type a key action captures one supported physical key; Escape and
+focus loss cancel. Shortcut selection now uses search and compact matches rather
+than an exhaustive dropdown. Assignment remains staged until Apply.
+
+Wide windows place the browser in a right sidebar beside the persistent keyboard;
+narrower windows place it below the board. Tiles fit their labels instead of
+using full-width bars. Board legends are derived from the selected layer's draft,
+so staged, saved and reverted assignments are reflected without another device
+read. Hover identifies the original physical key and full assigned action.
+
+Reference review used McMaster-Carr's category/search organization
+(https://www.mcmaster.com/) and the previously recorded official-interface
+categories in docs/live-evidence.md. No vendor implementation was copied.
+Automated coverage includes group/search isolation, typed assignment, cancelling
+capture, remapped legends and revert. Final visual layout and physical key output
+remain for human review. Stop after this requested iteration.
