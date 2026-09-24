@@ -1,6 +1,6 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
 use super::{Closing, Desktop, Message, Page};
-use crate::control_widgets;
+
 use crate::{panels, physical_board, shortcut};
 use byakko_core::{
     Action,
@@ -27,20 +27,12 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
             Some(Message::Page(Page::Macros)),
         ));
     }
-    if app.session.lighting().is_some() {
+    if app.session.lighting().is_some() || app.session.picture().is_some() {
         navigation = navigation.push(panels::selectable_button(
             &app.ui,
             "Lighting",
             app.page == Page::Lighting,
             Some(Message::Page(Page::Lighting)),
-        ));
-    }
-    if app.session.picture().is_some() {
-        navigation = navigation.push(panels::selectable_button(
-            &app.ui,
-            "Per-key colors",
-            app.page == Page::Picture,
-            Some(Message::Page(Page::Picture)),
         ));
     }
     if app.session.settings().is_some() {
@@ -115,19 +107,21 @@ fn keymap_toolbar(app: &Desktop) -> Element<'_, Message> {
         )
     }))
     .spacing(app.ui.spacing.s);
-    let toolbar = control_widgets::transaction_toolbar(
-        &app.ui,
-        "Read / reconnect",
-        (!app.busy()).then_some(Message::Read),
-        (!app.busy() && !dirty.is_empty()).then_some(Message::Revert),
-        (ready && !dirty.is_empty()).then_some(Message::Apply),
-        format!("{} staged", dirty.len()),
-    );
-    column![toolbar, text(status(app)), layers]
-        .spacing(app.ui.spacing.m)
-        .into()
+    let mut toolbar = row![layers].spacing(app.ui.spacing.m);
+    if !dirty.is_empty() {
+        toolbar = toolbar
+            .push(button("Save assignments").on_press_maybe(ready.then_some(Message::Apply)))
+            .push(button("Revert").on_press_maybe((!app.busy()).then_some(Message::Revert)));
+    }
+    let mut content = column![toolbar].spacing(app.ui.spacing.s);
+    if *app.session.status() != Status::Ready {
+        content = content.push(text(status(app)));
+        if !app.busy() {
+            content = content.push(button("Reconnect / retry").on_press(Message::Read));
+        }
+    }
+    content.into()
 }
-
 fn keymap(app: &Desktop) -> Element<'_, Message> {
     column![keymap_toolbar(app), keymap_detail(app)]
         .spacing(app.ui.spacing.m)
@@ -160,12 +154,10 @@ fn feature(app: &Desktop) -> Element<'_, Message> {
 fn macro_sidebar(app: &Desktop) -> Element<'_, Message> {
     let mut sidebar = column![super::macro_view::library(app)].spacing(app.ui.spacing.m);
     if let Some(editor) = app.session.macros() {
-        sidebar =
-            sidebar.push(scrollable(super::macro_binding_view::view(app, editor)).height(Fill));
+        sidebar = sidebar.push(super::macro_binding_view::view(app, editor));
     }
-    sidebar.height(Fill).into()
+    scrollable(sidebar).height(Fill).into()
 }
-
 fn workspace(app: &Desktop) -> Element<'_, Message> {
     iced::widget::responsive(move |size| {
         let mut below = column![].spacing(app.ui.spacing.s);
@@ -176,9 +168,23 @@ fn workspace(app: &Desktop) -> Element<'_, Message> {
             below = below.push(text("Waiting for the device operation before closing…"));
         }
         if size.width >= app.ui.key_sidebar_breakpoint {
+            if matches!(app.page, Page::Settings | Page::Archive) {
+                return column![
+                    row![
+                        container(keys(app)).width(Fill),
+                        iced::widget::Space::new().width(app.ui.key_sidebar_width)
+                    ]
+                    .spacing(app.ui.spacing.l),
+                    below.push(feature(app)).height(Fill),
+                ]
+                .spacing(app.ui.spacing.m)
+                .height(Fill)
+                .into();
+            }
             let sidebar = match app.page {
                 Page::Keys => crate::action_catalog::view(app),
                 Page::Macros => macro_sidebar(app),
+                Page::Lighting => super::lighting::modes(app),
                 _ => iced::widget::Space::new().into(),
             };
             row![
@@ -213,6 +219,15 @@ fn workspace(app: &Desktop) -> Element<'_, Message> {
                     container(super::macro_view::editor(app))
                         .width(iced::FillPortion(app.ui.panes.detail)),
                     container(macro_sidebar(app)).width(iced::FillPortion(app.ui.panes.sidebar)),
+                ]
+                .spacing(app.ui.spacing.m)
+                .height(Fill)
+                .into(),
+                Page::Lighting => row![
+                    container(super::lighting::view(app))
+                        .width(iced::FillPortion(app.ui.panes.detail)),
+                    container(super::lighting::modes(app))
+                        .width(iced::FillPortion(app.ui.panes.sidebar)),
                 ]
                 .spacing(app.ui.spacing.m)
                 .height(Fill)
@@ -270,7 +285,9 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
         .collect();
     let labels =
         physical_board::labels_for_layer(app.session.descriptor(), app.session.draft(), &app.layer);
-    if app.page == Page::Picture {
+    if app.page == Page::Picture
+        || (app.page == Page::Lighting && app.lighting_panel == super::lighting::Panel::PerKey)
+    {
         let colors = super::picture::projected_colors(app).unwrap_or_default();
         return physical_board::colored_view_with_labels(
             &app.ui,

@@ -4,7 +4,7 @@ use crate::panels;
 use byakko_core::archive::{ArchiveProblem, ArchiveState, NativeArchive, Review};
 use iced::{
     Element, Fill, Task,
-    widget::{button, column, scrollable, text, text_input},
+    widget::{button, column, row, scrollable, text, text_input},
 };
 use std::{
     fs::{File, OpenOptions},
@@ -217,12 +217,12 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     };
     panels::split(
         &app.ui,
-        || panels::panel(&app.ui, "Local configuration", file_controls(app)),
+        || panels::panel(&app.ui, "Backup files", file_controls(app)),
         || {
             panels::panel(
                 &app.ui,
                 "Review",
-                scrollable(review(state, &app.ui)).height(Fill).into(),
+                scrollable(review(app, state, &app.ui)).height(Fill).into(),
             )
         },
     )
@@ -231,34 +231,49 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
 fn file_controls(app: &Desktop) -> Element<'_, AppMessage> {
     let state = app.session.archive().expect("archive capability");
     let can_export = captured(Some(state)).is_some() && !app.busy();
-    let can_apply =
-        !app.busy() && matches!(state, ArchiveState::Ready(review) if !review.changes.is_empty());
-    let path = text_input("Path to native configuration JSON", &app.archive_path)
+    let has_path = !app.archive_path.trim().is_empty();
+    let path = text_input("Backup file path", &app.archive_path)
         .on_input_maybe((!app.busy()).then_some(|value| AppMessage::Archive(Message::Path(value))))
         .width(app.ui.fields.regular);
-    column![
-        text("A native backup keeps device-specific bytes losslessly."),
+    let mut controls = column![
         path,
-        column![
+        text("Save current configuration"),
+        row![
             button("Capture current")
                 .on_press_maybe((!app.busy()).then_some(AppMessage::Archive(Message::Capture))),
-            button("Export new file")
-                .on_press_maybe(can_export.then_some(AppMessage::Archive(Message::Export))),
-            button("Review file")
-                .on_press_maybe((!app.busy()).then_some(AppMessage::Archive(Message::ReviewFile))),
-            button("Apply reviewed changes")
-                .on_press_maybe(can_apply.then_some(AppMessage::Archive(Message::Apply))),
+            button("Save captured file").on_press_maybe(
+                (can_export && has_path).then_some(AppMessage::Archive(Message::Export))
+            ),
         ]
         .spacing(app.ui.spacing.s),
-        text(status(app, state)),
+        text("Open a backup"),
+        button("Open and review").on_press_maybe(
+            (!app.busy() && has_path).then_some(AppMessage::Archive(Message::ReviewFile))
+        ),
     ]
-    .spacing(app.ui.spacing.m)
-    .into()
+    .spacing(app.ui.spacing.m);
+    if let Some(message) = status(app, state) {
+        controls = controls.push(text(message));
+    }
+    controls.into()
 }
 
-fn review(state: &ArchiveState, style: &panels::UiStyle) -> Element<'static, AppMessage> {
+fn review<'a>(
+    app: &'a Desktop,
+    state: &'a ArchiveState,
+    style: &panels::UiStyle,
+) -> Element<'a, AppMessage> {
     match state {
-        ArchiveState::Ready(review) => review_changes(review, style),
+        ArchiveState::Ready(review) => {
+            let mut content = column![review_changes(review, style)].spacing(style.spacing.m);
+            if !review.changes.is_empty() {
+                content =
+                    content.push(button("Apply reviewed changes").on_press_maybe(
+                        (!app.busy()).then_some(AppMessage::Archive(Message::Apply)),
+                    ));
+            }
+            content.into()
+        }
         ArchiveState::Unverified {
             review: Some(review),
             ..
@@ -268,12 +283,9 @@ fn review(state: &ArchiveState, style: &panels::UiStyle) -> Element<'static, App
         ]
         .spacing(style.spacing.m)
         .into(),
-        ArchiveState::Captured(archive) => text(format!(
-            "Captured {} bytes; choose a file to review changes",
-            archive.bytes.len()
-        ))
-        .into(),
-        ArchiveState::Idle => text("Capture or open a configuration to begin").into(),
+        ArchiveState::Captured(_) | ArchiveState::Idle => {
+            text("Open a backup file to compare it with the keyboard.").into()
+        }
         ArchiveState::Unverified { review: None, .. } => {
             text("Archive state needs a fresh capture").into()
         }
@@ -294,33 +306,25 @@ fn review_changes(review: &Review, style: &panels::UiStyle) -> Element<'static, 
     .into()
 }
 
-fn status(app: &Desktop, state: &ArchiveState) -> String {
+fn status(app: &Desktop, state: &ArchiveState) -> Option<String> {
     match app.archive_file {
-        FileState::Importing { .. } => return "Reading local archive file…".into(),
-        FileState::Exporting { .. } => return "Writing new archive file…".into(),
+        FileState::Importing { .. } => return Some("Opening backup file…".into()),
+        FileState::Exporting { .. } => return Some("Saving backup file…".into()),
         FileState::Idle => {}
     }
     if app.session.busy() {
-        return super::view::status(app);
+        return Some(super::view::status(app));
     }
     match state {
-        ArchiveState::Idle => "No archive loaded".into(),
-        ArchiveState::Captured(archive) => format!(
-            "Current configuration captured · {} bytes",
-            archive.bytes.len()
-        ),
-        ArchiveState::Ready(review) => format!(
-            "Reviewed against current device · {} changed sections",
-            review.changes.len()
-        ),
+        ArchiveState::Idle | ArchiveState::Captured(_) | ArchiveState::Ready(_) => None,
         ArchiveState::Unverified { problem, .. } => match problem {
-            ArchiveProblem::ReadRequired => "Capture again before reviewing".into(),
+            ArchiveProblem::ReadRequired => Some("Capture again before reviewing".into()),
             ArchiveProblem::Capture(reason)
             | ArchiveProblem::Review(reason)
-            | ArchiveProblem::InvalidResult(reason) => reason.clone(),
-            ArchiveProblem::Apply(failure) => super::view::apply_failure_label(failure),
+            | ArchiveProblem::InvalidResult(reason) => Some(reason.clone()),
+            ArchiveProblem::Apply(failure) => Some(super::view::apply_failure_label(failure)),
             ArchiveProblem::ApplyReadbackMismatch => {
-                "Complete readback differs from the reviewed archive; state is unverified".into()
+                Some("Readback differs from the backup. Capture again before applying.".into())
             }
         },
     }

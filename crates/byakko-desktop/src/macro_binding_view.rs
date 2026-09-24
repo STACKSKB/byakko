@@ -21,11 +21,6 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
         .keys
         .iter()
         .find(|key| Some(&key.id) == app.selected.as_ref());
-    let layer = descriptor.layers.iter().find(|layer| layer.id == app.layer);
-    let target = match (key, layer) {
-        (Some(key), Some(layer)) => format!("Assign to {} / {}", layer.label, key.label),
-        _ => "Select a key on the keyboard above".into(),
-    };
     let ready = !app.busy()
         && *app.session.status() == Status::Ready
         && key.is_some_and(|key| key.writable);
@@ -53,8 +48,6 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
         && restriction.is_none()
         && app.session.changes().is_empty();
     let mut content = column![
-        text(target),
-        text("Playback"),
         modes,
         button("Assign to key").on_press_maybe(
             selected_choice
@@ -63,14 +56,19 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
         ),
     ]
     .spacing(app.ui.spacing.s);
+    if key.is_none() {
+        content = content.push(text("Select a key on the keyboard to assign this macro."));
+    }
     if let Some(choice) = selected_choice
         && let Some(required) = choice.required_repeat_count
+        && editor
+            .draft()
+            .is_some_and(|program| program.repeat_count != required)
     {
         content = content.push(text(format!(
-            "This mode needs a saved repeat count of {required}."
+            "Save this macro with repeat count {required} to use this mode."
         )));
-    }
-    if let Some(reason) = restriction {
+    } else if let Some(reason) = restriction {
         content = content.push(text(reason));
     }
     if !app.session.changes().is_empty() {
@@ -87,5 +85,5 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
             .spacing(app.ui.spacing.s),
         );
     }
-    panels::panel(&app.ui, "Key binding", content.into())
+    panels::panel(&app.ui, "Playback", content.into())
 }

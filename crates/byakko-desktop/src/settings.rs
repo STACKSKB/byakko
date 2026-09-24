@@ -1,6 +1,6 @@
 //! Capability-driven scalar settings; the view knows no firmware fields.
 use super::{Desktop, Message as AppMessage};
-use crate::{control_widgets, panels};
+use crate::panels;
 use byakko_core::settings::{
     Content, Edit, Field, Kind, Value,
     editor::{Editor, Status},
@@ -44,8 +44,10 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         return text("Settings are unavailable on this device").into();
     };
     let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
-    let mut content = column![toolbar(app, editor, editable), text(status(app, editor))]
-        .spacing(app.ui.spacing.m);
+    let mut content = column![toolbar(app, editor, editable)].spacing(app.ui.spacing.s);
+    if let Some(message) = status(app, editor) {
+        content = content.push(text(message));
+    }
     let Some(draft) = editor.draft() else {
         if let Some(snapshot) = editor.baseline()
             && let Content::Opaque { reason } = &snapshot.content
@@ -116,29 +118,37 @@ fn settings_grid(
 }
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {
-    control_widgets::transaction_toolbar(
-        &app.ui,
-        "Read settings",
-        (!app.busy()).then_some(AppMessage::Settings(Message::Read)),
-        (!app.busy() && editor.dirty()).then_some(AppMessage::Settings(Message::Revert)),
-        (editable && editor.dirty()).then_some(AppMessage::Settings(Message::Apply)),
-        if editor.dirty() {
-            "One setting staged"
-        } else {
-            "No staged changes"
-        },
-    )
+    let mut actions = row!().spacing(app.ui.spacing.s);
+    if editor.dirty() {
+        actions = actions
+            .push(
+                button("Apply setting")
+                    .on_press_maybe(editable.then_some(AppMessage::Settings(Message::Apply))),
+            )
+            .push(
+                button("Revert")
+                    .on_press_maybe((!app.busy()).then_some(AppMessage::Settings(Message::Revert))),
+            )
+            .push(text("Apply or revert to change another setting"));
+    } else if !matches!(editor.status(), Status::Ready) {
+        actions = actions.push(
+            button("Read settings")
+                .on_press_maybe((!app.busy()).then_some(AppMessage::Settings(Message::Read))),
+        );
+    }
+    actions.into()
 }
 
-fn status(app: &Desktop, editor: &Editor) -> String {
+fn status(app: &Desktop, editor: &Editor) -> Option<String> {
     if app.busy() {
-        return super::view::status(app);
+        return Some(super::view::status(app));
     }
     match editor.status() {
-        Status::Unloaded => "Read settings to begin".into(),
-        Status::Ready => "Readback verified · one setting can be staged at a time".into(),
-        Status::Conflict { .. } => "Settings changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
-        Status::Unverified { problem } => super::view::problem_label(problem),
+        Status::Unloaded | Status::Ready => None,
+        Status::Conflict { .. } => {
+            Some("Settings changed on the device. Revert the draft, then read again.".into())
+        }
+        Status::Unverified { problem } => Some(super::view::problem_label(problem)),
     }
 }
 
