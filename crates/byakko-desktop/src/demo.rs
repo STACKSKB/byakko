@@ -1,6 +1,7 @@
 //! Deliberately different from the Nia87: three keys, three named layers.
 use byakko_core::{
-    Action, ActionChoice, Descriptor, Layer, PhysicalKey, ShortcutCapabilities, State, UsageChoice,
+    Action, ActionCategory, ActionChoice, Descriptor, Layer, PhysicalKey, ShortcutCapabilities,
+    State, UsageChoice,
     macros::{
         Action as MacroAction, Binding, ButtonChoice, Capabilities, Choice, Content, Event,
         Program, Snapshot,
@@ -37,14 +38,17 @@ pub fn device() -> Result<MemoryDevice, String> {
             ActionChoice {
                 label: "A".into(),
                 action: Action::Key(4),
+                category: ActionCategory::Alphanumeric,
             },
             ActionChoice {
                 label: "B".into(),
                 action: Action::Key(5),
+                category: ActionCategory::Alphanumeric,
             },
             ActionChoice {
                 label: "Disabled".into(),
                 action: Action::Disabled,
+                category: ActionCategory::Other,
             },
         ],
         shortcuts: Some(ShortcutCapabilities {

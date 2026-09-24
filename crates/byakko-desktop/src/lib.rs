@@ -1,4 +1,5 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
+mod action_catalog;
 mod archive;
 mod audio_stream;
 mod color_picker;
@@ -44,7 +45,7 @@ enum Message {
     Macro(macro_editor::Message),
     SelectLayer(String),
     SelectKey(String),
-    Search(String),
+    Catalog(action_catalog::Message),
     Stage(usize),
     Read,
     Apply,
@@ -109,7 +110,7 @@ struct Desktop {
     auto_read: AutoRead,
     layer: String,
     selected: Option<String>,
-    search: String,
+    action_browser: action_catalog::Browser,
     shortcut: shortcut::Form,
     notice: Option<String>,
     closing: Closing,
@@ -154,7 +155,7 @@ pub fn run(
         auto_read: AutoRead::Enabled,
         layer,
         selected: None,
-        search: String::new(),
+        action_browser: Default::default(),
         shortcut: shortcut::Form::default(),
         notice: None,
         closing: Closing::Open,
@@ -277,6 +278,7 @@ impl Desktop {
             return;
         }
         match message {
+            shortcut::Message::Search(query) => self.shortcut.query = query,
             shortcut::Message::ToggleModifier(usage) => {
                 self.notice = self.shortcut.toggle_modifier(caps, usage).err();
             }
@@ -662,6 +664,7 @@ impl Desktop {
             Message::File(message) => return self.update_macro_files(message),
             Message::Record(message) => self.update_recording(message),
             Message::Page(page) => {
+                self.action_browser.input = action_catalog::InputMode::Browse;
                 self.page = page;
             }
             Message::Macro(message) => self.update_macro(message),
@@ -681,7 +684,7 @@ impl Desktop {
                 self.selected = Some(key);
                 self.sync_shortcut();
             }
-            Message::Search(search) => self.search = search,
+            Message::Catalog(message) => self.update_catalog(message),
             Message::Stage(index) => self.stage(index),
             Message::Read => {
                 self.auto_read = AutoRead::Enabled;
@@ -709,6 +712,22 @@ impl Desktop {
     }
 
     fn subscription(&self) -> Subscription<Message> {
+        let normal = self.base_subscription();
+        if self.page == Page::Keys
+            && self.closing == Closing::Open
+            && !self.session.recording()
+            && self.action_browser.input == action_catalog::InputMode::Capture
+        {
+            Subscription::batch([
+                normal,
+                iced::event::listen_with(action_catalog::capture_event),
+            ])
+        } else {
+            normal
+        }
+    }
+
+    fn base_subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         if self.closing == Closing::ConfirmDiscard {
             let cancel = iced::event::listen_with(|event, _, _| match event {

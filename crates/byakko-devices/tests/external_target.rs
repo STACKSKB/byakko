@@ -35,12 +35,14 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
             ActionChoice {
                 label: "A".into(),
                 action: Action::Key(4),
+                category: Default::default(),
             },
             ActionChoice {
                 label: "Scroll up".into(),
                 action: Action::Named {
                     id: "scroll-up".into(),
                 },
+                category: Default::default(),
             },
         ],
         shortcuts: None,
