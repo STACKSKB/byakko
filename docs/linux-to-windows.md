@@ -216,3 +216,31 @@ the Linux task; it should not be repeated.
 - Constraints: No new device I/O, webcam capture, official-app actions, code
   edits or keyboard writes. Preserve the original capture and other worktree.
   Do not repeat completed 003 checks or blocked 002 physical actions.
+
+### WIN-20260925-005: Profile the official macro editing and assignment workflow
+- Revision: 1
+- Status: pending
+- Source commit: `9744f0f` (Byakko comparison baseline).
+- Scope: official-app macro UX observation and existing evidence inspection.
+- User authorization: The user explicitly requested: "Have the Windows agent
+  profile how the official app handles macros. And improve the UX here as well."
+- Request: Profile the official app's normal create/select/name/record/edit/
+  repeat/playback/save/assign-to-key workflow. Report the order of actions,
+  where controls appear, defaults, disabled-control explanations, whether save
+  and assignment are separate or combined, and what selecting a key does while
+  editing. Inspect existing captures first where useful, then observe the UI.
+  Focus on behavior and task flow; do not copy vendor source or visual design.
+  Byakko currently splits library/playback on the right from editing below the
+  keyboard; Assign requires a separately selected playback mode and saved macro,
+  which can leave it silently disabled. The user reports Read does not help.
+- Evidence/output needed: Return ID/revision, official-app version, concise
+  step-by-step observed workflow, screenshots/paths where available, and a clear
+  separation between observed behavior and inferred implementation. Identify
+  which steps write to hardware versus local drafts. Send preliminary findings
+  promptly so Linux can continue the UX fix, then final findings when complete.
+- Constraints: Preserve existing macros, bindings and captures. UI navigation,
+  local draft editing and read-only inspection are in scope. Do not overwrite
+  an existing macro or key binding, run fault injection, or use archive restore.
+  If completing an observation requires a hardware write, return the smallest
+  concrete backed-up test and restoration proposal rather than guessing. Do not
+  block this UX profiling on camera availability or repeat brightness tests.
