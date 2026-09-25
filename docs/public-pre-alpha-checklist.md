@@ -99,7 +99,7 @@ optional source-inventory script, not the Cargo build or the renderer itself.
 
 ### Builds, platform delivery and reproducibility
 
-- [ ] **Close the confirmed code/tool findings above.** Rerun strict formatting,
+- [x] **Close the confirmed code/tool findings above.** Rerun strict formatting,
   Clippy, product tests, helper checks, renderer regressions and source inventory
   against the final release commit. Preserve logs with the commit/toolchain.
 - [ ] **Record local Windows/Linux release checks.** Build the selected Iced
@@ -242,3 +242,30 @@ physical interaction will be coordinated around the user's availability.
   beside the before-image after recovery finishes, with persistence failures
   reported separately. No extra HID reads or retries were added. Device tests
   and strict product Clippy pass; hardware root cause remains unproven.
+
+## Consolidated Linux verification after fixes
+
+Verified source: `e18884702266a82abc3d5b0bac0eff5eb1ee9fe6` (product/research
+code identical to `e1af8b7`; the later commit only publishes Windows requests).
+Toolchain: Rust 1.98.0, `x86_64-unknown-linux-gnu`; Linux
+`6.12.107+deb13-amd64`, glibc 2.41. All commands used the lockfile and cached
+dependencies; no dependency versions changed.
+
+| Local check | Result |
+| --- | --- |
+| Workspace formatting | Passed |
+| Core/devices/desktop/CLI tests | 377 passed |
+| Strict product Clippy, all targets | Passed, no allowances |
+| Vendored renderer tests | 2 passed |
+| Linux desktop/CLI release build | Passed |
+| Linux permission-helper release build, tests and strict Clippy | Passed; 2 tests |
+| Python audit tests | 9 passed |
+| Complete source inventory | Passed; 182 package versions, 10 existing supplemental-notice cases |
+
+Exact commands, exit codes, toolchain and individual logs are retained locally
+in `/tmp/byakko-prealpha-final-e1af8b7/results.json` and sibling logs. The directory
+name identifies the product code; the results manifest records the full tested
+commit above. The WebAssembly target is not installed, so no new wasm build is
+claimed. Windows native linking/tests are requested as `WIN-20260925-003`.
+These checks close the four original code/documentation findings; the physical
+acceptance and recovery gates remain open.
