@@ -23,7 +23,6 @@ pub(super) enum Message {
     StageEvent,
     NewEvent,
     RepeatInput(String),
-    StageRepeat,
     ToggleComposer,
 }
 
@@ -136,43 +135,15 @@ impl Desktop {
                 }
             }
             Message::Assign(binding) => {
-                self.macro_notice = None;
-                let Some(editor) = self.session.macros() else {
-                    self.macro_notice = Some("Read a macro before assigning it".into());
-                    return;
-                };
-                if self.macro_binding_choice.as_ref()
-                    != Some(&(editor.slot().to_owned(), binding.clone()))
-                {
+                let selected = self
+                    .session
+                    .macros()
+                    .and_then(|editor| super::macro_binding_view::selected_binding(self, editor));
+                if selected.is_none_or(|choice| choice.id != binding) {
                     self.macro_notice = Some("Choose a playback mode before assigning".into());
                     return;
                 }
-                if !self.session.changes().is_empty() {
-                    self.macro_notice = Some(
-                        "Save or revert other key assignments before assigning this macro".into(),
-                    );
-                    return;
-                }
-                let Some(key) = self.selected.as_deref() else {
-                    self.macro_notice = Some("Select a writable key on the keyboard first".into());
-                    return;
-                };
-                if let Err(reason) = self.session.stage_macro_binding(&self.layer, key, &binding) {
-                    self.macro_notice = Some(reason);
-                    return;
-                }
-                match self.session.request_apply() {
-                    Ok(command) => {
-                        if let Some(editor) = self.session.macros() {
-                            self.macro_files.remember_binding(editor, &binding);
-                        }
-                        self.submit_macro(Ok(command));
-                    }
-                    Err(reason) => {
-                        let _ = self.session.revert();
-                        self.macro_notice = Some(reason);
-                    }
-                }
+                self.save_and_assign_macro(binding);
             }
             Message::Select(slot) => {
                 if self.session.macros().is_some_and(|editor| {
@@ -200,6 +171,10 @@ impl Desktop {
                 self.submit_macro(request);
             }
             Message::Apply => {
+                if !self.macro_repeat_input_valid() {
+                    self.macro_notice = Some("Enter a valid repeat count before saving.".into());
+                    return;
+                }
                 let request = self.session.request_macro_apply();
                 self.submit_macro(request);
             }
@@ -233,18 +208,22 @@ impl Desktop {
                 Ok(edit) => self.stage_macro(edit),
                 Err(reason) => self.macro_notice = Some(reason),
             },
-            Message::RepeatInput(value) => self.repeat_input = value,
-            Message::StageRepeat => match number(&self.repeat_input, "Repeat count") {
-                Ok(count) => {
-                    self.macro_notice = self.session.edit_macro(Edit::Repeat(count)).err();
-                    if self.macro_notice.is_none() {
-                        // Changing the count leaves the event being composed intact.
-                        self.repeat_input = count.to_string();
-                    }
-                }
-                Err(reason) => self.macro_notice = Some(reason),
-            },
+            Message::RepeatInput(value) => {
+                self.repeat_input = value;
+                self.macro_notice = number(&self.repeat_input, "Repeat count")
+                    .and_then(|count| self.session.edit_macro(Edit::Repeat(count)))
+                    .err();
+            }
         }
+    }
+
+    pub(super) fn macro_repeat_input_valid(&self) -> bool {
+        self.session
+            .macros()
+            .and_then(|editor| editor.draft())
+            .is_some_and(|draft| {
+                number::<u32>(&self.repeat_input, "Repeat count").ok() == Some(draft.repeat_count)
+            })
     }
 
     fn stage_macro(&mut self, edit: Edit) {

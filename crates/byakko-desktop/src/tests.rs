@@ -9,6 +9,7 @@ mod archive_workflow;
 #[path = "demo.rs"]
 mod demo;
 mod lighting_workflow;
+mod macro_assignment_workflow;
 pub(crate) mod macro_workflow;
 mod picture_workflow;
 mod recording_workflow;
@@ -55,6 +56,7 @@ fn ready() -> Desktop {
         macro_new_slot: None,
         macro_composer: macro_view::Composer::default(),
         macro_binding_choice: None,
+        macro_assignment: None,
         macro_notice: None,
         clock: std::time::Instant::now(),
         recording_options: Default::default(),

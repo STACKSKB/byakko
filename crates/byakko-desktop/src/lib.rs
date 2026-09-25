@@ -7,6 +7,7 @@ mod color_picker;
 mod control_widgets;
 pub mod discovery;
 mod lighting;
+mod macro_assignment;
 mod macro_binding_view;
 mod macro_editor;
 mod macro_files;
@@ -98,6 +99,7 @@ struct Desktop {
     macro_new_slot: Option<String>,
     macro_composer: macro_view::Composer,
     macro_binding_choice: Option<(String, String)>,
+    macro_assignment: Option<macro_assignment::Pending>,
     macro_notice: Option<String>,
     clock: std::time::Instant,
     recording_options: recording::Options,
@@ -153,6 +155,7 @@ pub fn run(
         macro_new_slot: None,
         macro_composer: macro_view::Composer::default(),
         macro_binding_choice: None,
+        macro_assignment: None,
         macro_notice: None,
         clock: std::time::Instant::now(),
         recording_options: Default::default(),
@@ -255,6 +258,7 @@ impl Desktop {
         if self.busy() {
             return false;
         }
+        self.macro_assignment = None;
         self.hold_reconnect_if_cautious();
         if let Some(executor) = self.executor.take() {
             executor.cancel_macro_catalog();
@@ -476,6 +480,7 @@ impl Desktop {
             Err(TryRecvError::Empty) => return Task::none(),
             Err(TryRecvError::Disconnected) => {
                 executor.set_generation(0);
+                self.cancel_macro_assignment_after_disconnect();
                 let caution = self.hold_reconnect_if_cautious();
                 let write_in_flight = matches!(
                     self.session.activity(),
@@ -541,6 +546,7 @@ impl Desktop {
         let previous = self.selected_device.as_deref();
         let changed = matches!(&availability, Availability::Ready { id } if previous.is_some_and(|old| old != id));
         if changed || !matches!(availability, Availability::Ready { .. }) {
+            self.cancel_macro_assignment_after_disconnect();
             self.hold_reconnect_if_cautious();
             if let Some(executor) = &self.executor {
                 executor.set_generation(0);
@@ -571,6 +577,7 @@ impl Desktop {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        let macro_assignment_completion = self.macro_assignment_completion(&completion);
         let activated_picture = match &completion {
             Completion::ApplyLighting {
                 generation,
@@ -676,6 +683,9 @@ impl Desktop {
         } else {
             *self.session.status() == Status::Ready
         };
+        if let Some(progress) = macro_assignment_completion {
+            self.advance_macro_assignment(progress);
+        }
         if self.closing == Closing::Waiting && !self.busy() {
             // Keep failures visible; a close request must not hide an uncertain write.
             if !verified {

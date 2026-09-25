@@ -41,3 +41,31 @@ restriction. Save and verify the macro before assigning its captured target
 key; a failed macro save must never initiate the key assignment. Keep Save only
 for library macros. These are Byakko design choices, not copied or observed
 vendor UI behavior.
+
+
+## Implemented and checked
+
+The desktop now chooses an advertised playback mode without requiring a
+separate choice click: explicit choice, an existing binding on the selected
+key, then a repeat-compatible default. Playback, repeat count, selected key,
+Save & assign, Save only, Revert and file actions are grouped. Repeat edits
+stage directly; event actions stay beside the event list. Empty-state prompts
+and the verbose demo title were shortened following the user's feedback.
+
+Save & assign captures its slot/key/layer/mode, saves a dirty macro, and only
+continues to the existing keymap transaction after the correlated save is
+accepted and verified. Save failure never stages a key assignment. Assignment
+failure reports partial success, and a pending close cannot hide that failure.
+The operation is sequential, not an atomic transaction spanning both features.
+Core saved-macro binding restrictions, repeat-count constraints, backups and
+readbacks remain in force.
+
+Validation: 100 desktop library tests plus one composition-root test passed;
+strict desktop Clippy, Linux release build and Windows MSVC cross-target check
+passed. Added regressions cover playback defaults, direct repeat edits, dirty
+save/assignment, selection changes, stale completions, failed saves, failed key
+writes and closing during the operation. An isolated X11 memory demo confirmed
+that a saved macro enables assignment without a separate mode choice and that
+editing the repeat count enables Save & assign. This is UI/memory-backend
+acceptance, not a physical keyboard write or native Windows runtime check.
+Logs: `/tmp/byakko-macro-ux-{tests,clippy,build,windows-check}.log`.
