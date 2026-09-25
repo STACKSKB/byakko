@@ -2,7 +2,7 @@
 use crate::panels::UiStyle;
 use iced::{
     Element,
-    widget::{button, row, text},
+    widget::{button, row},
 };
 
 /// Shared visible RGB presets for lighting and individual keys.
@@ -12,16 +12,16 @@ pub fn color_presets<Message: Clone + 'static>(
     on_change: Option<impl Fn([u8; 3]) -> Message>,
 ) -> Element<'static, Message> {
     let presets = [
-        ("Red", [255, 0, 0]),
-        ("Orange", [255, 128, 0]),
-        ("Yellow", [255, 255, 0]),
-        ("Green", [0, 255, 0]),
-        ("Blue", [0, 0, 255]),
-        ("Violet", [128, 0, 255]),
-        ("White", [255, 255, 255]),
-        ("Off", [0, 0, 0]),
+        [255, 0, 0],
+        [255, 128, 0],
+        [255, 255, 0],
+        [0, 255, 0],
+        [0, 0, 255],
+        [128, 0, 255],
+        [255, 255, 255],
+        [0, 0, 0],
     ];
-    row(presets.into_iter().map(|(label, rgb)| {
+    row(presets.into_iter().map(|rgb| {
         let foreground = if u32::from(rgb[0]) * 299
             + u32::from(rgb[1]) * 587
             + u32::from(rgb[2]) * 114
@@ -46,7 +46,7 @@ pub fn color_presets<Message: Clone + 'static>(
                 appearance.border.color = foreground;
                 appearance
             });
-        iced::widget::tooltip(swatch, text(label), iced::widget::tooltip::Position::Top).into()
+        swatch.into()
     }))
     .spacing(style.spacing.xs)
     .wrap()
