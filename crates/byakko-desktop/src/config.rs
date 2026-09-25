@@ -9,7 +9,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            auto_save_delay: Duration::from_millis(350),
+            auto_save_delay: Duration::from_secs(2),
         }
     }
 }

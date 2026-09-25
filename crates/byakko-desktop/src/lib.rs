@@ -87,6 +87,7 @@ pub mod config;
 struct Desktop {
     config: config::Config,
     live_settings: settings::Pending,
+    picker_gesture: color_picker::Gesture,
     brush_color: Option<[u8; 3]>,
     ui: panels::UiStyle,
     archive_file: archive::FileState,
@@ -139,6 +140,7 @@ pub fn run(
     let initial = std::cell::RefCell::new(Some(Desktop {
         config,
         live_settings: Default::default(),
+        picker_gesture: Default::default(),
         brush_color: None,
         ui: panels::UiStyle::DEFAULT,
         archive_file: archive::FileState::Idle,

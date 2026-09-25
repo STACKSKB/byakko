@@ -20,6 +20,9 @@ pub(super) struct Pending {
 }
 
 impl Pending {
+    pub(crate) fn postpone(&mut self, now: Instant, delay: Duration) {
+        self.due = Some(now + delay);
+    }
     fn ready(&self, now: Instant) -> bool {
         !self.blocked && !self.queued.is_empty() && self.due.is_none_or(|due| now >= due)
     }
@@ -194,7 +197,9 @@ impl Desktop {
         if self.live_picture.in_flight.is_some() {
             self.live_picture.reconcile(editor.status());
         }
-        if !self.live_picture.ready(Instant::now()) {
+        if self.picker_gesture == crate::color_picker::Gesture::Dragging
+            || !self.live_picture.ready(Instant::now())
+        {
             return false;
         }
         if failed_status(editor.status()) {
@@ -322,6 +327,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         &app.ui,
         color,
         "picture-brush".into(),
+        |event| AppMessage::Lighting(super::lighting::Message::PickerInteraction(event)),
         editable.then_some(move |color| {
             AppMessage::Picture(Message::Live(Edit::Color {
                 key: selected_id.clone(),

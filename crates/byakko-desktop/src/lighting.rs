@@ -3,10 +3,7 @@ mod host;
 pub(crate) mod live;
 pub(crate) mod screen;
 use super::{Desktop, Message as AppMessage};
-use crate::{
-    control_widgets::{self, Choice},
-    panels::{self, UiStyle},
-};
+use crate::panels::{self, UiStyle};
 use byakko_core::lighting::{
     Color, Content, Edit,
     controls::{self, Control, LevelEdit},
@@ -16,7 +13,7 @@ use byakko_core::session::{Activity, Status as SessionStatus};
 pub(crate) use host::HostInput;
 use iced::{
     Element, Fill,
-    widget::{button, column, pick_list, row, scrollable, text},
+    widget::{button, column, pick_list, row, scrollable, slider, text},
 };
 use std::fmt;
 
@@ -30,6 +27,7 @@ pub(crate) enum Panel {
 
 #[derive(Clone, Debug)]
 pub(super) enum Message {
+    PickerInteraction(crate::color_picker::Interaction),
     Panel(Panel),
     #[cfg(test)]
     Read,
@@ -98,6 +96,18 @@ impl Desktop {
             return iced::Task::none();
         }
         match message {
+            Message::PickerInteraction(event) => {
+                use crate::color_picker::{Gesture, Interaction};
+                match event {
+                    Interaction::Started => self.picker_gesture = Gesture::Dragging,
+                    Interaction::Finished => self.picker_gesture = Gesture::Idle,
+                    Interaction::Moved => {}
+                }
+                let now = std::time::Instant::now();
+                self.live_lighting
+                    .postpone(now, self.config.auto_save_delay);
+                self.live_picture.postpone(now, self.config.auto_save_delay);
+            }
             Message::Panel(panel) => {
                 self.lighting_panel = panel;
                 if panel == Panel::PerKey
@@ -144,7 +154,10 @@ impl Desktop {
     }
 
     pub(crate) fn flush_live_lighting(&mut self) -> bool {
-        if self.busy() || !self.live_lighting.ready(std::time::Instant::now()) {
+        if self.picker_gesture == crate::color_picker::Gesture::Dragging
+            || self.busy()
+            || !self.live_lighting.ready(std::time::Instant::now())
+        {
             return false;
         }
         if self.session.status() == &SessionStatus::Disconnected {
@@ -296,6 +309,7 @@ fn mode_controls(app: &Desktop) -> Element<'_, AppMessage> {
             style,
             rgb,
             format!("onboard:{}", shown.effect),
+            |event| AppMessage::Lighting(Message::PickerInteraction(event)),
             editable
                 .then_some(|rgb| AppMessage::Lighting(Message::Live(Edit::Color(Color::Rgb(rgb))))),
         ),
@@ -304,7 +318,7 @@ fn mode_controls(app: &Desktop) -> Element<'_, AppMessage> {
     content
         .push(
             scrollable(
-                column![
+                row![
                     swatches,
                     setting_controls(style, &settings, editable, Message::Live)
                 ]
@@ -477,6 +491,7 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
             &app.ui,
             *rgb,
             format!("host:{}", selected.id),
+            |event| AppMessage::Lighting(Message::PickerInteraction(event)),
             (!app.busy()).then_some(|rgb| {
                 AppMessage::Lighting(Message::EditHost(Edit::Color(Color::Rgb(rgb))))
             }),
@@ -484,7 +499,7 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
         _ => column![].into(),
     };
     let parameters: Element<'static, AppMessage> = match settings {
-        Some(Ok(projected)) => column![
+        Some(Ok(projected)) => row![
             host_color,
             setting_controls(&app.ui, &projected, !app.busy(), Message::EditHost)
         ]
@@ -578,31 +593,50 @@ fn setting_controls(
             })
             .cloned()
             .map(|control| match control {
-                Control::Choices { label, choices } => control_widgets::choices(
-                    style,
-                    label,
-                    choices.into_iter().map(|choice| Choice {
-                        label: choice.label,
-                        selected: choice.selected,
-                        message: editable.then_some(AppMessage::Lighting(message(choice.edit))),
-                    }),
-                ),
+                Control::Choices { label, choices } => row![
+                    text(label).width(style.fields.compact),
+                    row(choices.into_iter().map(|choice| {
+                        panels::selectable_button(
+                            style,
+                            choice.label,
+                            choice.selected,
+                            editable.then_some(AppMessage::Lighting(message(choice.edit))),
+                        )
+                    }))
+                    .spacing(style.spacing.xs)
+                    .width(style.fields.regular)
+                    .wrap(),
+                ]
+                .spacing(style.spacing.s)
+                .align_y(iced::Alignment::Center)
+                .into(),
                 Control::Level {
                     label,
                     range,
                     value,
                     edit,
-                } => control_widgets::level(
-                    style,
-                    label,
-                    range,
-                    value,
-                    editable.then_some(move |value| {
-                        AppMessage::Lighting(message(edit.edit(value).expect("projected range")))
-                    }),
-                ),
+                } => {
+                    let mut controls = row![
+                        text(label).width(style.fields.compact),
+                        text(value).width(style.color_hue_width)
+                    ]
+                    .spacing(style.spacing.s)
+                    .align_y(iced::Alignment::Center);
+                    if editable && range.start() != range.end() {
+                        controls = controls.push(
+                            slider(range, value, move |value| {
+                                AppMessage::Lighting(message(
+                                    edit.edit(value).expect("projected range"),
+                                ))
+                            })
+                            .step(1u16)
+                            .width(style.fields.regular),
+                        );
+                    }
+                    controls.into()
+                }
             }),
     )
-    .spacing(style.spacing.l)
+    .spacing(style.spacing.s)
     .into()
 }

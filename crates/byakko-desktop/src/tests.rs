@@ -44,6 +44,7 @@ fn ready() -> Desktop {
             auto_save_delay: Duration::ZERO,
         },
         live_settings: Default::default(),
+        picker_gesture: Default::default(),
         brush_color: None,
         ui: panels::UiStyle::DEFAULT,
         archive_file: archive::FileState::Idle,

@@ -393,3 +393,43 @@ fn failed_picture_apply_keeps_draft_visible_and_close_waits() {
     );
     assert!(app.session.request_picture_apply().is_err());
 }
+
+#[test]
+fn picker_activity_defers_existing_paint_and_drag_blocks_sending() {
+    use crate::color_picker::Interaction;
+    use crate::lighting::Message as Lighting;
+    let mut app = loaded();
+    let activity = |app: &mut Desktop, event| {
+        let _ = app.update(Message::Lighting(Lighting::PickerInteraction(event)));
+    };
+    activity(&mut app, Interaction::Started);
+    send(
+        &mut app,
+        Picture::Live(Edit::Color {
+            key: "Alpha".into(),
+            color: [12, 90, 180],
+        }),
+    );
+    // Even an already-due edit cannot send while a picker drag is held.
+    assert!(!app.busy());
+    assert!(!app.flush_live_picture());
+    app.config.auto_save_delay = Duration::from_secs(2);
+    activity(&mut app, Interaction::Finished);
+    assert!(!app.flush_live_picture());
+    // Movement alone renews the deadline without replacing the queued paint.
+    app.live_picture
+        .postpone(std::time::Instant::now(), Duration::ZERO);
+    activity(&mut app, Interaction::Moved);
+    assert!(!app.flush_live_picture());
+    assert_eq!(
+        crate::picture::projected_colors(&app).unwrap()["Alpha"],
+        [12, 90, 180]
+    );
+    app.config.auto_save_delay = Duration::ZERO;
+    activity(&mut app, Interaction::Finished);
+    settle_live(&mut app);
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Alpha"],
+        [12, 90, 180]
+    );
+}
