@@ -40,6 +40,41 @@ class SourceInventoryTests(unittest.TestCase):
             self.assertTrue(row["missing_text"])
             self.assertEqual(row["texts"], [])
 
+    def test_explicit_iced_vendor_is_inventoried_with_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "vendor" / "iced_tiny_skia"
+            (source / "src").mkdir(parents=True)
+            (source / "Cargo.toml").write_text(
+                '[package]\nname = "iced_tiny_skia"\nversion = "0.14.1"\nlicense = "MIT"\n',
+                encoding="utf-8",
+            )
+            (source / "LICENSE").write_text("MIT license\n", encoding="utf-8")
+            (source / "BYAKKO-PATCH.md").write_text("Upstream provenance and local patch.\n", encoding="utf-8")
+            (source / "src" / "lib.rs").write_text("// vendored source\n", encoding="utf-8")
+            row = source_row(
+                {"name": "iced_tiny_skia", "version": "0.14.1", "declared": "MIT", "selected": "MIT"},
+                {("iced_tiny_skia", "0.14.1"): {
+                    "manifest_path": str(source / "Cargo.toml"), "source": None}},
+                root,
+            )
+            self.assertEqual(row["source"], "vendored")
+            self.assertFalse(row["missing_text"])
+            self.assertEqual(row["provenance"]["record"], "BYAKKO-PATCH.md")
+            self.assertIn("src/lib.rs", [item["path"] for item in row["provenance"]["files"]])
+
+    def test_arbitrary_local_dependency_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "Cargo.toml"
+            manifest.write_text("", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unexpected source"):
+                source_row(
+                    {"name": "example", "version": "1.0", "declared": "MIT", "selected": "MIT"},
+                    {("example", "1.0"): {"manifest_path": str(manifest), "source": None}},
+                    root,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

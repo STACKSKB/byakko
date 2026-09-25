@@ -1,5 +1,19 @@
 # Target dependency source-license audit
 
+## 2026-09-25 update
+
+The project is GPL-3.0-or-later; third-party notices remain intact. The local
+`iced_tiny_skia 0.14.1` patch builds from tracked Git files. The source inventory
+now explicitly supports that vendor directory, records its MIT license and
+hashes the source and `BYAKKO-PATCH.md` provenance record. Unreviewed local
+sources still require a separate audit decision. Python 3.11+ is required by
+the inventory tool's TOML parser.
+
+The full inventory succeeds with 182 selected dependency versions; 10 (rather
+than 11) lack root texts in their crate archives because the renderer's vendored
+LICENSE is now included. Existing supplemental notices cover those ten.
+The historical records below describe the earlier registry-only inventory.
+
 ## Current Iced desktop metadata gate (2026-09-23)
 
 `python tools/check_dependency_licenses.py` (defaulting to `byakko-desktop`)
@@ -12,7 +26,8 @@ and the Iced desktop graph has no legacy eframe or bundled
 BSD, Zlib, BSL, ISC, and Unicode-3.0 obligations; this is a metadata result,
 not a complete source-header, native-library, or distribution-notice audit.
 The release bundle must include required third-party license and attribution
-texts. The project owner's own license choice is still open.
+texts. Byakko-owned material is now GPL-3.0-or-later (2026-09-25); dependency
+licenses and notices remain unchanged.
 
 The independent `byakko-cli` graph also passes the same gate with
 `--package byakko-cli`: 13 Windows and 12 Linux third-party package/version
@@ -47,8 +62,7 @@ not the remaining packaging and asset review.
 This inventory does not choose which of a crate's alternate license files to
 ship, inspect nested attribution or bundled native libraries, or grant a
 license to Byakko itself. Preserve compound obligations such as Unicode-3.0
-when assembling release notices. The project owner's license choice and final
-release packaging remain open.
+when assembling release notices. Byakko's own license is GPL-3.0-or-later; final release packaging remains open.
 
 The historical audit below describes the retained root research package,
 which has a different dependency graph. Do not use its counts or font notices

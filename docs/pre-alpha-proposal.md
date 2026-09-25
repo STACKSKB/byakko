@@ -1,6 +1,8 @@
 # Pre-alpha architecture — approved direction
 
 Status: approved by the user with Iced selected. Implementation may proceed.
+The 2026-09-25 GPL-3.0-or-later project-license decision supersedes the historical
+no-copyleft selection constraint below; it does not change the chosen toolkit.
 The later [protocol-family amendment](protocol-family-boundary.md) supersedes
 the assumption below that all native wire behavior belongs directly to Nia87:
 the Rongyuan driver should be reusable across verified OEM boards, and QMK/VIA

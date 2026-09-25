@@ -39,8 +39,13 @@ one complete sweep, not duplicated sweeps and section-by-section rereads.
   access every HID interface or bypass browser permission prompts.
 - USB Nia87 stock firmware first. Do not flash firmware. Preserve the full
   configurator parity objective; QMK/VIA and 2.4 GHz are later capabilities.
-- Original implementation and UX. Do not copy vendor, Sharkfin, GPL or other
-  copyleft source. Review dependency and asset licenses separately.
+- Original implementation and UX. Do not copy vendor or Sharkfin source.
+  Byakko-owned code, documentation and assets are GPL-3.0-or-later by the
+  user's 2026-09-25 decision, superseding the earlier no-copyleft rule. Preserve
+  third-party licenses/notices and review dependency and asset compatibility.
+- This is a personal pre-alpha: no CI/CD requirement. Use local reproducible
+  build/test commands. Ask the user about UX/behavior/design decisions and
+  coordinate physical or Windows official-app capture work with them.
 - Finish functional parity or reach a genuine user-input blocker before visual
   polish. The later visual direction is a white-tiger identity with no gradients,
   consistent spacing and alignment, a clear attention hierarchy, concise text,

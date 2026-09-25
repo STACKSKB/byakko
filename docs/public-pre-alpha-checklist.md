@@ -4,14 +4,21 @@ Review date: 2026-09-25. Reviewed source: `31de12abba9f2e3d3dfb8fb4ad68bf783f670
 The clean `master` checkout was fast-forwarded from `977df91` using
 `git pull --ff-only origin master`. This report changes no product code.
 
-**Release assessment: not ready for a public pre-alpha with all currently exposed
-write features enabled.** Recovery acceptance, release packaging and licensing,
-and the checks below remain open. A pre-alpha may have documented limitations;
-an exposed write workflow still needs a demonstrated recovery route. Narrowing
-the public feature/platform scope requires an explicit release decision and an
-actual gate in the shipped application, not just a disclaimer.
+## User-directed scope (2026-09-25)
 
-## Confirmed review findings
+This is a personal public pre-alpha, not a corporate release process. There is
+no CI/CD requirement. Byakko-owned material is GPL-3.0-or-later. Use local
+build/test commands and a source checkout; release automation, signing and
+installer integration are not prerequisites imposed by this review. Ask the
+user before changing exposed behavior, UX or release feature availability.
+Physical tests and Windows official-app packet captures are coordinated with
+the user. Remaining acceptance questions below are evidence to resolve, not
+authorization to disable features or expand the pre-alpha scope.
+
+The renderer builds from tracked sources: the issue identified below is in the
+optional source-inventory script, not the Cargo build or the renderer itself.
+
+## Original review findings (status tracked below)
 
 1. **P2 — the source inventory cannot handle the shipped renderer patch.**
    `Cargo.toml:46` selects a local `iced_tiny_skia` dependency, but
@@ -62,7 +69,7 @@ actual gate in the shipped application, not just a disclaimer.
   mismatches, but cannot repair those collateral changes. Capture a correlated
   controlled fault trace, establish the cause, and demonstrate restoration of
   the complete before-image. Preserve the failure evidence. If unresolved,
-  explicitly gate public archive Apply while retaining capture/review/export.
+  ask the user how to expose the limitation; do not silently disable Apply.
   See [fault evidence](../Research/configuration-fault-verification.md).
 - [ ] **Accept partial-upload and interrupted-write behavior.** Exercise
   transport errors before and after picture pages, settings/keymap/macro writes,
@@ -76,7 +83,7 @@ actual gate in the shipped application, not just a disclaimer.
   and power-cycle persistence. Keep stored repeat-zero snapshots lossless and
   outside writable macro-editor policy. Record firmware, board, OS, source
   revision, before-image and restore result for each case.
-- [ ] **Accept host lighting lifecycle or gate unaccepted modes.** Verify Iced
+- [ ] **Accept host lighting lifecycle and document remaining limits.** Verify Iced
   screen/music Start, Stop, focus loss, close, device removal, sampler failure,
   reconnect and explicit exit from a stored host mode. Verify restoration and
   sustained streaming; test Linux audio routing and X11 display loss. Wayland
@@ -95,31 +102,29 @@ actual gate in the shipped application, not just a disclaimer.
 - [ ] **Close the confirmed code/tool findings above.** Rerun strict formatting,
   Clippy, product tests, helper checks, renderer regressions and source inventory
   against the final release commit. Preserve logs with the commit/toolchain.
-- [ ] **Establish repeatable Windows and Linux release jobs.** No tracked
-  `.github` workflow or complete release assembly pipeline was present. CI or an
-  equivalent reproducible release script must build the selected Iced desktop,
-  CLI and required helper with the lockfile; exclude research tools/legacy egui
-  from the product bundle. Record the supported toolchain and target baseline.
-  Recheck core's WebAssembly build on a host with the target installed.
-- [ ] **Produce and test installable artifacts on clean machines.** Verify
-  startup, native runtime dependencies (including dynamically loaded sampler
-  libraries), normal-user data/backup paths, upgrade and uninstall behavior,
-  permissions and a recovery walkthrough. Publish version/commit identifiers,
-  checksums, installation steps and an explicit artifact signing policy.
+- [ ] **Record local Windows/Linux release checks.** Build the selected Iced
+  desktop, CLI and helper with the lockfile. Record the tested toolchain and
+  source revision; keep research tools/legacy egui separate from the product.
+  No CI/CD. Recheck core's WebAssembly build where the target is installed.
+- [ ] **Verify the offered downloads or source-build instructions.** Check
+  startup, runtime dependencies, normal-user data/backup paths and the recovery
+  walkthrough. State version/commit and supported environments. Ask the user
+  before choosing a packaging format or changing installation behavior.
 - [ ] **Finish the Linux permission/distribution experience.** The repository
   currently requires administrator-installed helper/udev files; an application
-  image alone does not establish hidraw access. Deliver the intended installer
-  integration while retaining the exact collection/descriptor gate. Verify only
+  image alone does not establish hidraw access. Ask the user to choose the
+  pre-alpha distribution approach while retaining the exact collection gate. Verify only
   the intended node receives the active-seat ACL, then follow the read-only-first
   sequence in [Linux handoff](linux-handoff.md). Current-revision Linux GUI,
   Wayland startup and write/readback/restoration acceptance remain separate.
 
 ### Distribution audit and public documentation
 
-- [ ] **Choose and include Byakko's own distribution license.** Workspace
-  manifests have no license declaration and no top-level project license is
-  tracked. The owner must decide terms; third-party MIT notices do not supply
-  Byakko's own license. Apply the decision consistently to source and artifacts.
+- [x] **Include Byakko's chosen distribution license.** The user selected
+  GPL-3.0-or-later. The root LICENSE contains GPL v3; the README grants the
+  later-version option for Byakko-owned code, docs and assets, and all five
+  workspace manifests declare `GPL-3.0-or-later`. Third-party licenses remain
+  intact, including the renderer's MIT license.
 - [ ] **Assemble the complete notices and provenance bundle.** Repair the source
   inventory, audit the exact compiled sources/assets/native libraries, include
   applicable dependency notices and compound obligations, and retain the local
@@ -182,3 +187,16 @@ The latest [official picture capture](../Research/official-picture-capture-20260
 records physical preset/steady/hue response, twelve consecutive uploads and a
 later full 128-entry readback match. Those successful checks are credited here;
 they do not close partial-failure recovery, power-cycle or Linux write gates.
+
+## Fix progress, 2026-09-25
+
+- [x] GPL-3.0-or-later declared for all five Byakko packages; full license text
+  and repository scope notice added. Third-party MIT notices preserved.
+- [x] Removed CI/CD and corporate release-process prerequisites per user direction.
+- [x] Renderer investigation: desktop and CLI release builds pass from a fresh
+  `git archive` extraction of tracked source, with locked cached dependencies.
+- [x] Source inventory supports the reviewed vendor directory and hashes source,
+  license and patch provenance. Full inventory passes (182 versions); all nine
+  audit-tool tests pass. Finding 1 is closed; no renderer code change was needed.
+
+The verification table above remains the original review record.

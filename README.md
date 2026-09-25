@@ -90,3 +90,16 @@ Complete device archives can be captured, inspected, reviewed and applied from t
 The product uses original Windows HID and Linux hidraw adapters with permissively licensed OS bindings. HIDAPI was removed after an audit found a GPL header in its build script despite MIT package metadata. Target-specific dependency and distribution notice audits remain necessary before releases.
 
 No Sharkfin source, tables, tests or assets have been incorporated. User-reported Sharkfin compatibility is behavioral evidence only. Vendor installers and extracted research material are ignored by Git and are not product assets.
+
+## License
+
+Byakko's original code, documentation and project-owned assets are licensed
+under the GNU General Public License, version 3 or (at your option) any later
+version (`GPL-3.0-or-later`). See [LICENSE](LICENSE). Byakko is distributed
+without any warranty; see the license for details.
+
+Third-party code and assets retain their own notices and license terms. In
+particular, the vendored `iced_tiny_skia` renderer retains its
+[MIT license](vendor/iced_tiny_skia/LICENSE) and
+[patch provenance](vendor/iced_tiny_skia/BYAKKO-PATCH.md). Files identifying a
+separate third-party license are not relicensed by this project notice.
