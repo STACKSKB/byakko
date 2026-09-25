@@ -789,13 +789,12 @@ mod platform {
                 return Err(error);
             }
             let monitor = monitor?;
-            if let ScreenSampling::Point { x, y } = capture.sampling {
-                if let Err(error) = point_coordinate(x, monitor.width)
+            if let ScreenSampling::Point { x, y } = capture.sampling
+                && let Err(error) = point_coordinate(x, monitor.width)
                     .and_then(|_| point_coordinate(y, monitor.height))
-                {
-                    unsafe { (xlib.close)(display) };
-                    return Err(error);
-                }
+            {
+                unsafe { (xlib.close)(display) };
+                return Err(error);
             }
             Ok(Self {
                 xlib,
