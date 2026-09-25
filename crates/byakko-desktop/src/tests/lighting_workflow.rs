@@ -326,3 +326,35 @@ fn per_key_mode_activates_in_lighting_and_effect_choice_returns_in_place() {
         "sweep"
     );
 }
+
+#[test]
+fn mode_choice_is_immediate_and_latest_rapid_choice_survives_completion() {
+    let mut app = loaded();
+    app.config.auto_save_delay = Duration::from_secs(2);
+    let effects: Vec<_> = app
+        .session
+        .lighting()
+        .unwrap()
+        .capabilities()
+        .effects
+        .iter()
+        .map(|e| e.id.clone())
+        .collect();
+    let original = app
+        .session
+        .lighting()
+        .unwrap()
+        .draft()
+        .unwrap()
+        .effect
+        .clone();
+    let other = effects.iter().find(|id| **id != original).unwrap().clone();
+    send(&mut app, Lighting::Live(Edit::Effect(other)));
+    assert!(app.busy(), "mode changes must not wait for the color timer");
+    send(&mut app, Lighting::Live(Edit::Effect(original.clone())));
+    settle(&mut app);
+    assert_eq!(
+        app.session.lighting().unwrap().draft().unwrap().effect,
+        original
+    );
+}

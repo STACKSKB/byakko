@@ -121,6 +121,14 @@ impl Desktop {
             }
             Message::StopHost => self.stop_host(),
             Message::StartHost(mode_id) if !self.busy() => self.start_host(mode_id),
+            Message::SelectHost(id) => match self.session.select_host_mode(&id) {
+                Ok(()) => {
+                    self.lighting_panel = Panel::Host;
+                    self.live_lighting.clear();
+                    self.notice = None;
+                }
+                Err(reason) => self.notice = Some(reason),
+            },
             _ if self.busy() => (),
             #[cfg(test)]
             Message::Read => {
@@ -140,10 +148,6 @@ impl Desktop {
             Message::Revert => self.notice = self.session.revert_lighting().err(),
             #[cfg(test)]
             Message::Edit(edit) => self.notice = self.session.edit_lighting(edit).err(),
-            Message::SelectHost(id) => {
-                self.lighting_panel = Panel::Host;
-                self.notice = self.session.select_host_mode(&id).err();
-            }
             Message::EditHost(edit) => self.notice = self.session.edit_host_setting(edit).err(),
             Message::StartHost(_) => {}
             Message::Screen(_) => unreachable!(),
@@ -441,15 +445,18 @@ fn mode_selector(app: &Desktop) -> Element<'_, AppMessage> {
     }
     column![
         text("Lighting mode"),
-        pick_list(choices, selected, |choice: ModeChoice| {
-            AppMessage::Lighting(match choice.kind {
-                ModeKind::PerKey => Message::Panel(Panel::PerKey),
-                ModeKind::Onboard(id) => Message::Live(Edit::Effect(id)),
-                ModeKind::Host(id) => Message::SelectHost(id),
+        crate::clipped_dropdown::clipped(
+            pick_list(choices, selected, |choice: ModeChoice| {
+                AppMessage::Lighting(match choice.kind {
+                    ModeKind::PerKey => Message::Panel(Panel::PerKey),
+                    ModeKind::Onboard(id) => Message::Live(Edit::Effect(id)),
+                    ModeKind::Host(id) => Message::SelectHost(id),
+                })
             })
-        })
-        .placeholder("Select lighting mode")
-        .width(app.ui.fields.regular),
+            .placeholder("Select lighting mode")
+            .width(app.ui.fields.regular)
+            .into()
+        ),
     ]
     .spacing(app.ui.spacing.xs)
     .into()
@@ -506,7 +513,7 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
         .spacing(app.ui.spacing.s)
         .into(),
         Some(Err(reason)) => text(reason).into(),
-        None => text("This mode has no parameters").into(),
+        None => column![].into(),
     };
     let capture: Element<'static, AppMessage> =
         if selected.source == byakko_core::lighting::HostSource::ScreenAverage {
@@ -522,20 +529,20 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
             .as_ref()
             .map(|_| AppMessage::Lighting(Message::StopHost)),
     );
-    column![
-        row![start, stop].spacing(app.ui.spacing.m),
-        scrollable(panels::panel(
-            &app.ui,
-            "Host lighting",
-            column![parameters, capture]
-                .spacing(app.ui.spacing.l)
-                .into(),
-        ))
-        .height(Fill),
-    ]
-    .spacing(app.ui.spacing.s)
-    .height(Fill)
-    .into()
+    let actions = row![start, stop].spacing(app.ui.spacing.s);
+    if selected.source == byakko_core::lighting::HostSource::ScreenAverage {
+        return row![
+            iced::widget::Space::new().width(
+                app.ui.color_picker_size.0 + app.ui.fields.compact as f32 + app.ui.spacing.s as f32
+            ),
+            column![actions, capture].spacing(app.ui.spacing.s),
+        ]
+        .spacing(app.ui.spacing.m)
+        .into();
+    }
+    column![actions, parameters]
+        .spacing(app.ui.spacing.s)
+        .into()
 }
 
 fn status(app: &Desktop, editor: &Editor) -> String {

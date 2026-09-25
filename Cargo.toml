@@ -41,3 +41,6 @@ eframe = { version = "=0.36.2", optional = true, default-features = false, featu
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+
+[patch.crates-io]
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }

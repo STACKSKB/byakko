@@ -2,6 +2,7 @@
 mod action_catalog;
 mod archive;
 mod audio_stream;
+mod clipped_dropdown;
 mod color_picker;
 mod control_widgets;
 pub mod discovery;
