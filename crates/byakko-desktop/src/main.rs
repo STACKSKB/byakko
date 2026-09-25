@@ -12,7 +12,7 @@ use byakko_devices::{
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     type Probe = Box<dyn Fn() -> Availability + Send>;
-    type Attach = Box<dyn Fn(&str) -> Result<Executor, String>>;
+    type Attach = Box<dyn Fn(Option<&str>) -> Result<(String, Executor), String>>;
     let (session, probe, attach, labels_directory): (
         Session,
         Probe,
@@ -26,9 +26,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 nia87::application::session()?,
                 Box::new(|| match nia87::device::availability() {
                     nia87::device::Availability::Unavailable => Availability::Missing,
-                    nia87::device::Availability::Available(candidate) => {
-                        Availability::Ready { id: candidate.path }
-                    }
+                    nia87::device::Availability::Available(candidate) => Availability::Ready {
+                        id: collection_id(&candidate),
+                    },
                     nia87::device::Availability::Ambiguous(candidates) => Availability::Ambiguous {
                         count: candidates.len(),
                     },
@@ -39,16 +39,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Box::new(move |id| {
                     let candidate = match nia87::device::availability() {
                         nia87::device::Availability::Available(candidate)
-                            if candidate.path == id =>
+                            if id.is_none_or(|id| collection_id(&candidate) == id) =>
                         {
                             candidate
                         }
-                        _ => return Err("Keyboard identity changed before attachment".into()),
+                        nia87::device::Availability::Available(_) => {
+                            return Err("Keyboard identity changed before attachment".into());
+                        }
+                        nia87::device::Availability::Unavailable => {
+                            return Err("No supported keyboard is connected".into());
+                        }
+                        nia87::device::Availability::Ambiguous(candidates) => {
+                            return Err(format!(
+                                "Found {} matching keyboards; connect one keyboard",
+                                candidates.len()
+                            ));
+                        }
+                        nia87::device::Availability::EnumerationFailed(reason) => {
+                            return Err(format!("Could not enumerate keyboards: {reason}"));
+                        }
                     };
                     let target = nia87::device::Target::from_candidate(&candidate)
                         .map_err(|error| error.to_string())?;
-                    Executor::spawn(BoundNia87Adapter::new(target), backups.clone())
-                        .map_err(|error| error.to_string())
+                    let executor = Executor::spawn(BoundNia87Adapter::new(target), backups.clone())
+                        .map_err(|error| error.to_string())?;
+                    Ok((collection_id(&candidate), executor))
                 }),
                 Some(data.join("macro-labels").join("nia87")),
             )
@@ -89,7 +104,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Box::new(|| Availability::Ready { id: "demo".into() }),
                 Box::new(|_id| {
                     let device = demo::device()?;
-                    Executor::spawn(device, Default::default()).map_err(|e| e.to_string())
+                    Executor::spawn(device, Default::default())
+                        .map(|executor| ("demo".into(), executor))
+                        .map_err(|e| e.to_string())
                 }),
                 None,
             )
@@ -103,4 +120,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         labels_directory,
         byakko_desktop::config::Config::from_environment()?,
     )
+}
+
+// Discovery must compare every field pinned by the executor, including metadata
+// when the operating system reuses a collection path after a quick replug.
+fn collection_id(candidate: &nia87::device::Candidate) -> String {
+    format!(
+        "{}|{:04x}:{:04x}:{}:{:04x}:{:04x}",
+        candidate.path,
+        candidate.vid,
+        candidate.pid,
+        candidate.interface,
+        candidate.usage_page,
+        candidate.usage
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn discovery_identity_includes_metadata_even_when_path_is_reused() {
+        let candidate = nia87::device::Candidate {
+            path: "/dev/hidraw3".into(),
+            vid: 0x3151,
+            pid: 0x4015,
+            interface: 2,
+            usage_page: 0xffff,
+            usage: 2,
+            manufacturer: None,
+            product: None,
+        };
+        let original = collection_id(&candidate);
+        let changes: [fn(&mut nia87::device::Candidate); 6] = [
+            |c| c.path = "/dev/hidraw4".into(),
+            |c| c.vid += 1,
+            |c| c.pid += 1,
+            |c| c.interface += 1,
+            |c| c.usage_page -= 1,
+            |c| c.usage += 1,
+        ];
+        for change in changes {
+            let mut changed = candidate.clone();
+            change(&mut changed);
+            assert_ne!(original, collection_id(&changed));
+        }
+        let mut renamed = candidate;
+        renamed.product = Some("Localized product name".into());
+        assert_eq!(original, collection_id(&renamed));
+    }
 }

@@ -42,6 +42,7 @@ fn ready() -> Desktop {
     Desktop {
         config: config::Config {
             auto_save_delay: Duration::ZERO,
+            short_edit_delay: Duration::ZERO,
         },
         live_settings: Default::default(),
         picker_gesture: Default::default(),
@@ -69,8 +70,10 @@ fn ready() -> Desktop {
         repeat_input: String::new(),
         session,
         executor: Some(executor),
-        attach: Box::new(|_| {
-            Executor::spawn(demo::device()?, Default::default()).map_err(|e| e.to_string())
+        attach: Box::new(|id| {
+            Executor::spawn(demo::device()?, Default::default())
+                .map(|executor| (id.unwrap_or("demo").into(), executor))
+                .map_err(|e| e.to_string())
         }),
         discovery: Discovery::spawn(|| Availability::Ready { id: "demo".into() }).unwrap(),
         presence: Some(Availability::Ready { id: "demo".into() }),
@@ -234,8 +237,11 @@ fn changed_configuration_path_forces_new_read() {
     let attached = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let observed = attached.clone();
     app.attach = Box::new(move |id| {
+        let id = id.unwrap();
         observed.lock().unwrap().push(id.to_owned());
-        Executor::spawn(demo::device()?, Default::default()).map_err(|e| e.to_string())
+        Executor::spawn(demo::device()?, Default::default())
+            .map(|executor| (id.into(), executor))
+            .map_err(|e| e.to_string())
     });
     let generation = app.session.generation();
     app.accept_availability(Availability::Ready {
@@ -373,4 +379,61 @@ fn dirty_close_modal_blocks_background_edits_until_dismissed() {
     let baseline = app.session.baseline().cloned();
     let _ = app.update(Message::Close);
     assert_eq!(app.session.baseline(), baseline.as_ref());
+}
+
+#[test]
+fn manual_reconnect_rebinds_even_without_a_discovery_change() {
+    let mut app = ready();
+    app.stage(1);
+    let draft = app.session.draft().cloned();
+    let old_generation = app.session.generation();
+    let baseline = app.session.baseline().cloned().unwrap();
+    app.attach = Box::new(|expected| {
+        assert_eq!(expected, None, "manual reconnect must discover afresh");
+        Executor::spawn(demo::device()?, Default::default())
+            .map(|executor| ("replugged-collection".into(), executor))
+            .map_err(|error| error.to_string())
+    });
+    // No Missing/Ready scan was delivered between unplug and replug.
+    let _ = app.update(Message::Read);
+    assert_eq!(app.selected_device.as_deref(), Some("replugged-collection"));
+    assert!(app.session.generation() > old_generation);
+    assert_eq!(app.session.draft(), draft.as_ref());
+    let byakko_core::session::Activity::Read { operation } = *app.session.activity() else {
+        panic!("fresh binding must read before editing");
+    };
+    let _ = app.complete(Completion::Read {
+        generation: old_generation,
+        operation,
+        result: Ok(baseline),
+    });
+    assert!(
+        app.session.busy(),
+        "old completion cannot satisfy the new read"
+    );
+    macro_workflow::settle(&mut app);
+    assert_eq!(app.session.status(), &Status::Ready);
+    assert_eq!(app.session.draft(), draft.as_ref());
+}
+
+#[test]
+fn failed_manual_reconnect_retires_the_stale_executor_and_keeps_drafts() {
+    let mut app = ready();
+    app.stage(1);
+    let draft = app.session.draft().cloned();
+    app.attach = Box::new(|expected| {
+        assert_eq!(expected, None);
+        Err("two matching keyboards".into())
+    });
+    let _ = app.update(Message::Read);
+    assert!(app.executor.is_none());
+    assert!(app.selected_device.is_none());
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert_eq!(app.session.draft(), draft.as_ref());
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap()
+            .contains("two matching keyboards")
+    );
 }

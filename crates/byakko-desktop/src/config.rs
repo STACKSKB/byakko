@@ -3,13 +3,17 @@ use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    /// Batching window for per-key color painting.
     pub auto_save_delay: Duration,
+    /// Short batching window for scalar settings and onboard lighting edits.
+    pub short_edit_delay: Duration,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
             auto_save_delay: Duration::from_secs(2),
+            short_edit_delay: Duration::from_millis(200),
         }
     }
 }
@@ -33,6 +37,7 @@ impl Config {
         }
         Ok(Self {
             auto_save_delay: Duration::from_millis(milliseconds),
+            short_edit_delay: Self::default().short_edit_delay,
         })
     }
 }
@@ -52,5 +57,12 @@ mod tests {
         );
         assert!(Config::from_millis("10001").is_err());
         assert!(Config::from_millis("-1").is_err());
+    }
+
+    #[test]
+    fn default_delays_keep_per_key_batching_longer_than_single_edits() {
+        let config = Config::default();
+        assert_eq!(config.auto_save_delay, Duration::from_secs(2));
+        assert_eq!(config.short_edit_delay, Duration::from_millis(200));
     }
 }

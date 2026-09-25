@@ -72,7 +72,11 @@ impl Desktop {
                 return iced::Task::none();
             };
             let mut proposed = self.live_lighting.clone();
-            proposed.push(edit, std::time::Instant::now(), self.config.auto_save_delay);
+            proposed.push(
+                edit,
+                std::time::Instant::now(),
+                self.config.short_edit_delay,
+            );
             match proposed.projected(editor) {
                 Ok(Some(_)) => {
                     self.live_lighting = proposed;
@@ -105,7 +109,7 @@ impl Desktop {
                 }
                 let now = std::time::Instant::now();
                 self.live_lighting
-                    .postpone(now, self.config.auto_save_delay);
+                    .postpone(now, self.config.short_edit_delay);
                 self.live_picture.postpone(now, self.config.auto_save_delay);
             }
             Message::Panel(panel) => {
@@ -136,8 +140,10 @@ impl Desktop {
                 self.submit(request);
             }
             Message::Retry if !self.busy() => {
-                self.live_lighting.retry();
-                self.reload_lighting_intent();
+                if self.refresh_connection() {
+                    self.live_lighting.retry();
+                    self.reload_lighting_intent();
+                }
             }
             #[cfg(test)]
             Message::Apply => {

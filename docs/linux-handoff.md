@@ -392,3 +392,26 @@ comparison returned no changes. This resolves the narrow Linux static-green
 brightness observation without a codec change; it does not resolve the older
 exact `FF FF FF` archive restore mismatch. See
 [camera method and evidence](../Research/brightness-investigation.md#linux-fixed-camera-comparison).
+
+
+## Reconnect regression fix (2026-09-25)
+
+A quick unplug/replug could leave the desktop executor bound to the previous
+collection identity. Manual reconnect and feature retry previously reused that
+worker, so repeated reads could report the same identity-change error. Explicit
+Reconnect/retry and lighting, picture and settings retry now enumerate the
+current unique supported collection, retire the previous executor, advance the
+session generation and read through a newly bound executor. Pending edits are
+retained; stale completions cannot satisfy the new read. Discovery compares all
+pinned identity fields, including metadata when the OS reuses a path. Exact
+collection selection inside each transaction and recovery is unchanged.
+
+Memory-backend regressions cover missed discovery, retained draft/lighting
+intent, stale completions and failed reattachment. This does not constitute a
+physical unplug/replug test of the rebuilt executable. Onboard color and scalar
+settings batching is now 200 ms; per-key RGB retains its 2 s window.
+
+Validation: 90 desktop library tests and one composition-root identity test
+passed, as did strict desktop Clippy, the Linux release build and the Windows
+MSVC cross-target check. Logs: `/tmp/byakko-reconnect-{tests,clippy,build,windows-check}.log`.
+The latter is a compile check, not native Windows runtime acceptance.
