@@ -9,15 +9,20 @@ use iced::{
     widget::{button, column, scrollable, text},
 };
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub(super) struct Pending {
     queued: BTreeMap<String, [u8; 3]>,
     in_flight: Option<BTreeMap<String, [u8; 3]>>,
+    due: Option<Instant>,
     pub(super) blocked: bool,
 }
 
 impl Pending {
+    fn ready(&self, now: Instant) -> bool {
+        !self.blocked && !self.queued.is_empty() && self.due.is_none_or(|due| now >= due)
+    }
     pub(super) fn has_queued(&self) -> bool {
         !self.queued.is_empty() || self.in_flight.is_some()
     }
@@ -25,8 +30,9 @@ impl Pending {
         !self.blocked && (!self.queued.is_empty() || self.in_flight.is_some())
     }
 
-    fn queue(&mut self, key: String, color: [u8; 3]) {
+    fn queue(&mut self, key: String, color: [u8; 3], now: Instant, delay: Duration) {
         self.queued.insert(key, color);
+        self.due = Some(now + delay);
     }
 
     fn reconcile(&mut self, status: &Status) {
@@ -104,7 +110,9 @@ impl Desktop {
                     self.notice = Some("Unknown picture key".into());
                     return;
                 }
-                self.live_picture.queue(key, color);
+                self.brush_color = Some(color);
+                self.live_picture
+                    .queue(key, color, Instant::now(), self.config.auto_save_delay);
                 if !self.live_picture.blocked {
                     self.notice = None;
                 }
@@ -116,8 +124,14 @@ impl Desktop {
                     .picture()
                     .is_some_and(|editor| editor.capabilities().keys.contains(&key))
                 {
-                    self.picture_selected = Some(key);
+                    let color = self
+                        .brush_color
+                        .or_else(|| projected_colors(self)?.get(&key).copied());
+                    self.picture_selected = Some(key.clone());
                     self.selected = self.picture_selected.clone();
+                    if let Some(color) = color {
+                        self.update_picture(Message::Live(Edit::Color { key, color }));
+                    }
                 }
             }
             _ if self.busy() => (),
@@ -180,7 +194,7 @@ impl Desktop {
         if self.live_picture.in_flight.is_some() {
             self.live_picture.reconcile(editor.status());
         }
-        if self.live_picture.blocked || self.live_picture.queued.is_empty() {
+        if !self.live_picture.ready(Instant::now()) {
             return false;
         }
         if failed_status(editor.status()) {
@@ -302,12 +316,12 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     let Some(selected) = selected else {
         return content.push(text("No color-capable physical keys")).into();
     };
-    let color = draft[selected];
+    let color = app.brush_color.unwrap_or(draft[selected]);
     let selected_id = selected.clone();
     let picker = crate::color_picker::view(
         &app.ui,
         color,
-        format!("picture:{selected}"),
+        "picture-brush".into(),
         editable.then_some(move |color| {
             AppMessage::Picture(Message::Live(Edit::Color {
                 key: selected_id.clone(),
@@ -365,5 +379,27 @@ fn status(app: &Desktop, editor: &Editor) -> String {
         Status::Ready => String::new(),
         Status::Conflict { .. } => "Colors changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => super::view::problem_label(problem),
+    }
+}
+
+#[cfg(test)]
+mod batching_tests {
+    use super::*;
+    #[test]
+    fn each_stroke_restarts_the_configured_idle_deadline() {
+        let now = Instant::now();
+        let delay = Duration::from_millis(420);
+        let mut pending = Pending::default();
+        pending.queue("a".into(), [1, 2, 3], now, delay);
+        pending.queue(
+            "b".into(),
+            [1, 2, 3],
+            now + Duration::from_millis(300),
+            delay,
+        );
+        assert!(!pending.ready(now + delay));
+        assert!(!pending.ready(now + Duration::from_millis(719)));
+        assert!(pending.ready(now + Duration::from_millis(720)));
+        assert_eq!(pending.queued.len(), 2);
     }
 }

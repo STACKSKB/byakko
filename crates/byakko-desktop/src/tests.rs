@@ -40,6 +40,11 @@ fn ready() -> Desktop {
     let executor = Executor::spawn(device, Default::default()).unwrap();
     executor.set_generation(generation);
     Desktop {
+        config: config::Config {
+            auto_save_delay: Duration::ZERO,
+        },
+        live_settings: Default::default(),
+        brush_color: None,
         ui: panels::UiStyle::DEFAULT,
         archive_file: archive::FileState::Idle,
         archive_path: String::new(),

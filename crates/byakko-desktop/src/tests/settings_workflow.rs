@@ -2,6 +2,95 @@ use super::*;
 use crate::settings::Message as Settings;
 use byakko_core::settings::{Content, Edit, Value, editor::Status as SettingsStatus};
 use macro_workflow::settle;
+use std::time::{Duration, Instant};
+
+#[test]
+fn queued_settings_coalesce_latest_value_per_field_and_preserve_failure_intent() {
+    let now = Instant::now();
+    let mut pending = crate::settings::Pending::default();
+    pending.queue(
+        Edit {
+            id: "repeat_delay".into(),
+            value: Value::Number(10),
+        },
+        now,
+        Duration::from_millis(50),
+    );
+    pending.queue(
+        Edit {
+            id: "repeat_delay".into(),
+            value: Value::Number(12),
+        },
+        now,
+        Duration::from_millis(50),
+    );
+    pending.queue(
+        Edit {
+            id: "studio_mode".into(),
+            value: Value::Toggle(true),
+        },
+        now,
+        Duration::from_millis(50),
+    );
+    assert!(!pending.ready(now));
+    assert!(pending.ready(now + Duration::from_millis(50)));
+    assert_eq!(
+        pending.queued_value("repeat_delay"),
+        Some(&Value::Number(12))
+    );
+    pending.begin(Edit {
+        id: "repeat_delay".into(),
+        value: Value::Number(12),
+    });
+    pending.reconcile(&SettingsStatus::Unverified {
+        problem: byakko_core::session::Problem::ReadRequired,
+    });
+    assert!(pending.blocked());
+    assert_eq!(
+        pending.queued_value("repeat_delay"),
+        Some(&Value::Number(12))
+    );
+    assert_eq!(
+        pending.queued_value("studio_mode"),
+        Some(&Value::Toggle(true))
+    );
+    pending.retry();
+    assert!(pending.ready(now));
+}
+
+#[test]
+fn live_settings_accept_multiple_fields_while_first_write_is_in_flight() {
+    let mut app = loaded();
+    send(
+        &mut app,
+        Settings::Live(Edit {
+            id: "repeat_delay".into(),
+            value: Value::Number(12),
+        }),
+    );
+    assert!(app.busy());
+    send(
+        &mut app,
+        Settings::Live(Edit {
+            id: "studio_mode".into(),
+            value: Value::Toggle(true),
+        }),
+    );
+    assert_eq!(
+        app.live_settings.queued_value("studio_mode"),
+        Some(&Value::Toggle(true))
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.busy() || app.live_settings.has_pending() {
+        assert!(Instant::now() < deadline, "settings write timed out");
+        let _ = app.poll();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let values = app.session.settings().unwrap().draft().unwrap();
+    assert_eq!(values["repeat_delay"], Value::Number(12));
+    assert_eq!(values["studio_mode"], Value::Toggle(true));
+    assert!(!app.live_settings.has_queued());
+}
 
 fn send(app: &mut Desktop, message: Settings) {
     let _ = app.update(Message::Settings(message));

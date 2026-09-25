@@ -31,6 +31,37 @@ fn settle_live(app: &mut Desktop) {
     }
 }
 
+#[test]
+fn brush_paints_new_keys_and_batches_until_the_configured_gap() {
+    let mut app = loaded();
+    app.config.auto_save_delay = Duration::from_secs(60);
+    send(
+        &mut app,
+        Picture::Live(Edit::Color {
+            key: "Alpha".into(),
+            color: [9, 80, 170],
+        }),
+    );
+    send(&mut app, Picture::Select("Fixed".into()));
+    assert_eq!(app.brush_color, Some([9, 80, 170]));
+    let shown = crate::picture::projected_colors(&app).unwrap();
+    assert_eq!(shown["Alpha"], [9, 80, 170]);
+    assert_eq!(shown["Fixed"], [9, 80, 170]);
+    assert!(!app.busy());
+    assert!(!app.flush_live_picture());
+    app.config.auto_save_delay = Duration::ZERO;
+    send(&mut app, Picture::Select("Fixed".into()));
+    settle_live(&mut app);
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Alpha"],
+        [9, 80, 170]
+    );
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Fixed"],
+        [9, 80, 170]
+    );
+}
+
 fn wait_for_live_write(app: &mut Desktop) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while !matches!(
@@ -260,6 +291,7 @@ fn per_key_draft_uses_advertised_keys_and_saves_through_memory_executor() {
     let mut app = loaded();
     let original = app.session.picture().unwrap().draft().unwrap().clone();
     send(&mut app, Picture::Select("Fixed".into()));
+    settle_live(&mut app);
     assert_eq!(app.picture_selected.as_deref(), Some("Fixed"));
     send(
         &mut app,

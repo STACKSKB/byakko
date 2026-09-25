@@ -9,15 +9,16 @@ use crate::{
 };
 use byakko_core::lighting::{
     Color, Content, Edit,
-    controls::{self, ChoiceEdit, Control, LevelEdit},
+    controls::{self, Control, LevelEdit},
     editor::{Editor, Status},
 };
 use byakko_core::session::{Activity, Status as SessionStatus};
 pub(crate) use host::HostInput;
 use iced::{
     Element, Fill,
-    widget::{button, column, row, scrollable, text},
+    widget::{button, column, pick_list, row, scrollable, text},
 };
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum Panel {
@@ -73,7 +74,7 @@ impl Desktop {
                 return iced::Task::none();
             };
             let mut proposed = self.live_lighting.clone();
-            proposed.push(edit, std::time::Instant::now());
+            proposed.push(edit, std::time::Instant::now(), self.config.auto_save_delay);
             match proposed.projected(editor) {
                 Ok(Some(_)) => {
                     self.live_lighting = proposed;
@@ -223,9 +224,14 @@ impl Desktop {
 }
 
 pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
-    if app.lighting_panel == Panel::PerKey
-        || (app.session.lighting().is_none() && app.session.picture().is_some())
-    {
+    column![mode_selector(app), mode_controls(app)]
+        .spacing(app.ui.spacing.m)
+        .height(Fill)
+        .into()
+}
+
+fn mode_controls(app: &Desktop) -> Element<'_, AppMessage> {
+    if shows_per_key(app) {
         return super::picture::view(app);
     }
     let Some(editor) = app.session.lighting() else {
@@ -258,21 +264,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     let Some(draft) = editor.draft() else {
         if let Some(snapshot) = editor.baseline() {
             match &snapshot.content {
-                Content::HostActive { .. } => {
-                    content = content.push(panels::panel(
-                        &app.ui,
-                        "Choose an onboard effect",
-                        scrollable(choice_buttons(
-                            &app.ui,
-                            &controls::effect_choices(editor.capabilities(), None),
-                            app.host.is_none()
-                                && app.session.status() != &SessionStatus::Disconnected
-                                && *editor.status() == Status::Ready,
-                        ))
-                        .height(Fill)
-                        .into(),
-                    ));
-                }
+                Content::HostActive { .. } => {}
                 Content::Opaque { reason } => content = content.push(text(reason)),
                 Content::Editable(_) => {}
             }
@@ -323,17 +315,58 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
         .into()
 }
 
-pub(super) fn modes(app: &Desktop) -> Element<'_, AppMessage> {
-    let mut modes = column![text("Lighting mode")].spacing(app.ui.spacing.s);
+pub(super) fn shows_per_key(app: &Desktop) -> bool {
+    if app.lighting_panel == Panel::Host {
+        return false;
+    }
+    if app.lighting_panel == Panel::PerKey
+        || (app.session.lighting().is_none() && app.session.picture().is_some())
+    {
+        return true;
+    }
+    let Some(effect) = app
+        .session
+        .picture()
+        .and_then(|editor| editor.capabilities().lighting_effect.as_ref())
+    else {
+        return false;
+    };
+    app.session.lighting().is_some_and(|editor| {
+        app.live_lighting
+            .projected(editor)
+            .ok()
+            .flatten()
+            .or_else(|| editor.draft().cloned())
+            .is_some_and(|setting| &setting.effect == effect)
+    })
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ModeKind {
+    PerKey,
+    Onboard(String),
+    Host(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ModeChoice {
+    kind: ModeKind,
+    label: String,
+}
+
+impl fmt::Display for ModeChoice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
+fn mode_choices(app: &Desktop) -> (Vec<ModeChoice>, Option<ModeChoice>) {
+    let mut choices = Vec::new();
     if app.session.picture().is_some() {
-        modes = modes.push(panels::selectable_button(
-            &app.ui,
-            "Per-key colors",
-            app.lighting_panel == Panel::PerKey,
-            app.host
-                .is_none()
-                .then_some(AppMessage::Lighting(Message::Panel(Panel::PerKey))),
-        ));
+        choices.push(ModeChoice {
+            kind: ModeKind::PerKey,
+            label: "Per-key colors".into(),
+        });
     }
     if let Some(editor) = app.session.lighting() {
         let projected = app.live_lighting.projected(editor).ok().flatten();
@@ -349,28 +382,63 @@ pub(super) fn modes(app: &Desktop) -> Element<'_, AppMessage> {
             if matches!(&choice.edit, Edit::Effect(id) if Some(id) == picture_effect) {
                 continue;
             }
-            modes = modes.push(panels::selectable_button(
-                &app.ui,
-                choice.label,
-                app.lighting_panel == Panel::Onboard && choice.selected,
-                (app.host.is_none() && app.session.status() != &SessionStatus::Disconnected)
-                    .then_some(AppMessage::Lighting(Message::Live(choice.edit))),
-            ));
+            let Edit::Effect(id) = choice.edit else {
+                continue;
+            };
+            choices.push(ModeChoice {
+                kind: ModeKind::Onboard(id),
+                label: choice.label,
+            });
         }
         for mode in &editor.capabilities().host_modes {
-            modes = modes.push(panels::selectable_button(
-                &app.ui,
-                &mode.label,
-                app.lighting_panel == Panel::Host
-                    && app
-                        .session
-                        .host_draft()
-                        .is_some_and(|draft| draft.mode_id == mode.id),
-                (!app.busy()).then_some(AppMessage::Lighting(Message::SelectHost(mode.id.clone()))),
-            ));
+            choices.push(ModeChoice {
+                kind: ModeKind::Host(mode.id.clone()),
+                label: mode.label.clone(),
+            });
         }
     }
-    scrollable(modes).height(Fill).into()
+    let selected_kind = match app.lighting_panel {
+        _ if shows_per_key(app) => Some(ModeKind::PerKey),
+        Panel::Onboard => app.session.lighting().and_then(|editor| {
+            app.live_lighting
+                .projected(editor)
+                .ok()
+                .flatten()
+                .or_else(|| editor.draft().cloned())
+                .map(|setting| ModeKind::Onboard(setting.effect))
+        }),
+        Panel::Host => app
+            .session
+            .host_draft()
+            .map(|draft| ModeKind::Host(draft.mode_id.clone())),
+        Panel::PerKey => Some(ModeKind::PerKey),
+    };
+    let selected = choices
+        .iter()
+        .find(|choice| Some(&choice.kind) == selected_kind.as_ref())
+        .cloned();
+    (choices, selected)
+}
+
+fn mode_selector(app: &Desktop) -> Element<'_, AppMessage> {
+    let (mut choices, selected) = mode_choices(app);
+    if app.host.is_some() || app.session.status() == &SessionStatus::Disconnected {
+        choices.retain(|choice| Some(choice) == selected.as_ref());
+    }
+    column![
+        text("Lighting mode"),
+        pick_list(choices, selected, |choice: ModeChoice| {
+            AppMessage::Lighting(match choice.kind {
+                ModeKind::PerKey => Message::Panel(Panel::PerKey),
+                ModeKind::Onboard(id) => Message::Live(Edit::Effect(id)),
+                ModeKind::Host(id) => Message::SelectHost(id),
+            })
+        })
+        .placeholder("Select lighting mode")
+        .width(app.ui.fields.regular),
+    ]
+    .spacing(app.ui.spacing.xs)
+    .into()
 }
 fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage> {
     let selected_id = app.session.host_draft().map(|draft| draft.mode_id.as_str());
@@ -488,22 +556,6 @@ fn status(app: &Desktop, editor: &Editor) -> String {
         Status::Conflict { .. } => "Lighting changed since the draft began. Draft retained; revert it, then read again to use device values.".into(),
         Status::Unverified { problem } => super::view::problem_label(problem),
     }
-}
-
-fn choice_buttons(
-    style: &UiStyle,
-    source: &[ChoiceEdit],
-    editable: bool,
-) -> Element<'static, AppMessage> {
-    control_widgets::choices(
-        style,
-        "Available",
-        source.iter().cloned().map(|choice| Choice {
-            label: choice.label,
-            selected: choice.selected,
-            message: editable.then_some(AppMessage::Lighting(Message::Live(choice.edit))),
-        }),
-    )
 }
 
 fn setting_controls(

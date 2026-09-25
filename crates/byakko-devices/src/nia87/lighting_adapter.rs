@@ -23,10 +23,39 @@ fn host_mode_id(effect_id: u8) -> Option<&'static str> {
     }
 }
 
+fn effect_label(effect: &native::Effect) -> &'static str {
+    match effect.id {
+        0 => "Off",
+        1 => "Solid color",
+        2 => "Breathing",
+        3 => "Neon",
+        4 => "Wave",
+        5 => "Ripple",
+        6 => "Raindrops",
+        7 => "Snake",
+        8 => "Reactive",
+        9 => "Converging",
+        10 => "Sine wave",
+        11 => "Kaleidoscope",
+        12 => "Line wave",
+        13 => "Per-key colors",
+        14 => "Laser",
+        15 => "Circle wave",
+        16 => "Dazzle",
+        17 => "Falling rain",
+        18 => "Meteor",
+        19 => "Reactive fade",
+        20 => "Music follow 3",
+        21 => "Screen color",
+        22 => "Music follow 2",
+        _ => effect.name,
+    }
+}
+
 fn effect_schema(id: String, effect: &native::Effect) -> Effect {
     Effect {
         id,
-        label: effect.name.into(),
+        label: effect_label(effect).into(),
         brightness: effect.value.then_some(0..=4),
         speed: effect.speed.then_some(0..=4),
         options: effect
@@ -252,6 +281,22 @@ pub(super) fn apply_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_native_effect_has_a_plain_english_capability_label() {
+        let caps = capabilities();
+        assert_eq!(caps.effects.len(), 20);
+        for effect in &caps.effects {
+            let id = effect.id.parse::<u8>().unwrap();
+            assert_eq!(
+                effect.label,
+                effect_label(native::effect_by_id(id).unwrap())
+            );
+            assert!(!effect.label.starts_with("Light"));
+        }
+        assert_eq!(caps.effects[12].label, "Line wave");
+        assert_eq!(caps.effects[13].label, "Per-key colors");
+    }
 
     #[test]
     fn transport_accepted_revision_remains_editable_but_cannot_forge_content() {
