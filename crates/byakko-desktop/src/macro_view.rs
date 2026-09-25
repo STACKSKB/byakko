@@ -120,7 +120,6 @@ pub(super) fn editor(app: &Desktop) -> Element<'_, Message> {
         );
     }
     let editable = !app.busy() && *editor.status() == Status::Ready && editor.draft().is_some();
-    let can_save = editable && editor.dirty() && editor.request_apply().is_ok();
     let mut content = column![
         super::macro_files::name_controls(app, editor),
         super::recording::controls(app, editable)
@@ -156,9 +155,6 @@ pub(super) fn editor(app: &Desktop) -> Element<'_, Message> {
                 editable.then_some(Message::Macro(Macro::Edit(Edit::Repeat(count)))),
             ));
         }
-        let repeat = text_input("Count", &app.repeat_input)
-            .on_input_maybe(editable.then_some(|value| Message::Macro(Macro::RepeatInput(value))))
-            .width(app.ui.fields.compact);
         content = content.push(text(format!("{} events", program.events.len())));
         let events = column(program.events.iter().enumerate().map(|(index, event)| {
             row![
@@ -191,48 +187,31 @@ pub(super) fn editor(app: &Desktop) -> Element<'_, Message> {
             .into()
         }))
         .spacing(app.ui.spacing.xs);
-        if program.events.is_empty() {
-            content = content.push(text(
-                "Record input to build a macro, or add an event manually.",
-            ));
-        } else {
-            content = content.push(scrollable(events).height(Fill));
-        }
         content = content.push(
             row![
-                text("Repeat"),
-                repeat,
-                button("Set repeat")
-                    .on_press_maybe(editable.then_some(Message::Macro(Macro::StageRepeat))),
                 button("Clear events").on_press_maybe(
                     (editable && !program.events.is_empty())
                         .then_some(Message::Macro(Macro::Edit(Edit::Clear)))
                 ),
+                button(if app.macro_composer == Composer::Expanded {
+                    "Hide manual editor"
+                } else {
+                    "Edit events manually"
+                })
+                .on_press_maybe(editable.then_some(Message::Macro(Macro::ToggleComposer))),
             ]
             .spacing(app.ui.spacing.s),
-        );
-        content = content.push(
-            button(if app.macro_composer == Composer::Expanded {
-                "Hide manual event editor"
-            } else {
-                "Add or edit event manually"
-            })
-            .on_press_maybe(editable.then_some(Message::Macro(Macro::ToggleComposer))),
         );
         if app.macro_composer == Composer::Expanded {
             content = content.push(composer(app, editor, editable));
         }
+        let event_list: Element<'_, Message> = if program.events.is_empty() {
+            iced::widget::space().height(Fill).into()
+        } else {
+            scrollable(events).height(Fill).into()
+        };
+        content = content.push(event_list);
     }
-    content = content.push(
-        row![
-            button("Save macro").on_press_maybe(can_save.then_some(Message::Macro(Macro::Apply))),
-            button("Revert").on_press_maybe(
-                (editable && editor.dirty()).then_some(Message::Macro(Macro::Revert))
-            ),
-        ]
-        .spacing(app.ui.spacing.s),
-    );
-    content = content.push(super::macro_files::file_controls(app, editor));
     panels::panel(
         &app.ui,
         "Macro editor",

@@ -318,14 +318,11 @@ fn binding_requires_saved_compatible_macro_and_uses_backend_action() {
     send(&mut app, Macro::Edit(Edit::Repeat(1)));
     send(&mut app, Macro::ChooseBinding("hold".into()));
     send(&mut app, Macro::Assign("hold".into()));
+    assert!(app.busy(), "Save & assign must save the macro first");
     assert!(
-        app.macro_notice.is_some(),
-        "an unsaved count must not authorize binding"
+        app.session.changes().is_empty(),
+        "key assignment waits for the macro save"
     );
-    assert!(app.session.changes().is_empty());
-    send(&mut app, Macro::Apply);
-    settle(&mut app);
-    send(&mut app, Macro::Assign("hold".into()));
     settle(&mut app);
     assert!(app.macro_notice.is_none());
     assert_eq!(app.page, Page::Macros);
@@ -420,7 +417,6 @@ fn messages_edit_and_verify_a_memory_slot_without_losing_keymap_draft() {
     send(&mut app, Macro::Form(Input::Wait("20".into())));
     send(&mut app, Macro::StageEvent);
     send(&mut app, Macro::RepeatInput("0".into()));
-    send(&mut app, Macro::StageRepeat);
     let desired = app.session.macros().unwrap().draft().unwrap().clone();
     assert_eq!(desired.events.len(), 3);
     assert_eq!(desired.events[0].delay_ms, 0);
@@ -476,15 +472,14 @@ fn rejected_input_is_atomic_and_sequence_edits_clear_replacement_target() {
 }
 
 #[test]
-fn staging_repeat_count_preserves_an_unsubmitted_event_edit() {
+fn editing_repeat_count_preserves_an_unsubmitted_event_edit() {
     let mut app = loaded();
     send(&mut app, Macro::Inspect(0));
     send(&mut app, Macro::Form(Input::Wait("37".into())));
     send(&mut app, Macro::RepeatInput("03".into()));
-    send(&mut app, Macro::StageRepeat);
 
     assert!(app.macro_notice.is_none());
-    assert_eq!(app.repeat_input, "3");
+    assert_eq!(app.repeat_input, "03");
     assert_eq!(app.macro_form.target, Some(0));
     assert_eq!(app.macro_form.wait, "37");
     assert_eq!(
@@ -538,4 +533,29 @@ fn macro_failure_prevents_close_and_stale_success_cannot_hide_it() {
         app.session.macros().unwrap().status(),
         MacroStatus::Unverified { .. }
     ));
+}
+
+#[test]
+fn repeat_edit_stages_without_a_separate_set_button_and_invalid_text_blocks_save() {
+    let mut app = loaded();
+    send(&mut app, Macro::RepeatInput("3".into()));
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        3
+    );
+    assert!(app.macro_repeat_input_valid());
+    send(&mut app, Macro::RepeatInput("".into()));
+    assert!(!app.macro_repeat_input_valid());
+    send(&mut app, Macro::Apply);
+    assert!(!app.busy());
+    assert!(
+        app.macro_notice
+            .as_deref()
+            .unwrap()
+            .contains("valid repeat count")
+    );
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        3
+    );
 }

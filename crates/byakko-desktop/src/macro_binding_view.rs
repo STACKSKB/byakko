@@ -1,9 +1,13 @@
 //! Binding choices are advertised actions, not UI-generated firmware codes.
 use super::{Desktop, Message, macro_editor::Message as Macro, panels};
-use byakko_core::{macros::editor::Editor, session::Status};
+use byakko_core::{
+    Action,
+    macros::{Binding, editor::Editor},
+    session::Status,
+};
 use iced::{
     Element,
-    widget::{button, column, row, text},
+    widget::{button, column, row, text, text_input},
 };
 
 pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Message> {
@@ -21,14 +25,11 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
         .keys
         .iter()
         .find(|key| Some(&key.id) == app.selected.as_ref());
-    let ready = !app.busy()
-        && *app.session.status() == Status::Ready
-        && key.is_some_and(|key| key.writable);
-    let selected = app
-        .macro_binding_choice
-        .as_ref()
-        .filter(|(slot, _)| slot == editor.slot())
-        .map(|(_, id)| id.as_str());
+    let editable = !app.busy()
+        && *editor.status() == byakko_core::macros::editor::Status::Ready
+        && editor.draft().is_some();
+    let selected_choice = selected_binding(app, editor);
+    let selected = selected_choice.map(|choice| choice.id.as_str());
     let modes = row(choices.iter().map(|choice| {
         panels::selectable_button(
             &app.ui,
@@ -39,51 +40,154 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
     }))
     .spacing(app.ui.spacing.s)
     .wrap();
-    let selected_choice = choices
-        .iter()
-        .find(|choice| selected == Some(choice.id.as_str()));
-    let restriction = selected_choice.and_then(|choice| editor.binding_action(&choice.id).err());
-    let can_assign = ready
-        && selected_choice.is_some()
-        && restriction.is_none()
-        && app.session.changes().is_empty();
+    let restriction = selected_choice.and_then(|choice| app.assignment_problem(&choice.id));
+    let can_assign = !app.busy() && selected_choice.is_some() && restriction.is_none();
+    let target = key.map_or_else(|| "Key: —".to_owned(), |key| format!("Key: {}", key.label));
+    let can_save = editable
+        && editor.dirty()
+        && editor.request_apply().is_ok()
+        && app.macro_repeat_input_valid();
     let mut content = column![
+        text(target),
         modes,
-        button("Assign to key").on_press_maybe(
+        row![
+            text("Repeat"),
+            text_input("Count", &app.repeat_input)
+                .width(app.ui.fields.compact)
+                .on_input_maybe(
+                    editable.then_some(|value| Message::Macro(Macro::RepeatInput(value)))
+                ),
+        ]
+        .spacing(app.ui.spacing.s),
+        button(if editor.dirty() {
+            "Save & assign"
+        } else {
+            "Assign macro"
+        })
+        .on_press_maybe(
             selected_choice
                 .filter(|_| can_assign)
                 .map(|choice| Message::Macro(Macro::Assign(choice.id.clone())))
         ),
+        row![
+            button("Save only").on_press_maybe(can_save.then_some(Message::Macro(Macro::Apply))),
+            button("Revert edits").on_press_maybe(
+                (editable && editor.dirty()).then_some(Message::Macro(Macro::Revert))
+            ),
+        ]
+        .spacing(app.ui.spacing.s),
     ]
     .spacing(app.ui.spacing.s);
-    if key.is_none() {
-        content = content.push(text("Select a key on the keyboard to assign this macro."));
-    }
-    if let Some(choice) = selected_choice
-        && let Some(required) = choice.required_repeat_count
-        && editor
-            .draft()
-            .is_some_and(|program| program.repeat_count != required)
-    {
-        content = content.push(text(format!(
-            "Save this macro with repeat count {required} to use this mode."
-        )));
-    } else if let Some(reason) = restriction {
+    if let Some(reason) = restriction {
         content = content.push(text(reason));
     }
-    if !app.session.changes().is_empty() {
-        content = content.push(text(
-            "Save or revert other key assignments before assigning this macro.",
-        ));
-    }
     if *app.session.status() != Status::Ready {
-        content = content.push(
-            row![
-                text("Read keymaps before assigning."),
-                button("Read keymaps").on_press_maybe((!app.busy()).then_some(Message::Read)),
-            ]
-            .spacing(app.ui.spacing.s),
-        );
+        content = content
+            .push(button("Reload keyboard").on_press_maybe((!app.busy()).then_some(Message::Read)));
     }
+    content = content.push(super::macro_files::file_controls(app, editor));
     panels::panel(&app.ui, "Playback", content.into())
+}
+
+/// Prefer the user's explicit mode, then preserve the mode already bound to
+/// the selected key, then pick a mode compatible with this macro's repeat
+/// count. If none are compatible, keep the first choice selected so its reason
+/// is visible beside the disabled Assign button.
+pub(super) fn selected_binding<'a>(app: &Desktop, editor: &'a Editor) -> Option<&'a Binding> {
+    let choices: Vec<_> = editor
+        .capabilities()
+        .bindings
+        .iter()
+        .filter(|binding| binding.slot == editor.slot())
+        .collect();
+    let explicit = app
+        .macro_binding_choice
+        .as_ref()
+        .filter(|(slot, _)| slot == editor.slot())
+        .and_then(|(_, id)| choices.iter().copied().find(|choice| choice.id == *id));
+    let bound_action = app
+        .selected
+        .as_deref()
+        .and_then(|key| app.session.draft()?.get(&app.layer)?.get(key));
+    choose_binding(
+        &choices,
+        explicit,
+        bound_action,
+        editor.draft().map(|program| program.repeat_count),
+    )
+}
+
+fn choose_binding<'a>(
+    choices: &[&'a Binding],
+    explicit: Option<&'a Binding>,
+    bound_action: Option<&Action>,
+    repeat_count: Option<u32>,
+) -> Option<&'a Binding> {
+    explicit
+        .or_else(|| {
+            bound_action.and_then(|action| choices.iter().copied().find(|c| &c.action == action))
+        })
+        .or_else(|| {
+            choices.iter().copied().find(|choice| {
+                choice
+                    .required_repeat_count
+                    .is_none_or(|required| Some(required) == repeat_count)
+            })
+        })
+        .or_else(|| choices.first().copied())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::choose_binding;
+    use byakko_core::{Action, macros::Binding};
+
+    fn binding(id: &str, required_repeat_count: Option<u32>) -> Binding {
+        Binding {
+            slot: "slot-00".into(),
+            id: id.into(),
+            label: id.into(),
+            action: Action::Macro {
+                slot: 0,
+                mode: if id == "counted" { 0 } else { 1 },
+            },
+            required_repeat_count,
+        }
+    }
+
+    #[test]
+    fn explicit_choice_takes_precedence() {
+        let counted = binding("counted", None);
+        let hold = binding("hold", Some(1));
+        let choices = [&counted, &hold];
+        let selected = choose_binding(&choices, Some(&hold), Some(&counted.action), Some(1));
+        assert_eq!(selected.map(|choice| choice.id.as_str()), Some("hold"));
+    }
+
+    #[test]
+    fn preserves_the_selected_keys_advertised_binding() {
+        let counted = binding("counted", None);
+        let hold = binding("hold", Some(1));
+        let choices = [&counted, &hold];
+        let selected = choose_binding(&choices, None, Some(&hold.action), Some(2));
+        assert_eq!(selected.map(|choice| choice.id.as_str()), Some("hold"));
+    }
+
+    #[test]
+    fn defaults_to_first_mode_compatible_with_repeat_count() {
+        let hold = binding("hold", Some(1));
+        let counted = binding("counted", None);
+        let choices = [&hold, &counted];
+        let selected = choose_binding(&choices, None, None, Some(2));
+        assert_eq!(selected.map(|choice| choice.id.as_str()), Some("counted"));
+    }
+
+    #[test]
+    fn falls_back_to_first_choice_to_expose_its_restriction() {
+        let hold = binding("hold", Some(1));
+        let toggle = binding("toggle", Some(1));
+        let choices = [&hold, &toggle];
+        let selected = choose_binding(&choices, None, None, Some(2));
+        assert_eq!(selected.map(|choice| choice.id.as_str()), Some("hold"));
+    }
 }

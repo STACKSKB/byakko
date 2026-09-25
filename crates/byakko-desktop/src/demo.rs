@@ -12,7 +12,7 @@ use byakko_devices::memory::MemoryDevice;
 pub fn device() -> Result<MemoryDevice, String> {
     let descriptor = Descriptor {
         backend_id: "memory".into(),
-        device_name: "Memory keyboard · no hardware writes".into(),
+        device_name: "Demo keyboard".into(),
         keys: ["Alpha", "Beta", "Fixed"]
             .into_iter()
             .enumerate()
