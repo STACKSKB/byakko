@@ -11,7 +11,13 @@ pub(crate) struct Pending {
 
 impl Pending {
     pub(crate) fn postpone(&mut self, now: Instant, delay: Duration) {
-        self.due = Some(now + delay);
+        if self
+            .edits
+            .iter()
+            .any(|edit| matches!(edit, Edit::Color(_) | Edit::Channel(_, _)))
+        {
+            self.due = Some(now + delay);
+        }
     }
     pub fn has_pending(&self) -> bool {
         !self.blocked && !self.edits.is_empty()
@@ -55,9 +61,10 @@ impl Pending {
                     .retain(|earlier| !matches!(earlier, Edit::Channel(_, _)));
             }
         }
+        let coloring = matches!(edit, Edit::Color(_) | Edit::Channel(_, _));
         self.edits.push(edit);
         debug_assert!(self.edits.len() <= 8);
-        self.due = Some(now + delay);
+        self.due = coloring.then_some(now + delay);
     }
 
     pub fn projected(&self, editor: &Editor) -> Result<Option<Setting>, String> {
@@ -107,14 +114,18 @@ mod tests {
         pending.push(Edit::Brightness(10), now, delay);
         pending.push(Edit::Brightness(20), now, delay);
         assert_eq!(pending.edits, vec![Edit::Brightness(20)]);
+        assert!(pending.ready(now));
+        pending.push(Edit::Color(Color::Rgb([1, 2, 3])), now, delay);
         assert!(!pending.ready(now));
         assert!(pending.ready(now + delay));
-        pending.push(Edit::Color(Color::Rgb([1, 2, 3])), now, delay);
         pending.push(Edit::Channel(Channel::Red, 4), now, delay);
         pending.push(Edit::Color(Color::Rainbow), now, delay);
         assert_eq!(pending.edits.len(), 2);
         pending.push(Edit::Effect("other".into()), now, delay);
         assert_eq!(pending.edits, vec![Edit::Effect("other".into())]);
+        assert!(pending.ready(now));
+        pending.postpone(now, delay);
+        assert!(pending.ready(now));
         pending.block();
         assert!(!pending.has_pending());
         assert!(pending.has_queued());

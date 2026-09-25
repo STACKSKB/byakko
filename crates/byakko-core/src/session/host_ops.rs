@@ -25,7 +25,11 @@ impl Session {
     }
 
     pub fn select_host_mode(&mut self, mode_id: &str) -> Result<(), String> {
-        self.require_idle()?;
+        // Selecting a local editor does not touch the device or an in-flight
+        // onboard write. A running host session must retain its own settings.
+        if matches!(self.activity, Activity::HostLighting { .. }) {
+            return Err("Stop host lighting before selecting another host mode".into());
+        }
         let editor = self
             .lighting
             .as_ref()

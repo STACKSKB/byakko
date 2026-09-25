@@ -1,9 +1,12 @@
 //! Local capture controls. Display identities belong to the OS sampler, not HID.
-use crate::{Message as AppMessage, control_widgets, panels::UiStyle};
+use crate::{
+    Message as AppMessage,
+    panels::{self, UiStyle},
+};
 use byakko_devices::screen_sample::{DisplaySource, ScreenCapture, ScreenSampling};
 use iced::{
-    Element, Task,
-    widget::{button, column, text},
+    Alignment, Element, Task,
+    widget::{button, column, pick_list, row, slider, text},
 };
 
 #[derive(Clone, Debug)]
@@ -31,6 +34,18 @@ pub(crate) struct Controls {
 
 fn message(value: Message) -> AppMessage {
     AppMessage::Lighting(super::Message::Screen(value))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DisplayChoice {
+    id: Option<String>,
+    label: String,
+}
+
+impl std::fmt::Display for DisplayChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
+    }
 }
 
 impl Controls {
@@ -83,73 +98,100 @@ impl Controls {
     }
 
     pub fn view(&self, style: &UiStyle, editable: bool) -> Element<'static, AppMessage> {
-        let mut choices = vec![control_widgets::Choice {
-            label: "Primary / default display".into(),
-            selected: self.capture.display_id.is_none(),
-            message: editable.then(|| message(Message::Display(None))),
+        let mut displays = vec![DisplayChoice {
+            id: None,
+            label: "Primary display".into(),
         }];
-        if let Inventory::Ready(displays) = &self.inventory {
-            choices.extend(displays.iter().map(|display| control_widgets::Choice {
+        if let Inventory::Ready(sources) = &self.inventory {
+            displays.extend(sources.iter().map(|display| DisplayChoice {
+                id: Some(display.id.clone()),
                 label: display.label.clone(),
-                selected: self.capture.display_id.as_ref() == Some(&display.id),
-                message: editable.then(|| message(Message::Display(Some(display.id.clone())))),
             }));
         }
+        let selected = displays
+            .iter()
+            .find(|display| display.id == self.capture.display_id)
+            .cloned()
+            .unwrap_or_else(|| DisplayChoice {
+                id: self.capture.display_id.clone(),
+                label: "Selected display (unavailable)".into(),
+            });
+        if !displays.contains(&selected) {
+            displays.push(selected.clone());
+        }
+        if !editable {
+            displays.retain(|display| display == &selected);
+        }
         let mut controls = column![
-            control_widgets::choices(style, "Capture display", choices),
-            button("Find / refresh displays").on_press_maybe(
-                (editable && !matches!(self.inventory, Inventory::Loading))
-                    .then(|| message(Message::Refresh))
-            ),
+            row![
+                text("Display").width(style.fields.compact),
+                crate::clipped_dropdown::clipped(
+                    pick_list(displays, Some(selected), |display: DisplayChoice| message(
+                        Message::Display(display.id)
+                    ))
+                    .width(style.fields.regular)
+                    .into()
+                ),
+                button("Refresh").on_press_maybe(
+                    (editable && !matches!(self.inventory, Inventory::Loading))
+                        .then(|| message(Message::Refresh))
+                ),
+            ]
+            .spacing(style.spacing.s)
+            .align_y(Alignment::Center),
+            row![
+                text("Sample").width(style.fields.compact),
+                panels::selectable_button(
+                    style,
+                    "Average",
+                    matches!(self.capture.sampling, ScreenSampling::Average),
+                    editable.then(|| message(Message::Sampling(ScreenSampling::Average)))
+                ),
+                panels::selectable_button(
+                    style,
+                    "Point",
+                    matches!(self.capture.sampling, ScreenSampling::Point { .. }),
+                    editable.then(|| message(Message::Sampling(ScreenSampling::Point {
+                        x: 500,
+                        y: 500
+                    })))
+                ),
+            ]
+            .spacing(style.spacing.s)
+            .align_y(Alignment::Center),
         ]
         .spacing(style.spacing.s);
         match &self.inventory {
-            Inventory::Loading => controls = controls.push(text("Finding displays…")),
+            Inventory::Loading => controls = controls.push(text("Finding displays...")),
             Inventory::Failed(reason) => controls = controls.push(text(reason.clone())),
             _ => {}
         }
-        if let Some(id) = &self.capture.display_id {
-            controls = controls.push(text(format!("Selected display: {id}")));
-        }
-        controls = controls.push(control_widgets::choices(
-            style,
-            "Sample",
-            [
-                control_widgets::Choice {
-                    label: "Display average".into(),
-                    selected: matches!(self.capture.sampling, ScreenSampling::Average),
-                    message: editable.then(|| message(Message::Sampling(ScreenSampling::Average))),
-                },
-                control_widgets::Choice {
-                    label: "Point on display".into(),
-                    selected: matches!(self.capture.sampling, ScreenSampling::Point { .. }),
-                    message: editable.then(|| {
-                        message(Message::Sampling(ScreenSampling::Point { x: 500, y: 500 }))
-                    }),
-                },
-            ],
-        ));
         if let ScreenSampling::Point { x, y } = self.capture.sampling {
-            controls = controls
-                .push(text("Position: 0 is left/top, 1000 is right/bottom."))
-                .push(control_widgets::level(
-                    style,
-                    "Horizontal",
-                    0..=1000,
-                    x,
-                    editable.then_some(move |x| {
-                        message(Message::Sampling(ScreenSampling::Point { x, y }))
-                    }),
-                ))
-                .push(control_widgets::level(
-                    style,
-                    "Vertical",
-                    0..=1000,
-                    y,
-                    editable.then_some(move |y| {
-                        message(Message::Sampling(ScreenSampling::Point { x, y }))
-                    }),
-                ));
+            for (label, value, horizontal) in [("Horizontal", x, true), ("Vertical", y, false)] {
+                let control: Element<'static, AppMessage> = if editable {
+                    slider(0..=1000, value, move |value| {
+                        message(Message::Sampling(if horizontal {
+                            ScreenSampling::Point { x: value, y }
+                        } else {
+                            ScreenSampling::Point { x, y: value }
+                        }))
+                    })
+                    .step(1u16)
+                    .width(style.fields.regular)
+                    .into()
+                } else {
+                    iced::widget::space().width(style.fields.regular).into()
+                };
+                controls = controls.push(
+                    row![
+                        text(label).width(style.fields.compact),
+                        control,
+                        text(format!("{}%", value / 10)),
+                    ]
+                    .spacing(style.spacing.s)
+                    .align_y(Alignment::Center),
+                );
+            }
         }
         controls.into()
     }
