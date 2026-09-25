@@ -39,13 +39,14 @@ captures and vendor fixtures under ignored paths are not in Git.
 - [ ] After installing the rule as described in `docs/linux-install.md`, verify
   that only the intended hidraw node gets the active-seat ACL. Run the desktop
   as the normal user. First run `target/release/byakko-cli devices`, then one
-  `target/release/byakko-cli read` and repeat that read to check stability.
+  `target/release/byakko-cli read` once to establish the baseline.
   If the first read fails, record its exact stderr and the ACL state before
   changing transport code or trying a setter. Then use `read-lighting`,
   `read-settings`, `read-colors`, and `read-macro slot-49` for
   initial read-only checks. Capture a new local archive with
-  `target/release/byakko-cli capture-archive NEW_PATH.json` and repeat the read
-  to establish stability. Compare the two saved files with
+  `target/release/byakko-cli capture-archive NEW_PATH.json` using one complete
+  sweep. Do not duplicate the sweep or reread every section as a preflight.
+  Where an earlier archive already exists, compare offline with
   `target/release/byakko-cli compare-archives FIRST.json SECOND.json`; an empty
   JSON list means the native configuration matches. The comparison runs offline
   and uses the same forward/reverse preflight as archive review, so an
@@ -66,8 +67,7 @@ captures and vendor fixtures under ignored paths are not in Git.
   but is not yet a successful device I/O test. Do not change that mapping
   merely because the ioctl returns 64 rather than 65 bytes.
 
-- [ ] Check Linux removal/reconnect, one-device selection, GUI page entry
-  reads, and clean shutdown. Record whether X11 and Wayland behave differently.
+- [ ] Check Linux removal/reconnect, one-device selection, GUI connection loads with no reads on page navigation, and clean shutdown. Record whether X11 and Wayland behave differently.
   Physical key output, macro playback/timing, RGB visual behavior and Linux
   write/readback/restoration remain separate acceptance gates.
 
@@ -100,7 +100,8 @@ captures and vendor fixtures under ignored paths are not in Git.
 - [ ] After read-only picture stability and recovery checks, exercise one
   per-key color edit with `plan-colors` and explicit `apply-colors`; verify the
   backup, full picture readback, visible output and restoration. Keep this
-  pending while the Windows Iced picture write path lacks physical acceptance.
+  coordinated with the user while partial-upload recovery remains unresolved;
+  newer Windows physical picture-upload evidence is recorded separately.
 
 ## Linux verification record (2026-09-23)
 
@@ -302,3 +303,38 @@ read-only transport/identity checks first. See
 The stock-firmware Nia87 USB path comes first. QMK/VIA and 2.4 GHz remain
 later adapters. Keep protocol-specific reports in `byakko-devices`, portable
 session decisions in `byakko-core`, and the Iced GUI in `byakko-desktop`.
+
+## Current read-only acceptance (2026-09-25, source `f8583d7`)
+
+The user connected the Nia87 to this Linux laptop. The rebuilt CLI identified
+`/dev/hidraw3`; the host node already had a `user:three:rw-` ACL. No permission
+changes were made. The sandbox could enumerate sysfs but could not see the
+host node (`No such file or directory`); the authorized host read as the normal
+user succeeded. This was a sandbox visibility limit, not a HID protocol error.
+
+One `read`, `read-lighting`, `read-settings`, `read-colors`, `read-macro slot-49`
+and `capture-archive` pass succeeded on the rebuilt source. No setters were
+sent. Picture output carried `Readback` evidence and context `[4,0]`; lighting
+reported effect 4, speed 2, brightness 4, right/rainbow. The keymap JSON hash
+matches the earlier Linux keymap evidence. The single archive's hash matches
+both historical archives recorded at `cc03b34`; no second current archive was
+required or performed.
+
+Local evidence directory: `/tmp/byakko-readonly-20260925-r49cg5m_` (not tracked;
+retain separately if long-term evidence is needed). Each command has stdout
+and stderr. SHA-256:
+
+| Output | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Keymap JSON | 36186 | `75b94b74a58f5f012ada73b19763469eba22a8cab50b2ec1ded9278de8d8952f` |
+| Lighting JSON | 686 | `ee3a8262010578c60ab498ceb6ae647f20ec0cd96649b9a1e5d6eef411c0c8df` |
+| Settings JSON | 2291 | `f386ec90f827e8f3a931da9a3379426dc6be82439265143d0c76599567e3f433` |
+| Colors JSON | 8186 | `998a47ff821693f0cca4c678e2243949929057e830d1960100e695e778995d45` |
+| Macro 49 JSON | 1949 | `9a9fa47a17c3fa2d615e4165141068bcd6e89b4b9262ffe70c5eb92fefe55306` |
+| Native archive wrapper | 419201 | `6bbc238f9b2e2bda6703f361168c68394c71b4e3e1c367187aa38fc4f77c7cf6` |
+
+This closes the current Linux read-only selector-context check. It does not
+establish physical writes, playback, power-cycle persistence, GUI behavior or
+recovery. The desktop/CLI release build and all 376 selected product tests also
+passed at this source; recovery classification tests do not prove hardware
+recovery.

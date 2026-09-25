@@ -16,9 +16,13 @@ per-page identity barriers and pre-write fresh-state comparisons. Load each
 feature once, back up the cached before-image, and read the affected feature
 once after a write. Retry only a concrete failure where firmware evidence calls
 for it. Keep exact collection selection, report/schema validation, known setter
-settling delays, correlated completions, and verified recovery. Successful
+settling delays, correlated completions, and verified recovery. Keymap,
+settings, and macro writes use one post-write feature readback. Ordinary global-
+lighting and picture setters are exceptions: after known pacing, success means
+transport acceptance and does not trigger a post-write getter. Successful
 feature writes must not invalidate unrelated caches or restart library scans.
-A real selector change still invalidates selector-dependent picture data.
+A real selector change invalidates selector-dependent picture data, which
+requires a new picture read.
 CLI file workflows may read once to establish the file's current baseline;
 the executor must not repeat that preflight. Archive capture/verification uses
 one complete sweep, not duplicated sweeps and section-by-section rereads.
@@ -126,31 +130,30 @@ one complete sweep, not duplicated sweeps and section-by-section rereads.
 - Portable Nia87 keymap edits must use advertised typed actions. New opaque
   four-byte bindings are not programmable through the frontend contract;
   existing opaque values remain lossless in reads and native archives.
-- The CLI keymap file workflow uses the same session/executor write path as
-  Iced: require a freshly matching raw revision, validate the intended changes
-  against the Nia87 adapter, then wait for backup, write, and full readback.
-  The settings-file workflow follows the same boundary and permits only one
-  changed scalar field per apply, matching the backend's one-field transaction.
-  The global-lighting file workflow requires the same fresh raw revision and
-  passes the Nia87 adapter's pure effect preflight before staging through the
-  shared session.
+- CLI file workflows may read once to establish the file's current baseline;
+  the serialized executor must not repeat that preflight. Keymap and settings
+  writes use the shared session path, a cached before-image backup, then one
+  complete post-write feature readback. Settings permits one scalar field per
+  apply. Ordinary global-lighting and picture setters report transport
+  acceptance after their known pacing; they do not imply device readback.
   The macro snapshot-file workflow plans against one fresh slot revision and
   stages through the correlated session import and guarded executor. Do not
   confuse that backend snapshot with a portable macro document; changed
   programs with stored repeat count zero remain unwritable pending playback
   evidence.
-  The per-key color file workflow requires a complete advertised map and fresh
-  raw picture revision and any backend-owned selector context; it stages changed
-  colors through one session command. Nia87 reads the global effect/option
-  around each picture read and rechecks that context inside the guarded color
-  transaction. A matching RGB revision alone does not authorize a write after
-  the picture selector changes.
+  The per-key color file workflow requires a complete advertised map and a
+  matching cached picture revision/context; it stages changed colors through
+  one session command. A real lighting selector change invalidates
+  selector-dependent picture data and requires a new picture read, which may
+  be requested as part of the selector activation flow. Do not claim a per-write fresh selector comparison.
   A full Nia87 archive contains only the picture response under its captured
   selector. Its preflight must reject a restore that changes both the lighting
   selector and picture colors in one transaction; there is no verified
   multi-selector backup or recovery representation yet.
-  Keep physical color writes pending until the earlier recovery concern and
-  Iced picture-write acceptance gate can be addressed with user interaction.
+  Recent physical evidence covers rebuilt Iced bulk picture submissions and
+  visible steady-lighting choices; retain the earlier failed picture recovery
+  as an unresolved concern. Do not broaden that evidence into archive restore,
+  power-cycle persistence, or general recovery acceptance.
   Keep CLI command parsing closed and typed; load only the file associated with
   that command. Preserve offline archive comparison before device discovery
   and use the shared bounded JSON reader for snapshot inputs.
@@ -160,12 +163,14 @@ one complete sweep, not duplicated sweeps and section-by-section rereads.
 
 - The pure model, memory backend, Nia87 adapter, and Iced keymap, macro,
   built-in global lighting, per-key picture, scalar settings and native archive
-  capture/review/apply workflows now exercise the approved boundary. The Iced
-  picture flow has only read-only USB baseline verification; keep live picture
-  writes pending while physical acceptance is unavailable and the earlier
-  recovery discrepancy is unresolved. RGB storage
-  is separate from selecting the global picture effect. Settings stage one
-  field per native transaction and have read-only USB verification in Iced.
+  capture/review/apply workflows now exercise the approved boundary. Iced
+  picture submissions have bounded physical acceptance evidence: repeated
+  full-image uploads and visible color changes succeeded. Successful ordinary
+  writes mean transport accepted, with cached backup and explicit later read
+  available. The earlier failed picture recovery discrepancy remains
+  unresolved. RGB storage is separate from selecting the global picture
+  effect. Settings stage one field per native transaction; Iced physical
+  write/restore acceptance remains open.
   Native archive apply now has typed recovery outcomes and a reviewed Iced
   action, but has no live write acceptance in this slice; the earlier failed
   automatic recovery remains open. Iced now has a read-only, bounded USB
@@ -210,8 +215,12 @@ one complete sweep, not duplicated sweeps and section-by-section rereads.
   slot and remains local. The library shows configured/bound slots; Add chooses
   the first unbound free slot. Selecting a macro reads its editable snapshot.
   Explicit reads remain for failed or invalidated feature snapshots. The Windows
-  release containing this UX change has been opened for user validation; no
-  physical acceptance is implied by headless tests.
+  release containing this UX change has been opened for user validation. The
+  2026-09-25 camera capture shows the retained color-brush path painting F2
+  and F3 green in the reviewed release; this does not establish subsecond
+  batching. The official settings capture and current Iced session provide
+  reference/implementation evidence, not physical Iced settings write
+  acceptance.
 - Preserve existing protocol fixtures and research evidence. Reuse reviewed
   codecs selectively; screen sampling is an OS effect separate from HID and
   the root sampler module is a compatibility re-export.
@@ -232,8 +241,8 @@ The user has requested that work stop after the specifically flagged UX fixes.
 Do not resume parity work or further UX redesign without their next instruction.
 Lighting now sends user choices automatically through coalesced intent queues;
 normal use does not require Read/Apply. The native color picker replaces RGB
-sliders. Verified writes retain unrelated cached baselines while backend fresh
-expected-state checks still protect each write. The discard prompt is modal.
+sliders. Verified writes retain unrelated cached baselines. The discard prompt
+is modal.
 Macro creation can foreground-read an unbound candidate while discovery remains
 passive; unknown slots must never be assumed empty. Physical LED response and
 final rendered layout remain for the user's review when they return.

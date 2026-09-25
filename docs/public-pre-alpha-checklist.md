@@ -106,17 +106,13 @@ optional source-inventory script, not the Cargo build or the renderer itself.
   desktop, CLI and helper with the lockfile. Record the tested toolchain and
   source revision; keep research tools/legacy egui separate from the product.
   No CI/CD. Recheck core's WebAssembly build where the target is installed.
-- [ ] **Verify the offered downloads or source-build instructions.** Check
-  startup, runtime dependencies, normal-user data/backup paths and the recovery
-  walkthrough. State version/commit and supported environments. Ask the user
-  before choosing a packaging format or changing installation behavior.
-- [ ] **Finish the Linux permission/distribution experience.** The repository
-  currently requires administrator-installed helper/udev files; an application
-  image alone does not establish hidraw access. Ask the user to choose the
-  pre-alpha distribution approach while retaining the exact collection gate. Verify only
-  the intended node receives the active-seat ACL, then follow the read-only-first
-  sequence in [Linux handoff](linux-handoff.md). Current-revision Linux GUI,
-  Wayland startup and write/readback/restoration acceptance remain separate.
+- [x] **Provide source-build instructions.** The user selected source checkout
+  and local builds only; see [source build](source-build.md). Binary downloads,
+  packaging, signing, upgrades and installers are out of this release scope.
+- [ ] **Verify normal-user Linux access and current read-only behavior.** Keep
+  the narrow helper/udev instructions for source users. Verify only the intended
+  node gets the active-seat ACL, then follow [Linux handoff](linux-handoff.md).
+  Existing permissions are used during this run; no permission changes are made.
 
 ### Distribution audit and public documentation
 
@@ -125,11 +121,12 @@ optional source-inventory script, not the Cargo build or the renderer itself.
   later-version option for Byakko-owned code, docs and assets, and all five
   workspace manifests declare `GPL-3.0-or-later`. Third-party licenses remain
   intact, including the renderer's MIT license.
-- [ ] **Assemble the complete notices and provenance bundle.** Repair the source
-  inventory, audit the exact compiled sources/assets/native libraries, include
-  applicable dependency notices and compound obligations, and retain the local
-  renderer's upstream revision and patch record. Passing metadata selections
-  alone is not a complete distribution audit. Also run a current dependency
+- [x] **Preserve source licenses and provenance.** The source-only checkout
+  includes GPL v3, the project later-version grant, the vendored MIT license and
+  supplemental notices. The renderer inventory is repaired and records its
+  source/patch hashes. Cargo fetches other dependencies with their own notices;
+  no third-party binary notice bundle is shipped by this pre-alpha.
+- [ ] **Check dependency advisories.** Also run a current dependency
   advisory check; no `cargo audit`/`cargo deny` command was installed for this
   review, so no current vulnerability clearance is claimed.
 - [ ] **Publish one accurate support/acceptance matrix and recovery guide.**
@@ -142,7 +139,8 @@ optional source-inventory script, not the Cargo build or the renderer itself.
   Measure comparable startup, idle, active editing and sustained host lighting
   against Sharkfin and the official application; include child processes,
   methodology and limits. Existing warmed-idle results do not cover all workloads.
-- [ ] **Record the i18n catalog and initial-language rollout plan.** Cover English,
+- [x] **Record the i18n catalog and initial-language rollout plan.** See
+  [localization plan](localization-plan.md). Cover English,
   Hindi, Bengali, Kannada, Telugu, Tamil, Marathi and Japanese; keep protocol/state
   behavior independent of UI text. The repository requires a plan now, not
   premature translation polish. State the actual language availability of the
@@ -216,3 +214,14 @@ The user selected a source-checkout-only pre-alpha. Binary packaging, signing,
 installers and CI/CD are out of scope. Source-build and normal-user Linux access
 instructions remain required. Hardware is available on Linux and Windows;
 physical interaction will be coordinated around the user's availability.
+
+- [x] Finding 4 closed: README, source-build/support guides, AGENTS, frontend
+  contract and acceptance docs distinguish current behavior from dated evidence.
+  Source-only scope and English availability are explicit; the localization
+  plan records all requested initial languages without adding unapproved UX.
+- [x] Current Linux read-only pass completed at `f8583d7`: all scalar/picture/
+  macro checks and one archive capture passed, with the archive matching the
+  historical hash. Existing user ACL retained; no setters or permission changes.
+- [x] Windows historical failure evidence reconciled offline; exact byte diffs
+  recorded in the investigation. No fault-run transport trace exists. Cause
+  and recovery acceptance remain open; no new fault experiment was performed.

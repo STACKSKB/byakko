@@ -1,11 +1,14 @@
-# Linux desktop setup (hardware validation pending)
+# Linux source-checkout setup (pre-alpha)
 
 Byakko uses native hidraw access. The application runs as your desktop user;
 installing the device permission rule requires administrator access once.
 No background driver service, browser authorization, or JavaScript is involved.
 
-Build the Iced desktop and the narrow native permission helper on Linux with
-Rust and the native dependencies described in [Linux readiness](linux-readiness.md):
+This is a source-checkout procedure for pre-alpha evaluation, not a packaged
+user installation guide. Use the current [source build instructions](source-build.md)
+for Rust versions, native dependencies, and reproducible build commands. The
+permission helper and udev rule below are still required by this checkout's
+current hidraw access path:
 
 ```sh
 cargo build --release --locked -p byakko-desktop
@@ -49,8 +52,8 @@ broaden the rule to every hidraw device to work around a mismatch.
 The application also checks the opened collection itself. It requires the
 vendor Application Collection to contain exactly one unnumbered Feature report
 with 8-bit fields and a count of 64; a matching VID/PID and usage alone cannot
-authorize a 65-byte host transaction. This parser check compiles on Linux, but
-the actual hidraw representation and I/O still need a Linux hardware test.
+authorize a 65-byte host transaction. The dated
+read-only HID acceptance is recorded in [Linux handoff](linux-handoff.md).
 
 For diagnosis, identify the candidate `hidrawN` with the optional research
 command `cargo run --locked -p byakko --no-default-features -- devices`, then
@@ -65,8 +68,11 @@ getfacl /dev/hidrawN
 The helper prints `nia87-config` only on a match. `uaccess` grants access through
 the active local desktop seat; an SSH/RDP/headless session may not receive that
 ACL. Such deployments need a separately reviewed, dedicated-group policy.
-Linux device reads, writes, restoration, and GUI runtime remain unverified;
-cross-linking and helper unit tests do not establish hardware compatibility.
+The dated Linux evidence in [the handoff](linux-handoff.md) records successful
+normal-user read-only checks on 2026-09-23 and 2026-09-25, including current-source
+section reads and a single-sweep archive. It does not establish Linux writes,
+restoration or GUI behavior. Follow the read-only-first sequence before writes.
+Windows physical picture and steady-lighting evidence is tracked separately.
 
 Rule syntax and local-seat ACL ordering are based on systemd's
 [udev documentation](https://www.freedesktop.org/software/systemd/man/udev.html)

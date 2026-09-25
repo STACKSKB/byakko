@@ -29,7 +29,7 @@ fn main() -> device::Result<()> {
         })
     });
     let outcome = match &result {
-        Ok(Ok(_)) => "Two complete captures matched".to_owned(),
+        Ok(Ok(_)) => "One complete capture read".to_owned(),
         Ok(Err(error)) => error.to_string(),
         Err(error) => error.clone(),
     };
