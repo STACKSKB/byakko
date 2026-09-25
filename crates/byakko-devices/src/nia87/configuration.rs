@@ -165,10 +165,10 @@ pub fn load(path: &Path) -> Result<Configuration> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn example() -> Configuration {
+    pub(crate) fn example() -> Configuration {
         let mut macros = vec![vec![0; MACRO_LEN]; MACRO_SLOTS];
         macros[49][255] = 0xa5;
         macros[0][2] = 0xfa; // Unknown macro data remains archival.

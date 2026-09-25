@@ -2,8 +2,9 @@
 use std::fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum VerificationFailure {
+pub(crate) enum VerificationFailure<T> {
     Mismatch {
+        actual: Box<T>,
         first_read_error: Option<String>,
     },
     Unreadable {
@@ -12,14 +13,16 @@ pub(crate) enum VerificationFailure {
     },
 }
 
-impl fmt::Display for VerificationFailure {
+impl<T> fmt::Display for VerificationFailure<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Mismatch {
                 first_read_error: None,
+                ..
             } => f.write_str("configuration readback did not match expected state"),
             Self::Mismatch {
                 first_read_error: Some(error),
+                ..
             } => write!(
                 f,
                 "configuration readback failed ({error}); retry did not match expected state"
@@ -43,15 +46,17 @@ pub(crate) fn verify<T: PartialEq>(
     expected: &T,
     first: Result<T, String>,
     retry: impl FnOnce() -> Result<T, String>,
-) -> Result<(), VerificationFailure> {
+) -> Result<(), VerificationFailure<T>> {
     match first {
         Ok(actual) if &actual == expected => Ok(()),
-        Ok(_) => Err(VerificationFailure::Mismatch {
+        Ok(actual) => Err(VerificationFailure::Mismatch {
+            actual: Box::new(actual),
             first_read_error: None,
         }),
         Err(original_error) => match retry() {
             Ok(actual) if &actual == expected => Ok(()),
-            Ok(_) => Err(VerificationFailure::Mismatch {
+            Ok(actual) => Err(VerificationFailure::Mismatch {
+                actual: Box::new(actual),
                 first_read_error: Some(original_error),
             }),
             Err(retry_error) => Err(VerificationFailure::Unreadable {
@@ -91,8 +96,8 @@ mod tests {
         assert!(matches!(
             error,
             super::VerificationFailure::Mismatch {
-                first_read_error: None
-            }
+                first_read_error: None, actual
+            } if *actual == 8
         ));
         assert_eq!(calls.get(), 0);
     }
@@ -119,7 +124,7 @@ mod tests {
         })
         .unwrap_err();
         assert!(
-            matches!(error, super::VerificationFailure::Mismatch { first_read_error: Some(message) } if message == "first read")
+            matches!(error, super::VerificationFailure::Mismatch { first_read_error: Some(message), actual } if message == "first read" && *actual == 8)
         );
         assert_eq!(calls.get(), 1);
     }

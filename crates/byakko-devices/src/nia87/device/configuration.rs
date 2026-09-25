@@ -20,7 +20,7 @@ impl std::error::Error for ConfigurationApplyError {}
 #[derive(Debug)]
 enum RecoveryResult {
     Verified(String),
-    Failed(String),
+    Failed(String, Box<crate::nia87::configuration::Configuration>),
     Unverified(String),
 }
 /// Capture all supported local configuration data without sending setters.
@@ -101,12 +101,14 @@ fn apply_configuration_selected(
     let path = backup_dir.join(format!("configuration-before-{stamp}.json"));
     crate::nia87::configuration::save_new(&path, expected)?;
     let mut setter_started = false;
+    let mut mismatched_readback = None;
     let result = (|| -> Result<crate::nia87::configuration::Configuration> {
         progress("Writing reviewed configuration changes");
         write_configuration_changes(device, expected, target, &plan, &mut setter_started)?;
         progress("Verifying complete configuration");
         let actual = capture_configuration_on_device(device, |_, _| {})?;
         if &actual != target {
+            mismatched_readback = Some(actual);
             return Err("Complete configuration readback mismatch".into());
         }
         Ok(actual)
@@ -121,13 +123,31 @@ fn apply_configuration_selected(
             let restore = recover_configuration(selection, device, target, expected, &reverse);
             let (recovery, detail) = match restore {
                 RecoveryResult::Verified(message) => (Recovery::Verified, message),
-                RecoveryResult::Failed(message) => (Recovery::Failed, message),
+                RecoveryResult::Failed(message, actual) => (
+                    Recovery::Failed,
+                    format!(
+                        "{message}; {}",
+                        retain_readback(
+                            &backup_dir
+                                .join(format!("configuration-recovery-mismatch-{stamp}.json")),
+                            &actual,
+                        )
+                    ),
+                ),
                 RecoveryResult::Unverified(message) => (Recovery::Unverified, message),
             };
+            // Diagnostic persistence follows recovery and never changes its outcome.
+            let evidence = mismatched_readback.map(|actual| {
+                retain_readback(
+                    &backup_dir.join(format!("configuration-apply-mismatch-{stamp}.json")),
+                    &actual,
+                )
+            });
             Err(ConfigurationApplyError(ApplyFailure {
                 message: format!(
-                    "Configuration apply failed: {error}; recovery: {detail}; backup {}",
-                    path.display()
+                    "Configuration apply failed: {error}; recovery: {detail}; backup {}{}",
+                    path.display(),
+                    evidence.map_or_else(String::new, |message| format!("; {message}"))
                 ),
                 recovery,
             })
@@ -296,14 +316,31 @@ fn recover_configuration(
         } else {
             format!("original configuration verified after section errors: {section_failures}")
         }),
-        Err(crate::nia87::recovery_verification::VerificationFailure::Mismatch { .. }) => {
-            RecoveryResult::Failed(format!(
+        Err(crate::nia87::recovery_verification::VerificationFailure::Mismatch {
+            actual, ..
+        }) => RecoveryResult::Failed(
+            format!(
                 "original configuration readback mismatched; section failures: {section_failures}"
-            ))
-        }
+            ),
+            actual,
+        ),
         Err(
             error @ crate::nia87::recovery_verification::VerificationFailure::Unreadable { .. },
         ) => RecoveryResult::Unverified(format!("{error}; section failures: {section_failures}")),
+    }
+}
+
+/// Best-effort evidence from an existing complete read; never perform device I/O.
+fn retain_readback(
+    path: &std::path::Path,
+    actual: &crate::nia87::configuration::Configuration,
+) -> String {
+    match crate::nia87::configuration::save_new(path, actual) {
+        Ok(()) => format!("mismatched readback saved to {}", path.display()),
+        Err(error) => format!(
+            "could not save mismatched readback to {}: {error}",
+            path.display()
+        ),
     }
 }
 
@@ -368,4 +405,42 @@ fn write_configuration_changes(
         write_lighting_report(device, &lighting_restore_report(&target.lighting))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod evidence_tests {
+    use super::retain_readback;
+    use crate::nia87::configuration;
+
+    #[test]
+    fn retains_complete_readback_without_overwriting_existing_evidence() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "byakko-readback-evidence-{}-{stamp}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("mismatch.json");
+        let actual = configuration::tests::example();
+        assert!(retain_readback(&path, &actual).starts_with("mismatched readback saved to "));
+        assert_eq!(configuration::load(&path).unwrap(), actual);
+
+        let mut another = actual.clone();
+        another.macros[0][0] ^= 0xff;
+        let error = retain_readback(&path, &another);
+        assert!(error.starts_with("could not save mismatched readback to "));
+        assert!(error.contains(&path.display().to_string()));
+        assert_eq!(configuration::load(&path).unwrap(), actual);
+
+        // Diagnostic persistence failure is reported as detail, not propagated
+        // into the already determined recovery outcome.
+        let missing_parent = directory.join("missing/mismatch.json");
+        assert!(
+            retain_readback(&missing_parent, &actual)
+                .starts_with("could not save mismatched readback to ")
+        );
+    }
 }
