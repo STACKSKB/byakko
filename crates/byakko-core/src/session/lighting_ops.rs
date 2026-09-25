@@ -1,5 +1,9 @@
 use super::{Activity, Command, Session, Status};
 use crate::lighting::{Capabilities, Edit, Setting, editor::Editor};
+use crate::session::CommandPayload;
+#[cfg(test)]
+use crate::session::CompletionPayload;
+use crate::session::{DeviceActivity, Feature};
 
 impl Session {
     pub fn with_lighting(mut self, capabilities: Capabilities) -> Result<Self, String> {
@@ -43,10 +47,14 @@ impl Session {
         }
         self.lighting_editor()?;
         let operation = self.operation()?;
-        self.activity = Activity::ReadLighting { operation };
-        Ok(Command::ReadLighting {
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Read(Feature::Lighting),
+        };
+        Ok(Command {
             generation: self.generation,
             operation,
+            payload: CommandPayload::ReadLighting {},
         })
     }
     pub fn request_lighting_apply(&mut self) -> Result<Command, String> {
@@ -55,15 +63,17 @@ impl Session {
         }
         let (expected, desired) = self.lighting_editor()?.request_apply()?;
         let operation = self.operation()?;
-        self.activity = Activity::ApplyLighting { operation };
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Apply(Feature::Lighting),
+        };
         // This transaction verifies lighting only. Keep the last observed
         // keymap and unrelated drafts in this single-owner session.
         self.invalidate_archive();
-        Ok(Command::ApplyLighting {
+        Ok(Command {
             generation: self.generation,
             operation,
-            expected,
-            desired,
+            payload: CommandPayload::ApplyLighting { expected, desired },
         })
     }
 }
@@ -131,40 +141,44 @@ mod tests {
         .unwrap()
     }
     fn read(session: &mut Session, result: Result<Snapshot, String>) {
-        let Command::ReadLighting {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadLighting {},
         } = session.request_lighting_read().unwrap()
         else {
             unreachable!()
         };
         assert_eq!(
-            session.accept(Completion::ReadLighting {
+            session.accept(Completion {
                 generation,
                 operation,
-                result
+                payload: CompletionPayload::ReadLighting { result }
             }),
             Acceptance::Accepted
         );
     }
     fn read_keymap(session: &mut Session) {
-        let Command::Read {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::Read {},
         } = session.request_read().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::Read {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(State {
-                revision: vec![1],
-                bindings: std::collections::BTreeMap::from([(
-                    "base".into(),
-                    std::collections::BTreeMap::from([("a".into(), Action::Disabled)]),
-                )]),
-            }),
+            payload: CompletionPayload::Read {
+                result: Ok(State {
+                    revision: vec![1],
+                    bindings: std::collections::BTreeMap::from([(
+                        "base".into(),
+                        std::collections::BTreeMap::from([("a".into(), Action::Disabled)]),
+                    )]),
+                }),
+            },
         });
         assert_eq!(session.status(), &Status::Ready);
     }
@@ -176,19 +190,21 @@ mod tests {
         read(&mut session, Ok(snapshot(1, 10)));
         session.stage_lighting(setting(5)).unwrap();
         let original = session.baseline().cloned();
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
         };
         assert_eq!(session.status(), &Status::Ready);
-        session.accept(Completion::ApplyLighting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(snapshot(2, 5)),
+            payload: CompletionPayload::ApplyLighting {
+                result: Ok(snapshot(2, 5)),
+            },
         });
         assert_eq!(session.status(), &Status::Ready);
         assert_eq!(session.baseline(), original.as_ref());
@@ -203,10 +219,10 @@ mod tests {
         session.connect().unwrap();
         read(&mut session, Ok(snapshot(1, 10)));
         session.stage_lighting(setting(5)).unwrap();
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
@@ -215,10 +231,12 @@ mod tests {
             evidence: lighting::Evidence::TransportAccepted,
             ..snapshot(2, 5)
         };
-        session.accept(Completion::ApplyLighting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(accepted.clone()),
+            payload: CompletionPayload::ApplyLighting {
+                result: Ok(accepted.clone()),
+            },
         });
         assert_eq!(session.lighting().unwrap().baseline(), Some(&accepted));
         assert_eq!(
@@ -266,23 +284,26 @@ mod tests {
                 [1, 2, 3],
             )])),
         };
-        let Command::ReadPicture {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadPicture {},
         } = session.request_picture_read().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ReadPicture {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(picture.clone()),
+            payload: CompletionPayload::ReadPicture {
+                result: Ok(picture.clone()),
+            },
         });
         session.stage_lighting(setting(5)).unwrap();
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
@@ -291,10 +312,12 @@ mod tests {
             session.picture().unwrap().status(),
             &picture::editor::Status::Ready
         );
-        session.accept(Completion::ApplyLighting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(snapshot(2, 5)),
+            payload: CompletionPayload::ApplyLighting {
+                result: Ok(snapshot(2, 5)),
+            },
         });
         assert_eq!(session.picture().unwrap().baseline(), Some(&picture));
         assert_eq!(
@@ -323,37 +346,42 @@ mod tests {
             .unwrap();
         session.connect().unwrap();
         read(&mut session, Ok(snapshot(1, 10)));
-        let Command::ReadPicture {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadPicture {},
         } = session.request_picture_read().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ReadPicture {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(picture),
+            payload: CompletionPayload::ReadPicture {
+                result: Ok(picture),
+            },
         });
         session.edit_lighting(Edit::Effect("other".into())).unwrap();
         let desired = session.lighting().unwrap().draft().unwrap().clone();
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ApplyLighting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(Snapshot {
-                backend_id: "memory".into(),
-                revision: vec![2],
-                evidence: lighting::Evidence::Readback,
-                content: Content::Editable(desired),
-            }),
+            payload: CompletionPayload::ApplyLighting {
+                result: Ok(Snapshot {
+                    backend_id: "memory".into(),
+                    revision: vec![2],
+                    evidence: lighting::Evidence::Readback,
+                    content: Content::Editable(desired),
+                }),
+            },
         });
         assert!(matches!(
             session.picture().unwrap().status(),
@@ -376,24 +404,27 @@ mod tests {
         session.connect().unwrap();
         read_keymap(&mut session);
         read(&mut session, Ok(snapshot(1, 10)));
-        let Command::ReadSettings {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadSettings {},
         } = session.request_settings_read().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ReadSettings {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(settings::Snapshot {
-                backend_id: "memory".into(),
-                revision: vec![1],
-                content: settings::Content::Editable(std::collections::BTreeMap::from([(
-                    "enabled".into(),
-                    Value::Toggle(false),
-                )])),
-            }),
+            payload: CompletionPayload::ReadSettings {
+                result: Ok(settings::Snapshot {
+                    backend_id: "memory".into(),
+                    revision: vec![1],
+                    content: settings::Content::Editable(std::collections::BTreeMap::from([(
+                        "enabled".into(),
+                        Value::Toggle(false),
+                    )])),
+                }),
+            },
         });
         session
             .edit_setting(settings::Edit {
@@ -402,18 +433,20 @@ mod tests {
             })
             .unwrap();
         session.stage_lighting(setting(5)).unwrap();
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ApplyLighting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(snapshot(2, 5)),
+            payload: CompletionPayload::ApplyLighting {
+                result: Ok(snapshot(2, 5)),
+            },
         });
         assert_eq!(
             session.settings().unwrap().status(),
@@ -423,25 +456,27 @@ mod tests {
             session.settings().unwrap().draft().unwrap()["enabled"],
             Value::Toggle(true)
         );
-        let Command::ApplySetting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplySetting { .. },
         } = session.request_setting_apply().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ApplySetting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(settings::Snapshot {
-                backend_id: "memory".into(),
-                revision: vec![2],
-                content: settings::Content::Editable(std::collections::BTreeMap::from([(
-                    "enabled".into(),
-                    Value::Toggle(true),
-                )])),
-            }),
+            payload: CompletionPayload::ApplySetting {
+                result: Ok(settings::Snapshot {
+                    backend_id: "memory".into(),
+                    revision: vec![2],
+                    content: settings::Content::Editable(std::collections::BTreeMap::from([(
+                        "enabled".into(),
+                        Value::Toggle(true),
+                    )])),
+                }),
+            },
         });
         assert_eq!(
             session.lighting().unwrap().status(),
@@ -455,24 +490,26 @@ mod tests {
                 action: Action::Key(4),
             })
             .unwrap();
-        let Command::Apply {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::Apply { .. },
         } = session.request_apply().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::Apply {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(State {
-                revision: vec![2],
-                bindings: std::collections::BTreeMap::from([(
-                    "base".into(),
-                    std::collections::BTreeMap::from([("a".into(), Action::Key(4))]),
-                )]),
-            }),
+            payload: CompletionPayload::Apply {
+                result: Ok(State {
+                    revision: vec![2],
+                    bindings: std::collections::BTreeMap::from([(
+                        "base".into(),
+                        std::collections::BTreeMap::from([("a".into(), Action::Key(4))]),
+                    )]),
+                }),
+            },
         });
         assert_eq!(session.status(), &Status::Ready);
         assert_eq!(
@@ -484,21 +521,23 @@ mod tests {
             &settings::editor::Status::Ready
         );
         session.stage_lighting(setting(4)).unwrap();
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ApplyLighting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Err(ApplyFailure {
-                message: "uncertain".into(),
-                recovery: Recovery::Unverified,
-            }),
+            payload: CompletionPayload::ApplyLighting {
+                result: Err(ApplyFailure {
+                    message: "uncertain".into(),
+                    recovery: Recovery::Unverified,
+                }),
+            },
         });
         assert!(matches!(
             session.status(),
@@ -570,11 +609,10 @@ mod tests {
             serde_json::from_slice::<Command>(&encoded).unwrap(),
             command
         );
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            expected,
-            desired,
+            payload: CommandPayload::ApplyLighting { expected, desired },
         } = command
         else {
             unreachable!()
@@ -582,25 +620,31 @@ mod tests {
         assert_eq!(expected, snapshot(1, 10));
         assert_eq!(desired, setting(5));
         assert_eq!(
-            session.accept(Completion::ReadLighting {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(snapshot(3, 5))
+                payload: CompletionPayload::ReadLighting {
+                    result: Ok(snapshot(3, 5))
+                }
             }),
             Acceptance::IgnoredStale
         );
         assert_eq!(
-            session.accept(Completion::ApplyLighting {
+            session.accept(Completion {
                 generation: generation + 1,
                 operation,
-                result: Ok(snapshot(3, 5))
+                payload: CompletionPayload::ApplyLighting {
+                    result: Ok(snapshot(3, 5))
+                }
             }),
             Acceptance::IgnoredStale
         );
-        let completion = Completion::ApplyLighting {
+        let completion = Completion {
             generation,
             operation,
-            result: Ok(snapshot(3, 4)),
+            payload: CompletionPayload::ApplyLighting {
+                result: Ok(snapshot(3, 4)),
+            },
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&completion).unwrap())
@@ -630,28 +674,31 @@ mod tests {
         read(&mut session, Ok(snapshot(1, 10)));
         session.stage_lighting(setting(5)).unwrap();
         assert!(session.dirty());
-        let Command::Read {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::Read {},
         } = session.request_read().unwrap()
         else {
             unreachable!()
         };
         assert!(session.request_lighting_apply().is_err());
-        session.accept(Completion::Read {
+        session.accept(Completion {
             generation,
             operation,
-            result: Err("read failed".into()),
+            payload: CompletionPayload::Read {
+                result: Err("read failed".into()),
+            },
         });
         read_keymap(&mut session);
         assert!(matches!(
             session.lighting().unwrap().status(),
             lighting::editor::Status::Ready
         ));
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
@@ -659,13 +706,15 @@ mod tests {
         assert_eq!(session.status(), &Status::Ready);
         assert!(session.reconnect_cautions().is_empty());
         assert_eq!(
-            session.accept(Completion::ApplyLighting {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Err(ApplyFailure {
-                    message: "failed".into(),
-                    recovery: Recovery::Unverified
-                })
+                payload: CompletionPayload::ApplyLighting {
+                    result: Err(ApplyFailure {
+                        message: "failed".into(),
+                        recovery: Recovery::Unverified
+                    })
+                }
             }),
             Acceptance::Accepted
         );

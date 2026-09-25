@@ -4,6 +4,8 @@ use crate::{
     macro_form::{Input, Kind},
 };
 use byakko_core::macros::{Content, Edit, editor::Status as MacroStatus};
+use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::{DeviceActivity, Feature};
 use byakko_devices::Device;
 
 #[test]
@@ -18,17 +20,21 @@ fn explicit_new_empty_slot_stages_editable_count_without_changing_stored_zero() 
         .unwrap();
     let generation = session.connect().unwrap();
     session.select_macro("spare").unwrap();
-    let Command::ReadMacro {
-        operation, slot, ..
+    let Command {
+        operation,
+        payload: CommandPayload::ReadMacro { slot, .. },
+        ..
     } = session.request_macro_read().unwrap()
     else {
         unreachable!()
     };
-    session.accept(Completion::ReadMacro {
+    session.accept(Completion {
         generation,
         operation,
-        slot,
-        result: device.read_macro("spare"),
+        payload: CompletionPayload::ReadMacro {
+            slot,
+            result: device.read_macro("spare"),
+        },
     });
     app.session = session;
     app.initialize_new_macro();
@@ -156,7 +162,10 @@ fn slot_editor_opens_during_background_catalog_scan() {
     send(&mut app, Macro::Select("intro".into()));
     assert!(matches!(
         app.session.activity(),
-        byakko_core::session::Activity::ReadMacro { .. }
+        byakko_core::session::Activity::Device {
+            request: DeviceActivity::Read(Feature::Macro { .. }),
+            ..
+        }
     ));
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     while app.busy() {
@@ -183,7 +192,10 @@ fn add_checks_candidates_before_catalog_completes() {
     assert_eq!(app.macro_new_slot.as_deref(), Some(first.as_str()));
     assert!(matches!(
         app.session.activity(),
-        byakko_core::session::Activity::ReadMacro { .. }
+        byakko_core::session::Activity::Device {
+            request: DeviceActivity::Read(Feature::Macro { .. }),
+            ..
+        }
     ));
     settle(&mut app);
     let editor = app.session.macros().unwrap();
@@ -209,19 +221,21 @@ fn failed_read_preserves_unsubmitted_form_input() {
     let mut app = loaded();
     send(&mut app, Macro::Inspect(0));
     send(&mut app, Macro::Form(Input::Wait("123".into())));
-    let Command::ReadMacro {
+    let Command {
         generation,
         operation,
-        slot,
+        payload: CommandPayload::ReadMacro { slot },
     } = app.session.request_macro_read().unwrap()
     else {
         unreachable!()
     };
-    let _ = app.complete(Completion::ReadMacro {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        slot,
-        result: Err("device gone".into()),
+        payload: CompletionPayload::ReadMacro {
+            slot,
+            result: Err("device gone".into()),
+        },
     });
     assert_eq!(app.macro_form.wait, "123");
     assert_eq!(app.macro_form.target, Some(0));
@@ -499,34 +513,37 @@ fn editing_repeat_count_preserves_an_unsubmitted_event_edit() {
 fn macro_failure_prevents_close_and_stale_success_cannot_hide_it() {
     let mut app = loaded();
     send(&mut app, Macro::Edit(Edit::Clear));
-    let Command::ApplyMacro {
+    let Command {
         generation,
         operation,
-        expected,
-        ..
+        payload: CommandPayload::ApplyMacro { expected, .. },
     } = app.session.request_macro_apply().unwrap()
     else {
         unreachable!()
     };
     let _ = app.update(Message::Close);
-    let _ = app.complete(Completion::ApplyMacro {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        slot: expected.slot.clone(),
-        result: Err(ApplyFailure {
-            message: "readback failed".into(),
-            recovery: Recovery::Failed,
-        }),
+        payload: CompletionPayload::ApplyMacro {
+            slot: expected.slot.clone(),
+            result: Err(ApplyFailure {
+                message: "readback failed".into(),
+                recovery: Recovery::Failed,
+            }),
+        },
     });
     assert_eq!(app.closing, Closing::Open);
     let editor = app.session.macros().unwrap();
     assert!(editor.dirty());
     assert!(matches!(editor.status(), MacroStatus::Unverified { .. }));
-    let _ = app.complete(Completion::ApplyMacro {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        slot: expected.slot.clone(),
-        result: Ok(expected),
+        payload: CompletionPayload::ApplyMacro {
+            slot: expected.slot.clone(),
+            result: Ok(expected),
+        },
     });
     assert_eq!(app.closing, Closing::Open);
     assert!(matches!(

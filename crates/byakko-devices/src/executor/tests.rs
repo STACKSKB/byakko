@@ -1,4 +1,5 @@
 use crate::KeymapDevice;
+use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::{Change, State, macros};
 
 use super::*;
@@ -23,10 +24,15 @@ struct CatalogDevice {
     reads: Arc<AtomicUsize>,
 }
 
+struct FlakyCatalogDevice {
+    reads: Arc<AtomicUsize>,
+}
+
 struct GatedCatalogDevice {
     entered: Sender<()>,
     release: Receiver<()>,
     slots_read: Arc<AtomicUsize>,
+    fail_apply: bool,
 }
 
 impl KeymapDevice for GatedCatalogDevice {
@@ -37,7 +43,16 @@ impl KeymapDevice for GatedCatalogDevice {
         })
     }
     fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        unreachable!()
+        if self.fail_apply {
+            return Err(ApplyFailure {
+                message: "keymap write failed".into(),
+                recovery: Recovery::Unverified,
+            });
+        }
+        self.read().map_err(|message| ApplyFailure {
+            message,
+            recovery: Recovery::NotAttempted,
+        })
     }
     fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
         if self.slots_read.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -66,24 +81,29 @@ fn foreground_read_runs_between_catalog_slots() {
             entered: entered_tx,
             release: release_rx,
             slots_read: slots_read.clone(),
+            fail_apply: false,
         },
         PathBuf::new(),
     )
     .unwrap();
     worker.set_generation(1);
     worker
-        .try_submit(Command::ReadMacroCatalog {
+        .try_submit(Command {
             generation: 1,
             operation: 1,
-            slots: vec!["first".into(), "second".into()],
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: vec!["first".into(), "second".into()],
+            },
         })
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     worker
-        .try_submit(Command::ReadMacro {
+        .try_submit(Command {
             generation: 1,
             operation: 2,
-            slot: "selected".into(),
+            payload: CommandPayload::ReadMacro {
+                slot: "selected".into(),
+            },
         })
         .unwrap();
     release_tx.send(()).unwrap();
@@ -92,11 +112,10 @@ fn foreground_read_runs_between_catalog_slots() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::ReadMacro {
+        Completion {
             generation: 1,
             operation: 2,
-            result: Ok(_),
-            ..
+            payload: CompletionPayload::ReadMacro { result: Ok(_), .. }
         }
     ));
     assert!(matches!(
@@ -104,17 +123,17 @@ fn foreground_read_runs_between_catalog_slots() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::ReadMacroCatalog {
+        Completion {
             generation: 1,
             operation: 1,
-            result: Ok(_)
+            payload: CompletionPayload::ReadMacroCatalog { result: Ok(_) }
         }
     ));
     assert_eq!(slots_read.load(Ordering::SeqCst), 3);
 }
 
 #[test]
-fn keymap_refresh_cancels_unfinished_catalog() {
+fn keymap_read_and_apply_resume_unfinished_catalog() {
     let (entered_tx, entered_rx) = mpsc::channel();
     let (release_tx, release_rx) = mpsc::channel();
     let slots_read = Arc::new(AtomicUsize::new(0));
@@ -123,23 +142,40 @@ fn keymap_refresh_cancels_unfinished_catalog() {
             entered: entered_tx,
             release: release_rx,
             slots_read: slots_read.clone(),
+            fail_apply: false,
         },
         PathBuf::new(),
     )
     .unwrap();
     worker.set_generation(1);
     worker
-        .try_submit(Command::ReadMacroCatalog {
+        .try_submit(Command {
             generation: 1,
             operation: 1,
-            slots: vec!["first".into(), "second".into()],
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: vec!["first".into(), "second".into()],
+            },
         })
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     worker
-        .try_submit(Command::Read {
+        .try_submit(Command {
             generation: 1,
             operation: 2,
+            payload: CommandPayload::Read {},
+        })
+        .unwrap();
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 3,
+            payload: CommandPayload::Apply {
+                expected: State {
+                    revision: vec![1],
+                    bindings: BTreeMap::new(),
+                },
+                changes: vec![],
+            },
         })
         .unwrap();
     release_tx.send(()).unwrap();
@@ -148,10 +184,86 @@ fn keymap_refresh_cancels_unfinished_catalog() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::Read {
+        Completion {
             generation: 1,
             operation: 2,
-            result: Ok(_)
+            payload: CompletionPayload::Read { result: Ok(_) }
+        }
+    ));
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion {
+            generation: 1,
+            operation: 3,
+            payload: CompletionPayload::Apply { result: Ok(_) }
+        }
+    ));
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion {
+            generation: 1,
+            operation: 1,
+            payload: CompletionPayload::ReadMacroCatalog { result: Ok(_) }
+        }
+    ));
+    assert_eq!(slots_read.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn failed_keymap_apply_stops_unfinished_catalog() {
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let slots_read = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        GatedCatalogDevice {
+            entered: entered_tx,
+            release: release_rx,
+            slots_read: slots_read.clone(),
+            fail_apply: true,
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 1,
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: vec!["first".into(), "second".into()],
+            },
+        })
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 2,
+            payload: CommandPayload::Apply {
+                expected: State {
+                    revision: vec![1],
+                    bindings: BTreeMap::new(),
+                },
+                changes: vec![],
+            },
+        })
+        .unwrap();
+    release_tx.send(()).unwrap();
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion {
+            generation: 1,
+            operation: 2,
+            payload: CompletionPayload::Apply { result: Err(_) }
         }
     ));
     assert_eq!(slots_read.load(Ordering::SeqCst), 1);
@@ -171,25 +283,30 @@ fn explicit_cancel_stops_catalog_after_current_slot() {
             entered: entered_tx,
             release: release_rx,
             slots_read: slots_read.clone(),
+            fail_apply: false,
         },
         PathBuf::new(),
     )
     .unwrap();
     worker.set_generation(1);
     worker
-        .try_submit(Command::ReadMacroCatalog {
+        .try_submit(Command {
             generation: 1,
             operation: 1,
-            slots: vec!["first".into(), "second".into()],
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: vec!["first".into(), "second".into()],
+            },
         })
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     worker.cancel_macro_catalog();
     worker
-        .try_submit(Command::ReadMacro {
+        .try_submit(Command {
             generation: 1,
             operation: 2,
-            slot: "selected".into(),
+            payload: CommandPayload::ReadMacro {
+                slot: "selected".into(),
+            },
         })
         .unwrap();
     release_tx.send(()).unwrap();
@@ -198,11 +315,10 @@ fn explicit_cancel_stops_catalog_after_current_slot() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::ReadMacro {
+        Completion {
             generation: 1,
             operation: 2,
-            result: Ok(_),
-            ..
+            payload: CompletionPayload::ReadMacro { result: Ok(_), .. }
         }
     ));
     assert_eq!(slots_read.load(Ordering::SeqCst), 2);
@@ -233,6 +349,82 @@ impl KeymapDevice for CatalogDevice {
     }
 }
 
+impl KeymapDevice for FlakyCatalogDevice {
+    fn read(&mut self) -> Result<State, String> {
+        unreachable!()
+    }
+    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+        unreachable!()
+    }
+    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
+        if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+            return Err("macro slot first, read page 1: transport error".into());
+        }
+        Ok(macros::Snapshot {
+            backend_id: "test".into(),
+            slot: slot.into(),
+            revision: vec![1],
+            content: macros::Content::Editable(macros::Program {
+                repeat_count: 1,
+                events: vec![],
+            }),
+        })
+    }
+}
+
+#[test]
+fn failed_catalog_read_completes_and_explicit_retry_can_finish() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        FlakyCatalogDevice {
+            reads: reads.clone(),
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    let slots = vec!["first".into(), "second".into()];
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 1,
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: slots.clone(),
+            },
+        })
+        .unwrap();
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion {
+            generation: 1,
+            operation: 1,
+            payload: CompletionPayload::ReadMacroCatalog { result: Err(_) }
+        }
+    ));
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 2,
+            payload: CommandPayload::ReadMacroCatalog { slots },
+        })
+        .unwrap();
+    assert!(matches!(
+        worker
+            .completions
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap(),
+        Completion {
+            generation: 1,
+            operation: 2,
+            payload: CompletionPayload::ReadMacroCatalog { result: Ok(_) }
+        }
+    ));
+    assert_eq!(reads.load(Ordering::SeqCst), 3);
+}
+
 #[test]
 fn catalog_reads_every_requested_slot_in_one_correlated_command() {
     let reads = Arc::new(AtomicUsize::new(0));
@@ -245,16 +437,18 @@ fn catalog_reads_every_requested_slot_in_one_correlated_command() {
     .unwrap();
     worker.set_generation(3);
     worker
-        .try_submit(Command::ReadMacroCatalog {
+        .try_submit(Command {
             generation: 3,
             operation: 5,
-            slots: vec!["first".into(), "second".into()],
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: vec!["first".into(), "second".into()],
+            },
         })
         .unwrap();
-    let Completion::ReadMacroCatalog {
+    let Completion {
         generation,
         operation,
-        result,
+        payload: CompletionPayload::ReadMacroCatalog { result },
     } = worker
         .completions
         .recv_timeout(Duration::from_secs(2))
@@ -287,14 +481,16 @@ fn panicked_write_returns_correlated_unverified_completion() {
     let worker = Executor::spawn(PanickingDevice, PathBuf::new()).unwrap();
     worker.set_generation(7);
     worker
-        .try_submit(Command::Apply {
+        .try_submit(Command {
             generation: 7,
             operation: 9,
-            expected: State {
-                revision: vec![],
-                bindings: BTreeMap::new(),
+            payload: CommandPayload::Apply {
+                expected: State {
+                    revision: vec![],
+                    bindings: BTreeMap::new(),
+                },
+                changes: vec![],
             },
-            changes: vec![],
         })
         .unwrap();
     assert!(matches!(
@@ -302,13 +498,15 @@ fn panicked_write_returns_correlated_unverified_completion() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::Apply {
+        Completion {
             generation: 7,
             operation: 9,
-            result: Err(ApplyFailure {
-                recovery: Recovery::Unverified,
-                ..
-            })
+            payload: CompletionPayload::Apply {
+                result: Err(ApplyFailure {
+                    recovery: Recovery::Unverified,
+                    ..
+                })
+            }
         }
     ));
 }
@@ -345,9 +543,10 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
     .unwrap();
     worker.set_generation(1);
     worker
-        .try_submit(Command::Read {
+        .try_submit(Command {
             generation: 1,
             operation: 1,
+            payload: CommandPayload::Read {},
         })
         .unwrap();
     assert_eq!(
@@ -355,17 +554,21 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::Read {
+        Completion {
             generation: 1,
             operation: 1,
-            result: Ok(state.clone())
+            payload: CompletionPayload::Read {
+                result: Ok(state.clone())
+            }
         }
     );
-    let apply = Command::Apply {
+    let apply = Command {
         generation: 1,
         operation: 2,
-        expected: state,
-        changes: vec![],
+        payload: CommandPayload::Apply {
+            expected: state,
+            changes: vec![],
+        },
     };
     worker.try_submit(apply.clone()).unwrap();
     assert!(matches!(
@@ -373,7 +576,10 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::Apply { result: Ok(_), .. }
+        Completion {
+            payload: CompletionPayload::Apply { result: Ok(_), .. },
+            ..
+        }
     ));
     worker.try_submit(apply).unwrap();
     assert!(matches!(
@@ -381,11 +587,14 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::Apply {
-            result: Err(ApplyFailure {
-                recovery: Recovery::NotAttempted,
+        Completion {
+            payload: CompletionPayload::Apply {
+                result: Err(ApplyFailure {
+                    recovery: Recovery::NotAttempted,
+                    ..
+                }),
                 ..
-            }),
+            },
             ..
         }
     ));
@@ -434,9 +643,10 @@ fn blocked_worker() -> (Executor, Sender<()>, Arc<AtomicUsize>, State) {
     .unwrap();
     worker.set_generation(1);
     worker
-        .try_submit(Command::Read {
+        .try_submit(Command {
             generation: 1,
             operation: 1,
+            payload: CommandPayload::Read {},
         })
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -447,11 +657,13 @@ fn blocked_worker() -> (Executor, Sender<()>, Arc<AtomicUsize>, State) {
 fn reconnect_rejects_queued_old_apply_without_writing() {
     let (worker, release, writes, state) = blocked_worker();
     worker
-        .try_submit(Command::Apply {
+        .try_submit(Command {
             generation: 1,
             operation: 2,
-            expected: state,
-            changes: vec![],
+            payload: CommandPayload::Apply {
+                expected: state,
+                changes: vec![],
+            },
         })
         .unwrap();
     worker.set_generation(2);
@@ -461,10 +673,10 @@ fn reconnect_rejects_queued_old_apply_without_writing() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::Read {
+        Completion {
             generation: 1,
             operation: 1,
-            result: Ok(_)
+            payload: CompletionPayload::Read { result: Ok(_) }
         }
     ));
     assert!(matches!(
@@ -472,13 +684,15 @@ fn reconnect_rejects_queued_old_apply_without_writing() {
             .completions
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
-        Completion::Apply {
+        Completion {
             generation: 1,
             operation: 2,
-            result: Err(ApplyFailure {
-                recovery: Recovery::NotAttempted,
-                ..
-            })
+            payload: CompletionPayload::Apply {
+                result: Err(ApplyFailure {
+                    recovery: Recovery::NotAttempted,
+                    ..
+                })
+            }
         }
     ));
     assert_eq!(writes.load(Ordering::SeqCst), 0);
@@ -487,23 +701,27 @@ fn reconnect_rejects_queued_old_apply_without_writing() {
 #[test]
 fn full_queue_returns_correlated_rejection_to_core() {
     let (worker, release, writes, state) = blocked_worker();
-    let apply = |operation| Command::Apply {
+    let apply = |operation| Command {
         generation: 1,
         operation,
-        expected: state.clone(),
-        changes: vec![],
+        payload: CommandPayload::Apply {
+            expected: state.clone(),
+            changes: vec![],
+        },
     };
     worker.try_submit(apply(2)).unwrap();
     worker.try_submit(apply(3)).unwrap();
     assert!(matches!(
         *worker.try_submit(apply(4)).unwrap_err(),
-        Completion::Apply {
+        Completion {
             generation: 1,
             operation: 4,
-            result: Err(ApplyFailure {
-                recovery: Recovery::NotAttempted,
-                ..
-            })
+            payload: CompletionPayload::Apply {
+                result: Err(ApplyFailure {
+                    recovery: Recovery::NotAttempted,
+                    ..
+                })
+            }
         }
     ));
     worker.set_generation(0);
@@ -551,32 +769,36 @@ fn default_macro_operations_are_typed_unsupported_results() {
     .unwrap();
     worker.set_generation(1);
     worker
-        .try_submit(Command::ReadMacro {
+        .try_submit(Command {
             generation: 1,
             operation: 1,
-            slot: "slot-00".into(),
-        })
-        .unwrap();
-    assert!(
-        matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion::ReadMacro { generation: 1, operation: 1, slot, result: Err(message) }
-            if slot == "slot-00" && message.contains("unsupported"))
-    );
-    let expected = macro_snapshot();
-    worker
-        .try_submit(Command::ApplyMacro {
-            generation: 1,
-            operation: 2,
-            expected: expected.clone(),
-            desired: macros::Program {
-                repeat_count: 1,
-                events: vec![],
+            payload: CommandPayload::ReadMacro {
+                slot: "slot-00".into(),
             },
         })
         .unwrap();
     assert!(
         matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion::ApplyMacro { generation: 1, operation: 2, slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, message }) }
+            Completion { generation: 1, operation: 1, payload: CompletionPayload::ReadMacro { slot, result: Err(message) } }
+            if slot == "slot-00" && message.contains("unsupported"))
+    );
+    let expected = macro_snapshot();
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 2,
+            payload: CommandPayload::ApplyMacro {
+                expected: expected.clone(),
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            },
+        })
+        .unwrap();
+    assert!(
+        matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Completion { generation: 1, operation: 2, payload: CompletionPayload::ApplyMacro { slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, message }) } }
             if slot == expected.slot && message.contains("unsupported"))
     );
 }
@@ -622,31 +844,38 @@ fn one_worker_orders_keymap_and_macro_operations() {
     worker.set_generation(1);
     let expected = macro_snapshot();
     let commands = [
-        Command::Read {
+        Command {
             generation: 1,
             operation: 1,
+            payload: CommandPayload::Read {},
         },
-        Command::ReadMacro {
+        Command {
             generation: 1,
             operation: 2,
-            slot: expected.slot.clone(),
+            payload: CommandPayload::ReadMacro {
+                slot: expected.slot.clone(),
+            },
         },
-        Command::Apply {
+        Command {
             generation: 1,
             operation: 3,
-            expected: State {
-                revision: vec![],
-                bindings: BTreeMap::new(),
+            payload: CommandPayload::Apply {
+                expected: State {
+                    revision: vec![],
+                    bindings: BTreeMap::new(),
+                },
+                changes: vec![],
             },
-            changes: vec![],
         },
-        Command::ApplyMacro {
+        Command {
             generation: 1,
             operation: 4,
-            expected,
-            desired: macros::Program {
-                repeat_count: 1,
-                events: vec![],
+            payload: CommandPayload::ApplyMacro {
+                expected,
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
             },
         },
     ];
@@ -669,19 +898,21 @@ fn old_generation_macro_apply_is_rejected_before_device_access() {
     let worker = Executor::spawn(OrderedDevice { log: log.clone() }, PathBuf::new()).unwrap();
     worker.set_generation(2);
     worker
-        .try_submit(Command::ApplyMacro {
+        .try_submit(Command {
             generation: 1,
             operation: 1,
-            expected: macro_snapshot(),
-            desired: macros::Program {
-                repeat_count: 1,
-                events: vec![],
+            payload: CommandPayload::ApplyMacro {
+                expected: macro_snapshot(),
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
             },
         })
         .unwrap();
     assert!(
         matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion::ApplyMacro { generation: 1, operation: 1, slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, .. }) }
+            Completion { generation: 1, operation: 1, payload: CompletionPayload::ApplyMacro { slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, .. }) } }
             if slot == "slot-00")
     );
     assert!(log.lock().unwrap().is_empty());
@@ -711,19 +942,21 @@ fn panicked_macro_write_returns_correlated_unverified_completion() {
     let worker = Executor::spawn(PanickingMacroDevice, PathBuf::new()).unwrap();
     worker.set_generation(7);
     worker
-        .try_submit(Command::ApplyMacro {
+        .try_submit(Command {
             generation: 7,
             operation: 9,
-            expected: macro_snapshot(),
-            desired: macros::Program {
-                repeat_count: 1,
-                events: vec![],
+            payload: CommandPayload::ApplyMacro {
+                expected: macro_snapshot(),
+                desired: macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
             },
         })
         .unwrap();
     assert!(
         matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion::ApplyMacro { generation: 7, operation: 9, slot, result: Err(ApplyFailure { recovery: Recovery::Unverified, .. }) }
+            Completion { generation: 7, operation: 9, payload: CompletionPayload::ApplyMacro { slot, result: Err(ApplyFailure { recovery: Recovery::Unverified, .. }) } }
             if slot == "slot-00")
     );
 }

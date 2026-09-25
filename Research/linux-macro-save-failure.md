@@ -1,5 +1,11 @@
 # Linux macro save failure audit (2026-09-25)
 
+Follow-up: a later failure identifies slot 0 readback page 1, followed by
+recovery write page 0 failing. The subsequent
+[session/transaction audit](session-transaction-audit.md) records structural
+fixes, catalog scheduling defects, and finer transport error context. The
+physical transport cause remains unresolved.
+
 The user reported two Save & assign failures on the Linux Nia87. Both showed
 `Protocol error (os error 71)` and automatic recovery reported
 `No such device (os error 19)`, classified as Unverified. The user clarified

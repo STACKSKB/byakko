@@ -400,6 +400,10 @@ Follow-up: [Linux macro failure audit](../Research/linux-macro-save-failure.md)
 records the user's save failure before their manual replug, current read-only
 state, and the global Reconnect action added for disconnected feature pages.
 The underlying macro transport failure remains an open release gate.
+The subsequent [session/transaction audit](../Research/session-transaction-audit.md)
+documents shared correlation/backup handling and the catalog scan continuation
+and failure-cancellation fixes. Those changes do not establish physical macro
+write acceptance.
 
 A quick unplug/replug could leave the desktop executor bound to the previous
 collection identity. Manual reconnect and feature retry previously reused that

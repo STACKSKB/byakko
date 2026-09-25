@@ -225,6 +225,12 @@ impl Editor {
         };
     }
 
+    /// A failed write elsewhere can make the library image uncertain even when
+    /// this editor already has a more useful failure or conflict diagnostic.
+    pub(crate) fn clear_catalog(&mut self) {
+        self.catalog = None;
+    }
+
     pub fn edit(&mut self, change: Edit) -> Result<(), String> {
         if self.status != Status::Ready {
             return Err("Read and verify the macro before editing".into());

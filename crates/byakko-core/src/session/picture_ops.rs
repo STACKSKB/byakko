@@ -1,5 +1,9 @@
 use super::{Activity, Command, Session, Status};
 use crate::picture::{Capabilities, Edit, editor::Editor, validate_capabilities};
+use crate::session::CommandPayload;
+#[cfg(test)]
+use crate::session::CompletionPayload;
+use crate::session::{DeviceActivity, Feature};
 
 impl Session {
     pub fn with_picture(mut self, capabilities: Capabilities) -> Result<Self, String> {
@@ -34,10 +38,14 @@ impl Session {
         }
         self.picture_editor()?;
         let operation = self.operation()?;
-        self.activity = Activity::ReadPicture { operation };
-        Ok(Command::ReadPicture {
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Read(Feature::Picture),
+        };
+        Ok(Command {
             generation: self.generation,
             operation,
+            payload: CommandPayload::ReadPicture {},
         })
     }
     pub fn request_picture_apply(&mut self) -> Result<Command, String> {
@@ -46,13 +54,15 @@ impl Session {
         }
         let (expected, desired) = self.picture_editor()?.request_apply()?;
         let operation = self.operation()?;
-        self.activity = Activity::ApplyPicture { operation };
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Apply(Feature::Picture),
+        };
         self.invalidate_archive();
-        Ok(Command::ApplyPicture {
+        Ok(Command {
             generation: self.generation,
             operation,
-            expected,
-            desired,
+            payload: CommandPayload::ApplyPicture { expected, desired },
         })
     }
 }
@@ -113,18 +123,21 @@ mod tests {
         }
     }
     fn read(session: &mut Session, snapshot: Snapshot) {
-        let Command::ReadPicture {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadPicture {},
         } = session.request_picture_read().unwrap()
         else {
             unreachable!()
         };
         assert_eq!(
-            session.accept(Completion::ReadPicture {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(snapshot)
+                payload: CompletionPayload::ReadPicture {
+                    result: Ok(snapshot)
+                }
             }),
             Acceptance::Accepted
         );
@@ -244,26 +257,29 @@ mod tests {
             })
             .unwrap();
         let draft = session.picture().unwrap().draft().unwrap().clone();
-        let Command::Read {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::Read {},
         } = session.request_read().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::Read {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(State {
-                revision: vec![1],
-                bindings: BTreeMap::from([(
-                    "base".into(),
-                    BTreeMap::from([
-                        ("a".into(), Action::Key(4)),
-                        ("fn".into(), Action::Disabled),
-                    ]),
-                )]),
-            }),
+            payload: CompletionPayload::Read {
+                result: Ok(State {
+                    revision: vec![1],
+                    bindings: BTreeMap::from([(
+                        "base".into(),
+                        BTreeMap::from([
+                            ("a".into(), Action::Key(4)),
+                            ("fn".into(), Action::Disabled),
+                        ]),
+                    )]),
+                }),
+            },
         });
         assert_eq!(session.picture().unwrap().draft(), Some(&draft));
         assert_eq!(
@@ -293,29 +309,32 @@ mod tests {
             serde_json::from_slice::<Command>(&serde_json::to_vec(&command).unwrap()).unwrap(),
             command
         );
-        let Command::ApplyPicture {
+        let Command {
             generation,
             operation,
-            desired,
-            ..
+            payload: CommandPayload::ApplyPicture { desired, .. },
         } = command
         else {
             unreachable!()
         };
         assert_eq!(desired, draft);
         assert_eq!(
-            session.accept(Completion::ReadPicture {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(snapshot(2, [7, 2, 3]))
+                payload: CompletionPayload::ReadPicture {
+                    result: Ok(snapshot(2, [7, 2, 3]))
+                }
             }),
             Acceptance::IgnoredStale
         );
         assert_eq!(
-            session.accept(Completion::ApplyPicture {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(snapshot(2, [8, 2, 3]))
+                payload: CompletionPayload::ApplyPicture {
+                    result: Ok(snapshot(2, [8, 2, 3]))
+                }
             }),
             Acceptance::Accepted
         );
@@ -336,21 +355,23 @@ mod tests {
         ));
         assert_eq!(session.picture().unwrap().draft(), Some(&draft));
         read(&mut session, snapshot(1, [1, 2, 3]));
-        let Command::ApplyPicture {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyPicture { .. },
         } = session.request_picture_apply().unwrap()
         else {
             unreachable!()
         };
-        let failure = Completion::ApplyPicture {
+        let failure = Completion {
             generation,
             operation,
-            result: Err(ApplyFailure {
-                message: "failed".into(),
-                recovery: Recovery::Unverified,
-            }),
+            payload: CompletionPayload::ApplyPicture {
+                result: Err(ApplyFailure {
+                    message: "failed".into(),
+                    recovery: Recovery::Unverified,
+                }),
+            },
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&failure).unwrap()).unwrap(),
@@ -375,10 +396,10 @@ mod tests {
                 color: [7, 8, 9],
             })
             .unwrap();
-        let Command::ApplyPicture {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyPicture { .. },
         } = session.request_picture_apply().unwrap()
         else {
             unreachable!()
@@ -387,10 +408,12 @@ mod tests {
             evidence: Evidence::TransportAccepted,
             ..snapshot(2, [7, 8, 9])
         };
-        session.accept(Completion::ApplyPicture {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(accepted.clone()),
+            payload: CompletionPayload::ApplyPicture {
+                result: Ok(accepted.clone()),
+            },
         });
         assert_eq!(session.picture().unwrap().baseline(), Some(&accepted));
         assert_eq!(
@@ -398,17 +421,20 @@ mod tests {
             &crate::picture::editor::Status::Ready
         );
 
-        let Command::ReadPicture {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadPicture {},
         } = session.request_picture_read().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ReadPicture {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(accepted.clone()),
+            payload: CompletionPayload::ReadPicture {
+                result: Ok(accepted.clone()),
+            },
         });
         assert!(matches!(
             session.picture().unwrap().status(),

@@ -14,7 +14,7 @@ cargo run -p byakko-devices --features research-tools --example read_keymap -- R
 ```
 
 The probe reserves a new output file, creates the Nia87 descriptor and core
-session, publishes the generation, submits only `Command::Read` through the
+session, publishes the generation, submits only an enveloped `CommandPayload::Read` through the
 serialized executor and feeds the correlated completion back to core. It exits
 successfully only when the core reaches Ready. No setters or keyboard edits are
 in this code path. The full serialized completion is retained locally at the

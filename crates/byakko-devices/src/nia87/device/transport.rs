@@ -37,7 +37,7 @@ pub struct Candidate {
 }
 
 impl Candidate {
-    fn identity(&self) -> Identity {
+    pub fn identity(&self) -> Identity {
         Identity {
             path: self.path.clone(),
             vendor_id: self.vid,
@@ -240,6 +240,53 @@ pub(super) trait FeatureSetter {
     fn send_setter(&self, report: &[u8]) -> Result<()>;
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReadPhase {
+    SendRequest,
+    ReceiveResponse,
+}
+
+#[derive(Debug)]
+struct FeatureReadError {
+    phase: ReadPhase,
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl std::fmt::Display for FeatureReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let phase = match self.phase {
+            ReadPhase::SendRequest => "send request",
+            ReadPhase::ReceiveResponse => "receive response",
+        };
+        write!(f, "HID feature read {phase} failed: {}", self.source)
+    }
+}
+
+impl std::error::Error for FeatureReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+fn feature_read_exchange(
+    request: &[u8; 65],
+    reply: &mut [u8; 65],
+    send: impl FnOnce(&[u8; 65]) -> crate::hid::Result<()>,
+    receive: impl FnOnce(&mut [u8; 65]) -> crate::hid::Result<usize>,
+) -> crate::hid::Result<usize> {
+    send(request).map_err(|source| FeatureReadError {
+        phase: ReadPhase::SendRequest,
+        source,
+    })?;
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    receive(reply).map_err(|source| {
+        Box::new(FeatureReadError {
+            phase: ReadPhase::ReceiveResponse,
+            source,
+        }) as Box<dyn std::error::Error + Send + Sync>
+    })
+}
+
 impl FeatureSetter for HidDevice {
     fn send_setter(&self, report: &[u8]) -> Result<()> {
         #[cfg(feature = "research-tools")]
@@ -265,9 +312,12 @@ pub(super) fn read_payload(
     let mut request = [0u8; 65];
     request[1..].copy_from_slice(&crate::nia87::protocol::read_request(opcode, index, page));
     let exchange = |reply: &mut [u8; 65]| {
-        device.send_feature_report(&request)?;
-        std::thread::sleep(std::time::Duration::from_millis(30));
-        device.get_feature_report(reply)
+        feature_read_exchange(
+            &request,
+            reply,
+            |request| device.send_feature_report(request),
+            |reply| device.get_feature_report(reply),
+        )
     };
     #[cfg(feature = "research-tools")]
     let (n, reply) = crate::research_trace::read(&request, exchange)?;
@@ -312,7 +362,10 @@ impl Session {
 
 #[cfg(test)]
 mod tests {
-    use super::{Availability, Candidate, Target, TargetSelectionError, classify, lock_file};
+    use super::{
+        Availability, Candidate, FeatureReadError, ReadPhase, Target, TargetSelectionError,
+        classify, feature_read_exchange, lock_file,
+    };
 
     fn candidate(path: &str) -> Candidate {
         Candidate {
@@ -415,5 +468,55 @@ mod tests {
         drop(first);
         assert!(lock_file(&path).is_ok());
         // Retain the empty test artifact in accordance with the no-deletion rule.
+    }
+
+    #[test]
+    fn feature_read_reports_request_phase_and_preserves_io_cause() {
+        let mut reply = [0; 65];
+        let error = feature_read_exchange(
+            &[0; 65],
+            &mut reply,
+            |_| Err(std::io::Error::from_raw_os_error(71).into()),
+            |_| panic!("receive must not run after a failed request"),
+        )
+        .unwrap_err();
+        let context = error.downcast_ref::<FeatureReadError>().unwrap();
+        assert_eq!(context.phase, ReadPhase::SendRequest);
+        assert!(context.to_string().contains("send request"));
+        assert_eq!(
+            std::error::Error::source(context)
+                .unwrap()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .raw_os_error(),
+            Some(71)
+        );
+    }
+
+    #[test]
+    fn feature_read_reports_response_phase_and_sends_once() {
+        let sends = std::cell::Cell::new(0);
+        let mut reply = [0; 65];
+        let error = feature_read_exchange(
+            &[0; 65],
+            &mut reply,
+            |_| {
+                sends.set(sends.get() + 1);
+                Ok(())
+            },
+            |_| Err(std::io::Error::from_raw_os_error(19).into()),
+        )
+        .unwrap_err();
+        let context = error.downcast_ref::<FeatureReadError>().unwrap();
+        assert_eq!(context.phase, ReadPhase::ReceiveResponse);
+        assert_eq!(sends.get(), 1);
+        assert_eq!(
+            std::error::Error::source(context)
+                .unwrap()
+                .downcast_ref::<std::io::Error>()
+                .unwrap()
+                .raw_os_error(),
+            Some(19)
+        );
     }
 }

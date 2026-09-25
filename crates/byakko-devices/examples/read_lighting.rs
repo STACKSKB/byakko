@@ -1,4 +1,5 @@
 //! Read-only probe of the lighting command path used by the desktop.
+use byakko_core::session::CompletionPayload;
 use byakko_core::{
     lighting::{Content, editor::Status},
     session::{Completion, Session},
@@ -41,7 +42,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     serde_json::to_writer_pretty(&mut file, &completion)?;
     file.write_all(b"\n")?;
     file.sync_all()?;
-    let read_ok = matches!(&completion, Completion::ReadLighting { result: Ok(_), .. });
+    let read_ok = matches!(
+        &completion,
+        Completion {
+            payload: CompletionPayload::ReadLighting { result: Ok(_), .. },
+            ..
+        }
+    );
     session.accept(completion);
     let editor = session.lighting().expect("configured lighting");
     if !read_ok || *editor.status() != Status::Ready {

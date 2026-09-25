@@ -226,20 +226,33 @@ pub fn from_bytes(slot: &str, raw: &[u8]) -> Result<Snapshot, String> {
 }
 
 pub fn draft(expected: &Snapshot, desired: &Program) -> Result<native::Macro, String> {
+    prepare(expected, desired).map(|(_, value)| value)
+}
+
+fn prepare(
+    expected: &Snapshot,
+    desired: &Program,
+) -> Result<(native::ValidatedBeforeImage, native::Macro), String> {
     if expected.backend_id != BACKEND_ID {
         return Err("Macro snapshot belongs to another backend".into());
     }
     slot_number(&expected.slot)?;
-    let projected = from_bytes(&expected.slot, &expected.revision)?;
-    if projected != *expected {
-        return Err("Macro snapshot differs from its revision; reload before editing".into());
-    }
     if !matches!(expected.content, Content::Editable(_)) {
         return Err("Unrecognized Nia87 macro is available only as a raw backup".into());
     }
+    let before = native::ValidatedBeforeImage::validate(&expected.revision)?;
+    let projected = Snapshot {
+        backend_id: BACKEND_ID.into(),
+        slot: expected.slot.clone(),
+        revision: before.as_bytes().into(),
+        content: Content::Editable(from_native(before.decoded())),
+    };
+    if projected != *expected {
+        return Err("Macro snapshot differs from its revision; reload before editing".into());
+    }
     let value = to_native(desired)?;
     native::encode(&value)?;
-    Ok(value)
+    Ok((before, value))
 }
 
 pub fn read(slot: &str) -> Result<Snapshot, String> {
@@ -286,7 +299,7 @@ pub(super) fn apply_with(
     desired: &Program,
     backup: &Path,
 ) -> Result<Snapshot, ApplyFailure> {
-    let value = draft(expected, desired).map_err(|message| ApplyFailure {
+    let (before, value) = prepare(expected, desired).map_err(|message| ApplyFailure {
         message,
         recovery: Recovery::NotAttempted,
     })?;
@@ -294,7 +307,7 @@ pub(super) fn apply_with(
         message,
         recovery: Recovery::NotAttempted,
     })?;
-    let raw = access.apply_macro_detailed(number, &expected.revision, &value, backup)?;
+    let raw = access.apply_macro_validated_detailed(number, &before, &value, backup)?;
     from_bytes(&expected.slot, &raw).map_err(|message| ApplyFailure {
         message,
         recovery: Recovery::Unverified,

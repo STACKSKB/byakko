@@ -85,15 +85,17 @@ pub(super) fn library(app: &Desktop) -> Element<'_, Message> {
     if let Some(error) = editor.catalog_error() {
         list = list.push(text(format!("Library scan failed: {error}")));
         list = list.push(
-            button("Retry scan")
-                .on_press_maybe(can_select.then_some(Message::Macro(Macro::ReadCatalog))),
+            button("Retry scan").on_press_maybe(
+                (can_select && !app.session.macro_catalog_scanning())
+                    .then_some(Message::Macro(Macro::ReadCatalog)),
+            ),
         );
     } else if let Some(configured) = configured {
         list = list.push(text(format!(
             "{} of {capacity} slots used",
             configured.len()
         )));
-    } else {
+    } else if app.session.macro_catalog_scanning() {
         list = list.push(text("Finding saved macros…"));
     }
     panels::panel(style, "Library", list.width(Fill).into())

@@ -1,4 +1,5 @@
 use super::apply_error::{ApplyError, RestoreMismatch, lighting_apply_error};
+use super::transaction::{apply_with_recovery, pacing, save_json_backup};
 use super::*;
 use byakko_core::session::{ApplyFailure, Recovery};
 
@@ -168,7 +169,7 @@ pub(super) fn write_lighting_report(device: &HidDevice, report: &[u8; 64]) -> Re
     let mut host = [0u8; 65];
     host[1..].copy_from_slice(report);
     device.send_setter(&host)?;
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(pacing::LIGHTING_SETTER);
     Ok(())
 }
 
@@ -233,17 +234,9 @@ fn apply_lighting_unlocked(
         return Ok(expected.clone());
     }
 
-    std::fs::create_dir_all(backup_dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let path = backup_dir.join(format!("lighting-before-{stamp}.json"));
-    let mut backup = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
-    serde_json::to_writer_pretty(
-        &mut backup,
+    let backup = save_json_backup(
+        backup_dir,
+        "lighting-before",
         &serde_json::json!({
             "format_version": 1,
             "firmware": 0x0100,
@@ -252,42 +245,39 @@ fn apply_lighting_unlocked(
             "target_report": target.as_slice(),
         }),
     )?;
-    backup.sync_all()?;
 
     if matches!(policy, CompletionPolicy::TransportAccepted) {
         // The captured official UI updates its cache after the setter without
         // a getter. Keep transport acceptance distinct from verified reads.
-        submit_lighting_report(&target, &path, |report| {
+        submit_lighting_report(&target, backup.path(), |report| {
             write_lighting_report(&device, report)
         })?;
         return submitted_lighting(expected, &target);
     }
 
-    let result = (|| -> Result<crate::nia87::lighting::Lighting> {
-        write_lighting_report(&device, &target)?;
-        let actual = read_lighting_on_device(&device)?;
-        if !lighting_matches_report(&actual, &target, expected) {
-            return Err("Lighting readback differs in setting or reserved response bytes".into());
-        }
-        Ok(actual)
-    })();
-    match result {
-        Ok(actual) => Ok(actual),
-        Err(error) => {
-            let restore = (|| -> Result<()> {
-                let report = lighting_restore_report(expected);
-                write_lighting_report(&device, &report)?;
-                let actual = read_lighting_on_device(&device)?;
-                if !lighting_matches_report(&actual, &report, expected) {
-                    return Err(
-                        RestoreMismatch("Lighting restoration could not be verified").into(),
-                    );
-                }
-                Ok(())
-            })();
-            Err(lighting_apply_error(error.as_ref(), restore, &path).into())
-        }
-    }
+    apply_with_recovery(
+        &backup,
+        || -> Result<crate::nia87::lighting::Lighting> {
+            write_lighting_report(&device, &target)?;
+            let actual = read_lighting_on_device(&device)?;
+            if !lighting_matches_report(&actual, &target, expected) {
+                return Err(
+                    "Lighting readback differs in setting or reserved response bytes".into(),
+                );
+            }
+            Ok(actual)
+        },
+        || -> Result<()> {
+            let report = lighting_restore_report(expected);
+            write_lighting_report(&device, &report)?;
+            let actual = read_lighting_on_device(&device)?;
+            if !lighting_matches_report(&actual, &report, expected) {
+                return Err(RestoreMismatch("Lighting restoration could not be verified").into());
+            }
+            Ok(())
+        },
+        lighting_apply_error,
+    )
 }
 
 fn submitted_lighting(

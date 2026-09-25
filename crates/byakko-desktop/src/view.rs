@@ -1,5 +1,6 @@
 //! Read-only projections and widgets; no backend imports or report knowledge.
 use super::{Closing, Desktop, Message, Page};
+use byakko_core::session::DeviceActivity;
 
 use crate::{panels, physical_board, shortcut};
 use byakko_core::{
@@ -354,24 +355,14 @@ pub(super) fn status(app: &Desktop) -> String {
                 byakko_core::session::HostPhase::Stopping => "Restoring saved lighting…".into(),
             };
         }
-        Activity::Read { .. }
-        | Activity::ReadMacro { .. }
-        | Activity::ReadMacroCatalog { .. }
-        | Activity::ReadLighting { .. }
-        | Activity::ReadPicture { .. }
-        | Activity::ReadSettings { .. }
-        | Activity::CaptureArchive { .. }
-        | Activity::ReviewArchive { .. } => {
-            return "Reading device…".into();
-        }
-        Activity::Apply { .. }
-        | Activity::ApplyMacro { .. }
-        | Activity::ApplyLighting { .. }
-        | Activity::ApplyPicture { .. }
-        | Activity::ApplySetting { .. }
-        | Activity::ApplyArchive { .. } => {
-            return "Backing up, applying and verifying…".into();
-        }
+        Activity::Device {
+            request: DeviceActivity::Read(_) | DeviceActivity::ReviewArchive { .. },
+            ..
+        } => return "Reading device…".into(),
+        Activity::Device {
+            request: DeviceActivity::Apply(_),
+            ..
+        } => return "Backing up, applying and verifying…".into(),
         Activity::Idle => {}
     }
     if let Some(presence) = &app.presence {

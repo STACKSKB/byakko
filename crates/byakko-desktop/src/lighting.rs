@@ -1,4 +1,6 @@
 //! Render capability-projected lighting controls; device policy lives in core.
+use byakko_core::session::CommandPayload;
+use byakko_core::session::{DeviceActivity, Feature};
 mod host;
 pub(crate) mod live;
 pub(crate) mod screen;
@@ -218,10 +220,10 @@ impl Desktop {
             }
         };
         if self.lighting_panel == Panel::PerKey
-            && let byakko_core::session::Command::ApplyLighting {
+            && let byakko_core::session::Command {
                 generation,
                 operation,
-                ..
+                payload: CommandPayload::ApplyLighting { .. },
             } = &command
         {
             self.picture_activation = Some((*generation, *operation));
@@ -551,7 +553,13 @@ fn host_controls(app: &Desktop, editor: &Editor) -> Element<'static, AppMessage>
 }
 
 fn status(app: &Desktop, editor: &Editor) -> String {
-    if matches!(app.session.activity(), Activity::ApplyLighting { .. }) {
+    if matches!(
+        app.session.activity(),
+        Activity::Device {
+            request: DeviceActivity::Apply(Feature::Lighting),
+            ..
+        }
+    ) {
         return "Updating lighting…".into();
     }
     if app.live_lighting.has_pending() {

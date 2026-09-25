@@ -1,4 +1,5 @@
 use super::apply_error::{RestoreMismatch, keymap_apply_error};
+use super::transaction::{apply_with_recovery, pacing, save_json_backup};
 use super::*;
 
 fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>> {
@@ -68,7 +69,7 @@ pub(super) fn write_binding(
     device.send_setter(&payload)?;
     // Firmware 0100 can cross-write base/Fn values when setters are only
     // 100 ms apart. A 1 s interval passed mixed-layer write/restore tests.
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    std::thread::sleep(pacing::KEYMAP_SETTER);
     Ok(())
 }
 
@@ -135,90 +136,79 @@ pub(super) fn apply_keymaps_with(
     if changes.is_empty() {
         return Ok(expected.clone());
     }
-    std::fs::create_dir_all(backup_dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let path = backup_dir.join(format!("keymaps-before-{stamp}.json"));
-    let mut backup = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
-    serde_json::to_writer_pretty(&mut backup, expected)?;
-    backup.sync_all()?;
+    let backup = save_json_backup(backup_dir, "keymaps-before", expected)?;
     let (_, device) = selection.open()?;
-    let result = (|| -> Result<Snapshot> {
-        // The official helper's captured final HID report for a Fn binding is
-        // the single-key 0x15 command with index 0.
-        for &(is_fn, slot, _, new) in &changes {
-            if is_fn {
-                continue;
+    apply_with_recovery(
+        &backup,
+        || -> Result<Snapshot> {
+            // The official helper's captured final HID report for a Fn binding is
+            // the single-key 0x15 command with index 0.
+            for &(is_fn, slot, _, new) in &changes {
+                if is_fn {
+                    continue;
+                }
+                write_binding(&device, false, expected.profile, slot, new)?;
             }
-            write_binding(&device, false, expected.profile, slot, new)?;
-        }
-        for &(is_fn, slot, _, new) in &changes {
-            if is_fn {
-                write_binding(&device, true, 0, slot, new)?;
+            for &(is_fn, slot, _, new) in &changes {
+                if is_fn {
+                    write_binding(&device, true, 0, slot, new)?;
+                }
             }
-        }
-        let actual = snapshot_on_device(&device)?;
-        if actual.base != base
-            || actual.function != function
-            || actual.firmware != expected.firmware
-            || actual.profile != expected.profile
-        {
-            let mismatch_path = backup_dir.join(format!("keymaps-mismatch-{stamp}.json"));
-            let mut mismatch = std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(mismatch_path)?;
-            serde_json::to_writer_pretty(
-                &mut mismatch,
-                &serde_json::json!({"actual":actual,"desired_base":base,"desired_function":function}),
-            )?;
-            mismatch.sync_all()?;
-            return Err("Readback does not match the complete intended keymaps".into());
-        }
-        Ok(actual)
-    })();
-    match result {
-        Ok(actual) => Ok(actual),
-        Err(error) => {
-            let rollback = (|| -> Result<()> {
-                // A failed setter may have changed either map. Read both maps
-                // before recovery, restore Fn first, then reread both maps
-                // because those Fn writes might also have affected base.
-                for (is_fn, profile, attempted, original) in [
-                    (true, 0, function, expected.function.as_slice()),
-                    (false, expected.profile, base, expected.base.as_slice()),
-                ] {
-                    let observed = snapshot_unlocked(selection).ok();
-                    let observed_map = observed.as_ref().map(|snapshot| {
-                        if is_fn {
-                            snapshot.function.as_slice()
-                        } else {
-                            snapshot.base.as_slice()
-                        }
-                    });
-                    // Without a trustworthy read, restore only planned changes.
-                    // Complete readback below must still prove restoration.
-                    let slots = crate::nia87::recovery_keymaps::slots_to_restore(
-                        observed_map,
-                        attempted,
-                        original,
-                    )?;
-                    for slot in slots {
-                        write_binding(&device, is_fn, profile, slot, original[slot])?;
+            let actual = snapshot_on_device(&device)?;
+            if actual.base != base
+                || actual.function != function
+                || actual.firmware != expected.firmware
+                || actual.profile != expected.profile
+            {
+                let mismatch_path =
+                    backup_dir.join(format!("keymaps-mismatch-{}.json", backup.stamp()));
+                let mut mismatch = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(mismatch_path)?;
+                serde_json::to_writer_pretty(
+                    &mut mismatch,
+                    &serde_json::json!({"actual":actual,"desired_base":base,"desired_function":function}),
+                )?;
+                mismatch.sync_all()?;
+                return Err("Readback does not match the complete intended keymaps".into());
+            }
+            Ok(actual)
+        },
+        || -> Result<()> {
+            // A failed setter may have changed either map. Read both maps
+            // before recovery, restore Fn first, then reread both maps
+            // because those Fn writes might also have affected base.
+            for (is_fn, profile, attempted, original) in [
+                (true, 0, function, expected.function.as_slice()),
+                (false, expected.profile, base, expected.base.as_slice()),
+            ] {
+                let observed = snapshot_unlocked(selection).ok();
+                let observed_map = observed.as_ref().map(|snapshot| {
+                    if is_fn {
+                        snapshot.function.as_slice()
+                    } else {
+                        snapshot.base.as_slice()
                     }
+                });
+                // Without a trustworthy read, restore only planned changes.
+                // Complete readback below must still prove restoration.
+                let slots = crate::nia87::recovery_keymaps::slots_to_restore(
+                    observed_map,
+                    attempted,
+                    original,
+                )?;
+                for slot in slots {
+                    write_binding(&device, is_fn, profile, slot, original[slot])?;
                 }
-                if snapshot_on_device(&device)? != *expected {
-                    return Err(RestoreMismatch("restored data could not be verified").into());
-                }
-                Ok(())
-            })();
-            Err(keymap_apply_error(error.as_ref(), rollback, &path).into())
-        }
-    }
+            }
+            if snapshot_on_device(&device)? != *expected {
+                return Err(RestoreMismatch("restored data could not be verified").into());
+            }
+            Ok(())
+        },
+        keymap_apply_error,
+    )
 }
 
 #[cfg(test)]

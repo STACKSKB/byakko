@@ -1,5 +1,7 @@
 use super::*;
 use crate::settings::Message as Settings;
+use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::{DeviceActivity, Feature};
 use byakko_core::settings::{Content, Edit, Value, editor::Status as SettingsStatus};
 use macro_workflow::settle;
 use std::time::{Duration, Instant};
@@ -116,7 +118,10 @@ fn settings_page_uses_explicit_read_and_keeps_verified_snapshot_across_navigatio
     send(&mut app, Settings::Read);
     assert!(matches!(
         app.session.activity(),
-        byakko_core::session::Activity::ReadSettings { .. }
+        byakko_core::session::Activity::Device {
+            request: DeviceActivity::Read(Feature::Settings),
+            ..
+        }
     ));
     settle(&mut app);
     assert_eq!(
@@ -184,30 +189,34 @@ fn failed_setting_apply_retains_draft_and_blocks_close() {
     );
     let baseline = app.session.settings().unwrap().baseline().cloned();
     let draft = app.session.settings().unwrap().draft().cloned();
-    let Command::ApplySetting {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ApplySetting { .. },
     } = app.session.request_setting_apply().unwrap()
     else {
         unreachable!()
     };
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::Waiting);
-    let _ = app.complete(Completion::ReadSettings {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Ok(baseline.clone().unwrap()),
+        payload: CompletionPayload::ReadSettings {
+            result: Ok(baseline.clone().unwrap()),
+        },
     });
     assert!(app.busy());
     let failure = ApplyFailure {
         message: "restore mismatch".into(),
         recovery: Recovery::Failed,
     };
-    let _ = app.complete(Completion::ApplySetting {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Err(failure.clone()),
+        payload: CompletionPayload::ApplySetting {
+            result: Err(failure.clone()),
+        },
     });
     assert_eq!(app.closing, Closing::Open);
     let editor = app.session.settings().unwrap();

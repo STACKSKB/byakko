@@ -1,4 +1,5 @@
 //! Whole-configuration capture, apply, and recovery on one locked HID session.
+use super::transaction::{pacing, save_encoded_backup};
 use super::{
     FeatureSetter, HidDevice, Result, Selection, Session, lighting_restore_report,
     read_lighting_on_device, read_macro_on_device, read_picture_on_device, read_settings_on_device,
@@ -94,12 +95,10 @@ fn apply_configuration_selected(
     }
     let session = Session::open_for(selection)?;
     let device = session.device();
-    std::fs::create_dir_all(backup_dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let path = backup_dir.join(format!("configuration-before-{stamp}.json"));
-    crate::nia87::configuration::save_new(&path, expected)?;
+    let encoded = crate::nia87::configuration::encode(expected)?;
+    let backup = save_encoded_backup(backup_dir, "configuration-before", &encoded)?;
+    let stamp = backup.stamp();
+    let path = backup.path();
     let mut setter_started = false;
     let mut mismatched_readback = None;
     let result = (|| -> Result<crate::nia87::configuration::Configuration> {
@@ -268,7 +267,7 @@ fn recover_configuration(
                 let mut host = [0u8; 65];
                 host[1..].copy_from_slice(&report);
                 device.send_setter(&host)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(pacing::ARCHIVE_PICTURE_KEY);
                 Ok(())
             })();
             attempt(format!("picture {slot}"), result);
@@ -289,7 +288,7 @@ fn recover_configuration(
             let mut host = [0u8; 65];
             host[1..].copy_from_slice(&report);
             device.send_setter(&host)?;
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(pacing::SETTING_SETTER);
             Ok(())
         })();
         attempt(format!("setting {setting:?}"), result);
@@ -382,7 +381,7 @@ fn write_configuration_changes(
                 host[1..].copy_from_slice(&report);
                 *setter_started = true;
                 device.send_setter(&host)?;
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                std::thread::sleep(pacing::ARCHIVE_PICTURE_KEY);
             }
         }
     }
@@ -398,7 +397,7 @@ fn write_configuration_changes(
         host[1..].copy_from_slice(&report);
         *setter_started = true;
         device.send_setter(&host)?;
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(pacing::SETTING_SETTER);
     }
     if plan.lighting {
         *setter_started = true;

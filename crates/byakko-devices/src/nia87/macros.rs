@@ -2,6 +2,32 @@
 pub use crate::rongyuan::yc500::macro_program::{Macro, MacroEvent, decode, encode};
 pub use crate::rongyuan::yc500::macro_reports::{read_request, write_reports};
 
+/// Exact bytes from a macro slot, validated before they can be backed up and
+/// used for recovery. Keep the decoded value so the portable adapter can
+/// compare its snapshot without decoding the same revision again.
+pub struct ValidatedBeforeImage {
+    bytes: [u8; 256],
+    decoded: Macro,
+}
+
+impl ValidatedBeforeImage {
+    pub fn validate(bytes: &[u8]) -> Result<Self, String> {
+        let decoded = decode(bytes)?;
+        let bytes = bytes
+            .try_into()
+            .map_err(|_| format!("Expected 256 Nia87 macro bytes, got {}", bytes.len()))?;
+        Ok(Self { bytes, decoded })
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn decoded(&self) -> &Macro {
+        &self.decoded
+    }
+}
+
 #[cfg(test)]
 const BUFFER_LEN: usize = 256;
 #[cfg(test)]
@@ -12,6 +38,19 @@ const WRITE_PAGES: usize = 5;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validated_before_image_retains_noncanonical_bytes_for_recovery() {
+        let mut raw = [0; 256];
+        raw[..6].copy_from_slice(&[1, 0, 4, 0x80, 1, 0]);
+        let before = ValidatedBeforeImage::validate(&raw).unwrap();
+        assert_eq!(before.as_bytes(), raw);
+        assert_eq!(before.decoded().events.len(), 1);
+        assert_ne!(encode(before.decoded()).unwrap(), raw);
+
+        raw[248] = 1;
+        assert!(ValidatedBeforeImage::validate(&raw).is_err());
+    }
 
     #[test]
     fn captured_official_mouse_macro_matches_native_event_bytes() {

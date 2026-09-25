@@ -1,4 +1,5 @@
 //! Read-only end-to-end probe of the same command path used by the desktop.
+use byakko_core::session::CompletionPayload;
 use byakko_core::session::{Completion, KeymapSession, Status};
 use byakko_devices::{Executor, nia87};
 use std::{
@@ -38,7 +39,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     serde_json::to_writer_pretty(&mut file, &completion)?;
     file.write_all(b"\n")?;
     file.sync_all()?;
-    let read_ok = matches!(&completion, Completion::Read { result: Ok(_), .. });
+    let read_ok = matches!(
+        &completion,
+        Completion {
+            payload: CompletionPayload::Read { result: Ok(_), .. },
+            ..
+        }
+    );
     session.accept(completion);
     if !read_ok || *session.status() != Status::Ready {
         return Err(format!("Read failed; completion preserved: {:?}", session.status()).into());
