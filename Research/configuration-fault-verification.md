@@ -279,3 +279,26 @@ changed. Unit tests cover retention of the first/retry mismatch, unchanged
 retry counts, exact file round-trip, non-overwrite and persistence failure.
 This improves evidence for a future authorized test; it does not reconstruct
 the discarded historical capture or resolve either hardware failure.
+
+The research `restore_configuration_archive` example also accepts an optional
+third argument, `NEW_TRACE.json`, when built with `--features research-tools`.
+It reserves that new file before device access and records existing setter/getter
+attempts in memory through apply and recovery, then saves the trace even when
+apply fails. It injects no fault. Without the feature, a trace argument is
+rejected before device access. The normal two-file invocation remains available.
+
+A read-only Linux capture after the diagnostic change (`975aa24`) still differs
+from the original archive only at lighting bytes 5 and 7: 250 instead of 255.
+The proposed native target changes those two bytes back; offline archive review
+reports one lighting change and no other sections. Prepared files are local at
+`/tmp/byakko-restore-review-20260925-kp8s7pec/`:
+
+- `current-native.json`: SHA-256 `c5a056cbb6edb9e3994d9acdd4aca71fd63c3743dffea8e88e89e5b47bdd0a04`.
+- `target-native.json`: SHA-256 `3e190a04d21e62372fc51977aa9619844ac038b73c2ef0a8a22a61701b92545e`.
+- `plan.json`: offline comparison showing global lighting count 1.
+
+No restore was run. This is a prepared proposal, not authorization or evidence
+of successful restoration. Revalidate its baseline if the device state changes
+before a future approved test. Trace-enabled release build and strict Clippy
+passed; an existing trace path was rejected before device access with its
+contents unchanged. No live traced setter has been tested by this preparation.

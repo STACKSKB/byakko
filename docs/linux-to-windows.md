@@ -70,7 +70,11 @@ the Linux task; it should not be repeated.
 
 ### WIN-20260925-001: Investigate official brightness encoding
 - Revision: 1
-- Status: pending
+- Status: completed
+- Result: Windows returned revision 1 against the requested source on 2026-09-25.
+  Existing evidence supports byte 3/direct 0–4 but does not explain absent
+  physical dimming. No new hardware access occurred. Recorded in
+  `Research/brightness-investigation.md`; no further test authorized by this entry.
 - Source commit: `b99fe6b073ffdcbaffe35fd0f06a74b1b87d9bc5`
 - Scope: read-only inspection of existing captures and protocol research.
 - User authorization: On 2026-09-25 the user requested direct Git-backed
