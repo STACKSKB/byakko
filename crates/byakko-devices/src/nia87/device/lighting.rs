@@ -1,4 +1,4 @@
-use super::apply_error::{ApplyError, lighting_apply_error};
+use super::apply_error::{ApplyError, RestoreMismatch, lighting_apply_error};
 use super::*;
 use byakko_core::session::{ApplyFailure, Recovery};
 
@@ -279,7 +279,9 @@ fn apply_lighting_unlocked(
                 write_lighting_report(&device, &report)?;
                 let actual = read_lighting_on_device(&device)?;
                 if !lighting_matches_report(&actual, &report, expected) {
-                    return Err("Lighting restoration could not be verified".into());
+                    return Err(
+                        RestoreMismatch("Lighting restoration could not be verified").into(),
+                    );
                 }
                 Ok(())
             })();

@@ -1,4 +1,4 @@
-use super::apply_error::{detailed, macro_apply_error};
+use super::apply_error::{RestoreMismatch, detailed, macro_apply_error};
 use super::transport::FeatureSetter;
 use super::{HidDevice, Result, Selection, Session, read_payload, transaction_lock};
 use serde_json;
@@ -103,7 +103,7 @@ pub(super) fn apply_macro_with(
             let rollback = (|| -> Result<()> {
                 write_macro_bytes(&device, slot, expected)?;
                 if read_macro_on_device(&device, slot)? != expected {
-                    return Err("macro restoration mismatch".into());
+                    return Err(RestoreMismatch("macro restoration mismatch").into());
                 }
                 Ok(())
             })();
