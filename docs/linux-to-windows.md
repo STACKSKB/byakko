@@ -109,8 +109,13 @@ the Linux task; it should not be repeated.
   restoration remains an open gate, separate from brightness.
 
 ### WIN-20260925-002: Observe official steady-green brightness with camera
-- Revision: 4
-- Status: awaiting usable Windows camera view
+- Revision: 5
+- Status: deferred by user availability
+- Current direction: The user reports the Windows camera cannot be repositioned
+  at present, while the Linux camera works. Do not repeat Windows camera or
+  physical test attempts while this prerequisite remains unavailable. Linux is
+  proceeding with its separately prepared camera comparison; keep this Windows
+  physical gate open. Read-only request 004 may proceed.
 - Progress: The initial camera attempt was rejected for missing explicit
   authorization. After the user directly authorized the Windows task, a still
   capture succeeded at 07:50Z but was almost black, with no identifiable keyboard.
@@ -119,7 +124,7 @@ the Linux task; it should not be repeated.
   No official-app action, diagnostic HID capture or keyboard setting change has
   occurred, and no restoration is needed yet. See the image hash in
   `Research/brightness-investigation.md`.
-- Revision 4 changes only this progress record; it does not request a new run
+- Revision 5 changes only this progress record; it does not request a new run
   or justify repeated physical actions. Preserve the existing receipt and
   awaiting-position state. Request 003 is completed and must not rerun.
 - Source commit: `e1af8b7`
