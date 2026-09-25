@@ -65,5 +65,36 @@ always-on external service. No-change checks remain quiet.
 
 ## Requests
 
-No pending requests at setup. The earlier recovery-capture comparison has already
-been delivered directly to the Linux task; it should not be repeated.
+The earlier recovery-capture comparison has already been delivered directly to
+the Linux task; it should not be repeated.
+
+### WIN-20260925-001: Investigate official brightness encoding
+- Revision: 1
+- Status: pending
+- Source commit: `b99fe6b073ffdcbaffe35fd0f06a74b1b87d9bc5`
+- Scope: read-only inspection of existing captures and protocol research.
+- User authorization: On 2026-09-25 the user requested direct Git-backed
+  coordination with the Windows agent, without relaying requests themselves.
+  Existing evidence may be inspected; this request does not authorize new
+  official-app setters or physical tests.
+- Request: Determine what existing official-app captures/research establish
+  about Nia87 global-lighting brightness encoding, ranges, and effect-specific
+  behavior. Compare this with Byakko's current encoder. The supervised Linux
+  steady-green test read brightness 4 and then 1 back correctly (only raw byte
+  3 changed), but the user saw no dimming. Mode/color switching was visible.
+  Identify whether evidence already explains this or which single bounded
+  physical comparison would resolve it. Do not change the codec on inference.
+- Evidence/output needed: Return this ID/revision and inspected source commit;
+  exact existing setter/getter payloads, byte offsets, displayed UI values,
+  firmware identity and timing if recorded, file paths/hashes, and limitations.
+  Distinguish captured observations from source-derived hypotheses. If fresh
+  physical evidence is necessary, return a concrete test proposal including
+  saved baseline and restoration, so authorization can be resolved here.
+- Constraints: No new keyboard writes, fault injection, flashing, or official-
+  app setting changes. Preserve existing evidence. Do not repeat the completed
+  historical recovery comparison. Linux observations and restoration details
+  are in `docs/linux-handoff.md` and
+  `Research/configuration-fault-verification.md`; the Linux temporary captures
+  are local to that host. The keyboard is currently restored to Wave/rainbow,
+  brightness 4, speed 2, right, with canonical RGB `FA FF FA`. Exact raw archive
+  restoration remains an open gate, separate from brightness.

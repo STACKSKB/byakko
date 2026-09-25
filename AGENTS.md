@@ -236,6 +236,11 @@ Do not turn diagnostic repetition into redundant automatic runtime preflights.
   Review their changes. Avoid parallel edits to the same files.
 - Commit after major completed steps. No PRs, issues, messages to others,
   Firefox automation, or file deletion. Use Edge/Codex browser for research.
+  User-directed exception (2026-09-25): coordinate directly with the Windows
+  agent through `docs/linux-to-windows.md` and its remote replies. Commit and
+  push requests/status updates as documented there; preserve both checkouts'
+  work and never force-push. This communication authorization does not expand
+  authorization for hardware writes or fault experiments.
 - Coordinate physical interaction with the user when available. Keep hardware
   writes backed up and bounded; retain the recorded recovery failure as an open
   acceptance gate. Do not revive deferred work without authorization.
