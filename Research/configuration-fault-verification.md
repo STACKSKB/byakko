@@ -259,3 +259,23 @@ archive mismatch. No trace or mismatched snapshot was retained by that restore
 path, so do not infer its actual failing section. This narrow Verified recovery
 is new Linux evidence, not proof that the old multi-section Windows failure is
 fixed. Preserve diagnostics before proposing any further write experiment.
+
+### Diagnostic retention added after this run
+
+The archive apply path now retains an already captured complete mismatch instead
+of discarding it. After recovery finishes, it attempts to save forward and
+recovery mismatches beside the durable before-image as
+`configuration-apply-mismatch-<stamp>.json` and
+`configuration-recovery-mismatch-<stamp>.json`. The shared stamp correlates them
+with `configuration-before-<stamp>.json`. Files use the lossless native archive
+format and exclusive creation; the returned failure message identifies saved
+paths or persistence errors. A persistence error cannot skip recovery or change
+its Verified/Failed/Unverified outcome.
+
+This uses existing captures only. A successful but mismatched recovery read
+still does not retry; a failed recovery read still permits the existing one
+fresh-handle read. No setters, delays, comparison rules or recovery strategy
+changed. Unit tests cover retention of the first/retry mismatch, unchanged
+retry counts, exact file round-trip, non-overwrite and persistence failure.
+This improves evidence for a future authorized test; it does not reconstruct
+the discarded historical capture or resolve either hardware failure.

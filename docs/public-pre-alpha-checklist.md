@@ -237,3 +237,8 @@ physical interaction will be coordinated around the user's availability.
   rolled back with Verified recovery; original visible settings were restored
   afterward with user-approved canonical RGB bytes. Root cause and physical
   brightness remain open; see the Linux handoff and fault investigation.
+
+- [x] Archive mismatch diagnostics now retain complete forward/recovery readbacks
+  beside the before-image after recovery finishes, with persistence failures
+  reported separately. No extra HID reads or retries were added. Device tests
+  and strict product Clippy pass; hardware root cause remains unproven.
