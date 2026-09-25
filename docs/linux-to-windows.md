@@ -219,7 +219,15 @@ the Linux task; it should not be repeated.
 
 ### WIN-20260925-005: Profile the official macro editing and assignment workflow
 - Revision: 1
-- Status: pending
+- Status: awaiting Windows desktop access
+- Progress: Revision 1 returned existing evidence on 2026-09-25. The available
+  official executable is Nia87 Driver 2.1.97.0; its launch failed with
+  `GetCursorPos failed: Access is denied (0x80070005)`. No UI controls were
+  clicked or hardware writes performed. Preserve this partial result and resume
+  the unfinished live observation when desktop access is restored; do not
+  repeat the existing-evidence audit. Camera availability is not a prerequisite.
+  The user approved Byakko's combined Save & assign workflow independently;
+  do not represent that design as observed official-app behavior.
 - Source commit: `9744f0f` (Byakko comparison baseline).
 - Scope: official-app macro UX observation and existing evidence inspection.
 - User authorization: The user explicitly requested: "Have the Windows agent
