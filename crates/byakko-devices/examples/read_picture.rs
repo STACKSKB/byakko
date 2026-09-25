@@ -1,5 +1,6 @@
 //! Read-only probe of the picture command path used by the desktop.
 use byakko_core::session::CompletionPayload;
+use byakko_core::session::FeatureResult;
 use byakko_core::{
     picture::{Content, editor::Status},
     session::{Completion, Session},
@@ -45,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let read_ok = matches!(
         &completion,
         Completion {
-            payload: CompletionPayload::ReadPicture { result: Ok(_), .. },
+            payload: CompletionPayload::Picture(FeatureResult::Read(Ok(_))),
             ..
         }
     );

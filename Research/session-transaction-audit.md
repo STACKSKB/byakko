@@ -7,6 +7,16 @@ stage, but not whether the getter's request or response failed. The user also
 reported a failed macro library scan. Neither observation alone establishes a
 malformed macro packet. No hardware writes were performed for this refactor.
 
+## Follow-up correction
+
+The initial refactor left parallel execution/failure dispatch and repeated
+verification control flow. Its completion summary overstated the simplification.
+The subsequent revision shares feature Read/Apply types, one executor dispatch,
+session request construction and the direct verified transaction sequence.
+See [reproducible measurements](refactor-metrics/README.md) for production line
+counts, an explicitly limited AST decision-syntax score, and remaining costs.
+There is no claim of a measured conventional cyclomatic-complexity reduction.
+
 ## Changes
 
 ### Session contract and completion handling

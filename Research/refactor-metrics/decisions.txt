@@ -1,0 +1,46 @@
+Convention: decision syntax = if + match arms beyond first + guards + &&/|| + for/while/loop + ? + let-else. This is not CFG cyclomatic complexity. Macro tokens are opaque and counted separately. Test paths and #[cfg(test)] items are skipped. All other cfg branches are included.
+Fields: decisions, functions, closures, if, match, arms, alternatives, guards, shortcircuit, for, while, loop, try, let_else, macro_boundaries, skipped_test_items
+
+core_session
+  09f193c: files=9; decisions=279, functions=99, closures=63, if=81, match=22, arms=78, alternatives=56, guards=5, shortcircuit=31, for=0, while=0, loop=0, try=97, let_else=9, macro_boundaries=14, skipped_test_items=8
+  264102c: files=9; decisions=258, functions=104, closures=73, if=78, match=20, arms=62, alternatives=42, guards=5, shortcircuit=28, for=0, while=0, loop=0, try=97, let_else=8, macro_boundaries=10, skipped_test_items=8  delta_decisions=-21
+  WORKTREE: files=9; decisions=251, functions=108, closures=73, if=78, match=23, arms=62, alternatives=39, guards=5, shortcircuit=28, for=0, while=0, loop=0, try=93, let_else=8, macro_boundaries=11, skipped_test_items=8  delta_decisions=-7
+
+executor
+  09f193c: files=2; decisions=97, functions=20, closures=15, if=21, match=18, arms=75, alternatives=57, guards=9, shortcircuit=6, for=0, while=1, loop=1, try=1, let_else=1, macro_boundaries=7, skipped_test_items=2
+  264102c: files=2; decisions=101, functions=20, closures=14, if=22, match=19, arms=79, alternatives=60, guards=9, shortcircuit=6, for=0, while=1, loop=1, try=1, let_else=1, macro_boundaries=7, skipped_test_items=2  delta_decisions=+4
+  WORKTREE: files=2; decisions=79, functions=23, closures=32, if=22, match=20, arms=58, alternatives=38, guards=9, shortcircuit=6, for=0, while=1, loop=1, try=1, let_else=1, macro_boundaries=7, skipped_test_items=2  delta_decisions=-22
+
+device_features
+  09f193c: files=10; decisions=274, functions=119, closures=51, if=58, match=15, arms=35, alternatives=20, guards=0, shortcircuit=22, for=19, while=0, loop=0, try=155, let_else=0, macro_boundaries=49, skipped_test_items=7
+  264102c: files=11; decisions=258, functions=130, closures=57, if=58, match=13, arms=31, alternatives=18, guards=0, shortcircuit=22, for=19, while=0, loop=0, try=141, let_else=0, macro_boundaries=46, skipped_test_items=8  delta_decisions=-16
+  WORKTREE: files=11; decisions=246, functions=131, closures=68, if=54, match=13, arms=31, alternatives=18, guards=0, shortcircuit=22, for=19, while=0, loop=0, try=133, let_else=0, macro_boundaries=46, skipped_test_items=8  delta_decisions=-12
+
+all
+  09f193c: files=21; decisions=650, functions=238, closures=129, if=160, match=55, arms=188, alternatives=133, guards=14, shortcircuit=59, for=19, while=1, loop=1, try=253, let_else=10, macro_boundaries=70, skipped_test_items=17
+  264102c: files=22; decisions=617, functions=254, closures=144, if=158, match=52, arms=172, alternatives=120, guards=14, shortcircuit=56, for=19, while=1, loop=1, try=239, let_else=9, macro_boundaries=63, skipped_test_items=18  delta_decisions=-33
+  WORKTREE: files=22; decisions=576, functions=262, closures=173, if=154, match=56, arms=151, alternatives=95, guards=14, shortcircuit=56, for=19, while=1, loop=1, try=227, let_else=9, macro_boundaries=64, skipped_test_items=18  delta_decisions=-41
+
+Per-file decision counts and source hashes:
+crates/byakko-core/src/session.rs 09f193c=103(6e99dcd4aa43) 264102c=82(9fb8d75c0483) WORKTREE=79(aeff73bf4866)
+crates/byakko-core/src/session/archive_ops.rs 09f193c=34(864eea8d5c35) 264102c=34(6cf1d778fdda) WORKTREE=34(365b6f8e7cfd)
+crates/byakko-core/src/session/host_ops.rs 09f193c=38(29ba230dfc40) 264102c=38(874e6d828d3e) WORKTREE=38(22409960cdc8)
+crates/byakko-core/src/session/lighting_ops.rs 09f193c=17(c045a0312498) 264102c=17(4b20e8593791) WORKTREE=16(9c5271006428)
+crates/byakko-core/src/session/macro_files.rs 09f193c=12(5037d87199ed) 264102c=12(5037d87199ed) WORKTREE=12(5037d87199ed)
+crates/byakko-core/src/session/macro_ops.rs 09f193c=37(853f9a4314dd) 264102c=37(bbfd4ff91f70) WORKTREE=36(ee8b9fbe840c)
+crates/byakko-core/src/session/picture_ops.rs 09f193c=14(401ba489b50d) 264102c=14(41408ddaad08) WORKTREE=13(b92624c32992)
+crates/byakko-core/src/session/recording.rs 09f193c=9(bcbe3a2c82a7) 264102c=9(bcbe3a2c82a7) WORKTREE=9(bcbe3a2c82a7)
+crates/byakko-core/src/session/settings_ops.rs 09f193c=15(fa3ec8e0336c) 264102c=15(3df6d574294c) WORKTREE=14(da95758b5461)
+crates/byakko-devices/src/executor.rs 09f193c=75(2a40bd8975b5) 264102c=79(760631006db0) WORKTREE=57(84af6dca4dfa)
+crates/byakko-devices/src/executor/host.rs 09f193c=22(7c99f0738749) 264102c=22(7c99f0738749) WORKTREE=22(7c99f0738749)
+crates/byakko-devices/src/nia87/device.rs 09f193c=0(0154d00b2962) 264102c=0(4078f1d77189) WORKTREE=0(4078f1d77189)
+crates/byakko-devices/src/nia87/device/access.rs 09f193c=2(4eaab4339fb2) 264102c=2(84a5341b790e) WORKTREE=2(84a5341b790e)
+crates/byakko-devices/src/nia87/device/apply_error.rs 09f193c=3(4733d4312b8f) 264102c=3(4733d4312b8f) WORKTREE=3(4733d4312b8f)
+crates/byakko-devices/src/nia87/device/configuration.rs 09f193c=67(3de028667a4d) 264102c=66(d64fff6cce3d) WORKTREE=66(d64fff6cce3d)
+crates/byakko-devices/src/nia87/device/keymaps.rs 09f193c=53(870b04cd2f4f) 264102c=48(1f2e3347e28a) WORKTREE=48(1f2e3347e28a)
+crates/byakko-devices/src/nia87/device/lighting.rs 09f193c=40(963c8fb347b8) 264102c=35(4a312ca6f505) WORKTREE=29(ebc381a7979b)
+crates/byakko-devices/src/nia87/device/macros.rs 09f193c=24(43faca50f47a) 264102c=19(2fa2b7ff3930) WORKTREE=11(3c450014dd48)
+crates/byakko-devices/src/nia87/device/picture.rs 09f193c=23(0cd6b7a4c514) 264102c=19(627105fa6a0c) WORKTREE=19(627105fa6a0c)
+crates/byakko-devices/src/nia87/device/settings.rs 09f193c=20(493a1516251d) 264102c=15(b7df152cf437) WORKTREE=9(a22f232acc29)
+crates/byakko-devices/src/nia87/device/transaction.rs 09f193c=absent 264102c=8(cd987401aa52) WORKTREE=16(b9348641b5c7)
+crates/byakko-devices/src/nia87/device/transport.rs 09f193c=42(a604c96242e4) 264102c=43(125d85e0c2d8) WORKTREE=43(125d85e0c2d8)

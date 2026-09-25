@@ -1,5 +1,5 @@
-use super::apply_error::{RestoreMismatch, detailed, macro_apply_error};
-use super::transaction::{apply_with_recovery, pacing, save_json_backup};
+use super::apply_error::{detailed, macro_apply_error};
+use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::transport::FeatureSetter;
 use super::{HidDevice, Result, Selection, Session, read_payload, transaction_lock};
 use serde_json;
@@ -92,29 +92,21 @@ pub(super) fn apply_macro_validated_with(
         &serde_json::json!({"slot":slot,"bytes":expected}),
     )?;
     let (_, device) = selection.open()?;
-    apply_with_recovery(
+    apply_roundtrip(
         &backup,
-        || -> Result<Vec<u8>> {
-            write_macro_bytes(&device, slot, &target)?;
-            let mut actual = read_macro_on_device(&device, slot)?;
-            if actual != target {
-                // The first copy after the setter can straddle a flash transition.
-                // Retry only a mismatch, once, before treating it as a failed save.
-                std::thread::sleep(pacing::MACRO_READBACK_MISMATCH);
-                actual = read_macro_on_device(&device, slot)?;
-            }
-            if actual != target {
-                return Err("Macro readback mismatch".into());
-            }
-            Ok(actual)
+        VerifiedStep {
+            write: || write_macro_bytes(&device, slot, &target),
+            matches: |actual: &Vec<u8>| *actual == target,
+            mismatch: "Macro readback mismatch",
         },
-        || -> Result<()> {
-            write_macro_bytes(&device, slot, expected)?;
-            if read_macro_on_device(&device, slot)? != expected {
-                return Err(RestoreMismatch("macro restoration mismatch").into());
-            }
-            Ok(())
+        VerifiedStep {
+            write: || write_macro_bytes(&device, slot, expected),
+            matches: |actual: &Vec<u8>| actual == expected,
+            mismatch: "macro restoration mismatch",
         },
+        || read_macro_on_device(&device, slot),
+        // The first copy after the setter can straddle a flash transition.
+        Some(pacing::MACRO_READBACK_MISMATCH),
         macro_apply_error,
     )
 }

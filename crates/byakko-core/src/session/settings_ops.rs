@@ -1,8 +1,11 @@
-use super::{Activity, Command, Session, Status};
+use super::{Command, Session, Status};
 use crate::session::CommandPayload;
 #[cfg(test)]
 use crate::session::CompletionPayload;
-use crate::session::{DeviceActivity, Feature};
+use crate::session::Feature;
+use crate::session::FeatureCommand;
+#[cfg(test)]
+use crate::session::FeatureResult;
 use crate::settings::{Capabilities, Edit, editor::Editor};
 
 impl Session {
@@ -39,35 +42,29 @@ impl Session {
             return Err("Device is disconnected".into());
         }
         self.settings_editor()?;
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Read(Feature::Settings),
-        };
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::ReadSettings {},
-        })
+        self.begin_feature(
+            Feature::Settings,
+            FeatureCommand::Read(()),
+            CommandPayload::Settings,
+        )
     }
     pub fn request_setting_apply(&mut self) -> Result<Command, String> {
         if self.status == Status::Disconnected {
             return Err("Device is disconnected".into());
         }
         let (expected, edit) = self.settings_editor()?.request_apply()?;
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Apply(Feature::Settings),
-        };
+        let command = self.begin_feature(
+            Feature::Settings,
+            FeatureCommand::Apply {
+                expected,
+                desired: edit,
+            },
+            CommandPayload::Settings,
+        )?;
         // A one-field settings transaction checks its own snapshot. Other
         // editors retain their last observed values and guarded write paths.
         self.invalidate_archive();
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::ApplySetting { expected, edit },
-        })
+        Ok(command)
     }
 }
 
@@ -143,7 +140,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ReadSettings {},
+            payload: CommandPayload::Settings(FeatureCommand::Read(())),
         } = session.request_settings_read().unwrap()
         else {
             unreachable!()
@@ -152,9 +149,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::ReadSettings {
-                    result: Ok(snapshot)
-                }
+                payload: CompletionPayload::Settings(FeatureResult::Read(Ok(snapshot)))
             }),
             Acceptance::Accepted
         );
@@ -163,7 +158,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = session.request_read().unwrap()
         else {
             unreachable!()
@@ -171,15 +166,13 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::Read {
-                result: Ok(State {
-                    revision: vec![1],
-                    bindings: BTreeMap::from([(
-                        "base".into(),
-                        BTreeMap::from([("a".into(), Action::Disabled)]),
-                    )]),
-                }),
-            },
+            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(State {
+                revision: vec![1],
+                bindings: BTreeMap::from([(
+                    "base".into(),
+                    BTreeMap::from([("a".into(), Action::Disabled)]),
+                )]),
+            }))),
         });
         assert_eq!(session.status(), &Status::Ready);
     }
@@ -196,7 +189,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplySetting { .. },
+            payload: CommandPayload::Settings(FeatureCommand::Apply { .. }),
         } = session.request_setting_apply().unwrap()
         else {
             unreachable!()
@@ -205,9 +198,7 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplySetting {
-                result: Ok(snapshot(2, 20)),
-            },
+            payload: CompletionPayload::Settings(FeatureResult::Apply(Ok(snapshot(2, 20)))),
         });
         assert_eq!(session.status(), &Status::Ready);
         assert_eq!(session.baseline(), original.as_ref());
@@ -285,10 +276,10 @@ mod tests {
             generation,
             operation,
             payload:
-                CommandPayload::ApplySetting {
+                CommandPayload::Settings(FeatureCommand::Apply {
                     expected,
-                    edit: requested_edit,
-                },
+                    desired: requested_edit,
+                }),
         } = session.request_setting_apply().unwrap()
         else {
             unreachable!()
@@ -305,18 +296,14 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::ReadSettings {
-                    result: Ok(snapshot(2, 25))
-                }
+                payload: CompletionPayload::Settings(FeatureResult::Read(Ok(snapshot(2, 25))))
             }),
             Acceptance::IgnoredStale
         );
         let mismatch = Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplySetting {
-                result: Ok(snapshot(2, 20)),
-            },
+            payload: CompletionPayload::Settings(FeatureResult::Apply(Ok(snapshot(2, 20)))),
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&mismatch).unwrap()).unwrap(),
@@ -377,7 +364,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplySetting { .. },
+            payload: CommandPayload::Settings(FeatureCommand::Apply { .. }),
         } = session.request_setting_apply().unwrap()
         else {
             unreachable!()
@@ -385,12 +372,10 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplySetting {
-                result: Err(ApplyFailure {
-                    message: "write failed".into(),
-                    recovery: Recovery::Failed,
-                }),
-            },
+            payload: CompletionPayload::Settings(FeatureResult::Apply(Err(ApplyFailure {
+                message: "write failed".into(),
+                recovery: Recovery::Failed,
+            }))),
         });
         assert_eq!(
             session.settings().unwrap().draft().unwrap()["timer"],

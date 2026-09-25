@@ -1,9 +1,12 @@
-use super::{Activity, Command, Session, Status};
+use super::{Command, Session, Status};
 use crate::picture::{Capabilities, Edit, editor::Editor, validate_capabilities};
 use crate::session::CommandPayload;
 #[cfg(test)]
 use crate::session::CompletionPayload;
-use crate::session::{DeviceActivity, Feature};
+use crate::session::Feature;
+use crate::session::FeatureCommand;
+#[cfg(test)]
+use crate::session::FeatureResult;
 
 impl Session {
     pub fn with_picture(mut self, capabilities: Capabilities) -> Result<Self, String> {
@@ -37,33 +40,24 @@ impl Session {
             return Err("Device is disconnected".into());
         }
         self.picture_editor()?;
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Read(Feature::Picture),
-        };
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::ReadPicture {},
-        })
+        self.begin_feature(
+            Feature::Picture,
+            FeatureCommand::Read(()),
+            CommandPayload::Picture,
+        )
     }
     pub fn request_picture_apply(&mut self) -> Result<Command, String> {
         if self.status == Status::Disconnected {
             return Err("Device is disconnected".into());
         }
         let (expected, desired) = self.picture_editor()?.request_apply()?;
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Apply(Feature::Picture),
-        };
+        let command = self.begin_feature(
+            Feature::Picture,
+            FeatureCommand::Apply { expected, desired },
+            CommandPayload::Picture,
+        )?;
         self.invalidate_archive();
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::ApplyPicture { expected, desired },
-        })
+        Ok(command)
     }
 }
 
@@ -126,7 +120,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ReadPicture {},
+            payload: CommandPayload::Picture(FeatureCommand::Read(())),
         } = session.request_picture_read().unwrap()
         else {
             unreachable!()
@@ -135,9 +129,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::ReadPicture {
-                    result: Ok(snapshot)
-                }
+                payload: CompletionPayload::Picture(FeatureResult::Read(Ok(snapshot)))
             }),
             Acceptance::Accepted
         );
@@ -260,7 +252,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = session.request_read().unwrap()
         else {
             unreachable!()
@@ -268,18 +260,16 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::Read {
-                result: Ok(State {
-                    revision: vec![1],
-                    bindings: BTreeMap::from([(
-                        "base".into(),
-                        BTreeMap::from([
-                            ("a".into(), Action::Key(4)),
-                            ("fn".into(), Action::Disabled),
-                        ]),
-                    )]),
-                }),
-            },
+            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(State {
+                revision: vec![1],
+                bindings: BTreeMap::from([(
+                    "base".into(),
+                    BTreeMap::from([
+                        ("a".into(), Action::Key(4)),
+                        ("fn".into(), Action::Disabled),
+                    ]),
+                )]),
+            }))),
         });
         assert_eq!(session.picture().unwrap().draft(), Some(&draft));
         assert_eq!(
@@ -312,7 +302,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplyPicture { desired, .. },
+            payload: CommandPayload::Picture(FeatureCommand::Apply { desired, .. }),
         } = command
         else {
             unreachable!()
@@ -322,9 +312,10 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::ReadPicture {
-                    result: Ok(snapshot(2, [7, 2, 3]))
-                }
+                payload: CompletionPayload::Picture(FeatureResult::Read(Ok(snapshot(
+                    2,
+                    [7, 2, 3]
+                ))))
             }),
             Acceptance::IgnoredStale
         );
@@ -332,9 +323,10 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::ApplyPicture {
-                    result: Ok(snapshot(2, [8, 2, 3]))
-                }
+                payload: CompletionPayload::Picture(FeatureResult::Apply(Ok(snapshot(
+                    2,
+                    [8, 2, 3]
+                ))))
             }),
             Acceptance::Accepted
         );
@@ -358,7 +350,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplyPicture { .. },
+            payload: CommandPayload::Picture(FeatureCommand::Apply { .. }),
         } = session.request_picture_apply().unwrap()
         else {
             unreachable!()
@@ -366,12 +358,10 @@ mod tests {
         let failure = Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplyPicture {
-                result: Err(ApplyFailure {
-                    message: "failed".into(),
-                    recovery: Recovery::Unverified,
-                }),
-            },
+            payload: CompletionPayload::Picture(FeatureResult::Apply(Err(ApplyFailure {
+                message: "failed".into(),
+                recovery: Recovery::Unverified,
+            }))),
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&failure).unwrap()).unwrap(),
@@ -399,7 +389,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplyPicture { .. },
+            payload: CommandPayload::Picture(FeatureCommand::Apply { .. }),
         } = session.request_picture_apply().unwrap()
         else {
             unreachable!()
@@ -411,9 +401,7 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplyPicture {
-                result: Ok(accepted.clone()),
-            },
+            payload: CompletionPayload::Picture(FeatureResult::Apply(Ok(accepted.clone()))),
         });
         assert_eq!(session.picture().unwrap().baseline(), Some(&accepted));
         assert_eq!(
@@ -424,7 +412,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ReadPicture {},
+            payload: CommandPayload::Picture(FeatureCommand::Read(())),
         } = session.request_picture_read().unwrap()
         else {
             unreachable!()
@@ -432,9 +420,7 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::ReadPicture {
-                result: Ok(accepted.clone()),
-            },
+            payload: CompletionPayload::Picture(FeatureResult::Read(Ok(accepted.clone()))),
         });
         assert!(matches!(
             session.picture().unwrap().status(),

@@ -6,6 +6,9 @@ use crate::archive::{
 use crate::session::CommandPayload;
 #[cfg(test)]
 use crate::session::CompletionPayload;
+use crate::session::FeatureCommand;
+#[cfg(test)]
+use crate::session::FeatureResult;
 use crate::session::{DeviceActivity, Feature};
 
 impl Session {
@@ -44,20 +47,16 @@ impl Session {
         if self.archive_capabilities.is_none() {
             return Err("Device does not support native archives".into());
         }
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Read(Feature::Archive),
-        };
+        let command = self.begin_feature(
+            Feature::Archive,
+            FeatureCommand::Read(()),
+            CommandPayload::Archive,
+        )?;
         self.archive_state = ArchiveState::Unverified {
             problem: ArchiveProblem::ReadRequired,
             review: None,
         };
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::CaptureArchive {},
-        })
+        Ok(command)
     }
     pub fn request_archive_review(&mut self, target: NativeArchive) -> Result<Command, String> {
         self.require_idle()?;
@@ -104,11 +103,14 @@ impl Session {
         }
         let expected = review.before.clone();
         let target = review.target.clone();
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Apply(Feature::Archive),
-        };
+        let command = self.begin_feature(
+            Feature::Archive,
+            FeatureCommand::Apply {
+                expected,
+                desired: target,
+            },
+            CommandPayload::Archive,
+        )?;
         self.status = Status::Unverified {
             problem: super::Problem::ReadRequired,
         };
@@ -116,11 +118,7 @@ impl Session {
         self.invalidate_lighting();
         self.invalidate_picture();
         self.invalidate_settings();
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::ApplyArchive { expected, target },
-        })
+        Ok(command)
     }
     pub(super) fn invalidate_archive(&mut self) {
         let previous = std::mem::replace(&mut self.archive_state, ArchiveState::Idle);
@@ -313,7 +311,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::CaptureArchive {},
+            payload: CommandPayload::Archive(FeatureCommand::Read(())),
         } = command
         else {
             unreachable!()
@@ -322,9 +320,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::CaptureArchive {
-                    result: Ok(archive(&[0; 5]))
-                }
+                payload: CompletionPayload::Archive(FeatureResult::Read(Ok(archive(&[0; 5]))))
             }),
             Acceptance::Accepted
         );
@@ -338,7 +334,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::CaptureArchive {},
+            payload: CommandPayload::Archive(FeatureCommand::Read(())),
         } = session.request_archive_capture().unwrap()
         else {
             unreachable!()
@@ -346,9 +342,7 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::CaptureArchive {
-                result: Ok(archive(&[1, 2])),
-            },
+            payload: CompletionPayload::Archive(FeatureResult::Read(Ok(archive(&[1, 2])))),
         });
         assert_eq!(
             session.archive(),
@@ -451,7 +445,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = session.request_read().unwrap()
         else {
             unreachable!()
@@ -466,7 +460,7 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::Read { result: Ok(state) },
+            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(state))),
         });
         assert!(matches!(session.archive(), Some(ArchiveState::Ready(_))));
         session
@@ -516,7 +510,11 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplyArchive { expected, target },
+            payload:
+                CommandPayload::Archive(FeatureCommand::Apply {
+                    expected,
+                    desired: target,
+                }),
         } = command
         else {
             unreachable!()
@@ -527,9 +525,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::CaptureArchive {
-                    result: Ok(target.clone())
-                }
+                payload: CompletionPayload::Archive(FeatureResult::Read(Ok(target.clone())))
             }),
             Acceptance::IgnoredStale
         );
@@ -537,9 +533,7 @@ mod tests {
             session.accept(Completion {
                 generation: generation + 1,
                 operation,
-                payload: CompletionPayload::ApplyArchive {
-                    result: Ok(target.clone())
-                }
+                payload: CompletionPayload::Archive(FeatureResult::Apply(Ok(target.clone())))
             }),
             Acceptance::IgnoredStale
         );
@@ -547,9 +541,7 @@ mod tests {
         let mismatch = Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplyArchive {
-                result: Ok(archive(&[3])),
-            },
+            payload: CompletionPayload::Archive(FeatureResult::Apply(Ok(archive(&[3])))),
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&mismatch).unwrap()).unwrap(),
@@ -568,7 +560,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplyArchive { .. },
+            payload: CommandPayload::Archive(FeatureCommand::Apply { .. }),
         } = session.request_archive_apply().unwrap()
         else {
             unreachable!()
@@ -576,9 +568,7 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplyArchive {
-                result: Ok(archive(&[2])),
-            },
+            payload: CompletionPayload::Archive(FeatureResult::Apply(Ok(archive(&[2])))),
         });
         assert_eq!(
             session.archive(),
@@ -593,7 +583,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplyArchive { .. },
+            payload: CommandPayload::Archive(FeatureCommand::Apply { .. }),
         } = session.request_archive_apply().unwrap()
         else {
             unreachable!()
@@ -605,9 +595,7 @@ mod tests {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::ApplyArchive {
-                result: Err(failure.clone()),
-            },
+            payload: CompletionPayload::Archive(FeatureResult::Apply(Err(failure.clone()))),
         });
         assert_eq!(
             session.archive(),

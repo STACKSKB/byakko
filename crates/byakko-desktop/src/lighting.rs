@@ -1,5 +1,6 @@
 //! Render capability-projected lighting controls; device policy lives in core.
 use byakko_core::session::CommandPayload;
+use byakko_core::session::FeatureCommand;
 use byakko_core::session::{DeviceActivity, Feature};
 mod host;
 pub(crate) mod live;
@@ -223,7 +224,7 @@ impl Desktop {
             && let byakko_core::session::Command {
                 generation,
                 operation,
-                payload: CommandPayload::ApplyLighting { .. },
+                payload: CommandPayload::Lighting(FeatureCommand::Apply { .. }),
             } = &command
         {
             self.picture_activation = Some((*generation, *operation));

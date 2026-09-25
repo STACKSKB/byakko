@@ -1,6 +1,7 @@
 use super::*;
 use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::session::{DeviceActivity, Feature};
+use byakko_core::session::{FeatureCommand, FeatureResult};
 use byakko_core::{
     Action,
     session::{ApplyFailure, Recovery},
@@ -34,7 +35,7 @@ fn ready() -> Desktop {
     let generation = session.connect().unwrap();
     let Command {
         operation,
-        payload: CommandPayload::Read { .. },
+        payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         ..
     } = session.request_read().unwrap()
     else {
@@ -43,9 +44,7 @@ fn ready() -> Desktop {
     session.accept(Completion {
         generation,
         operation,
-        payload: CompletionPayload::Read {
-            result: device.read(),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Read(device.read())),
     });
     let executor = Executor::spawn(device, Default::default()).unwrap();
     executor.set_generation(generation);
@@ -233,17 +232,13 @@ fn automatic_reconnect_preserves_staged_draft_and_ignores_late_completion() {
     let _ = app.complete(Completion {
         generation: old_generation,
         operation,
-        payload: CompletionPayload::Read {
-            result: Ok(baseline.clone()),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(baseline.clone()))),
     });
     assert!(app.session.busy());
     let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation,
-        payload: CompletionPayload::Read {
-            result: Ok(baseline),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(baseline))),
     });
     assert_eq!(app.session.status(), &Status::Ready);
     assert_eq!(app.session.draft(), draft.as_ref());
@@ -297,7 +292,7 @@ fn failed_write_does_not_restart_automatically_after_reappearance() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::Apply { .. },
+        payload: CommandPayload::Keymap(FeatureCommand::Apply { .. }),
     } = app.session.request_apply().unwrap()
     else {
         unreachable!()
@@ -305,12 +300,10 @@ fn failed_write_does_not_restart_automatically_after_reappearance() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::Apply {
-            result: Err(ApplyFailure {
-                message: "uncertain write".into(),
-                recovery: Recovery::Unverified,
-            }),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+            message: "uncertain write".into(),
+            recovery: Recovery::Unverified,
+        }))),
     });
     app.accept_availability(Availability::Missing);
     assert_eq!(app.auto_read, AutoRead::ManualOnly);
@@ -364,7 +357,7 @@ fn close_waits_for_apply_and_keeps_failure_and_draft_visible() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::Apply { .. },
+        payload: CommandPayload::Keymap(FeatureCommand::Apply { .. }),
     } = app.session.request_apply().unwrap()
     else {
         unreachable!()
@@ -376,12 +369,10 @@ fn close_waits_for_apply_and_keeps_failure_and_draft_visible() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::Apply {
-            result: Err(ApplyFailure {
-                message: "readback failed".into(),
-                recovery: Recovery::Unverified,
-            }),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+            message: "readback failed".into(),
+            recovery: Recovery::Unverified,
+        }))),
     });
     assert_eq!(app.closing, Closing::Open);
     assert_eq!(app.session.changes().len(), 1);
@@ -435,9 +426,7 @@ fn manual_reconnect_rebinds_even_without_a_discovery_change() {
     let _ = app.complete(Completion {
         generation: old_generation,
         operation,
-        payload: CompletionPayload::Read {
-            result: Ok(baseline),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(baseline))),
     });
     assert!(
         app.session.busy(),

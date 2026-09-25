@@ -1,5 +1,6 @@
 use crate::KeymapDevice;
 use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::{FeatureCommand, FeatureResult};
 use byakko_core::{Change, State, macros};
 
 use super::*;
@@ -101,9 +102,7 @@ fn foreground_read_runs_between_catalog_slots() {
         .try_submit(Command {
             generation: 1,
             operation: 2,
-            payload: CommandPayload::ReadMacro {
-                slot: "selected".into(),
-            },
+            payload: CommandPayload::Macro(FeatureCommand::Read("selected".into())),
         })
         .unwrap();
     release_tx.send(()).unwrap();
@@ -115,7 +114,10 @@ fn foreground_read_runs_between_catalog_slots() {
         Completion {
             generation: 1,
             operation: 2,
-            payload: CompletionPayload::ReadMacro { result: Ok(_), .. }
+            payload: CompletionPayload::Macro {
+                result: FeatureResult::Read(Ok(_)),
+                ..
+            }
         }
     ));
     assert!(matches!(
@@ -162,20 +164,20 @@ fn keymap_read_and_apply_resume_unfinished_catalog() {
         .try_submit(Command {
             generation: 1,
             operation: 2,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         })
         .unwrap();
     worker
         .try_submit(Command {
             generation: 1,
             operation: 3,
-            payload: CommandPayload::Apply {
+            payload: CommandPayload::Keymap(FeatureCommand::Apply {
                 expected: State {
                     revision: vec![1],
                     bindings: BTreeMap::new(),
                 },
-                changes: vec![],
-            },
+                desired: vec![],
+            }),
         })
         .unwrap();
     release_tx.send(()).unwrap();
@@ -187,7 +189,7 @@ fn keymap_read_and_apply_resume_unfinished_catalog() {
         Completion {
             generation: 1,
             operation: 2,
-            payload: CompletionPayload::Read { result: Ok(_) }
+            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(_)))
         }
     ));
     assert!(matches!(
@@ -198,7 +200,7 @@ fn keymap_read_and_apply_resume_unfinished_catalog() {
         Completion {
             generation: 1,
             operation: 3,
-            payload: CompletionPayload::Apply { result: Ok(_) }
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(_)))
         }
     ));
     assert!(matches!(
@@ -245,13 +247,13 @@ fn failed_keymap_apply_stops_unfinished_catalog() {
         .try_submit(Command {
             generation: 1,
             operation: 2,
-            payload: CommandPayload::Apply {
+            payload: CommandPayload::Keymap(FeatureCommand::Apply {
                 expected: State {
                     revision: vec![1],
                     bindings: BTreeMap::new(),
                 },
-                changes: vec![],
-            },
+                desired: vec![],
+            }),
         })
         .unwrap();
     release_tx.send(()).unwrap();
@@ -263,7 +265,7 @@ fn failed_keymap_apply_stops_unfinished_catalog() {
         Completion {
             generation: 1,
             operation: 2,
-            payload: CompletionPayload::Apply { result: Err(_) }
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(_)))
         }
     ));
     assert_eq!(slots_read.load(Ordering::SeqCst), 1);
@@ -304,9 +306,7 @@ fn explicit_cancel_stops_catalog_after_current_slot() {
         .try_submit(Command {
             generation: 1,
             operation: 2,
-            payload: CommandPayload::ReadMacro {
-                slot: "selected".into(),
-            },
+            payload: CommandPayload::Macro(FeatureCommand::Read("selected".into())),
         })
         .unwrap();
     release_tx.send(()).unwrap();
@@ -318,7 +318,10 @@ fn explicit_cancel_stops_catalog_after_current_slot() {
         Completion {
             generation: 1,
             operation: 2,
-            payload: CompletionPayload::ReadMacro { result: Ok(_), .. }
+            payload: CompletionPayload::Macro {
+                result: FeatureResult::Read(Ok(_)),
+                ..
+            }
         }
     ));
     assert_eq!(slots_read.load(Ordering::SeqCst), 2);
@@ -484,13 +487,13 @@ fn panicked_write_returns_correlated_unverified_completion() {
         .try_submit(Command {
             generation: 7,
             operation: 9,
-            payload: CommandPayload::Apply {
+            payload: CommandPayload::Keymap(FeatureCommand::Apply {
                 expected: State {
                     revision: vec![],
                     bindings: BTreeMap::new(),
                 },
-                changes: vec![],
-            },
+                desired: vec![],
+            }),
         })
         .unwrap();
     assert!(matches!(
@@ -501,12 +504,10 @@ fn panicked_write_returns_correlated_unverified_completion() {
         Completion {
             generation: 7,
             operation: 9,
-            payload: CompletionPayload::Apply {
-                result: Err(ApplyFailure {
-                    recovery: Recovery::Unverified,
-                    ..
-                })
-            }
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+                recovery: Recovery::Unverified,
+                ..
+            })))
         }
     ));
 }
@@ -546,7 +547,7 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
         .try_submit(Command {
             generation: 1,
             operation: 1,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         })
         .unwrap();
     assert_eq!(
@@ -557,18 +558,16 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
         Completion {
             generation: 1,
             operation: 1,
-            payload: CompletionPayload::Read {
-                result: Ok(state.clone())
-            }
+            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(state.clone())))
         }
     );
     let apply = Command {
         generation: 1,
         operation: 2,
-        payload: CommandPayload::Apply {
+        payload: CommandPayload::Keymap(FeatureCommand::Apply {
             expected: state,
-            changes: vec![],
-        },
+            desired: vec![],
+        }),
     };
     worker.try_submit(apply.clone()).unwrap();
     assert!(matches!(
@@ -577,7 +576,7 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
         Completion {
-            payload: CompletionPayload::Apply { result: Ok(_), .. },
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(_))),
             ..
         }
     ));
@@ -588,13 +587,10 @@ fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
             .recv_timeout(Duration::from_secs(2))
             .unwrap(),
         Completion {
-            payload: CompletionPayload::Apply {
-                result: Err(ApplyFailure {
-                    recovery: Recovery::NotAttempted,
-                    ..
-                }),
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+                recovery: Recovery::NotAttempted,
                 ..
-            },
+            }))),
             ..
         }
     ));
@@ -646,7 +642,7 @@ fn blocked_worker() -> (Executor, Sender<()>, Arc<AtomicUsize>, State) {
         .try_submit(Command {
             generation: 1,
             operation: 1,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         })
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
@@ -660,10 +656,10 @@ fn reconnect_rejects_queued_old_apply_without_writing() {
         .try_submit(Command {
             generation: 1,
             operation: 2,
-            payload: CommandPayload::Apply {
+            payload: CommandPayload::Keymap(FeatureCommand::Apply {
                 expected: state,
-                changes: vec![],
-            },
+                desired: vec![],
+            }),
         })
         .unwrap();
     worker.set_generation(2);
@@ -676,7 +672,7 @@ fn reconnect_rejects_queued_old_apply_without_writing() {
         Completion {
             generation: 1,
             operation: 1,
-            payload: CompletionPayload::Read { result: Ok(_) }
+            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(_)))
         }
     ));
     assert!(matches!(
@@ -687,12 +683,10 @@ fn reconnect_rejects_queued_old_apply_without_writing() {
         Completion {
             generation: 1,
             operation: 2,
-            payload: CompletionPayload::Apply {
-                result: Err(ApplyFailure {
-                    recovery: Recovery::NotAttempted,
-                    ..
-                })
-            }
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+                recovery: Recovery::NotAttempted,
+                ..
+            })))
         }
     ));
     assert_eq!(writes.load(Ordering::SeqCst), 0);
@@ -704,10 +698,10 @@ fn full_queue_returns_correlated_rejection_to_core() {
     let apply = |operation| Command {
         generation: 1,
         operation,
-        payload: CommandPayload::Apply {
+        payload: CommandPayload::Keymap(FeatureCommand::Apply {
             expected: state.clone(),
-            changes: vec![],
-        },
+            desired: vec![],
+        }),
     };
     worker.try_submit(apply(2)).unwrap();
     worker.try_submit(apply(3)).unwrap();
@@ -716,12 +710,10 @@ fn full_queue_returns_correlated_rejection_to_core() {
         Completion {
             generation: 1,
             operation: 4,
-            payload: CompletionPayload::Apply {
-                result: Err(ApplyFailure {
-                    recovery: Recovery::NotAttempted,
-                    ..
-                })
-            }
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+                recovery: Recovery::NotAttempted,
+                ..
+            })))
         }
     ));
     worker.set_generation(0);
@@ -772,14 +764,12 @@ fn default_macro_operations_are_typed_unsupported_results() {
         .try_submit(Command {
             generation: 1,
             operation: 1,
-            payload: CommandPayload::ReadMacro {
-                slot: "slot-00".into(),
-            },
+            payload: CommandPayload::Macro(FeatureCommand::Read("slot-00".into())),
         })
         .unwrap();
     assert!(
         matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 1, operation: 1, payload: CompletionPayload::ReadMacro { slot, result: Err(message) } }
+            Completion { generation: 1, operation: 1, payload: CompletionPayload::Macro { slot, result: FeatureResult::Read(Err(message)) } }
             if slot == "slot-00" && message.contains("unsupported"))
     );
     let expected = macro_snapshot();
@@ -787,18 +777,18 @@ fn default_macro_operations_are_typed_unsupported_results() {
         .try_submit(Command {
             generation: 1,
             operation: 2,
-            payload: CommandPayload::ApplyMacro {
+            payload: CommandPayload::Macro(FeatureCommand::Apply {
                 expected: expected.clone(),
                 desired: macros::Program {
                     repeat_count: 1,
                     events: vec![],
                 },
-            },
+            }),
         })
         .unwrap();
     assert!(
         matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 1, operation: 2, payload: CompletionPayload::ApplyMacro { slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, message }) } }
+            Completion { generation: 1, operation: 2, payload: CompletionPayload::Macro { slot, result: FeatureResult::Apply(Err(ApplyFailure { recovery: Recovery::NotAttempted, message })) } }
             if slot == expected.slot && message.contains("unsupported"))
     );
 }
@@ -847,36 +837,34 @@ fn one_worker_orders_keymap_and_macro_operations() {
         Command {
             generation: 1,
             operation: 1,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         },
         Command {
             generation: 1,
             operation: 2,
-            payload: CommandPayload::ReadMacro {
-                slot: expected.slot.clone(),
-            },
+            payload: CommandPayload::Macro(FeatureCommand::Read(expected.slot.clone())),
         },
         Command {
             generation: 1,
             operation: 3,
-            payload: CommandPayload::Apply {
+            payload: CommandPayload::Keymap(FeatureCommand::Apply {
                 expected: State {
                     revision: vec![],
                     bindings: BTreeMap::new(),
                 },
-                changes: vec![],
-            },
+                desired: vec![],
+            }),
         },
         Command {
             generation: 1,
             operation: 4,
-            payload: CommandPayload::ApplyMacro {
+            payload: CommandPayload::Macro(FeatureCommand::Apply {
                 expected,
                 desired: macros::Program {
                     repeat_count: 1,
                     events: vec![],
                 },
-            },
+            }),
         },
     ];
     for command in commands {
@@ -901,18 +889,18 @@ fn old_generation_macro_apply_is_rejected_before_device_access() {
         .try_submit(Command {
             generation: 1,
             operation: 1,
-            payload: CommandPayload::ApplyMacro {
+            payload: CommandPayload::Macro(FeatureCommand::Apply {
                 expected: macro_snapshot(),
                 desired: macros::Program {
                     repeat_count: 1,
                     events: vec![],
                 },
-            },
+            }),
         })
         .unwrap();
     assert!(
         matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 1, operation: 1, payload: CompletionPayload::ApplyMacro { slot, result: Err(ApplyFailure { recovery: Recovery::NotAttempted, .. }) } }
+            Completion { generation: 1, operation: 1, payload: CompletionPayload::Macro { slot, result: FeatureResult::Apply(Err(ApplyFailure { recovery: Recovery::NotAttempted, .. })) } }
             if slot == "slot-00")
     );
     assert!(log.lock().unwrap().is_empty());
@@ -945,18 +933,18 @@ fn panicked_macro_write_returns_correlated_unverified_completion() {
         .try_submit(Command {
             generation: 7,
             operation: 9,
-            payload: CommandPayload::ApplyMacro {
+            payload: CommandPayload::Macro(FeatureCommand::Apply {
                 expected: macro_snapshot(),
                 desired: macros::Program {
                     repeat_count: 1,
                     events: vec![],
                 },
-            },
+            }),
         })
         .unwrap();
     assert!(
         matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 7, operation: 9, payload: CompletionPayload::ApplyMacro { slot, result: Err(ApplyFailure { recovery: Recovery::Unverified, .. }) } }
+            Completion { generation: 7, operation: 9, payload: CompletionPayload::Macro { slot, result: FeatureResult::Apply(Err(ApplyFailure { recovery: Recovery::Unverified, .. })) } }
             if slot == "slot-00")
     );
 }

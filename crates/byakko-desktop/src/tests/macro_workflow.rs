@@ -6,6 +6,7 @@ use crate::{
 use byakko_core::macros::{Content, Edit, editor::Status as MacroStatus};
 use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::session::{DeviceActivity, Feature};
+use byakko_core::session::{FeatureCommand, FeatureResult};
 use byakko_devices::Device;
 
 #[test]
@@ -22,7 +23,7 @@ fn explicit_new_empty_slot_stages_editable_count_without_changing_stored_zero() 
     session.select_macro("spare").unwrap();
     let Command {
         operation,
-        payload: CommandPayload::ReadMacro { slot, .. },
+        payload: CommandPayload::Macro(FeatureCommand::Read(slot)),
         ..
     } = session.request_macro_read().unwrap()
     else {
@@ -31,9 +32,9 @@ fn explicit_new_empty_slot_stages_editable_count_without_changing_stored_zero() 
     session.accept(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ReadMacro {
+        payload: CompletionPayload::Macro {
             slot,
-            result: device.read_macro("spare"),
+            result: FeatureResult::Read(device.read_macro("spare")),
         },
     });
     app.session = session;
@@ -224,7 +225,7 @@ fn failed_read_preserves_unsubmitted_form_input() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ReadMacro { slot },
+        payload: CommandPayload::Macro(FeatureCommand::Read(slot)),
     } = app.session.request_macro_read().unwrap()
     else {
         unreachable!()
@@ -232,9 +233,9 @@ fn failed_read_preserves_unsubmitted_form_input() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ReadMacro {
+        payload: CompletionPayload::Macro {
             slot,
-            result: Err("device gone".into()),
+            result: FeatureResult::Read(Err("device gone".into())),
         },
     });
     assert_eq!(app.macro_form.wait, "123");
@@ -516,7 +517,7 @@ fn macro_failure_prevents_close_and_stale_success_cannot_hide_it() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ApplyMacro { expected, .. },
+        payload: CommandPayload::Macro(FeatureCommand::Apply { expected, .. }),
     } = app.session.request_macro_apply().unwrap()
     else {
         unreachable!()
@@ -525,12 +526,12 @@ fn macro_failure_prevents_close_and_stale_success_cannot_hide_it() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyMacro {
+        payload: CompletionPayload::Macro {
             slot: expected.slot.clone(),
-            result: Err(ApplyFailure {
+            result: FeatureResult::Apply(Err(ApplyFailure {
                 message: "readback failed".into(),
                 recovery: Recovery::Failed,
-            }),
+            })),
         },
     });
     assert_eq!(app.closing, Closing::Open);
@@ -540,9 +541,9 @@ fn macro_failure_prevents_close_and_stale_success_cannot_hide_it() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyMacro {
+        payload: CompletionPayload::Macro {
             slot: expected.slot.clone(),
-            result: Ok(expected),
+            result: FeatureResult::Apply(Ok(expected)),
         },
     });
     assert_eq!(app.closing, Closing::Open);

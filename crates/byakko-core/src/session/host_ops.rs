@@ -6,6 +6,8 @@ use super::{
 use crate::lighting::{self, Content, Edit, Evidence, Snapshot, editor};
 #[cfg(test)]
 use crate::session::{CommandPayload, CompletionPayload};
+#[cfg(test)]
+use crate::session::{FeatureCommand, FeatureResult};
 
 impl Session {
     pub(super) fn select_default_host_mode(&mut self) {
@@ -327,7 +329,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = session.request_read().unwrap()
         else {
             unreachable!()
@@ -336,22 +338,20 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::Read {
-                    result: Ok(State {
-                        revision: vec![1],
-                        bindings: BTreeMap::from([(
-                            "base".into(),
-                            BTreeMap::from([("a".into(), Action::Disabled)])
-                        )]),
-                    })
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(State {
+                    revision: vec![1],
+                    bindings: BTreeMap::from([(
+                        "base".into(),
+                        BTreeMap::from([("a".into(), Action::Disabled)])
+                    )]),
+                })))
             }),
             Acceptance::Accepted
         );
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ReadLighting {},
+            payload: CommandPayload::Lighting(FeatureCommand::Read(())),
         } = session.request_lighting_read().unwrap()
         else {
             unreachable!()
@@ -360,9 +360,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::ReadLighting {
-                    result: Ok(snapshot())
-                }
+                payload: CompletionPayload::Lighting(FeatureResult::Read(Ok(snapshot())))
             }),
             Acceptance::Accepted
         );
@@ -448,7 +446,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::ApplyLighting { .. },
+            payload: CommandPayload::Lighting(FeatureCommand::Apply { .. }),
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
@@ -464,9 +462,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::ApplyLighting {
-                    result: Ok(accepted.clone())
-                }
+                payload: CompletionPayload::Lighting(FeatureResult::Apply(Ok(accepted.clone())))
             }),
             Acceptance::Accepted
         );
