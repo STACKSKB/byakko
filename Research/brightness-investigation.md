@@ -62,7 +62,7 @@ post-send delay differ, but this alone does not establish a brightness cause.
 
 ## Proposed bounded official comparison
 
-Pending user approval: save the connected board's complete baseline and identity;
+Authorized for Windows (request revision 3): save the connected board's complete baseline and identity;
 then use only the official app to select steady green at its highest and lowest
 nonzero brightness. Capture every intervening report, displayed UI values, and
 visible output after equal two-second settling intervals. Use fixed ambient light
@@ -77,7 +77,10 @@ Request `WIN-20260925-002` revision 1 did not run: Windows automatic approval
 review rejected camera activation for missing explicit physical authorization.
 No image or keyboard write occurred. The camera-availability response was not
 accepted as sufficient approval. The user has been asked for explicit approval;
-revision 2 holds the physical request while Windows build/tests proceed.
+revision 2 held the physical request while Windows build/tests proceeded.
+The user subsequently replied **"I authorize this Windows test and restoration"**
+to the explicit webcam/baseline/max/minimum-nonzero/capture/restoration question.
+Revision 3 publishes this authorization. The physical outcome is still pending.
 
 Identical official encoding plus equally absent dimming would support a shared
 firmware/visual limitation. Different packets or visible behavior would guide

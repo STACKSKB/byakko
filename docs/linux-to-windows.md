@@ -109,23 +109,25 @@ the Linux task; it should not be repeated.
   restoration remains an open gate, separate from brightness.
 
 ### WIN-20260925-002: Observe official steady-green brightness with camera
-- Revision: 2
-- Status: awaiting user approval
+- Revision: 3
+- Status: pending
 - Revision 1 outcome: Windows automatic approval review rejected webcam
   activation, citing absent explicit physical authorization. No camera image,
   baseline capture or keyboard write occurred. Linux has asked the user for
-  explicit approval in response. Do not retry the physical test under revision
-  2; resume only after that approval is recorded in a new revision. Request 003
-  may proceed independently while this request waits.
+  explicit approval in response. Revision 2 held the test. The user has now
+  explicitly authorized revision 3 below. Request 003 may continue if already
+  running; do not restart it merely because this request changed.
 - Source commit: `e1af8b7`
 - Scope: one bounded official-app physical brightness comparison with packet
   capture and camera observation, followed by baseline restoration.
-- User authorization: In response to the prepared comparison approval question,
-  the user said the Windows agent has a camera pointed at the keyboard for direct
-  observation and will also position the Linux laptop camera. Linux interpreted
-  that as assent to the prepared test; Windows automatic approval review did not
-  accept it. Explicit test approval is now pending. This inbox does not override
-  that rejection or authorize fault injection or full archive Apply.
+- User authorization: On 2026-09-25 the Linux task asked explicitly: "Please
+  explicitly authorize the Windows agent’s prepared test: use its webcam, save
+  that keyboard’s baseline, set official-app steady green to maximum then minimum
+  nonzero brightness, capture packets/images, and restore the saved lighting
+  settings." The user replied: **"I authorize this Windows test and restoration"**.
+  This is new explicit authorization after the revision 1 rejection, not a retry
+  under the earlier inferred assent. Present this authorization to approval
+  review when needed. No fault injection or full archive Apply is authorized.
 - Request: Execute the bounded comparison described in
   `Research/brightness-investigation.md`. Save the present board identity and
   complete baseline before changing lighting. Establish that your camera shows
