@@ -13,9 +13,6 @@ use std::{collections::BTreeMap, path::Path};
 pub const BACKEND_ID: &str = "nia87";
 const LAYERS: [&str; 2] = ["base", "fn"];
 
-#[derive(Default)]
-pub struct Nia87Adapter;
-
 /// One immutable HID target belongs to one desktop executor lifetime.
 pub struct BoundNia87Adapter {
     access: device::Access,
@@ -341,41 +338,6 @@ pub fn draft_snapshot(expected: &State, changes: &[Change]) -> Result<Snapshot, 
     to_snapshot(&draft)
 }
 
-impl Nia87Adapter {
-    pub fn descriptor(&self) -> Descriptor {
-        descriptor()
-    }
-    pub fn validate(&self, expected: &State, changes: &[Change]) -> Result<(), String> {
-        draft_snapshot(expected, changes).map(|_| ())
-    }
-    pub fn read(&self) -> Result<State, String> {
-        device::Access::unique()
-            .snapshot()
-            .map_err(|e| e.to_string())
-            .and_then(|snapshot| from_snapshot(&snapshot))
-    }
-    pub fn apply(
-        &self,
-        expected: &State,
-        changes: &[Change],
-        backup_dir: &Path,
-    ) -> Result<State, String> {
-        self.apply_detailed(expected, changes, backup_dir)
-            .map_err(|error| error.message)
-    }
-}
-
-impl Nia87Adapter {
-    pub fn apply_detailed(
-        &self,
-        expected: &State,
-        changes: &[Change],
-        backup_dir: &Path,
-    ) -> Result<State, byakko_core::session::ApplyFailure> {
-        apply_detailed_with(&device::Access::unique(), expected, changes, backup_dir)
-    }
-}
-
 fn apply_detailed_with(
     access: &device::Access,
     expected: &State,
@@ -399,101 +361,6 @@ fn apply_detailed_with(
         message,
         recovery: Recovery::Unverified,
     })
-}
-
-impl crate::Device for Nia87Adapter {
-    fn read(&mut self) -> Result<State, String> {
-        Nia87Adapter::read(self)
-    }
-
-    fn apply(
-        &mut self,
-        expected: &State,
-        changes: &[Change],
-        backup_dir: &Path,
-    ) -> Result<State, byakko_core::session::ApplyFailure> {
-        self.apply_detailed(expected, changes, backup_dir)
-    }
-
-    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
-        macro_adapter::read(slot)
-    }
-
-    fn read_macro_catalog(&mut self, slots: &[String]) -> Result<Vec<macros::Snapshot>, String> {
-        macro_adapter::read_catalog_with(&device::Access::unique(), slots)
-    }
-
-    fn apply_macro(
-        &mut self,
-        expected: &macros::Snapshot,
-        desired: &macros::Program,
-        backup_dir: &Path,
-    ) -> Result<macros::Snapshot, byakko_core::session::ApplyFailure> {
-        macro_adapter::apply(expected, desired, backup_dir)
-    }
-
-    fn read_lighting(&mut self) -> Result<byakko_core::lighting::Snapshot, String> {
-        crate::nia87::lighting_adapter::read()
-    }
-
-    fn apply_lighting(
-        &mut self,
-        expected: &byakko_core::lighting::Snapshot,
-        desired: &byakko_core::lighting::Setting,
-        backup_dir: &Path,
-    ) -> Result<byakko_core::lighting::Snapshot, byakko_core::session::ApplyFailure> {
-        crate::nia87::lighting_adapter::apply(expected, desired, backup_dir)
-    }
-
-    fn read_picture(&mut self) -> Result<byakko_core::picture::Snapshot, String> {
-        crate::nia87::picture_adapter::read()
-    }
-
-    fn apply_picture(
-        &mut self,
-        expected: &byakko_core::picture::Snapshot,
-        desired: &BTreeMap<String, [u8; 3]>,
-        backup_dir: &Path,
-    ) -> Result<byakko_core::picture::Snapshot, byakko_core::session::ApplyFailure> {
-        crate::nia87::picture_adapter::apply(expected, desired, backup_dir)
-    }
-
-    fn read_settings(&mut self) -> Result<byakko_core::settings::Snapshot, String> {
-        crate::nia87::settings_adapter::read()
-    }
-
-    fn apply_setting(
-        &mut self,
-        expected: &byakko_core::settings::Snapshot,
-        edit: &byakko_core::settings::Edit,
-        backup_dir: &Path,
-    ) -> Result<byakko_core::settings::Snapshot, byakko_core::session::ApplyFailure> {
-        crate::nia87::settings_adapter::apply(expected, edit, backup_dir)
-    }
-
-    fn archive_capabilities(&self) -> Option<byakko_core::archive::ArchiveCapabilities> {
-        Some(crate::nia87::archive_adapter::capabilities())
-    }
-
-    fn capture_archive(&mut self) -> Result<byakko_core::archive::NativeArchive, String> {
-        crate::nia87::archive_adapter::capture()
-    }
-
-    fn review_archive(
-        &mut self,
-        target: &byakko_core::archive::NativeArchive,
-    ) -> Result<byakko_core::archive::Review, String> {
-        crate::nia87::archive_adapter::review(target)
-    }
-
-    fn apply_archive(
-        &mut self,
-        expected: &byakko_core::archive::NativeArchive,
-        target: &byakko_core::archive::NativeArchive,
-        backup_dir: &Path,
-    ) -> Result<byakko_core::archive::NativeArchive, byakko_core::session::ApplyFailure> {
-        crate::nia87::archive_adapter::apply(expected, target, backup_dir)
-    }
 }
 
 impl crate::Device for BoundNia87Adapter {

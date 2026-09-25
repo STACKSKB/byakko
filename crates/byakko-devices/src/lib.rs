@@ -2,7 +2,7 @@
 mod device;
 mod executor;
 
-pub use device::{Device, HostActivity, HostFrame, KeymapDevice};
+pub use device::{Device, HostActivity, HostFrame};
 pub use executor::{
     Executor, HostEvent, HostFrameError, HostStopResult, HostSubmitError, HostTicket,
 };

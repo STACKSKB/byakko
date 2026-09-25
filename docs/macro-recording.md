@@ -65,7 +65,7 @@ Switching modes or importing a file never silently rewrites its repeat count.
 
 ## Implementation boundary
 
-`macro_recorder` owns deterministic timing, held-input tracking, duplicate
+`byakko-core::macros::recorder` owns deterministic timing, held-input tracking, duplicate
 suppression and encoded-capacity reservation. It receives timestamps explicitly
 and has no egui, device, file or clock access. Rejected transitions leave the
 draft and recorder state unchanged. Stop consumes the recording session and
@@ -76,9 +76,9 @@ read/apply activity. A failed operation retains its prior baseline and draft
 while marking the baseline unverified. Matching readback restores trust; slot
 changes and imports cannot replace a pending operation's draft. The editor lends
 the draft to the recorder while recording and disables other edits during that
-session. The UI translates physical input, handles capture focus and presents
-recorder outcomes. Device worker dispatch and file/label controls remain in
-`macro_ui`; the model performs no egui, file or HID operations.
+session. The Iced desktop translates physical input, handles capture focus and
+presents recorder outcomes. Device worker dispatch lives in the desktop
+recording path; the model performs no UI, file or HID operations.
 
 A main-window device reread or full-archive apply invalidates the loaded panel
 baselines, including macros. Drafts remain available for review/export, but

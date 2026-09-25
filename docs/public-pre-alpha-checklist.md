@@ -63,7 +63,7 @@ optional source-inventory script, not the Cargo build or the renderer itself.
    picture writes. Current ordinary lighting/picture saves are automatic and
    carry `TransportAccepted` evidence; newer physical checks exist. The parity
    ledger, Linux installation page and older acceptance sections also contradict
-   later dated evidence. Clearly distinguish Iced from the retained research GUI,
+   later dated evidence. Clearly distinguish Iced from the historical research UI,
    document which controls send writes automatically, and reconcile the read
    policy in AGENTS with the newer transport-accepted implementation before
    further maintenance or publishing instructions.
@@ -113,7 +113,7 @@ optional source-inventory script, not the Cargo build or the renderer itself.
   against the final release commit. Preserve logs with the commit/toolchain.
 - [x] **Record local Windows/Linux release checks.** Build the selected Iced
   desktop, CLI and helper with the lockfile. Record the tested toolchain and
-  source revision; keep research tools/legacy egui separate from the product.
+  source revision; keep retained research tools separate from the product.
   No CI/CD. Recheck core's WebAssembly build where the target is installed.
 - [x] **Provide source-build instructions.** The user selected source checkout
   and local builds only; see [source build](source-build.md). Binary downloads,

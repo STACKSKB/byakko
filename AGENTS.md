@@ -249,8 +249,8 @@ remains available to developers outside the public workflow.
   Headless tests do not prove physical playback or Linux hardware behavior.
 - Use bounded GPT-6 Sol/Luna subagents for independent tasks with explicit ownership.
   Review their changes. Avoid parallel edits to the same files.
-- Commit after major completed steps. No PRs, issues, messages to others,
-  Firefox automation, or file deletion. Use Edge/Codex browser for research.
+- Commit after major completed steps. No PRs, issues, messages to others or
+  Firefox automation. Use Edge/Codex browser for research.
   User-directed exception (2026-09-25): coordinate directly with the Windows
   agent through `docs/linux-to-windows.md` and its remote replies. Commit and
   push requests/status updates as documented there; preserve both checkouts'

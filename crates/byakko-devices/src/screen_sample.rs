@@ -78,142 +78,52 @@ mod platform {
         COLS, DisplaySource, ROWS, ScreenCapture, ScreenSampling, mean_rgb, point_coordinate,
         select_display,
     };
-    use std::{ffi::c_void, io, ptr::null_mut};
-
-    #[link(name = "user32")]
-    unsafe extern "system" {
-        fn GetDC(window: *mut c_void) -> *mut c_void;
-        fn ReleaseDC(window: *mut c_void, dc: *mut c_void) -> i32;
-        fn EnumDisplayMonitors(
-            dc: *mut c_void,
-            clip: *const c_void,
-            callback: unsafe extern "system" fn(*mut c_void, *mut c_void, *mut Rect, isize) -> i32,
-            data: isize,
-        ) -> i32;
-        fn GetMonitorInfoW(monitor: *mut c_void, info: *mut MonitorInfoExW) -> i32;
-        fn OpenInputDesktop(flags: u32, inherit: i32, access: u32) -> *mut c_void;
-        fn CloseDesktop(desktop: *mut c_void) -> i32;
-        fn GetUserObjectInformationW(
-            object: *mut c_void,
-            index: i32,
-            info: *mut c_void,
-            length: u32,
-            needed: *mut u32,
-        ) -> i32;
-    }
-    #[link(name = "gdi32")]
-    unsafe extern "system" {
-        fn CreateCompatibleDC(dc: *mut c_void) -> *mut c_void;
-        fn DeleteDC(dc: *mut c_void) -> i32;
-        fn CreateDIBSection(
-            dc: *mut c_void,
-            info: *const BitmapInfo,
-            usage: u32,
-            bits: *mut *mut c_void,
-            section: *mut c_void,
-            offset: u32,
-        ) -> *mut c_void;
-        fn DeleteObject(object: *mut c_void) -> i32;
-        fn SelectObject(dc: *mut c_void, object: *mut c_void) -> *mut c_void;
-        fn SetStretchBltMode(dc: *mut c_void, mode: i32) -> i32;
-        fn StretchBlt(
-            dest: *mut c_void,
-            x: i32,
-            y: i32,
-            width: i32,
-            height: i32,
-            src: *mut c_void,
-            src_x: i32,
-            src_y: i32,
-            src_width: i32,
-            src_height: i32,
-            operation: u32,
-        ) -> i32;
-        fn GdiFlush() -> i32;
-    }
-
-    #[repr(C)]
-    struct BitmapInfoHeader {
-        size: u32,
-        width: i32,
-        height: i32,
-        planes: u16,
-        bits_per_pixel: u16,
-        compression: u32,
-        image_size: u32,
-        x_pixels_per_meter: i32,
-        y_pixels_per_meter: i32,
-        colors_used: u32,
-        colors_important: u32,
-    }
-    #[repr(C)]
-    struct BitmapInfo {
-        header: BitmapInfoHeader,
-        colors: [u32; 1],
-    }
-    #[repr(C)]
-    #[derive(Clone, Copy)]
-    struct Rect {
-        left: i32,
-        top: i32,
-        right: i32,
-        bottom: i32,
-    }
-    #[repr(C)]
-    struct MonitorInfoExW {
-        size: u32,
-        bounds: Rect,
-        work: Rect,
-        flags: u32,
-        device: [u16; 32],
-    }
+    use std::{io, ptr::null_mut};
+    use windows_sys::Win32::{
+        Foundation::RECT,
+        Graphics::Gdi::{
+            BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection,
+            DIB_RGB_COLORS, DeleteDC, DeleteObject, EnumDisplayMonitors, GdiFlush, GetDC,
+            GetMonitorInfoW, HALFTONE, HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFOEXW, RGBQUAD,
+            ReleaseDC, SRCCOPY, SelectObject, SetStretchBltMode, StretchBlt,
+        },
+        System::StationsAndDesktops::{
+            CloseDesktop, DESKTOP_READOBJECTS, GetUserObjectInformationW, HDESK, OpenInputDesktop,
+            UOI_NAME,
+        },
+    };
     #[derive(Clone)]
     struct Monitor {
         source: DisplaySource,
-        bounds: Rect,
+        bounds: RECT,
         primary: bool,
     }
 
     unsafe extern "system" fn collect_monitor(
-        monitor: *mut c_void,
-        _: *mut c_void,
-        _: *mut Rect,
+        monitor: HMONITOR,
+        _: HDC,
+        _: *mut RECT,
         data: isize,
     ) -> i32 {
         let monitors = unsafe { &mut *(data as *mut Vec<Monitor>) };
-        let mut info = MonitorInfoExW {
-            size: std::mem::size_of::<MonitorInfoExW>() as u32,
-            bounds: Rect {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            },
-            work: Rect {
-                left: 0,
-                top: 0,
-                right: 0,
-                bottom: 0,
-            },
-            flags: 0,
-            device: [0; 32],
-        };
-        if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        if unsafe { GetMonitorInfoW(monitor, &mut info.monitorInfo) } == 0 {
             return 0;
         }
         let len = info
-            .device
+            .szDevice
             .iter()
             .position(|&c| c == 0)
-            .unwrap_or(info.device.len());
-        let id = String::from_utf16_lossy(&info.device[..len]);
+            .unwrap_or(info.szDevice.len());
+        let id = String::from_utf16_lossy(&info.szDevice[..len]);
         monitors.push(Monitor {
             source: DisplaySource {
                 label: id.clone(),
                 id,
             },
-            bounds: info.bounds,
-            primary: info.flags & 1 != 0,
+            bounds: info.monitorInfo.rcMonitor,
+            primary: info.monitorInfo.dwFlags & 1 != 0,
         });
         1
     }
@@ -223,7 +133,7 @@ mod platform {
             EnumDisplayMonitors(
                 null_mut(),
                 std::ptr::null(),
-                collect_monitor,
+                Some(collect_monitor),
                 (&mut monitors as *mut Vec<Monitor>) as isize,
             )
         } == 0
@@ -257,22 +167,22 @@ mod platform {
         })
     }
 
-    struct Desktop(*mut c_void);
+    struct Desktop(HDESK);
     impl Drop for Desktop {
         fn drop(&mut self) {
             unsafe { CloseDesktop(self.0) };
         }
     }
-    struct ScreenDc(*mut c_void);
+    struct ScreenDc(HDC);
     impl Drop for ScreenDc {
         fn drop(&mut self) {
             unsafe { ReleaseDC(null_mut(), self.0) };
         }
     }
     struct SmallBitmap {
-        dc: *mut c_void,
-        bitmap: *mut c_void,
-        previous: *mut c_void,
+        dc: HDC,
+        bitmap: HBITMAP,
+        previous: HGDIOBJ,
     }
     impl Drop for SmallBitmap {
         fn drop(&mut self) {
@@ -291,7 +201,7 @@ mod platform {
     fn interactive_desktop() -> Result<(), String> {
         // An input desktop other than Default is usually the lock or secure
         // desktop. Refuse to represent that as an all-black user screen.
-        let handle = unsafe { OpenInputDesktop(0, 0, 0x0001) }; // DESKTOP_READOBJECTS
+        let handle = unsafe { OpenInputDesktop(0, 0, DESKTOP_READOBJECTS) };
         if handle.is_null() {
             return Err(format!(
                 "Cannot access interactive desktop: {}",
@@ -304,7 +214,7 @@ mod platform {
         let ok = unsafe {
             GetUserObjectInformationW(
                 desktop.0,
-                2, // UOI_NAME
+                UOI_NAME,
                 name.as_mut_ptr().cast(),
                 (name.len() * 2) as u32,
                 &mut needed,
@@ -397,24 +307,25 @@ mod platform {
                 bitmap: null_mut(),
                 previous: null_mut(),
             };
-            let info = BitmapInfo {
-                header: BitmapInfoHeader {
-                    size: std::mem::size_of::<BitmapInfoHeader>() as u32,
-                    width: cols,
-                    height: -rows, // top-down 32-bit BGRA
-                    planes: 1,
-                    bits_per_pixel: 32,
-                    compression: 0, // BI_RGB
-                    image_size: 0,
-                    x_pixels_per_meter: 0,
-                    y_pixels_per_meter: 0,
-                    colors_used: 0,
-                    colors_important: 0,
+            let info = BITMAPINFO {
+                bmiHeader: BITMAPINFOHEADER {
+                    biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                    biWidth: cols,
+                    biHeight: -rows, // top-down 32-bit BGRA
+                    biPlanes: 1,
+                    biBitCount: 32,
+                    biCompression: BI_RGB,
+                    biSizeImage: 0,
+                    biXPelsPerMeter: 0,
+                    biYPelsPerMeter: 0,
+                    biClrUsed: 0,
+                    biClrImportant: 0,
                 },
-                colors: [0],
+                bmiColors: [RGBQUAD::default()],
             };
             let mut bits = null_mut();
-            small.bitmap = unsafe { CreateDIBSection(dc.0, &info, 0, &mut bits, null_mut(), 0) };
+            small.bitmap =
+                unsafe { CreateDIBSection(dc.0, &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0) };
             if small.bitmap.is_null() || bits.is_null() {
                 return Err(format!(
                     "Screen DIB unavailable: {}",
@@ -429,8 +340,7 @@ mod platform {
                     io::Error::last_os_error()
                 ));
             }
-            if unsafe { SetStretchBltMode(small.dc, 4) } == 0 {
-                // HALFTONE
+            if unsafe { SetStretchBltMode(small.dc, HALFTONE) } == 0 {
                 return Err(format!(
                     "Screen stretch mode unavailable: {}",
                     io::Error::last_os_error()
@@ -448,7 +358,7 @@ mod platform {
                     source_y,
                     source_width,
                     source_height,
-                    0x00cc_0020,
+                    SRCCOPY,
                 )
             } == 0
             {

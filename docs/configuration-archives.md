@@ -6,12 +6,10 @@ both 128-entry keymaps, all 50 raw macro slots, global lighting, the current
 the same operation under **Configuration archive**. Unsaved editor drafts and
 host audio/screen streams are not part of the archive.
 
-Capture holds the Byakko transaction lock and one HID handle throughout. Each
-section uses its existing repeated-read checks, and two complete captures must
-match before a file is created. Close the official helper and other
-configurators first: they do not honor Byakko's lock. Progress counts macro slots
-across two passes (100 total). Capture can take a few minutes; it sends read
-requests only. Device disconnection or inconsistent responses abort the export.
+Capture reads each advertised feature once in one complete sweep and holds one
+HID handle throughout. Macro progress covers the 50 advertised slots. Capture
+sends read requests only; device disconnection or an invalid response aborts
+the export.
 
 Files use the original `byakko-configuration` JSON format, version1, limited to
 Nia87 firmware0100/profile0. Import checks fixed sizes and identity and is
@@ -20,33 +18,18 @@ unknown to the editor. Files are created exclusively; an existing file is never
 overwritten. `inspect-configuration PATH.json` validates and reports section
 counts without opening the keyboard or printing macro contents.
 
-Use **REVIEW RESTORE** to compare an archive with a fresh complete capture.
-The review lists changed sections; **APPLY REVIEWED ARCHIVE** is a separate
-action. Apply rechecks the complete expected state and saves a durable archive
-before sending setters. Macro contents are written before their bindings.
-Reserved slots, opaque setting differences and changed macros that cannot
-round-trip exactly are rejected before writes. Unknown unchanged bytes remain
-preserved. Saved host lighting modes do not automatically start screen/audio
-capture. Other editor drafts are retained and those panels must reload afterward.
+The public Iced page supports capture and export only. Whole-configuration
+review and restore remain developer research APIs and are not part of the
+public pre-alpha workflow. The historical research record below does not
+establish restore acceptance; its failure-recovery discrepancy remains open.
 
-On failure, recovery first restores keymaps, then attempts each affected macro,
-picture, scalar setting and lighting section. An individual section failure
-does not suppress later recovery attempts. Complete repeated readback determines
-whether recovery succeeded. Disconnection, process termination and partial-write
-failure recovery still need fault-injection acceptance tests; the durable
-before-image is retained regardless. Normal window close is held while archive
-application is active. The existing keymap and macro import/export remain
-available separately.
+The retained developer restore APIs keep typed recovery results and their
+research acceptance limits. Automatic failure recovery remains unaccepted;
+the before-image and failure evidence below are retained.
 
-The native archive controller owns one explicit operation state: idle, capturing,
-captured, reviewing, ready to apply, or applying. A ready state owns the reviewed
-before/after configurations; applying retains an immutable reference for display.
-Changing the path or
-starting a device read invalidates a completed review. Path edits are refused
-while an archive operation runs. The workbench coordinates device access with
-the other editors and receives the verified keymap result after archive apply.
-These state transitions are tested without device access; they do not replace
-the outstanding hardware recovery tests.
+The native capture controller owns an explicit idle/capturing/captured/exporting
+state. Changing the export path or starting a device read invalidates a completed
+capture. These transitions are tested without device access.
 
 `plan-configuration CURRENT.json TARGET.json` checks both directions and prints
 change counts without device access. It does not establish that CURRENT still
@@ -58,14 +41,14 @@ index0; these are not established as three editable banks. See the
 [selected-path audit](../Research/picture-selector-audit.md). The archive does
 not claim to cover any undiscovered firmware banks.
 
-On the attached Windows Nia87, the first live capture completed both full passes
-and saved a 139,657-byte archive. Inspection found 50 macro slots (one nonempty),
+Historical capture evidence: on the attached Windows Nia87, the first live
+capture saved a 139,657-byte archive. Inspection found 50 macro slots (one nonempty),
 128 bindings per layer, 128 colors and effect5. The keymaps and all 256 slot0
 bytes matched the preceding verified backups. A concurrent `inspect` command
 was rejected while capture held the lock. The private fixture remains ignored
 at `Research/captures/configuration-first-complete.json`.
 
-The reversible `verify_configuration_roundtrip` example then changed Pause to
+Historical developer research: the reversible `verify_configuration_roundtrip` example changed Pause to
 F24, populated unbound macro49, changed picture slot91, reduced Ripple brightness
 from4 to3 and changed debounce from1 to2 in one archive application. It applied
 the original archive afterward. Both applications passed complete repeated

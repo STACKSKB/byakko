@@ -287,9 +287,6 @@ pub struct Session {
     archive_state: crate::archive::ArchiveState,
 }
 
-/// Compatibility name for consumers using only the keymap surface.
-pub type KeymapSession = Session;
-
 impl Session {
     pub fn new(descriptor: Descriptor) -> Result<Self, String> {
         let bindings = descriptor
@@ -1003,7 +1000,7 @@ mod tests {
         }
     }
 
-    fn read(session: &mut KeymapSession, result: Result<State, String>) {
+    fn read(session: &mut Session, result: Result<State, String>) {
         let Command {
             generation,
             operation,
@@ -1024,7 +1021,7 @@ mod tests {
 
     #[test]
     fn rejects_old_connection_and_out_of_order_completions() {
-        let mut session = KeymapSession::new(descriptor()).unwrap();
+        let mut session = Session::new(descriptor()).unwrap();
         let first_generation = session.connect().unwrap();
         let Command {
             generation,
@@ -1090,7 +1087,7 @@ mod tests {
 
     #[test]
     fn dirty_reconnect_matching_read_retains_draft_and_difference_conflicts() {
-        let mut session = KeymapSession::new(descriptor()).unwrap();
+        let mut session = Session::new(descriptor()).unwrap();
         session.connect().unwrap();
         read(&mut session, Ok(state(1, 4)));
         assert!(
@@ -1124,7 +1121,7 @@ mod tests {
 
     #[test]
     fn failed_and_mismatched_apply_keep_baseline_and_draft_unverified() {
-        let mut session = KeymapSession::new(descriptor()).unwrap();
+        let mut session = Session::new(descriptor()).unwrap();
         session.connect().unwrap();
         read(&mut session, Ok(state(1, 4)));
         session.stage(edit(5)).unwrap();
@@ -1201,7 +1198,7 @@ mod tests {
 
     #[test]
     fn failed_read_preserves_draft_and_matching_apply_becomes_ready() {
-        let mut session = KeymapSession::new(descriptor()).unwrap();
+        let mut session = Session::new(descriptor()).unwrap();
         session.connect().unwrap();
         read(&mut session, Ok(state(1, 4)));
         session.stage(edit(5)).unwrap();
@@ -1239,7 +1236,7 @@ mod tests {
 
     #[test]
     fn commands_and_results_round_trip_as_owned_json_values() {
-        let mut session = KeymapSession::new(descriptor()).unwrap();
+        let mut session = Session::new(descriptor()).unwrap();
         session.connect().unwrap();
         let command = session.request_read().unwrap();
         let encoded = serde_json::to_vec(&command).unwrap();
@@ -1301,7 +1298,7 @@ mod tests {
 
     #[test]
     fn same_ticket_wrong_feature_or_direction_does_not_consume_pending_read() {
-        let mut session = KeymapSession::new(descriptor()).unwrap();
+        let mut session = Session::new(descriptor()).unwrap();
         session.connect().unwrap();
         let command = session.request_read().unwrap();
         let pending = session.activity().clone();
@@ -1334,7 +1331,7 @@ mod tests {
 
     #[test]
     fn opaque_action_survives_apply_command_and_verified_completion() {
-        let mut session = KeymapSession::new(descriptor()).unwrap();
+        let mut session = Session::new(descriptor()).unwrap();
         session.connect().unwrap();
         read(&mut session, Ok(state(1, 4)));
         let opaque = Action::Opaque {

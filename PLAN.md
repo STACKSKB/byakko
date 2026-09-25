@@ -2,6 +2,13 @@
 
 Research date: 2026-09-21; updated 2026-09-22. Scope: USB configuration using stock firmware only; 2.4 GHz is a later compatibility target. Native keymap and short macro storage have passed reversible write/readback checks on the connected keyboard. See `docs/live-evidence.md` for evidence and remaining verification limits. No firmware flashing is in scope.
 
+> **Historical proposal, superseded.** This document records the initial egui,
+> permissive-license and feature-migration exploration. The approved current
+> direction is Rust + Iced with GPL-3.0-or-later Byakko-owned code, as recorded
+> in [the pre-alpha proposal](docs/pre-alpha-proposal.md) and `AGENTS.md`.
+> Retained implementation and acceptance status are summarized in
+> [backend architecture](docs/backend-architecture.md).
+
 ## Direction
 
 Use an original dense, keyboard-friendly native workbench. The user's references are McMaster-Carr, FL Studio, and Vim; do not copy the official GUI or Sharkfin UX. See `docs/design-direction.md` for interaction and review criteria.

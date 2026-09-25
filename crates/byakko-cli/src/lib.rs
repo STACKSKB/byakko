@@ -19,10 +19,7 @@ pub use lighting::{apply_lighting, plan_lighting};
 pub use macro_snapshot::{apply_macro, plan_macro};
 pub use picture::{apply_colors, plan_colors};
 pub use settings::{apply_settings, plan_settings};
-use std::{
-    sync::mpsc::TryRecvError,
-    time::{Duration, Instant},
-};
+use std::time::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct MacroLibrary {
@@ -56,16 +53,10 @@ pub fn read_macro(
     slot: &str,
     timeout: Duration,
 ) -> Result<MacroSnapshot, String> {
-    let editor = session.macros().ok_or("Device does not support macros")?;
-    if !editor
-        .capabilities()
-        .slots
-        .iter()
-        .any(|choice| choice.id == slot)
-    {
-        return Err(format!("Unknown macro slot: {slot}"));
-    }
-    session.select_macro(slot)?;
+    session.macros().ok_or("Device does not support macros")?;
+    session
+        .select_macro(slot)
+        .map_err(|error| format!("Cannot select macro slot {slot}: {error}"))?;
     if *session.status() == Status::Disconnected {
         executor.set_generation(session.connect()?);
     }
@@ -214,22 +205,19 @@ pub(crate) fn submit_and_wait(
         session.accept(*rejected);
         return Err(format!("Device request rejected: {:?}", session.status()));
     }
-    let deadline = timeout.map(|limit| Instant::now() + limit);
-    loop {
-        match executor.try_receive() {
-            Ok(completion) => {
-                if session.accept(completion) == Acceptance::IgnoredStale {
-                    return Err("Stale device completion".into());
-                }
-                return Ok(());
-            }
-            Err(TryRecvError::Disconnected) => return Err("Device executor stopped".into()),
-            Err(TryRecvError::Empty) if deadline.is_some_and(|end| Instant::now() >= end) => {
-                return Err("Device operation timed out; its outcome is unknown".into());
-            }
-            Err(TryRecvError::Empty) => std::thread::sleep(Duration::from_millis(10)),
+    let completion = match executor.receive(timeout) {
+        Ok(completion) => completion,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            return Err("Device executor stopped".into());
         }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            return Err("Device operation timed out; its outcome is unknown".into());
+        }
+    };
+    if session.accept(completion) == Acceptance::IgnoredStale {
+        return Err("Stale device completion".into());
     }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -206,20 +206,28 @@ impl Desktop {
         };
         self.macro_notice = None;
         match kind {
-            FileOperation::Import => file_task(ticket, move || {
-                macro_files::load(&path).map(|document| Some(Box::new(document)))
-            }),
+            FileOperation::Import => super::file_task::spawn_blocking(
+                "byakko-file",
+                "File worker stopped without a result; check the destination before retrying an export",
+                move || macro_files::load(&path).map(|document| Some(Box::new(document))),
+                move |result| AppMessage::File(Message::Complete(ticket, result)),
+            ),
             FileOperation::Export => {
                 let document = self
                     .session
                     .macros()
                     .ok_or_else(|| "Macros are unavailable".to_string())
                     .and_then(|editor| self.macro_files.document(editor));
-                file_task(ticket, move || {
-                    document
-                        .and_then(|doc| macro_files::save_new(&path, &doc))
-                        .map(|()| None)
-                })
+                super::file_task::spawn_blocking(
+                    "byakko-file",
+                    "File worker stopped without a result; check the destination before retrying an export",
+                    move || {
+                        document
+                            .and_then(|doc| macro_files::save_new(&path, &doc))
+                            .map(|()| None)
+                    },
+                    move |result| AppMessage::File(Message::Complete(ticket, result)),
+                )
             }
         }
     }
@@ -287,31 +295,6 @@ impl Desktop {
         }
         Task::none()
     }
-}
-
-// Blocking filesystem calls must not occupy Iced's async subscription executor.
-fn file_task(
-    ticket: FileTicket,
-    work: impl FnOnce() -> Result<Option<Box<Document>>, String> + Send + 'static,
-) -> Task<AppMessage> {
-    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    if let Err(error) = std::thread::Builder::new()
-        .name("byakko-file".into())
-        .spawn(move || {
-            let _ = sender.send(work());
-        })
-    {
-        return Task::done(AppMessage::File(Message::Complete(
-            ticket,
-            Err(error.to_string()),
-        )));
-    }
-    Task::perform(
-        async move {
-            receiver.await.unwrap_or_else(|_| Err("File worker stopped without a result; check the destination before retrying an export".into()))
-        },
-        move |result| AppMessage::File(Message::Complete(ticket, result)),
-    )
 }
 
 pub(super) fn name_controls<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, AppMessage> {

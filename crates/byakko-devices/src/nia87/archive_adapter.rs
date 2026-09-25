@@ -36,19 +36,11 @@ fn decode(archive: &NativeArchive) -> Result<Configuration, String> {
     configuration::decode(&archive.bytes).map_err(|error| error.to_string())
 }
 
-pub fn capture() -> Result<NativeArchive, String> {
-    capture_with(&Access::unique())
-}
-
 pub(super) fn capture_with(access: &Access) -> Result<NativeArchive, String> {
     let config = access
         .capture_configuration(|_, _| {})
         .map_err(|error| error.to_string())?;
     encode(&config)
-}
-
-pub fn review(target: &NativeArchive) -> Result<Review, String> {
-    review_with(&Access::unique(), target)
 }
 
 /// Compare two saved native archives without opening a device. The same
@@ -68,14 +60,6 @@ pub(super) fn review_with(access: &Access, target: &NativeArchive) -> Result<Rev
         .capture_configuration(|_, _| {})
         .map_err(|error| error.to_string())?;
     review_captured(&before_config, target, &target_config)
-}
-
-pub fn apply(
-    expected: &NativeArchive,
-    target: &NativeArchive,
-    backup_dir: &Path,
-) -> Result<NativeArchive, ApplyFailure> {
-    apply_with(&Access::unique(), expected, target, backup_dir)
 }
 
 pub(super) fn apply_with(
@@ -170,6 +154,20 @@ mod tests {
     use crate::nia87::{
         configuration::Configuration, device::Snapshot, lighting::Lighting, settings::Settings,
     };
+
+    fn selected_access() -> Access {
+        let candidate = crate::nia87::device::Candidate {
+            path: "unused-test-path".into(),
+            vid: 0x3151,
+            pid: 0x4011,
+            interface: 0,
+            usage_page: 0xffff,
+            usage: 2,
+            manufacturer: None,
+            product: None,
+        };
+        Access::bound(crate::nia87::device::Target::from_candidate(&candidate).unwrap())
+    }
 
     fn fixture() -> Configuration {
         let mut replies = [[0u8; 64]; 4];
@@ -294,13 +292,25 @@ mod tests {
         let before = encode(&fixture()).unwrap();
         let mut malformed = before.clone();
         malformed.bytes.truncate(24);
-        let error = apply(&before, &malformed, Path::new("unused-backups")).unwrap_err();
+        let error = apply_with(
+            &selected_access(),
+            &before,
+            &malformed,
+            Path::new("unused-backups"),
+        )
+        .unwrap_err();
         assert_eq!(error.recovery, Recovery::NotAttempted);
 
         let mut invalid_target = fixture();
         invalid_target.macros[0][2] = 250;
         let invalid_target = encode(&invalid_target).unwrap();
-        let error = apply(&before, &invalid_target, Path::new("unused-backups")).unwrap_err();
+        let error = apply_with(
+            &selected_access(),
+            &before,
+            &invalid_target,
+            Path::new("unused-backups"),
+        )
+        .unwrap_err();
         assert_eq!(error.recovery, Recovery::NotAttempted);
         assert!(error.message.contains("macro slot"));
     }

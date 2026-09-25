@@ -1,4 +1,4 @@
-use crate::KeymapDevice;
+use crate::Device;
 use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::session::{FeatureCommand, FeatureResult};
 use byakko_core::{Change, State, macros};
@@ -36,7 +36,7 @@ struct GatedCatalogDevice {
     fail_apply: bool,
 }
 
-impl KeymapDevice for GatedCatalogDevice {
+impl Device for GatedCatalogDevice {
     fn read(&mut self) -> Result<State, String> {
         Ok(State {
             revision: vec![1],
@@ -331,7 +331,7 @@ fn explicit_cancel_stops_catalog_after_current_slot() {
     ));
 }
 
-impl KeymapDevice for CatalogDevice {
+impl Device for CatalogDevice {
     fn read(&mut self) -> Result<State, String> {
         unreachable!()
     }
@@ -352,7 +352,7 @@ impl KeymapDevice for CatalogDevice {
     }
 }
 
-impl KeymapDevice for FlakyCatalogDevice {
+impl Device for FlakyCatalogDevice {
     fn read(&mut self) -> Result<State, String> {
         unreachable!()
     }
@@ -470,7 +470,7 @@ fn catalog_reads_every_requested_slot_in_one_correlated_command() {
     );
     assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
-impl KeymapDevice for PanickingDevice {
+impl Device for PanickingDevice {
     fn read(&mut self) -> Result<State, String> {
         panic!("read panic")
     }
@@ -511,7 +511,7 @@ fn panicked_write_returns_correlated_unverified_completion() {
         }
     ));
 }
-impl KeymapDevice for MemoryDevice {
+impl Device for MemoryDevice {
     fn read(&mut self) -> Result<State, String> {
         Ok(self.state.clone())
     }
@@ -604,7 +604,7 @@ struct BlockingDevice {
     release: Receiver<()>,
 }
 
-impl KeymapDevice for BlockingDevice {
+impl Device for BlockingDevice {
     fn read(&mut self) -> Result<State, String> {
         self.entered.send(()).unwrap();
         self.release

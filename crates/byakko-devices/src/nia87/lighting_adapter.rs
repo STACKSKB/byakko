@@ -230,21 +230,9 @@ pub fn draft(expected: &Snapshot, desired: &Setting) -> Result<native::LightingS
     Ok(target)
 }
 
-pub fn read() -> Result<Snapshot, String> {
-    read_with(&device::Access::unique())
-}
-
 pub(super) fn read_with(access: &device::Access) -> Result<Snapshot, String> {
     let raw = access.read_lighting().map_err(|error| error.to_string())?;
     Ok(from_native(&raw))
-}
-
-pub fn apply(
-    expected: &Snapshot,
-    desired: &Setting,
-    backup: &Path,
-) -> Result<Snapshot, ApplyFailure> {
-    apply_with(&device::Access::unique(), expected, desired, backup)
 }
 
 pub(super) fn apply_with(

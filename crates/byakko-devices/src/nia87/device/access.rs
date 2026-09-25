@@ -20,22 +20,16 @@ impl Selection<'_> {
 /// back from the selected HID collection.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Access {
-    Unique,
     Bound(Target),
 }
 
 impl Access {
-    pub fn unique() -> Self {
-        Self::Unique
-    }
-
     pub fn bound(target: Target) -> Self {
         Self::Bound(target)
     }
 
     fn selection(&self) -> Selection<'_> {
         match self {
-            Self::Unique => Selection::Unique,
             Self::Bound(target) => Selection::Expected(target),
         }
     }

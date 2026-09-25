@@ -67,14 +67,9 @@ fn failed_status(status: &Status) -> bool {
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub(super) enum Message {
     Select(String),
-    Read,
-    Apply,
-    Revert,
-    Edit(Edit),
     Live(Edit),
     EnableLighting,
     Retry,
@@ -164,20 +159,6 @@ impl Desktop {
                 }
                 self.submit(request);
             }
-            Message::Read => {
-                self.live_picture.blocked = false;
-                let request = self.session.request_picture_read();
-                self.submit(request);
-            }
-            Message::Apply => {
-                let request = self.session.request_picture_apply();
-                self.submit(request);
-            }
-            Message::Revert => {
-                self.live_picture = Pending::default();
-                self.notice = self.session.revert_picture().err();
-            }
-            Message::Edit(edit) => self.notice = self.session.edit_picture(edit).err(),
             Message::Retry => {
                 if !self.refresh_connection() {
                     return;

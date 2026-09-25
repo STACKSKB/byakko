@@ -59,7 +59,12 @@ impl Desktop {
         };
         self.archive_file = state;
         self.notice = None;
-        file_task(state, move || write_new(&path, &archive.bytes))
+        super::file_task::spawn_blocking(
+            "byakko-archive-file",
+            "Archive file worker stopped without a result",
+            move || write_new(&path, &archive.bytes),
+            move |result| AppMessage::Archive(Message::FileComplete(state, result)),
+        )
     }
 
     fn complete_archive_file(
@@ -117,32 +122,6 @@ fn write_new(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
                 path.display()
             )
         })
-}
-
-fn file_task(
-    state: FileState,
-    work: impl FnOnce() -> Result<(), String> + Send + 'static,
-) -> Task<AppMessage> {
-    let (sender, receiver) = iced::futures::channel::oneshot::channel();
-    if let Err(error) = std::thread::Builder::new()
-        .name("byakko-archive-file".into())
-        .spawn(move || {
-            let _ = sender.send(work());
-        })
-    {
-        return Task::done(AppMessage::Archive(Message::FileComplete(
-            state,
-            Err(error.to_string()),
-        )));
-    }
-    Task::perform(
-        async move {
-            receiver
-                .await
-                .unwrap_or_else(|_| Err("Archive file worker stopped without a result".into()))
-        },
-        move |result| AppMessage::Archive(Message::FileComplete(state, result)),
-    )
 }
 
 pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {

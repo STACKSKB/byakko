@@ -13,7 +13,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
     },
 };
 
@@ -365,6 +365,55 @@ impl Executor {
 
     pub fn try_receive(&self) -> Result<Completion, TryRecvError> {
         self.completions.try_recv()
+    }
+
+    pub fn receive(
+        &self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Completion, RecvTimeoutError> {
+        receive(&self.completions, timeout)
+    }
+}
+
+fn receive<T>(
+    receiver: &Receiver<T>,
+    timeout: Option<std::time::Duration>,
+) -> Result<T, RecvTimeoutError> {
+    match timeout {
+        Some(timeout) => receiver.recv_timeout(timeout),
+        None => receiver.recv().map_err(|_| RecvTimeoutError::Disconnected),
+    }
+}
+
+#[cfg(test)]
+mod receive_tests {
+    use super::*;
+    use std::{sync::mpsc, time::Duration};
+
+    #[test]
+    fn blocking_receive_handles_completion_timeout_and_disconnect() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender.send(7).unwrap();
+        assert_eq!(receive(&receiver, Some(Duration::from_secs(1))), Ok(7));
+        assert_eq!(
+            receive(&receiver, Some(Duration::ZERO)),
+            Err(RecvTimeoutError::Timeout)
+        );
+        drop(sender);
+        assert_eq!(
+            receive(&receiver, None),
+            Err(RecvTimeoutError::Disconnected)
+        );
+    }
+
+    #[test]
+    fn unbounded_receive_waits_for_a_later_completion() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(5));
+            sender.send(9).unwrap();
+        });
+        assert_eq!(receive(&receiver, None), Ok(9));
     }
 }
 

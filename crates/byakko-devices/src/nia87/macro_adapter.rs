@@ -255,10 +255,6 @@ fn prepare(
     Ok((before, value))
 }
 
-pub fn read(slot: &str) -> Result<Snapshot, String> {
-    read_with(&device::Access::unique(), slot)
-}
-
 pub(super) fn read_with(access: &device::Access, slot: &str) -> Result<Snapshot, String> {
     let number = slot_number(slot)?;
     let raw = access
@@ -283,14 +279,6 @@ pub(super) fn read_catalog_with(
         .zip(raw)
         .map(|(slot, bytes)| from_bytes(slot, &bytes))
         .collect()
-}
-
-pub fn apply(
-    expected: &Snapshot,
-    desired: &Program,
-    backup: &Path,
-) -> Result<Snapshot, ApplyFailure> {
-    apply_with(&device::Access::unique(), expected, desired, backup)
 }
 
 pub(super) fn apply_with(

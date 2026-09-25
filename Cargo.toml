@@ -12,8 +12,7 @@ members = ["crates/byakko-core", "crates/byakko-devices", "crates/byakko-desktop
 resolver = "3"
 
 [features]
-default = ["gui"]
-gui = ["dep:eframe"]
+default = []
 research-tools = ["byakko-devices/research-tools"]
 
 [[bin]]
@@ -38,7 +37,6 @@ byakko-core = { path = "crates/byakko-core" }
 byakko-devices = { path = "crates/byakko-devices" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-eframe = { version = "=0.36.2", optional = true, default-features = false, features = ["default_fonts", "glow", "x11", "wayland", "accesskit"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

@@ -1,5 +1,7 @@
 //! Replay the independently captured Fn Pause transaction and always restore.
-use byakko::device::{self, Result};
+mod support;
+use byakko_devices::nia87::device::{self, Result};
+use byakko_devices::nia87::protocol;
 use std::{fs::OpenOptions, time::Duration};
 
 fn save(name: &str, value: &device::Snapshot) -> Result<()> {
@@ -9,13 +11,16 @@ fn save(name: &str, value: &device::Snapshot) -> Result<()> {
     Ok(())
 }
 
-fn send(function: bool, binding: [u8; 4], read_response: bool) -> Result<()> {
+fn send(
+    target: &device::Target,
+    function: bool,
+    binding: [u8; 4],
+    read_response: bool,
+) -> Result<()> {
     println!("Opening configuration collection for function={function}, binding={binding:?}");
-    let (_, device) = device::open_unique()?;
+    let (_, device) = device::open_expected(target)?;
     let mut host = [0; 65];
-    host[1..].copy_from_slice(&byakko::protocol::single_key_report(
-        function, 0, 91, binding,
-    )?);
+    host[1..].copy_from_slice(&protocol::single_key_report(function, 0, 91, binding)?);
     device.send_feature_report(&host)?;
     println!("Feature write returned successfully");
     std::thread::sleep(Duration::from_millis(1000));
@@ -39,7 +44,9 @@ fn main() -> Result<()> {
         Some("mixed-response") => [0, 0, 0x73, 0],
         _ => return Err("Expected no argument, f24 or mixed-response".into()),
     };
-    let before = device::snapshot()?;
+    let target = support::target()?;
+    let access = device::Access::bound(target.clone());
+    let before = access.snapshot()?;
     if before.firmware != 0x100
         || before.profile != 0
         || before.base[91] != [0, 0, 0x48, 0]
@@ -54,10 +61,10 @@ fn main() -> Result<()> {
     save(&format!("{prefix}-before.json"), &before)?;
     let result = (|| -> Result<bool> {
         if read_response {
-            send(false, [0, 0, 0x72, 0], true)?;
+            send(&target, false, [0, 0, 0x72, 0], true)?;
         }
-        send(true, binding, read_response)?;
-        let actual = device::snapshot()?;
+        send(&target, true, binding, read_response)?;
+        let actual = access.snapshot()?;
         save(&format!("{prefix}-after.json"), &actual)?;
         let mut desired = before.clone();
         desired.function[91] = binding;
@@ -66,12 +73,12 @@ fn main() -> Result<()> {
         }
         Ok(actual == desired)
     })();
-    send(true, before.function[91], read_response)?;
-    let restored = device::snapshot()?;
+    send(&target, true, before.function[91], read_response)?;
+    let restored = access.snapshot()?;
     if restored.base[91] != before.base[91] {
-        send(false, before.base[91], read_response)?;
+        send(&target, false, before.base[91], read_response)?;
     }
-    let restored = device::snapshot()?;
+    let restored = access.snapshot()?;
     save(&format!("{prefix}-restored.json"), &restored)?;
     if restored != before {
         return Err("Complete restoration mismatch; inspect saved snapshots".into());

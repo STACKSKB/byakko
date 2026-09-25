@@ -6,7 +6,7 @@ use byakko_core::{
     Action,
     session::{ApplyFailure, Recovery},
 };
-use byakko_devices::KeymapDevice;
+use byakko_devices::Device;
 
 mod archive_workflow;
 #[path = "demo.rs"]

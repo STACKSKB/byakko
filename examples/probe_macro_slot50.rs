@@ -1,5 +1,6 @@
 //! Read-only research probe for the official configurator's macro slot boundary.
 //! This does not advertise slot 50 or send a macro setter.
+mod support;
 use byakko_devices::{
     hid::HidDevice,
     nia87::{device, protocol},
@@ -39,7 +40,9 @@ fn complete(device: &HidDevice, slot: u8) -> Result<Vec<u8>> {
 }
 
 fn main() -> Result<()> {
-    let maps_before = device::snapshot()?;
+    let target = support::target()?;
+    let access = device::Access::bound(target.clone());
+    let maps_before = access.snapshot()?;
     if maps_before.firmware != 0x0100 || maps_before.profile != 0 {
         return Err("Unverified Nia87 firmware or profile".into());
     }
@@ -53,7 +56,7 @@ fn main() -> Result<()> {
         .truncate(false)
         .open(lock_path)?;
     lock.try_lock()?;
-    let (candidate, hid) = device::open_unique()?;
+    let (candidate, hid) = device::open_expected(&target)?;
     let mut captures = Vec::new();
     for slot in [0, 49, 50] {
         // This boundary probe deliberately compares two diagnostic captures;
@@ -83,7 +86,7 @@ fn main() -> Result<()> {
     println!("slot50_eq_slot49={}", captures[2] == captures[1]);
     drop(hid);
     drop(lock);
-    if device::snapshot()? != maps_before {
+    if access.snapshot()? != maps_before {
         return Err("Keymap changed across read-only macro probe".into());
     }
     Ok(())

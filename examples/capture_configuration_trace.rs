@@ -1,5 +1,9 @@
 //! Read-only complete capture with raw getter diagnostics, including on failure.
-use byakko::{configuration, device, research_trace};
+mod support;
+use byakko_devices::{
+    nia87::{configuration, device},
+    research_trace,
+};
 use std::{fs::OpenOptions, io::Write, path::Path};
 
 fn main() -> device::Result<()> {
@@ -22,7 +26,8 @@ fn main() -> device::Result<()> {
         );
     }
     let (result, trace) = research_trace::with_trace(|| {
-        device::capture_configuration(|done, total| {
+        let access = support::access()?;
+        access.capture_configuration(|done, total| {
             if done % 10 == 0 {
                 eprintln!("Read-only capture: {done}/{total} macro slots");
             }

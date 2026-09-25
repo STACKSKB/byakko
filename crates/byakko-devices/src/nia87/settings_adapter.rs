@@ -156,10 +156,6 @@ fn checked_native(snapshot: &Snapshot) -> Result<native::Settings, String> {
     Ok(native)
 }
 
-pub fn read() -> Result<Snapshot, String> {
-    read_with(&device::Access::unique())
-}
-
 pub(super) fn read_with(access: &device::Access) -> Result<Snapshot, String> {
     let settings = access.read_settings().map_err(|error| error.to_string())?;
     Ok(project(&settings))
@@ -199,10 +195,6 @@ fn native_setting(expected: &native::Settings, edit: &Edit) -> Result<native::Se
         ("backlight", Value::Toggle(value)) => Ok(native::Setting::Backlight(*value)),
         _ => Err("Unsupported Nia87 setting field/value".into()),
     }
-}
-
-pub fn apply(expected: &Snapshot, edit: &Edit, backup: &Path) -> Result<Snapshot, ApplyFailure> {
-    apply_with(&device::Access::unique(), expected, edit, backup)
 }
 
 pub(super) fn apply_with(

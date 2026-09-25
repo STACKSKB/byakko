@@ -54,10 +54,9 @@ before-image backups for individual feature writes remain in place; see the
 - [Dependency/source inventory](docs/dependency-source-audit.md)
 - [Performance observations and limits](docs/performance-baseline.md)
 
-The retained root `byakko gui` command is an egui research baseline, not the
-Iced product. Research captures, vendor installers and extracted material are
-not product assets and are not required to build. Original codecs and preserved
-fixtures live alongside dated observations; no Sharkfin source, tables, tests
+The egui application has been retired. Research captures, vendor installers,
+and extracted material are not product assets and are not required to build.
+Original codecs and preserved fixtures live alongside dated observations; no Sharkfin source, tables, tests
 or assets have been incorporated. The renderer's local patch is included in Git.
 
 USB Nia87 comes first. QMK/VIA, 2.4 GHz, browser delivery and unrelated visual

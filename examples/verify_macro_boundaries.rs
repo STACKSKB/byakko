@@ -1,11 +1,13 @@
 //! Reversible capacity/page/slot checks, restricted to empty unbound macros.
-use byakko::{
+mod support;
+use byakko_devices::nia87::{
     device,
     macros::{self, Macro, MacroEvent},
 };
 
 fn main() -> device::Result<()> {
-    let maps = device::snapshot()?;
+    let access = support::access()?;
+    let maps = access.snapshot()?;
     if maps.firmware != 0x100 || maps.profile != 0 {
         return Err("Unverified firmware/profile".into());
     }
@@ -21,7 +23,7 @@ fn main() -> device::Result<()> {
         {
             return Err(format!("Slot {slot} is bound; no writes sent").into());
         }
-        let bytes = device::read_macro(slot)?;
+        let bytes = access.read_macro(slot)?;
         if bytes.iter().any(|&byte| byte != 0) {
             return Err(format!("Slot {slot} is not empty; no writes sent").into());
         }
@@ -65,25 +67,25 @@ fn main() -> device::Result<()> {
     let backups = std::path::Path::new("Research/captures/backups");
     for (index, slot) in slots.into_iter().enumerate() {
         let result = (|| -> device::Result<()> {
-            let written = device::apply_macro(slot, &originals[index], &boundary, backups)?;
+            let written = access.apply_macro(slot, &originals[index], &boundary, backups)?;
             if written != boundary_bytes || macros::decode(&written)? != boundary {
                 return Err("Boundary readback mismatch".into());
             }
-            let written = device::apply_macro(slot, &written, &short, backups)?;
+            let written = access.apply_macro(slot, &written, &short, backups)?;
             if macros::decode(&written)? != short {
                 return Err("Short replacement mismatch".into());
             }
             Ok(())
         })();
-        let current = device::read_macro(slot)?;
+        let current = access.read_macro(slot)?;
         let restored =
-            device::apply_macro(slot, &current, &macros::decode(&originals[index])?, backups)?;
+            access.apply_macro(slot, &current, &macros::decode(&originals[index])?, backups)?;
         if restored != originals[index] {
             return Err(format!("Slot {slot} restoration failed; original backup retained").into());
         }
         result?;
         for (other, original) in slots.iter().zip(&originals) {
-            if device::read_macro(*other)? != *original {
+            if access.read_macro(*other)? != *original {
                 return Err(format!("Slot {other} changed unexpectedly").into());
             }
         }
@@ -91,7 +93,7 @@ fn main() -> device::Result<()> {
             "Slot {slot}: full248-byte macro → short → empty; all three tested slots matched originals"
         );
     }
-    if device::snapshot()? != maps {
+    if access.snapshot()? != maps {
         return Err("Keymaps changed unexpectedly".into());
     }
     println!("All boundary/slot checks passed; no macros were bound or played; keymaps unchanged");

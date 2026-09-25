@@ -281,7 +281,7 @@ fn run_device(command: Command) -> Result<(), Box<dyn std::error::Error>> {
                         return Err("Keymap file contains noncanonical actions; export a fresh `read` state and edit its bindings".into());
                     }
                     let changes = byakko_cli::plan_keymap(&session, &target)?;
-                    nia87::Nia87Adapter.validate(&keymap, &changes)?;
+                    nia87::draft_snapshot(&keymap, &changes)?;
                     match mode {
                         Mode::Plan => serde_json::to_string_pretty(&changes)?,
                         Mode::Apply => {

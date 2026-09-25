@@ -1,9 +1,15 @@
 # Cleanup audit and implementation plan — 2026-09-25
 
 Baseline: `a39cc1c`, pulled by fast-forward from `origin/master` (previous local
-HEAD `264102c`). This is an analysis and plan, not an implementation of the
-cleanup. The pre-existing untracked `Research/deferred-accessibility.patch`
-was left untouched. No hardware commands were run.
+HEAD `264102c`). This was the baseline analysis and plan; implementation is
+recorded below. The pre-existing untracked
+`Research/deferred-accessibility.patch` remains untouched. No hardware
+commands were run.
+
+Implementation authorization: on 2026-09-26 the user authorized legacy source
+file retirement and removed the stale no-file-deletion instruction from
+`AGENTS.md`. Retain every research tool and evidence record identified as useful
+below. The retained command and acceptance inventory is in [COMMANDS.md](COMMANDS.md).
 
 The largest structural opportunity is retiring the old egui application and
 its compatibility paths together, after preserving the useful research tools.
@@ -67,8 +73,8 @@ stream workers are not merely reexports.
    retained consumer is gone; update the lockfile/notices accordingly.
 
 Do not remove the root package wholesale: its HID-access utility and research
-commands still have value. The user's request here authorizes the plan, not
-executing file deletions; the repository's no-deletion instruction still applies.
+commands still have value. User authorization on 2026-09-26 permits retiring
+unneeded legacy source files after useful research tools have been migrated.
 
 ### 3. Collapse unique-device and bound-device adapter duplication
 
@@ -225,7 +231,7 @@ round trips; preserve that distinction.
    measure resulting function bodies and module size including the new helper.
 4. **Legacy retirement:** inventory and migrate research consumers first, then
    remove whole obsolete paths and corresponding dependencies. Requires the
-   implementation instruction that resolves deletion/product-default choices.
+   user's 2026-09-26 authorization resolves deletion and product-default choices.
 5. **Reassess residual repetition:** rerun AST checks. Extract only remaining
    duplication that changes together and produces a net simpler call graph.
 
@@ -240,3 +246,33 @@ queues/JSON input, raw opaque preservation, durable before-images, setter pacing
 required post-write reads, verified recovery, or the vendored Iced clipping fix
 without an equivalent passing raster regression. Ordinary lighting/picture
 setters must retain transport-acceptance semantics and must not gain getters.
+
+## Implementation record — 2026-09-26
+
+- Completed batches 1–4 and the concrete repeated-validation candidate in 9:
+  removed obsolete keymap aliases, dead picture workflow variants, the
+  egui/eframe application and root compatibility library, and obsolete one-off
+  examples. Migrated retained CLI and research commands to direct core/device
+  APIs with immutable exact-target binding. See `COMMANDS.md` for the retained
+  command and acceptance inventory.
+- The root package is now the default diagnostic CLI and `byakko-desktop` is
+  the ordinary native GUI target. `eframe`/`egui` dependencies and the root
+  `gui` feature were removed. Useful diagnostic, capture, restore, fault, and
+  research tools and their evidence remain.
+- Removed the unbound `Nia87Adapter` executor implementation after migrating
+  all in-repo consumers. `BoundNia87Adapter` remains the executor adapter.
+  Feature adapter access now requires a bound `Target`; their public wrappers
+  that silently reselected a unique HID target were removed. Developer archive
+  restore APIs remain through the bound executor path, and one-shot low-level
+  device functions retain their explicit discovery behavior.
+- Completed batches 5–8: standard channel waits, shared desktop file-task
+  plumbing, generated Win32 screen-capture declarations, and shared private
+  sampler lifecycle. Audio's blocking terminal event, screen's best-effort
+  terminal event, sampler thread ownership, separate pacing, and first-frame
+  behavior remain explicit.
+- Updated current documentation and retained historical evidence. Removed
+  misleading repeated-sweep wording; public archive UI remains capture/export
+  only. The no-file-deletion sentence was removed from `AGENTS.md` per the
+  user's correction.
+- Verification is recorded in the implementation report and commit. Checks
+  and tests are headless; no physical device commands or writes were run.

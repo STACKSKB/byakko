@@ -1,8 +1,8 @@
 # Linux Codex handoff
 
 The product is the Rust/Iced `byakko-desktop` application, with a separate
-`byakko-cli`. The root `byakko gui` command is the retained egui
-research application. Use `AGENTS.md` for architecture and safety rules, and
+`byakko-cli`. The egui application and root GUI command have been retired;
+use the Iced desktop target for the native UI. Use `AGENTS.md` for architecture and safety rules, and
 `docs/linux-install.md` for the maintained installation procedure. Windows
 captures and vendor fixtures under ignored paths are not in Git.
 
