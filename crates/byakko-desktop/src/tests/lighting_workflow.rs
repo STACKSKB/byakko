@@ -358,3 +358,53 @@ fn mode_choice_is_immediate_and_latest_rapid_choice_survives_completion() {
         original
     );
 }
+
+#[test]
+fn lighting_retry_rebinds_and_applies_retained_intent_after_fresh_read() {
+    let mut app = loaded();
+    let old_generation = app.session.generation();
+    app.live_lighting.push(
+        Edit::Brightness(42),
+        std::time::Instant::now(),
+        Duration::ZERO,
+    );
+    app.session.edit_lighting(Edit::Brightness(42)).unwrap();
+    let Command::ApplyLighting {
+        generation,
+        operation,
+        ..
+    } = app.session.request_lighting_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    let _ = app.complete(Completion::ApplyLighting {
+        generation,
+        operation,
+        result: Err(ApplyFailure {
+            message: "selected collection changed".into(),
+            recovery: Recovery::NotAttempted,
+        }),
+    });
+    app.attach = Box::new(|expected| {
+        assert_eq!(expected, None);
+        Executor::spawn(demo::device()?, Default::default())
+            .map(|executor| ("fresh-lighting-collection".into(), executor))
+            .map_err(|error| error.to_string())
+    });
+    send(&mut app, Lighting::Retry);
+    assert!(app.session.generation() > old_generation);
+    assert_eq!(
+        app.selected_device.as_deref(),
+        Some("fresh-lighting-collection")
+    );
+    assert!(matches!(
+        app.session.activity(),
+        byakko_core::session::Activity::ReadLighting { .. }
+    ));
+    settle(&mut app);
+    let editor = app.session.lighting().unwrap();
+    assert_eq!(editor.status(), &LightingStatus::Ready);
+    assert_eq!(editor.draft().unwrap().brightness, Some(42));
+    assert!(!editor.dirty());
+    assert!(!app.live_lighting.has_queued());
+}

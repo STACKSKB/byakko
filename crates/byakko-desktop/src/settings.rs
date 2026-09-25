@@ -99,7 +99,7 @@ impl Desktop {
             match result {
                 Ok(()) => {
                     self.live_settings
-                        .queue(edit, Instant::now(), self.config.auto_save_delay);
+                        .queue(edit, Instant::now(), self.config.short_edit_delay);
                     self.notice = None;
                     self.flush_live_settings();
                 }
@@ -123,6 +123,9 @@ impl Desktop {
             #[cfg(test)]
             Message::Edit(edit) => self.notice = self.session.edit_setting(edit).err(),
             Message::Retry => {
+                if !self.refresh_connection() {
+                    return;
+                }
                 self.live_settings.retry();
                 if let Err(reason) = self.session.revert_settings() {
                     self.notice = Some(reason);

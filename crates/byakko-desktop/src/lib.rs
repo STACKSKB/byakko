@@ -81,7 +81,7 @@ enum AutoRead {
     ManualOnly,
 }
 
-type Attach = dyn Fn(&str) -> Result<Executor, String>;
+type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
 
 pub mod config;
 
@@ -127,10 +127,12 @@ struct Desktop {
 }
 
 /// The composition root supplies a session and a factory for one executor per connection.
+/// `attach(Some(id))` must match the discovered identity; `attach(None)` explicitly
+/// selects the current unique device. Both return the newly pinned identity.
 pub fn run(
     session: Session,
     probe: impl Fn() -> Availability + Send + 'static,
-    attach: impl Fn(&str) -> Result<Executor, String> + 'static,
+    attach: impl Fn(Option<&str>) -> Result<(String, Executor), String> + 'static,
     labels_directory: Option<std::path::PathBuf>,
     config: config::Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -207,10 +209,10 @@ impl Desktop {
                 self.notice = Some("Waiting for one connected keyboard".into());
                 return;
             };
-            match (self.attach)(id) {
-                Ok(executor) => {
+            match (self.attach)(Some(id)) {
+                Ok((id, executor)) => {
                     self.executor = Some(executor);
-                    self.selected_device = Some(id.clone());
+                    self.selected_device = Some(id);
                     attached = true;
                 }
                 Err(reason) => {
@@ -219,21 +221,70 @@ impl Desktop {
                 }
             }
         }
-        let request = self.session.connect().and_then(|generation| {
-            self.executor
-                .as_ref()
-                .expect("attached above")
-                .set_generation(generation);
-            self.session.request_read()
-        });
+        let request = self
+            .connect_session()
+            .and_then(|()| self.session.request_read());
         self.submit(request);
-        self.initial_reads = [Page::Lighting, Page::Settings, Page::Picture].into();
-        if attached
-            && let Some(editor) = self.session.macros()
+        if attached {
+            self.load_macro_labels();
+        }
+    }
+
+    fn load_macro_labels(&mut self) {
+        if let Some(editor) = self.session.macros()
             && let Err(reason) = self.macro_files.load_labels(editor)
             && self.notice.is_none()
         {
             self.notice = Some(format!("Local labels could not be loaded: {reason}"));
+        }
+    }
+
+    fn connect_session(&mut self) -> Result<(), String> {
+        let generation = self.session.connect()?;
+        self.executor
+            .as_ref()
+            .expect("attached before connecting")
+            .set_generation(generation);
+        self.initial_reads = [Page::Lighting, Page::Settings, Page::Picture].into();
+        Ok(())
+    }
+
+    /// A deliberate reconnect/retry selects the current unique collection afresh.
+    /// Individual transactions and recovery keep their immutable executor target.
+    fn refresh_connection(&mut self) -> bool {
+        if self.busy() {
+            return false;
+        }
+        self.hold_reconnect_if_cautious();
+        if let Some(executor) = self.executor.take() {
+            executor.cancel_macro_catalog();
+            executor.set_generation(0);
+        }
+        self.discovery.invalidate();
+        self.session.disconnect();
+        self.selected_device = None;
+        self.initial_reads.clear();
+        match (self.attach)(None) {
+            Ok((id, executor)) => {
+                self.presence = Some(Availability::Ready { id: id.clone() });
+                self.selected_device = Some(id);
+                self.executor = Some(executor);
+                match self.connect_session() {
+                    Ok(()) => {
+                        self.load_macro_labels();
+                        true
+                    }
+                    Err(reason) => {
+                        self.notice = Some(reason);
+                        false
+                    }
+                }
+            }
+            Err(reason) => {
+                self.presence = None;
+                self.notice = Some(format!("Could not reconnect keyboard: {reason}"));
+                false
+            }
         }
     }
 
@@ -726,8 +777,11 @@ impl Desktop {
             Message::Catalog(message) => return self.update_catalog(message),
             Message::Stage(index) => self.stage(index),
             Message::Read => {
-                self.auto_read = AutoRead::Enabled;
-                self.read();
+                if self.refresh_connection() {
+                    self.auto_read = AutoRead::Enabled;
+                    let request = self.session.request_read();
+                    self.submit(request);
+                }
             }
             Message::Apply => {
                 let request = self.session.request_apply();

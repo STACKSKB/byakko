@@ -177,6 +177,9 @@ impl Desktop {
             }
             Message::Edit(edit) => self.notice = self.session.edit_picture(edit).err(),
             Message::Retry => {
+                if !self.refresh_connection() {
+                    return;
+                }
                 self.live_picture.blocked = false;
                 if self.session.picture().is_some_and(Editor::dirty) {
                     let _ = self.session.revert_picture();

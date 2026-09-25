@@ -1,7 +1,7 @@
 # Desktop autosave configuration
 
-`BYAKKO_AUTO_SAVE_DELAY_MS` configures the idle gap before queued color and
-settings edits are sent. The default is **2000 milliseconds**; valid values are
+`BYAKKO_AUTO_SAVE_DELAY_MS` configures the idle gap before per-key RGB edits
+are sent. The default is **2000 milliseconds**; valid values are
 0–10000. Set it in the environment before launching Byakko. Zero requests an
 immediate send whenever the serialized device worker is available.
 
@@ -19,9 +19,12 @@ supply a deterministic delay directly.
 Per-key lighting retains the brush color. Clicking another key paints that key;
 each paint restarts the idle deadline. The on-screen board changes immediately,
 then one complete picture is uploaded after the gap. Edits during an upload
-are retained for the next batch. Onboard color edits coalesce in the same way. Lighting mode, brightness,
-speed and option changes send immediately when the device worker is available. Settings retain the latest value per field and send native
-one-field transactions sequentially while the controls remain editable.
+are retained for the next batch. Onboard color edits use a shorter **200 ms**
+idle gap. Lighting mode, brightness, speed and option changes send immediately
+when the device worker is available. Scalar settings use **200 ms**, retain the
+latest value per field, and send native one-field transactions sequentially
+while the controls remain editable. These UI batching windows do not change
+backend firmware settling intervals.
 
 Sleep sliders use their backend-advertised range, with **Disabled** as the final
 stop after the maximum. Disabled maps to the backend's zero sentinel; it is not

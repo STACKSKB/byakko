@@ -132,4 +132,14 @@ mod tests {
         pending.retry();
         assert!(pending.ready(now));
     }
+
+    #[test]
+    fn onboard_color_uses_the_short_default_coalescing_window() {
+        let now = Instant::now();
+        let delay = crate::config::Config::default().short_edit_delay;
+        let mut pending = Pending::default();
+        pending.push(Edit::Color(Color::Rgb([4, 5, 6])), now, delay);
+        assert!(!pending.ready(now + Duration::from_millis(199)));
+        assert!(pending.ready(now + Duration::from_millis(200)));
+    }
 }
