@@ -200,3 +200,7 @@ they do not close partial-failure recovery, power-cycle or Linux write gates.
   audit-tool tests pass. Finding 1 is closed; no renderer code change was needed.
 
 The verification table above remains the original review record.
+
+- [x] Finding 2 closed: the Linux screen-sampler lint is fixed. Formatting and
+  strict Clippy pass for all four product packages/all targets and the helper,
+  with no lint allowances.
