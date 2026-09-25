@@ -73,14 +73,27 @@ raw equality; do not use full archive Apply for this brightness test. Capture a
 final read-only archive to check unrelated sections. Stop on unexpected behavior
 or restoration failure and report the evidence; do not repeat setters blindly.
 
-Request `WIN-20260925-002` revision 1 did not run: Windows automatic approval
-review rejected camera activation for missing explicit physical authorization.
-No image or keyboard write occurred. The camera-availability response was not
-accepted as sufficient approval. The user has been asked for explicit approval;
-revision 2 held the physical request while Windows build/tests proceeded.
+The first camera activation for `WIN-20260925-002` was rejected by Windows
+automatic approval review for missing explicit physical authorization. That
+attempt produced no image or keyboard write; the camera-availability response
+was not accepted as sufficient approval. Revision 2 held the physical request
+while Windows build/tests proceeded.
 The user subsequently replied **"I authorize this Windows test and restoration"**
 to the explicit webcam/baseline/max/minimum-nonzero/capture/restoration question.
-Revision 3 publishes this authorization. The physical outcome is still pending.
+Revision 3 published this authorization. The user also directly told the Windows
+agent **"You have my authorization"**. After that reply, a c922 capture succeeded
+at 07:50Z: Windows-local
+`Research/captures/keyboard-camera-1790322620522953900.png`, SHA-256
+`8e8ab24bf44dcaddf0b01ad4777b202d69ab63c17f70f8d65cc48a8243124534`.
+The Windows agent viewed it and reported an almost black image with no
+identifiable keyboard. This corrects the earlier overbroad statement that no
+image occurred: it applied only to the rejected attempt, not the later capture.
+
+Windows has asked the user to uncover/reposition the c922. No official-app
+action, diagnostic HID capture or keyboard setting change occurred, so no
+restoration was needed. Revision 4 records this prerequisite; authorization is
+not pending and no repeat test is requested merely by the revision change.
+The physical brightness outcome remains unknown.
 
 Identical official encoding plus equally absent dimming would support a shared
 firmware/visual limitation. Different packets or visible behavior would guide

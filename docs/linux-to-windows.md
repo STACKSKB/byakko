@@ -109,14 +109,19 @@ the Linux task; it should not be repeated.
   restoration remains an open gate, separate from brightness.
 
 ### WIN-20260925-002: Observe official steady-green brightness with camera
-- Revision: 3
-- Status: pending
-- Revision 1 outcome: Windows automatic approval review rejected webcam
-  activation, citing absent explicit physical authorization. No camera image,
-  baseline capture or keyboard write occurred. Linux has asked the user for
-  explicit approval in response. Revision 2 held the test. The user has now
-  explicitly authorized revision 3 below. Request 003 may continue if already
-  running; do not restart it merely because this request changed.
+- Revision: 4
+- Status: awaiting usable Windows camera view
+- Progress: The initial camera attempt was rejected for missing explicit
+  authorization. After the user directly authorized the Windows task, a still
+  capture succeeded at 07:50Z but was almost black, with no identifiable keyboard.
+  Authorization is settled. Windows has asked the user to uncover/reposition
+  its c922; resume this same bounded test when that prerequisite is satisfied.
+  No official-app action, diagnostic HID capture or keyboard setting change has
+  occurred, and no restoration is needed yet. See the image hash in
+  `Research/brightness-investigation.md`.
+- Revision 4 changes only this progress record; it does not request a new run
+  or justify repeated physical actions. Preserve the existing receipt and
+  awaiting-position state. Request 003 is completed and must not rerun.
 - Source commit: `e1af8b7`
 - Scope: one bounded official-app physical brightness comparison with packet
   capture and camera observation, followed by baseline restoration.
