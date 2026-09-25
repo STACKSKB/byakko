@@ -101,3 +101,23 @@ copyright attributions are now collected in
 packaging still needs to include them and collect the other dependency notices.
 The checker supplements, and does not replace, the
 source-header audit that identified the historical HIDAPI discrepancy.
+
+## Current RustSec check (2026-09-25)
+
+A temporary `cargo-audit 0.22.2` installation checked all 430 dependencies in
+Cargo.lock against RustSec database commit
+`593df8c1b5ed0bcde9dddadfeeead776fa514ff8`, updated 2026-09-24. No advisories
+were ignored. The result reported zero known vulnerabilities and one
+informational unmaintained-package warning:
+[`RUSTSEC-2026-0192`, ttf-parser 0.25.1](https://rustsec.org/advisories/RUSTSEC-2026-0192.html).
+The advisory lists no patched version; it is not a reported vulnerability.
+
+The Linux Iced graph reaches it through `fontdb → cosmic-text` and
+`owned_ttf_parser → ab_glyph → sctk-adwaita → winit`. Replacing it would need
+upstream integration, not an isolated version bump. This is recorded as a
+maintenance follow-up; no dependency, lockfile or renderer changes were made
+for the informational warning. The check does not audit local Byakko or
+vendored patch correctness.
+
+Local JSON result: `/tmp/byakko-audit-current.json`. The temporary audit tool
+is outside the checkout; building the product does not require it.
