@@ -1,0 +1,184 @@
+# Public pre-alpha review and release checklist
+
+Review date: 2026-09-25. Reviewed source: `31de12abba9f2e3d3dfb8fb4ad68bf783f67082c`.
+The clean `master` checkout was fast-forwarded from `977df91` using
+`git pull --ff-only origin master`. This report changes no product code.
+
+**Release assessment: not ready for a public pre-alpha with all currently exposed
+write features enabled.** Recovery acceptance, release packaging and licensing,
+and the checks below remain open. A pre-alpha may have documented limitations;
+an exposed write workflow still needs a demonstrated recovery route. Narrowing
+the public feature/platform scope requires an explicit release decision and an
+actual gate in the shipped application, not just a disclaimer.
+
+## Confirmed review findings
+
+1. **P2 — the source inventory cannot handle the shipped renderer patch.**
+   `Cargo.toml:46` selects a local `iced_tiny_skia` dependency, but
+   `tools/audit_release_sources.py:49` rejects every non-registry source.
+   Running the full inventory fails with
+   `ValueError: Unexpected source for ('iced_tiny_skia', '0.14.1'): None`.
+   Support explicitly reviewed vendored sources, preserve upstream revision and
+   patch provenance, and hash their license/source inputs. Add a regression for
+   this actual dependency graph. Do not silently omit the renderer from notices.
+
+2. **P2 — strict Linux Clippy fails at the reviewed revision.**
+   `crates/byakko-devices/src/screen_sample.rs:792` triggers `collapsible_if`
+   with Rust 1.98.0 and `-D warnings`. This blocks the documented native gate,
+   including the permission-helper gate through its device dependency. It is a
+   lint failure, not evidence of a runtime defect. Fix it and rerun the exact
+   strict commands; allowing that lint was used only to inspect the remaining
+   diagnostics, not to claim the gate passed.
+
+3. **P2 — standalone recovery loses the unknown-versus-mismatch distinction.**
+   `crates/byakko-devices/src/nia87/device/apply_error.rs:30` and its macro,
+   lighting and settings equivalents map every rollback error to
+   `Recovery::Failed`. That includes an unreadable verification result, where
+   recovery may have succeeded but cannot be established. The contract provides
+   `Unverified` (`crates/byakko-core/src/session.rs:169`), and archive recovery
+   already distinguishes unreadable from mismatched results
+   (`crates/byakko-devices/src/nia87/device/configuration.rs:293`). Preserve
+   that distinction through typed rollback results and failure-boundary tests.
+   Neither current label reports success; this is diagnostic/contract accuracy.
+
+4. **P2 — public instructions and acceptance claims are stale.**
+   `README.md:30` describes verified staged lighting saves and no physical
+   picture writes. Current ordinary lighting/picture saves are automatic and
+   carry `TransportAccepted` evidence; newer physical checks exist. The parity
+   ledger, Linux installation page and older acceptance sections also contradict
+   later dated evidence. Clearly distinguish Iced from the retained research GUI,
+   document which controls send writes automatically, and reconcile the read
+   policy in AGENTS with the newer transport-accepted implementation before
+   further maintenance or publishing instructions.
+
+## Required release checklist
+
+### Device safety and functional acceptance
+
+- [ ] **Resolve the existing archive recovery gate before exposing archive
+  Apply publicly.** The recorded injected fault caused unplanned macro/picture
+  changes. Recovery at `nia87/device/configuration.rs:234–255` repairs only the
+  planned macro slots/picture differences; final verification catches remaining
+  mismatches, but cannot repair those collateral changes. Capture a correlated
+  controlled fault trace, establish the cause, and demonstrate restoration of
+  the complete before-image. Preserve the failure evidence. If unresolved,
+  explicitly gate public archive Apply while retaining capture/review/export.
+  See [fault evidence](../Research/configuration-fault-verification.md).
+- [ ] **Accept partial-upload and interrupted-write behavior.** Exercise
+  transport errors before and after picture pages, settings/keymap/macro writes,
+  and lighting setters using bounded tests and coordinated hardware checks.
+  Require durable before-images, accurate non-success outcomes, retained user
+  intent, no speculative retries, and a demonstrated user recovery procedure.
+  Ordinary picture/lighting acceptance must never be presented as readback proof.
+- [ ] **Complete physical behavior and persistence checks for exposed features.**
+  Cover both key layers, shortcuts/media/mouse actions, macro counted/hold/toggle
+  playback and timing, clear/replace/bind, settings behavior, picture selectors,
+  and power-cycle persistence. Keep stored repeat-zero snapshots lossless and
+  outside writable macro-editor policy. Record firmware, board, OS, source
+  revision, before-image and restore result for each case.
+- [ ] **Accept host lighting lifecycle or gate unaccepted modes.** Verify Iced
+  screen/music Start, Stop, focus loss, close, device removal, sampler failure,
+  reconnect and explicit exit from a stored host mode. Verify restoration and
+  sustained streaming; test Linux audio routing and X11 display loss. Wayland
+  screen capture is explicitly unsupported by `screen_sample.rs:770–778`;
+  disclose that limit and distinguish it from Wayland GUI support.
+- [ ] **Validate the final rendered workspace and asynchronous interactions.**
+  Exercise rapid edits during uploads, mode switches, selector invalidation,
+  settings queues, macro foreground reads during scanning, recording/focus
+  loss, discard modal, close while busy, multiple-device ambiguity and
+  disconnect/reconnect with dirty/conflicted/failed editors. Confirm navigation
+  introduces no reads and successful writes retain unrelated caches. Headless
+  tests are supporting evidence, not rendered or physical acceptance.
+
+### Builds, platform delivery and reproducibility
+
+- [ ] **Close the confirmed code/tool findings above.** Rerun strict formatting,
+  Clippy, product tests, helper checks, renderer regressions and source inventory
+  against the final release commit. Preserve logs with the commit/toolchain.
+- [ ] **Establish repeatable Windows and Linux release jobs.** No tracked
+  `.github` workflow or complete release assembly pipeline was present. CI or an
+  equivalent reproducible release script must build the selected Iced desktop,
+  CLI and required helper with the lockfile; exclude research tools/legacy egui
+  from the product bundle. Record the supported toolchain and target baseline.
+  Recheck core's WebAssembly build on a host with the target installed.
+- [ ] **Produce and test installable artifacts on clean machines.** Verify
+  startup, native runtime dependencies (including dynamically loaded sampler
+  libraries), normal-user data/backup paths, upgrade and uninstall behavior,
+  permissions and a recovery walkthrough. Publish version/commit identifiers,
+  checksums, installation steps and an explicit artifact signing policy.
+- [ ] **Finish the Linux permission/distribution experience.** The repository
+  currently requires administrator-installed helper/udev files; an application
+  image alone does not establish hidraw access. Deliver the intended installer
+  integration while retaining the exact collection/descriptor gate. Verify only
+  the intended node receives the active-seat ACL, then follow the read-only-first
+  sequence in [Linux handoff](linux-handoff.md). Current-revision Linux GUI,
+  Wayland startup and write/readback/restoration acceptance remain separate.
+
+### Distribution audit and public documentation
+
+- [ ] **Choose and include Byakko's own distribution license.** Workspace
+  manifests have no license declaration and no top-level project license is
+  tracked. The owner must decide terms; third-party MIT notices do not supply
+  Byakko's own license. Apply the decision consistently to source and artifacts.
+- [ ] **Assemble the complete notices and provenance bundle.** Repair the source
+  inventory, audit the exact compiled sources/assets/native libraries, include
+  applicable dependency notices and compound obligations, and retain the local
+  renderer's upstream revision and patch record. Passing metadata selections
+  alone is not a complete distribution audit. Also run a current dependency
+  advisory check; no `cargo audit`/`cargo deny` command was installed for this
+  review, so no current vulnerability clearance is claimed.
+- [ ] **Publish one accurate support/acceptance matrix and recovery guide.**
+  Reconcile README, parity ledger, Linux setup, AGENTS and dated acceptance notes.
+  State supported Nia87 USB/firmware scope, automatic-write behavior, backup
+  locations, transport versus readback evidence, unaccepted capabilities and
+  known failures. Include concise bug-report instructions and release notes.
+  Keep private/ignored captures and vendor material out of the release bundle.
+- [ ] **Finish the required resource comparison before efficiency claims.**
+  Measure comparable startup, idle, active editing and sustained host lighting
+  against Sharkfin and the official application; include child processes,
+  methodology and limits. Existing warmed-idle results do not cover all workloads.
+- [ ] **Record the i18n catalog and initial-language rollout plan.** Cover English,
+  Hindi, Bengali, Kannada, Telugu, Tamil, Marathi and Japanese; keep protocol/state
+  behavior independent of UI text. The repository requires a plan now, not
+  premature translation polish. State the actual language availability of the
+  pre-alpha explicitly.
+
+QMK/VIA, 2.4 GHz, browser delivery, continuous tablet controls and unrelated visual
+redesign remain deferred. They are not added to this pre-alpha checklist.
+
+## Verification performed at the reviewed source
+
+Environment: Linux x86_64, Rust/Cargo 1.98.0. No device access, setters, permission
+changes, GUI acceptance or Windows runtime tests were performed.
+
+| Check | Result |
+| --- | --- |
+| `cargo fmt --all -- --check` | Passed |
+| Locked offline tests for core/devices/desktop/CLI | 375 passed, no failures |
+| Permission-helper unit tests | 2 passed |
+| Vendored renderer clipping regressions | 2 passed |
+| Python audit-tool unit tests | 7 passed |
+| Linux desktop/CLI release build | Passed |
+| Linux permission-helper release build | Passed |
+| Strict Clippy for four product crates, all targets | Failed on `screen_sample.rs:792` |
+| Strict helper Clippy | Failed through the same device lint |
+| Diagnostic Clippy run allowing only `collapsible_if` | Passed; not a replacement for strict gate |
+| Windows/Linux license metadata gates, desktop and CLI | Passed: desktop 126/175 packages; CLI 13/12 |
+| Complete release source inventory | Failed on vendored `iced_tiny_skia` source |
+| `ldd` for Linux release desktop | No unresolved directly linked libraries; dynamically loaded libraries not established |
+| Windows build/runtime, current advisory database, WebAssembly check | Not performed |
+
+The initial cross-target audit lacked cached dependencies; an authorized locked
+fetch succeeded, then the metadata gates passed and the inventory failure was
+reproduced end to end. No dependency versions or lockfile were changed.
+
+Review covered recent changes and critical session/executor, write/recovery,
+CLI, storage and release-tool paths, with independent device and frontend passes.
+It was not an exhaustive proof of every FFI or protocol path. A suspected
+reconnect issue was rejected after tracing the queue-blocking logic and is not
+a finding.
+
+The latest [official picture capture](../Research/official-picture-capture-20260924.md)
+records physical preset/steady/hue response, twelve consecutive uploads and a
+later full 128-entry readback match. Those successful checks are credited here;
+they do not close partial-failure recovery, power-cycle or Linux write gates.
