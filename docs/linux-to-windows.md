@@ -109,16 +109,23 @@ the Linux task; it should not be repeated.
   restoration remains an open gate, separate from brightness.
 
 ### WIN-20260925-002: Observe official steady-green brightness with camera
-- Revision: 1
-- Status: pending
+- Revision: 2
+- Status: awaiting user approval
+- Revision 1 outcome: Windows automatic approval review rejected webcam
+  activation, citing absent explicit physical authorization. No camera image,
+  baseline capture or keyboard write occurred. Linux has asked the user for
+  explicit approval in response. Do not retry the physical test under revision
+  2; resume only after that approval is recorded in a new revision. Request 003
+  may proceed independently while this request waits.
 - Source commit: `e1af8b7`
 - Scope: one bounded official-app physical brightness comparison with packet
   capture and camera observation, followed by baseline restoration.
 - User authorization: In response to the prepared comparison approval question,
   the user said the Windows agent has a camera pointed at the keyboard for direct
-  observation and will also position the Linux laptop camera. Proceed with the
-  proposed max/minimum-nonzero comparison using your camera; no need for the user
-  to relay results. This does not authorize fault injection or full archive Apply.
+  observation and will also position the Linux laptop camera. Linux interpreted
+  that as assent to the prepared test; Windows automatic approval review did not
+  accept it. Explicit test approval is now pending. This inbox does not override
+  that rejection or authorize fault injection or full archive Apply.
 - Request: Execute the bounded comparison described in
   `Research/brightness-investigation.md`. Save the present board identity and
   complete baseline before changing lighting. Establish that your camera shows

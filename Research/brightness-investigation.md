@@ -9,6 +9,15 @@ read-only after the user released another camera session: the keyboard and
 exposed switch LEDs are visible, but no paired brightness images have been
 captured yet. Do not infer brightness behavior from that setup frame.
 
+A read-only camera-control query found automatic exposure (mode 3), automatic
+white balance and dynamic framerate enabled on the Linux camera. Manual
+exposure time is advertised over 2–1250, with current read value 156; the camera
+does not expose a separate gain control in this query. No camera controls were
+changed. For a meaningful brightness comparison, retain and restore the camera
+settings and verify a fixed exposure without saturated LED regions; otherwise
+report the visual evidence as limited. Local control log:
+`/tmp/byakko-laptop-camera-controls-20260925.txt`.
+
 The supervised Linux test changed steady green from brightness 4 to 1. The
 readback changed only raw byte 3, but the user reported no visible dimming.
 Visible mode/color switching worked. See [Linux evidence](../docs/linux-handoff.md).
@@ -63,6 +72,12 @@ the agreed normal lighting path and distinguish visible restoration from exact
 raw equality; do not use full archive Apply for this brightness test. Capture a
 final read-only archive to check unrelated sections. Stop on unexpected behavior
 or restoration failure and report the evidence; do not repeat setters blindly.
+
+Request `WIN-20260925-002` revision 1 did not run: Windows automatic approval
+review rejected camera activation for missing explicit physical authorization.
+No image or keyboard write occurred. The camera-availability response was not
+accepted as sufficient approval. The user has been asked for explicit approval;
+revision 2 holds the physical request while Windows build/tests proceed.
 
 Identical official encoding plus equally absent dimming would support a shared
 firmware/visual limitation. Different packets or visible behavior would guide
