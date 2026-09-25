@@ -2,8 +2,6 @@
 use byakko_core::lighting::{self, Content, Edit, Setting, editor::Editor};
 use std::time::{Duration, Instant};
 
-const SLIDER_PAUSE: Duration = Duration::from_millis(120);
-
 #[derive(Clone, Default)]
 pub(crate) struct Pending {
     edits: Vec<Edit>,
@@ -43,7 +41,7 @@ impl Pending {
         self.has_pending() && self.due.is_none_or(|due| now >= due)
     }
 
-    pub fn push(&mut self, edit: Edit, now: Instant) {
+    pub fn push(&mut self, edit: Edit, now: Instant, delay: Duration) {
         self.blocked = false;
         if matches!(edit, Edit::Effect(_)) {
             self.edits.clear();
@@ -54,13 +52,9 @@ impl Pending {
                     .retain(|earlier| !matches!(earlier, Edit::Channel(_, _)));
             }
         }
-        let slider = matches!(
-            edit,
-            Edit::Brightness(_) | Edit::Speed(_) | Edit::Channel(_, _)
-        );
         self.edits.push(edit);
         debug_assert!(self.edits.len() <= 8);
-        self.due = slider.then(|| now + SLIDER_PAUSE);
+        self.due = Some(now + delay);
     }
 
     pub fn projected(&self, editor: &Editor) -> Result<Option<Setting>, String> {
@@ -105,17 +99,18 @@ mod tests {
     #[test]
     fn slider_intent_coalesces_and_effect_resets_old_parameters() {
         let now = Instant::now();
+        let delay = Duration::from_millis(350);
         let mut pending = Pending::default();
-        pending.push(Edit::Brightness(10), now);
-        pending.push(Edit::Brightness(20), now);
+        pending.push(Edit::Brightness(10), now, delay);
+        pending.push(Edit::Brightness(20), now, delay);
         assert_eq!(pending.edits, vec![Edit::Brightness(20)]);
         assert!(!pending.ready(now));
-        assert!(pending.ready(now + SLIDER_PAUSE));
-        pending.push(Edit::Color(Color::Rgb([1, 2, 3])), now);
-        pending.push(Edit::Channel(Channel::Red, 4), now);
-        pending.push(Edit::Color(Color::Rainbow), now);
+        assert!(pending.ready(now + delay));
+        pending.push(Edit::Color(Color::Rgb([1, 2, 3])), now, delay);
+        pending.push(Edit::Channel(Channel::Red, 4), now, delay);
+        pending.push(Edit::Color(Color::Rainbow), now, delay);
         assert_eq!(pending.edits.len(), 2);
-        pending.push(Edit::Effect("other".into()), now);
+        pending.push(Edit::Effect("other".into()), now, delay);
         assert_eq!(pending.edits, vec![Edit::Effect("other".into())]);
         pending.block();
         assert!(!pending.has_pending());

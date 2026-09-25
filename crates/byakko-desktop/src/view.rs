@@ -168,7 +168,7 @@ fn workspace(app: &Desktop) -> Element<'_, Message> {
             below = below.push(text("Waiting for the device operation before closing…"));
         }
         if size.width >= app.ui.key_sidebar_breakpoint {
-            if matches!(app.page, Page::Settings | Page::Archive) {
+            if matches!(app.page, Page::Settings | Page::Archive | Page::Lighting) {
                 return column![
                     row![
                         container(keys(app)).width(Fill),
@@ -184,7 +184,6 @@ fn workspace(app: &Desktop) -> Element<'_, Message> {
             let sidebar = match app.page {
                 Page::Keys => crate::action_catalog::view(app),
                 Page::Macros => macro_sidebar(app),
-                Page::Lighting => super::lighting::modes(app),
                 _ => iced::widget::Space::new().into(),
             };
             row![
@@ -223,15 +222,7 @@ fn workspace(app: &Desktop) -> Element<'_, Message> {
                 .spacing(app.ui.spacing.m)
                 .height(Fill)
                 .into(),
-                Page::Lighting => row![
-                    container(super::lighting::view(app))
-                        .width(iced::FillPortion(app.ui.panes.detail)),
-                    container(super::lighting::modes(app))
-                        .width(iced::FillPortion(app.ui.panes.sidebar)),
-                ]
-                .spacing(app.ui.spacing.m)
-                .height(Fill)
-                .into(),
+                Page::Lighting => super::lighting::view(app),
                 _ => feature(app),
             };
             column![keys(app), below.push(controls).height(Fill)]
@@ -286,7 +277,7 @@ fn keys(app: &Desktop) -> Element<'_, Message> {
     let labels =
         physical_board::labels_for_layer(app.session.descriptor(), app.session.draft(), &app.layer);
     if app.page == Page::Picture
-        || (app.page == Page::Lighting && app.lighting_panel == super::lighting::Panel::PerKey)
+        || (app.page == Page::Lighting && super::lighting::shows_per_key(app))
     {
         let colors = super::picture::projected_colors(app).unwrap_or_default();
         return physical_board::colored_view_with_labels(

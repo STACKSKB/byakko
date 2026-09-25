@@ -156,7 +156,7 @@ mod tests {
             crate::nia87::lighting_adapter::capabilities()
                 .effects
                 .iter()
-                .any(|choice| choice.id == effect && choice.label == "LightUserPicture")
+                .any(|choice| choice.id == effect && choice.label == "Per-key colors")
         );
     }
 

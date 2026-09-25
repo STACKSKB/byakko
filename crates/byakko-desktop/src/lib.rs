@@ -82,7 +82,12 @@ enum AutoRead {
 
 type Attach = dyn Fn(&str) -> Result<Executor, String>;
 
+pub mod config;
+
 struct Desktop {
+    config: config::Config,
+    live_settings: settings::Pending,
+    brush_color: Option<[u8; 3]>,
     ui: panels::UiStyle,
     archive_file: archive::FileState,
     archive_path: String,
@@ -125,12 +130,16 @@ pub fn run(
     probe: impl Fn() -> Availability + Send + 'static,
     attach: impl Fn(&str) -> Result<Executor, String> + 'static,
     labels_directory: Option<std::path::PathBuf>,
+    config: config::Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let layer = session.descriptor().layers[0].id.clone();
     let mut discovery = Discovery::spawn(probe)?;
     discovery.request();
     // Iced's boot closure is reusable; this native session has exactly one owner.
     let initial = std::cell::RefCell::new(Some(Desktop {
+        config,
+        live_settings: Default::default(),
+        brush_color: None,
         ui: panels::UiStyle::DEFAULT,
         archive_file: archive::FileState::Idle,
         archive_path: String::new(),
@@ -324,6 +333,7 @@ impl Desktop {
         if *self.session.status() != Status::Ready
             || self.live_lighting.has_pending()
             || self.live_picture.has_pending()
+            || self.live_settings.has_pending()
         {
             return;
         }
@@ -397,7 +407,11 @@ impl Desktop {
             return task;
         }
         self.poll_host_input();
-        if !self.busy() && (self.flush_live_lighting() || self.flush_live_picture()) {
+        if !self.busy()
+            && (self.flush_live_lighting()
+                || self.flush_live_picture()
+                || self.flush_live_settings())
+        {
             return Task::none();
         }
         let Some(executor) = &self.executor else {
@@ -550,6 +564,9 @@ impl Desktop {
         if self.session.accept(completion) == Acceptance::IgnoredStale {
             return Task::none();
         }
+        if settings_result && let Some(editor) = self.session.settings() {
+            self.live_settings.reconcile(editor.status());
+        }
         if keymap_result && *self.session.status() == Status::Ready {
             self.sync_shortcut();
         }
@@ -622,7 +639,10 @@ impl Desktop {
             }
         }
         if verified {
-            if !self.flush_live_lighting() && !self.flush_live_picture() {
+            if !self.flush_live_lighting()
+                && !self.flush_live_picture()
+                && !self.flush_live_settings()
+            {
                 self.read_initial_sections();
             }
         } else {
@@ -647,6 +667,7 @@ impl Desktop {
         } else if self.session.dirty()
             || self.live_lighting.has_queued()
             || self.live_picture.has_queued()
+            || self.live_settings.has_queued()
         {
             self.closing = Closing::ConfirmDiscard;
         } else {
@@ -759,7 +780,8 @@ impl Desktop {
         } else if (self.busy()
             || self.session.macro_catalog_scanning()
             || self.live_lighting.has_pending()
-            || self.live_picture.has_pending())
+            || self.live_picture.has_pending()
+            || self.live_settings.has_pending())
             && !matches!(
                 self.session.activity(),
                 byakko_core::session::Activity::MacroFile { .. }

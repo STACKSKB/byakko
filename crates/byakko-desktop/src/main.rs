@@ -96,5 +96,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         _ => return Err("Usage: byakko-desktop [--demo]".into()),
     };
-    byakko_desktop::run(session, probe, attach, labels_directory)
+    byakko_desktop::run(
+        session,
+        probe,
+        attach,
+        labels_directory,
+        byakko_desktop::config::Config::from_environment()?,
+    )
 }
