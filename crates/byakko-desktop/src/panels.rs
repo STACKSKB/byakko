@@ -1,7 +1,7 @@
 //! Small, reusable layout primitives shared by desktop views.
 
-use iced::widget::{button, column, container, responsive, row, text};
-use iced::{Background, Color, Element, Fill, FillPortion, Length, Size, Theme};
+use iced::widget::{button, column, container, text};
+use iced::{Background, Color, Element, Fill, Length, Theme};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Spacing {
@@ -59,7 +59,6 @@ pub struct UiStyle {
     pub theme: Theme,
     pub spacing: Spacing,
     pub type_scale: TypeScale,
-    pub compact_breakpoint: f32,
     pub key_sidebar_breakpoint: f32,
     pub key_sidebar_width: f32,
     pub workspace_width: f32,
@@ -93,7 +92,6 @@ impl UiStyle {
             section_title: 16,
             page_title: 22,
         },
-        compact_breakpoint: 720.0,
         key_sidebar_breakpoint: 1240.0,
         key_sidebar_width: 440.0,
         workspace_width: 1280.0,
@@ -138,32 +136,6 @@ pub fn panel<'a, Message: 'a>(
     )
     .width(Fill)
     .padding(style.spacing.panel_padding)
-    .into()
-}
-
-pub fn split<'a, Message: 'a>(
-    style: &UiStyle,
-    sidebar: impl Fn() -> Element<'a, Message> + 'a,
-    detail: impl Fn() -> Element<'a, Message> + 'a,
-) -> Element<'a, Message> {
-    let breakpoint = style.compact_breakpoint;
-    let gap = style.spacing.m;
-    let sidebar_ratio = style.panes.sidebar;
-    let detail_ratio = style.panes.detail;
-
-    responsive(move |size: Size| {
-        if size.width < breakpoint {
-            column![sidebar(), detail()].spacing(gap).width(Fill).into()
-        } else {
-            row![
-                container(sidebar()).width(FillPortion(sidebar_ratio)),
-                container(detail()).width(FillPortion(detail_ratio)),
-            ]
-            .spacing(gap)
-            .width(Fill)
-            .into()
-        }
-    })
     .into()
 }
 

@@ -1,137 +1,49 @@
 use super::*;
 use crate::archive::{FileState, Message as Archive};
-use byakko_core::archive::{ArchiveState, NativeArchive};
+use byakko_core::archive::ArchiveState;
 use macro_workflow::settle;
 
 fn send(app: &mut Desktop, message: Archive) {
     let _ = app.update(Message::Archive(message));
 }
 
-fn reviewed() -> (Desktop, NativeArchive, NativeArchive) {
+#[test]
+fn diagnostic_capture_is_explicit_and_path_changes_preserve_its_bytes() {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Archive));
+    assert_eq!(app.session.archive(), Some(&ArchiveState::Idle));
+    assert!(!app.busy());
     send(&mut app, Archive::Capture);
-    settle(&mut app);
-    let ArchiveState::Captured(before) = app.session.archive().unwrap() else {
-        panic!("expected captured native archive")
-    };
-    let before = before.clone();
-    let mut target = before.clone();
-    target.bytes.push(b' ');
-    let request = app.session.request_archive_review(target.clone());
-    app.submit(request);
     assert!(app.busy());
     settle(&mut app);
-    (app, before, target)
-}
-
-#[test]
-fn native_archive_capture_review_and_apply_use_owned_memory_backend_values() {
-    let (mut app, before, target) = reviewed();
-    let ArchiveState::Ready(review) = app.session.archive().unwrap() else {
-        panic!("expected archive review")
+    let Some(ArchiveState::Captured(before)) = app.session.archive().cloned() else {
+        panic!("expected captured native archive");
     };
-    assert_eq!(review.before, before);
-    assert_eq!(review.target, target);
-    assert!(!review.changes.is_empty());
-    drop(app.view());
-    assert!(
-        app.session
-            .request_archive_review(NativeArchive {
-                bytes: vec![0; 5000],
-                ..target.clone()
-            })
-            .is_err()
-    );
-    send(&mut app, Archive::Apply);
-    assert!(app.busy());
-    settle(&mut app);
-    assert_eq!(app.session.archive(), Some(&ArchiveState::Captured(target)));
-}
-
-#[test]
-fn changing_archive_path_clears_a_previous_review() {
-    let (mut app, before, _) = reviewed();
-    send(&mut app, Archive::Path("another-file.json".into()));
+    assert!(!before.bytes.is_empty());
+    send(&mut app, Archive::Path("diagnostic-capture.json".into()));
     assert_eq!(app.session.archive(), Some(&ArchiveState::Captured(before)));
+    assert!(!app.busy());
+    drop(app.view());
 }
 
 #[test]
-fn failed_archive_apply_retains_review_and_keeps_close_open() {
-    let (mut app, before, target) = reviewed();
-    let Command::ApplyArchive {
-        generation,
-        operation,
-        ..
-    } = app.session.request_archive_apply().unwrap()
-    else {
-        unreachable!()
-    };
-    let _ = app.update(Message::Close);
-    assert_eq!(app.closing, Closing::Waiting);
-    let _ = app.complete(Completion::CaptureArchive {
-        generation,
-        operation,
-        result: Ok(before),
-    });
-    assert!(app.busy());
-    let failure = ApplyFailure {
-        message: "restore unreadable".into(),
-        recovery: Recovery::Unverified,
-    };
-    let _ = app.complete(Completion::ApplyArchive {
-        generation,
-        operation,
-        result: Err(failure.clone()),
-    });
-    assert_eq!(app.closing, Closing::Open);
-    assert!(matches!(
-        app.session.archive(),
-        Some(ArchiveState::Unverified {
-            problem: byakko_core::archive::ArchiveProblem::Apply(actual),
-            review: Some(review),
-        }) if actual == &failure && review.target == target
-    ));
-    assert!(app.session.request_archive_apply().is_err());
-}
-
-#[test]
-fn failed_archive_apply_requires_manual_reconnect() {
-    let (mut app, _, _) = reviewed();
-    let Command::ApplyArchive {
-        generation,
-        operation,
-        ..
-    } = app.session.request_archive_apply().unwrap()
-    else {
-        unreachable!()
-    };
-    let _ = app.complete(Completion::ApplyArchive {
-        generation,
-        operation,
-        result: Err(ApplyFailure {
-            message: "archive recovery uncertain".into(),
-            recovery: Recovery::Unverified,
-        }),
-    });
-    app.accept_availability(Availability::Missing);
-    assert_eq!(app.auto_read, AutoRead::ManualOnly);
-    app.accept_availability(Availability::Ready {
-        id: "demo-2".into(),
-    });
-    assert_eq!(app.session.status(), &Status::Disconnected);
-    assert!(!app.session.busy());
-    assert!(
-        app.notice
-            .as_deref()
-            .is_some_and(|notice| notice.contains("archive recovery uncertain"))
+fn export_requires_a_capture_without_starting_device_work() {
+    let mut app = ready();
+    send(&mut app, Archive::Path("diagnostic-capture.json".into()));
+    send(&mut app, Archive::Export);
+    assert_eq!(app.archive_file, FileState::Idle);
+    assert_eq!(app.session.archive(), Some(&ArchiveState::Idle));
+    assert!(!app.busy());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("Capture the current configuration before exporting")
     );
 }
 
 #[test]
-fn failed_local_file_task_keeps_close_open_and_reports_error() {
+fn failed_export_keeps_close_open_and_reports_error() {
     let mut app = ready();
-    let state = FileState::Importing {
+    let state = FileState::Exporting {
         generation: app.session.generation(),
     };
     app.archive_file = state;
@@ -139,9 +51,43 @@ fn failed_local_file_task_keeps_close_open_and_reports_error() {
     assert_eq!(app.closing, Closing::Waiting);
     send(
         &mut app,
-        Archive::FileComplete(state, Err("read failed".into())),
+        Archive::FileComplete(state, Err("write failed".into())),
     );
     assert_eq!(app.closing, Closing::Open);
     assert_eq!(app.archive_file, FileState::Idle);
-    assert_eq!(app.notice.as_deref(), Some("read failed"));
+    assert_eq!(app.notice.as_deref(), Some("write failed"));
+}
+
+#[test]
+fn stale_export_completion_cannot_complete_a_new_export() {
+    let mut app = ready();
+    let state = FileState::Exporting {
+        generation: app.session.generation(),
+    };
+    let stale = FileState::Exporting {
+        generation: app.session.generation() - 1,
+    };
+    app.archive_file = state;
+    send(&mut app, Archive::FileComplete(stale, Ok(())));
+    assert_eq!(app.archive_file, state);
+    assert!(app.notice.is_none());
+}
+
+#[test]
+fn device_change_during_export_keeps_close_open() {
+    let mut app = ready();
+    let state = FileState::Exporting {
+        generation: app.session.generation(),
+    };
+    app.archive_file = state;
+    app.closing = Closing::Waiting;
+    app.session.disconnect();
+    app.session.connect().unwrap();
+    send(&mut app, Archive::FileComplete(state, Ok(())));
+    assert_eq!(app.archive_file, FileState::Idle);
+    assert_eq!(app.closing, Closing::Open);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("Device changed while saving the captured configuration")
+    );
 }

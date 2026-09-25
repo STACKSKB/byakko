@@ -46,7 +46,7 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
     if app.session.archive().is_some() {
         navigation = navigation.push(panels::selectable_button(
             &app.ui,
-            "Local configurations",
+            "Diagnostic capture",
             app.page == Page::Archive,
             Some(Message::Page(Page::Archive)),
         ));
@@ -419,7 +419,7 @@ pub(super) fn reconnect_caution_label(caution: ReconnectCaution<'_>) -> String {
         ReconnectSurface::Lighting => "Lighting",
         ReconnectSurface::Picture => "Per-key colors",
         ReconnectSurface::Settings => "Settings",
-        ReconnectSurface::Archive => "Local configuration",
+        ReconnectSurface::Archive => "Configuration capture",
     };
     let reason = match caution.cause {
         ReconnectCause::Conflict => "Device values conflict with a retained draft".into(),
