@@ -184,3 +184,61 @@ The example reserves the trace path before USB I/O, saves diagnostics even if
 capture fails or panics, and saves an archive only after two full captures match.
 Both outputs refuse overwrites. If the archive path aliases the reserved trace,
 the command stops before USB I/O and retains the empty reserved trace file.
+
+## 2026-09-25 offline evidence reconciliation
+
+At the user's request the Windows Agent compared the original ignored files
+without opening a device or changing them. The Linux checkout does not contain
+those files; the following is the agent's reported byte comparison, not an
+independently replayed USB trace. A is `configuration-first-complete.json`, B is
+`configuration-after-fault-lighting.json`, and C is
+`configuration-after-recovery-attempt.json`, all under `Research/captures`.
+Indices are zero-based; values are hexadecimal.
+
+| JSON byte path | A | B | C |
+| --- | --- | --- | --- |
+| `/macros/0/0` | 0F | 00 | FF |
+| `/macros/0/2` | 04 | 00 | 00 |
+| `/macros/0/3` | 80 | 00 | 00 |
+| `/macros/0/4` | F2 | 00 | 00 |
+| `/macros/0/5` | 01 | 00 | 00 |
+| `/macros/0/6` | 04 | 00 | 00 |
+| `/macros/0/8` | F2 | 00 | 00 |
+| `/macros/0/9` | 01 | 00 | 00 |
+| `/lighting/raw/1` | 05 | 04 | 04 |
+| `/lighting/raw/2` | 04 | 02 | 02 |
+| `/lighting/raw/4` | 07 | 08 | 08 |
+| `/lighting/raw/5` | 08 | FF | B4 |
+| `/lighting/raw/6` | 08 | FF | B4 |
+| `/lighting/raw/7` | 08 | FF | B4 |
+| `/picture/9/0` | 00 | FF | FF |
+
+Both keymaps, macro slots 1–49, all other picture bytes, all settings (including
+reserved bytes) and metadata match. A→B and A→C each have 15 changed scalar byte
+leaves; B→C has four. Slot 0 in A begins
+`0F 00 04 80 F2 01 04 00 F2 01` then 246 zero bytes; B is all zero; C begins
+`FF` then 255 zero bytes. The complete lighting prefixes are
+`87 05 04 04 07 08 08 08`, `87 04 02 04 08 FF FF FF`, and
+`87 04 02 04 08 B4 B4 B4`, each followed by 56 zeros. `87` is the response
+opcode, not a host report-ID byte.
+
+| File | Bytes | SHA-256 |
+| --- | ---: | --- |
+| A | 139657 | `2137480f0ba425bf06c9ef9a37881096834c928f6d4c21208ed65daf210ba4d4` |
+| B | 139658 | `3e190a04d21e62372fc51977aa9619844ac038b73c2ef0a8a22a61701b92545e` |
+| C | 139660 | `8386ba883037c175c22f3e2895023cd12560cf1cba0132cbd209d182d6ca5c92` |
+
+The backup files ending `1790054321767804900`, `1790054625539803000`, and
+`1790054976352601200` respectively match A/B/C by complete-file hash.
+No transport trace of that fault run was found. The 1,952-getter baseline trace
+and the later macro-event setter trace are separate runs; they cannot supply
+the missing fault-run ordering. Tracing was added after the fault test.
+
+This confirms C differs from A. Picture bytes were captured under differing
+lighting contexts, so their difference alone does not prove persistent damage
+to one picture bank. The macro and lighting changes remain unexplained.
+Snapshots alone cannot distinguish persistent firmware changes, transitional
+reads, selector-dependent responses or host transport defects. No root cause
+is claimed and no fault test was repeated. Before a new experiment, review the
+current baseline and propose a bounded trace-producing test to the user; do not
+reuse the historical multi-section fixture blindly.

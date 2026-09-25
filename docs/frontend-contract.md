@@ -16,7 +16,8 @@ stage and request work, then feeds a completion back to the same session.
 
 `byakko-devices` supplies concrete backends and the serialized executor. It
 owns discovery, exact HID target selection, protocol framing, backups, pacing,
-write verification and recovery. The Nia87 profile supplies board identity and
+feature-specific completion semantics and recovery. The Nia87 profile supplies
+board identity and
 physical geometry; generic views do not encode its matrix or report IDs. Other
 backends, starting with QMK/VIA, should implement the exercised device
 interface and publish their own capabilities. A Wacom-like external target can
@@ -38,45 +39,52 @@ exports the per-key color snapshot after the keymap read. `read-lighting` and
 `read-macro <slot-id>` reads one slot advertised by the backend's capabilities
 and exports the complete snapshot, including opaque revision bytes, without
 decoding backend-owned content in the CLI. `capture-archive <new-file>` saves a
-complete opaque native backup only after the backend's verified capture; it
+complete opaque native backup after one complete backend capture sweep; it
 refuses to overwrite an existing path. `review-archive <file>` reads that
 wrapper, captures the device again, and prints only the changed section
 summaries; it sends no setter. `read` output is also a complete keymap state
-file. After editing its bindings, `plan-keymap <state-file>` compares it with a
-fresh device read and reports the intended changes. `apply-keymap <state-file>`
-requires the exact raw before-image revision from that fresh read and passes the
-changes through the Nia87 adapter, then stages them through the same
+file. After editing its bindings, `plan-keymap <state-file>` compares it with
+one device read establishing the current baseline and reports the intended
+changes. `apply-keymap <state-file>`
+requires the matching raw before-image revision and passes the changes through
+the Nia87 adapter, then stages them through the same
 `Session → Command → Executor → Completion` path as Iced. The device backend
-creates a durable backup, performs the write and checks complete readback; the
+backs up the cached before-image, performs the write and checks one complete
+post-write readback; the
 CLI waits for its outcome rather than abandoning an in-flight write on a read
 timeout. The Nia87 adapter rejects new opaque bindings and unadvertised key or
 shortcut usages while preserving opaque baseline values. Memory-device tests
-exercise planning, apply and stale-file rejection without USB. No physical CLI
-write has been attempted yet.
+exercise planning, apply and stale-file rejection without
+USB. Physical CLI keymap apply and restoration have succeeded on the attached
+board; this does not establish Linux behavior or power-cycle persistence.
 
 `read-settings` output is likewise an editable snapshot file.
-`plan-settings <snapshot-file>` compares one proposed field with a fresh USB
-read and sends no setter. `apply-settings <snapshot-file>` accepts exactly one
+`plan-settings <snapshot-file>` compares one proposed field with a single USB
+baseline read and sends no setter. `apply-settings <snapshot-file>` accepts one
 changed field per invocation, verifies its complete catalog and raw revision,
 then uses the same session/executor transaction as Iced. The backend checks
-the complete native settings readback and keeps a durable before-image.
-Memory-device tests cover the write, reread and rejection paths. The attached
-Nia87 has exercised planning only; physical CLI settings apply remains open.
+the complete native settings readback and backs up the cached before-image. The
+executor does not repeat the file workflow preflight. Memory tests cover write,
+reread and rejection. Physical CLI one-field settings apply and restoration
+succeeded; Iced physical settings acceptance remains open.
 
 `read-lighting` output can be edited as a complete global-lighting snapshot.
-`plan-lighting <snapshot-file>` reads the device again, checks the exact raw
+`plan-lighting <snapshot-file>` reads the device once for its baseline and
+checks the exact raw
 revision and backend, validates the desired effect through the portable
 catalog and Nia87 preflight, then prints the desired setting or `null` for no
 change. `apply-lighting <snapshot-file>` requires a change and uses the same
-guarded session/executor transaction as Iced. The attached board has exercised
-planning only; physical CLI lighting apply remains open.
+session/executor transaction as Iced. Ordinary lighting completion records
+transport acceptance after known pacing, not an immediate GET or device
+readback. Physical CLI lighting write/restore evidence exists on the attached
+board.
 If `read-lighting` reports a recognized stored host mode, a file with the same
 raw revision and a desired onboard setting can plan and explicitly apply a
 return to local lighting. Unknown raw modes remain read-only; no startup action
 changes the board.
 
 `read-macro <slot-id>` output is a backend snapshot with the complete raw
-before-image. `plan-macro <snapshot-file>` freshly reads that exact slot,
+before-image. `plan-macro <snapshot-file>` reads that exact slot once for its baseline,
 checks its backend and revision, validates the proposed program against the
 portable capabilities and Nia87 codec, then displays full before/after
 programs. `apply-macro <snapshot-file>` stages through the same correlated
@@ -85,15 +93,21 @@ zero remains readable and can plan as an unchanged no-op, but a changed
 program must use the advertised editable count range. This snapshot workflow
 is distinct from the portable macro document format, whose source slot is
 descriptive rather than an expected-state token. Physical CLI macro apply and
-playback remain open.
+restoration succeeded; macro playback remains unaccepted.
 
-`read-colors` output is a complete per-key color snapshot with a raw revision.
-`plan-colors <snapshot-file>` freshly reads the keymap and picture, rejects
+`read-colors` output is a complete per-key color snapshot with a raw revision
+and selector context. `plan-colors <snapshot-file>` reads the keymap and picture
+once for its baseline, rejects
 missing or extra advertised keys, and lists only changed colors. The explicit
 `apply-colors <snapshot-file>` stages those edits through the shared session
-and one guarded backend transaction with complete picture readback. The CLI
-does not duplicate the Nia87 matrix mapping. The attached board has exercised
-planning only; physical CLI color apply remains open.
+and one backend transaction, which backs up the cached before-image and reports
+transport acceptance after all picture pages are submitted. A subsequent
+picture read establishes device state. A real selector change invalidates cached
+picture
+data and requires a later read; the write does not make a separate fresh
+selector comparison. The CLI does not duplicate the Nia87 matrix mapping.
+Physical Iced bulk-picture uploads and visible color changes have bounded
+acceptance evidence; CLI picture writes and picture recovery remain open.
 
 Later CLI work can expose archive apply workflows. It should
 show the target identity and operation result, preserve opaque values, and use
