@@ -1,4 +1,4 @@
-use super::apply_error::settings_apply_error;
+use super::apply_error::{RestoreMismatch, settings_apply_error};
 use super::*;
 
 pub fn read_settings() -> Result<crate::nia87::settings::Settings> {
@@ -87,7 +87,7 @@ pub(super) fn apply_setting_with(
             let restore = (|| -> Result<()> {
                 send(&restore_report)?;
                 if &read_settings_on_device(&device)? != expected {
-                    return Err("Settings restoration mismatch".into());
+                    return Err(RestoreMismatch("Settings restoration mismatch").into());
                 }
                 Ok(())
             })();

@@ -204,3 +204,15 @@ The verification table above remains the original review record.
 - [x] Finding 2 closed: the Linux screen-sampler lint is fixed. Formatting and
   strict Clippy pass for all four product packages/all targets and the helper,
   with no lint allowances.
+
+- [x] Finding 3 closed: standalone recovery reports typed, fully observed
+  mismatches as Failed and unknown transport/read/planning outcomes as
+  Unverified, including in the diagnostic text. Four native restore comparisons
+  create the typed mismatch. Tests cover all four paths and misleading error
+  text without parsing it. Device tests (200 unit + 1 integration), formatting
+  and strict device Clippy pass. HID sequencing and recovery strategy unchanged.
+
+The user selected a source-checkout-only pre-alpha. Binary packaging, signing,
+installers and CI/CD are out of scope. Source-build and normal-user Linux access
+instructions remain required. Hardware is available on Linux and Windows;
+physical interaction will be coordinated around the user's availability.

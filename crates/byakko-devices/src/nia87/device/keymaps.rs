@@ -1,4 +1,4 @@
-use super::apply_error::keymap_apply_error;
+use super::apply_error::{RestoreMismatch, keymap_apply_error};
 use super::*;
 
 fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>> {
@@ -212,7 +212,7 @@ pub(super) fn apply_keymaps_with(
                     }
                 }
                 if snapshot_on_device(&device)? != *expected {
-                    return Err("restored data could not be verified".into());
+                    return Err(RestoreMismatch("restored data could not be verified").into());
                 }
                 Ok(())
             })();

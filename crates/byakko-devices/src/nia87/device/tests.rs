@@ -108,8 +108,11 @@ mod lighting_tests {
             verified.to_string(),
             "Apply failed: write failed. Restore result: original keymaps verified. Backup: backup.json"
         );
-        let failed =
-            super::keymap_apply_error(&"readback mismatch", Err("restore failed".into()), backup);
+        let failed = super::keymap_apply_error(
+            &"readback mismatch",
+            Err(super::super::apply_error::RestoreMismatch("restore failed").into()),
+            backup,
+        );
         assert_eq!(failed.0.recovery, Recovery::Failed);
         assert_eq!(
             failed.to_string(),
