@@ -384,3 +384,11 @@ visible mode/color switching. It does not resolve the earlier Windows collateral
 changes, establish exact raw archive restoration, or prove brightness dimming.
 The user has been asked to obtain official-app brightness packet/visual evidence
 from the Windows Agent before changing the codec. No further setters are implied.
+
+Later on the same date, a fixed-camera steady-green 4→1 comparison showed lower
+recorded LED output on this Linux unit. The current Wave/rainbow baseline
+(`FA FF FA`) and camera settings were restored exactly, and a complete archive
+comparison returned no changes. This resolves the narrow Linux static-green
+brightness observation without a codec change; it does not resolve the older
+exact `FF FF FF` archive restore mismatch. See
+[camera method and evidence](../Research/brightness-investigation.md#linux-fixed-camera-comparison).

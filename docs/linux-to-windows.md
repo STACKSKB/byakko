@@ -187,7 +187,12 @@ the Linux task; it should not be repeated.
 
 ### WIN-20260925-004: Inspect the newly located official lighting capture
 - Revision: 1
-- Status: pending
+- Status: completed
+- Result: Windows independently parsed all 49 exchanges. All five lighting
+  setters have value 4 (one picture, four steady); no brightness comparison,
+  getter reply bytes or per-exchange timing exists. Conclusion of 001 unchanged.
+  File hash and relevant payloads are recorded in
+  `Research/brightness-investigation.md`.
 - Source commit: `e1af8b7`
 - Scope: read-only analysis of an existing capture; may proceed while 002 awaits
   camera positioning. No physical interaction or new capture is requested.

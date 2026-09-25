@@ -237,6 +237,10 @@ physical interaction will be coordinated around the user's availability.
   rolled back with Verified recovery; original visible settings were restored
   afterward with user-approved canonical RGB bytes. Root cause and physical
   brightness remain open; see the Linux handoff and fault investigation.
+  **Later camera follow-up:** steady green 4→1 now shows reduced output on the
+  Linux unit under fixed camera settings, with full baseline restoration. This
+  closes that narrow brightness observation, not the exact archive restore gate
+  or Windows behavior. See [brightness evidence](../Research/brightness-investigation.md).
 
 - [x] Archive mismatch diagnostics now retain complete forward/recovery readbacks
   beside the before-image after recovery finishes, with persistence failures
