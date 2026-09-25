@@ -1,7 +1,7 @@
 # Desktop autosave configuration
 
 `BYAKKO_AUTO_SAVE_DELAY_MS` configures the idle gap before queued lighting and
-settings edits are sent. The default is **350 milliseconds**; valid values are
+settings edits are sent. The default is **2000 milliseconds**; valid values are
 0–10000. Set it in the environment before launching Byakko. Zero requests an
 immediate send whenever the serialized device worker is available.
 
@@ -26,3 +26,7 @@ one-field transactions sequentially while the controls remain editable.
 Sleep sliders use their backend-advertised range, with **Disabled** as the final
 stop after the maximum. Disabled maps to the backend's zero sentinel; it is not
 an additional firmware timeout value.
+
+Moving within the color picker restarts the lighting idle deadline, even when
+the RGB value is unchanged. Holding a picker drag suspends lighting sends until
+release, then starts a fresh idle gap.

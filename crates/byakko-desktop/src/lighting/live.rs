@@ -10,6 +10,9 @@ pub(crate) struct Pending {
 }
 
 impl Pending {
+    pub(crate) fn postpone(&mut self, now: Instant, delay: Duration) {
+        self.due = Some(now + delay);
+    }
     pub fn has_pending(&self) -> bool {
         !self.blocked && !self.edits.is_empty()
     }

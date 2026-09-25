@@ -7,14 +7,29 @@ use iced::{
         widget::{Tree, tree},
     },
     gradient, mouse,
-    widget::{column, container, row},
+    widget::{column, container, mouse_area, row},
 };
 use std::rc::Rc;
+
+#[derive(Default, PartialEq)]
+pub(crate) enum Gesture {
+    #[default]
+    Idle,
+    Dragging,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Interaction {
+    Started,
+    Moved,
+    Finished,
+}
 
 pub(crate) fn view<Message: Clone + 'static>(
     style: &UiStyle,
     rgb: [u8; 3],
     identity: String,
+    on_interaction: fn(Interaction) -> Message,
     on_change: Option<impl Fn([u8; 3]) -> Message + 'static>,
 ) -> Element<'static, Message> {
     let on_change = on_change.map(|f| Rc::new(f) as Rc<dyn Fn([u8; 3]) -> Message>);
@@ -23,6 +38,7 @@ pub(crate) fn view<Message: Clone + 'static>(
         rgb,
         identity,
         on_change,
+        on_interaction,
         size: Size::new(style.color_picker_size.0, style.color_picker_size.1),
         hue_width: style.color_hue_width,
         gap: style.spacing.s as f32,
@@ -40,17 +56,24 @@ pub(crate) fn view<Message: Clone + 'static>(
             },
             ..Default::default()
         });
-    row![
-        picker,
-        column![
-            preview,
-            control_widgets::color_presets(style, rgb, swatch_change.map(|f| move |rgb| f(rgb)))
+    mouse_area(
+        row![
+            picker,
+            column![
+                preview,
+                control_widgets::color_presets(
+                    style,
+                    rgb,
+                    swatch_change.map(|f| move |rgb| f(rgb))
+                )
+            ]
+            .spacing(style.spacing.s)
+            .width(style.fields.compact),
         ]
         .spacing(style.spacing.s)
-        .width(style.fields.compact),
-    ]
-    .spacing(style.spacing.s)
-    .width(Length::Shrink)
+        .width(Length::Shrink),
+    )
+    .on_move(move |_| on_interaction(Interaction::Moved))
     .into()
 }
 
@@ -89,6 +112,7 @@ impl State {
 }
 
 struct Picker<Message> {
+    on_interaction: fn(Interaction) -> Message,
     rgb: [u8; 3],
     identity: String,
     on_change: Option<Rc<dyn Fn([u8; 3]) -> Message>>,
@@ -163,6 +187,7 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Picker<Message> {
                     shell.publish(on_change(rgb));
                 }
                 if was_dragging {
+                    shell.publish((self.on_interaction)(Interaction::Finished));
                     shell.capture_event();
                     shell.request_redraw();
                 }
@@ -177,6 +202,9 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Picker<Message> {
                     None
                 };
                 state.begin(area);
+                if area.is_some() {
+                    shell.publish((self.on_interaction)(Interaction::Started));
+                }
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) if state.dragging.is_some() => {}
             _ => return,
