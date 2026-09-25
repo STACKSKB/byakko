@@ -22,14 +22,20 @@ pub(super) fn read_macros_with(selection: Selection<'_>, slots: &[u8]) -> Result
 pub(super) fn read_macro_on_device(device: &HidDevice, slot: u8) -> Result<Vec<u8>> {
     crate::rongyuan::yc500::macro_io::read_complete(slot, |opcode, index, page| {
         read_payload(device, opcode, index, page)
+            .map_err(|error| format!("Macro {slot}, read page {page}: {error}").into())
     })
 }
 
 pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
-    for report in crate::nia87::macros::write_reports(slot, bytes)? {
+    for (page, report) in crate::nia87::macros::write_reports(slot, bytes)?
+        .into_iter()
+        .enumerate()
+    {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&report);
-        device.send_setter(&host)?;
+        device
+            .send_setter(&host)
+            .map_err(|error| format!("Macro {slot}, write page {page}: {error}"))?;
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
     std::thread::sleep(std::time::Duration::from_millis(200));

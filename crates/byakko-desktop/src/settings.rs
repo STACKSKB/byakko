@@ -255,17 +255,18 @@ fn settings_grid(
 
 fn toolbar<'a>(app: &Desktop, editor: &Editor, editable: bool) -> Element<'a, AppMessage> {
     let mut actions = row!().spacing(app.ui.spacing.s);
-    if app.live_settings.blocked()
-        || matches!(
-            editor.status(),
-            Status::Conflict { .. } | Status::Unverified { .. }
-        )
+    if app.session.status() != &byakko_core::session::Status::Disconnected
+        && (app.live_settings.blocked()
+            || matches!(
+                editor.status(),
+                Status::Conflict { .. } | Status::Unverified { .. }
+            ))
     {
         actions = actions.push(
             button("Reload & retry")
                 .on_press_maybe((!app.busy()).then_some(AppMessage::Settings(Message::Retry))),
         );
-    } else if !editable {
+    } else if !editable && app.session.status() != &byakko_core::session::Status::Disconnected {
         actions = actions.push(
             button("Read settings")
                 .on_press_maybe((!app.busy()).then_some(AppMessage::Settings(Message::Read))),

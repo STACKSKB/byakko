@@ -396,6 +396,11 @@ exact `FF FF FF` archive restore mismatch. See
 
 ## Reconnect regression fix (2026-09-25)
 
+Follow-up: [Linux macro failure audit](../Research/linux-macro-save-failure.md)
+records the user's save failure before their manual replug, current read-only
+state, and the global Reconnect action added for disconnected feature pages.
+The underlying macro transport failure remains an open release gate.
+
 A quick unplug/replug could leave the desktop executor bound to the previous
 collection identity. Manual reconnect and feature retry previously reused that
 worker, so repeated reads could report the same identity-change error. Explicit

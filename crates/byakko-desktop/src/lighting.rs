@@ -265,16 +265,15 @@ fn mode_controls(app: &Desktop) -> Element<'_, AppMessage> {
         && editor.draft().is_some()
         && matches!(editor.status(), Status::Ready | Status::Unverified { .. });
     let style = &app.ui;
-    let retry = (app.live_lighting.blocked()
-        || matches!(
-            editor.status(),
-            Status::Unverified { .. } | Status::Conflict { .. }
-        ))
+    let retry = (app.session.status() != &SessionStatus::Disconnected
+        && (app.live_lighting.blocked()
+            || matches!(
+                editor.status(),
+                Status::Unverified { .. } | Status::Conflict { .. }
+            )))
     .then(|| {
-        button("Reload & retry").on_press_maybe(
-            (!app.busy() && app.session.status() != &SessionStatus::Disconnected)
-                .then_some(AppMessage::Lighting(Message::Retry)),
-        )
+        button("Reload & retry")
+            .on_press_maybe((!app.busy()).then_some(AppMessage::Lighting(Message::Retry)))
     });
     let mut feedback = row![text(status(app, editor))].spacing(style.spacing.s);
     if let Some(retry) = retry {

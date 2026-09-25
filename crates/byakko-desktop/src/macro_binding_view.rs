@@ -81,7 +81,7 @@ pub(super) fn view<'a>(app: &'a Desktop, editor: &'a Editor) -> Element<'a, Mess
     if let Some(reason) = restriction {
         content = content.push(text(reason));
     }
-    if *app.session.status() != Status::Ready {
+    if *app.session.status() != Status::Ready && *app.session.status() != Status::Disconnected {
         content = content
             .push(button("Reload keyboard").on_press_maybe((!app.busy()).then_some(Message::Read)));
     }
