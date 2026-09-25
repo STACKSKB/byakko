@@ -131,7 +131,10 @@ pub(super) fn editor(app: &Desktop) -> Element<'_, Message> {
     }
     if *editor.status() != Status::Ready || app.busy() {
         content = content.push(text(status(app, editor)));
-        if !app.busy() && *editor.status() != Status::Unloaded {
+        if !app.busy()
+            && *editor.status() != Status::Unloaded
+            && app.session.status() != &byakko_core::session::Status::Disconnected
+        {
             content = content.push(button("Retry read").on_press(Message::Macro(Macro::Read)));
         }
     }

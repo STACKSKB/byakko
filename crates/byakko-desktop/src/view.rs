@@ -51,6 +51,9 @@ pub(super) fn shell(app: &Desktop) -> Element<'_, Message> {
             Some(Message::Page(Page::Archive)),
         ));
     }
+    if app.session.status() == &Status::Disconnected && !app.busy() {
+        navigation = navigation.push(button("Reconnect").on_press(Message::Read));
+    }
     let mut content = column![
         text(&app.session.descriptor().device_name).size(app.ui.type_scale.page_title),
         navigation
@@ -116,7 +119,7 @@ fn keymap_toolbar(app: &Desktop) -> Element<'_, Message> {
     let mut content = column![toolbar].spacing(app.ui.spacing.s);
     if *app.session.status() != Status::Ready {
         content = content.push(text(status(app)));
-        if !app.busy() {
+        if !app.busy() && app.session.status() != &Status::Disconnected {
             content = content.push(button("Reconnect / retry").on_press(Message::Read));
         }
     }

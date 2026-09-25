@@ -98,6 +98,82 @@ fn failed_macro_save_never_stages_key_assignment() {
 }
 
 #[test]
+fn macro_transport_failure_reconnect_restores_other_editors_and_keeps_macro_draft() {
+    let mut app = loaded_pointer();
+    let _ = app.update(Message::Lighting(lighting::Message::Read));
+    macro_workflow::settle(&mut app);
+    assert_eq!(
+        app.session.lighting().unwrap().status(),
+        &byakko_core::lighting::editor::Status::Ready
+    );
+    assert_eq!(
+        app.session.settings().unwrap().status(),
+        &byakko_core::settings::editor::Status::Ready
+    );
+
+    let _ = app.update(Message::Macro(macro_editor::Message::Edit(Edit::Repeat(1))));
+    app.repeat_input = "1".into();
+    let macro_draft = app.session.macros().unwrap().draft().cloned();
+    app.save_and_assign_macro("hold".into());
+    let Activity::ApplyMacro { operation, slot } = app.session.activity().clone() else {
+        panic!("macro save did not start");
+    };
+    let generation = app.session.generation();
+    let _ = app.complete(Completion::ApplyMacro {
+        generation,
+        operation,
+        slot,
+        result: Err(ApplyFailure {
+            message: "transport lost during macro save".into(),
+            recovery: Recovery::Unverified,
+        }),
+    });
+    assert!(matches!(
+        app.session.macros().unwrap().status(),
+        MacroStatus::Unverified { .. }
+    ));
+    assert!(matches!(
+        app.session.lighting().unwrap().status(),
+        byakko_core::lighting::editor::Status::Unverified { .. }
+    ));
+    assert!(app.session.changes().is_empty());
+
+    app.accept_availability(Availability::Missing);
+    assert_eq!(app.session.status(), &Status::Disconnected);
+    assert_eq!(app.auto_read, AutoRead::ManualOnly);
+    app.attach = Box::new(|expected| {
+        assert_eq!(expected, None, "retry must bind the current collection");
+        Executor::spawn(demo::device()?, Default::default())
+            .map(|executor| ("reconnected-keyboard".into(), executor))
+            .map_err(|error| error.to_string())
+    });
+    let _ = app.update(Message::Read);
+    assert!(app.session.generation() > generation);
+    assert!(matches!(app.session.activity(), Activity::Read { .. }));
+    macro_workflow::settle(&mut app);
+
+    assert_eq!(app.session.status(), &Status::Ready);
+    assert_eq!(
+        app.session.lighting().unwrap().status(),
+        &byakko_core::lighting::editor::Status::Ready
+    );
+    assert_eq!(
+        app.session.settings().unwrap().status(),
+        &byakko_core::settings::editor::Status::Ready
+    );
+    assert!(matches!(
+        app.session.macros().unwrap().status(),
+        MacroStatus::Unverified { .. }
+    ));
+    assert_eq!(app.session.macros().unwrap().draft(), macro_draft.as_ref());
+    assert!(
+        app.macro_notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("transport lost during macro save"))
+    );
+}
+
+#[test]
 fn key_failure_reports_macro_saved_without_claiming_assignment() {
     let mut app = loaded_pointer();
     let key_before = app.session.baseline().unwrap().bindings["Studio"]["Beta"].clone();

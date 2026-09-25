@@ -294,7 +294,7 @@ pub(super) fn view(app: &Desktop) -> Element<'_, AppMessage> {
     let projected = projected_colors(app);
     let editable = projected.is_some() && app.session.status() != &super::Status::Disconnected;
     let mut content = column![text(status(app, editor))].spacing(app.ui.spacing.m);
-    if self_needs_retry(app, editor) {
+    if app.session.status() != &super::Status::Disconnected && self_needs_retry(app, editor) {
         content = content.push(
             button("Retry color read")
                 .on_press_maybe((!app.busy()).then_some(AppMessage::Picture(Message::Retry))),
