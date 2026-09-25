@@ -58,7 +58,7 @@ def parse_tree(text):
         name, version = match.groups()
         expression = expression.removesuffix(" (*)").strip()
         if name in {"byakko", "byakko-core", "byakko-devices", "byakko-desktop", "byakko-cli"}:
-            continue  # Project license remains the owner's decision.
+            continue  # Byakko is GPL-3.0-or-later; this inventory covers dependencies.
         row = {"name": name, "version": version, "declared": expression,
                "selected": selection(name, expression)}
         key = (name, version)

@@ -4,6 +4,7 @@ default-run = "byakko"
 version = "0.1.0"
 edition = "2024"
 publish = false
+license = "GPL-3.0-or-later"
 description = "Native Nia87 configuration research tools"
 
 [workspace]
