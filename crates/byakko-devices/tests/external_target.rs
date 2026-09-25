@@ -1,5 +1,6 @@
 //! A tablet-shaped descriptor exercises the portable binding contract without
 //! claiming support for Wacom reports or continuous ring values.
+use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::{
     Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State,
     session::{Acceptance, Command, Completion, Session, Status},
@@ -60,14 +61,21 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
     let mut device = MemoryDevice::new(descriptor.clone(), state.clone()).unwrap();
     let mut session = Session::new(descriptor).unwrap();
     let generation = session.connect().unwrap();
-    let Command::Read { operation, .. } = session.request_read().unwrap() else {
+    let Command {
+        operation,
+        payload: CommandPayload::Read { .. },
+        ..
+    } = session.request_read().unwrap()
+    else {
         unreachable!()
     };
     assert_eq!(
-        session.accept(Completion::Read {
+        session.accept(Completion {
             generation,
             operation,
-            result: device.read(),
+            payload: CompletionPayload::Read {
+                result: device.read()
+            }
         }),
         Acceptance::Accepted
     );
@@ -90,10 +98,11 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
             })
             .unwrap();
     }
-    let Command::Apply {
+    let Command {
         operation,
-        expected,
-        changes,
+        payload: CommandPayload::Apply {
+            expected, changes, ..
+        },
         ..
     } = session.request_apply().unwrap()
     else {
@@ -101,10 +110,10 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
     };
     let result = device.apply(&expected, &changes, Path::new("unused"));
     assert_eq!(
-        session.accept(Completion::Apply {
+        session.accept(Completion {
             generation,
             operation,
-            result
+            payload: CompletionPayload::Apply { result }
         }),
         Acceptance::Accepted
     );

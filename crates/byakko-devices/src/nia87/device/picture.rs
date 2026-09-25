@@ -1,4 +1,5 @@
 use super::apply_error::picture_submit_error;
+use super::transaction::{pacing, save_json_backup};
 use super::*;
 
 /// Read the current custom lighting picture as 128 matrix-indexed RGB values.
@@ -69,17 +70,9 @@ pub(super) fn apply_picture_with(
         return Ok(expected.to_vec());
     }
     let reports = crate::nia87::lighting::user_picture_write_reports(desired)?;
-    std::fs::create_dir_all(backup_dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let path = backup_dir.join(format!("picture-before-{stamp}.json"));
-    let mut backup = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
-    serde_json::to_writer_pretty(
-        &mut backup,
+    let backup = save_json_backup(
+        backup_dir,
+        "picture-before",
         &serde_json::json!({
             "format_version": 2,
             "colors": expected,
@@ -87,17 +80,16 @@ pub(super) fn apply_picture_with(
             "context_revision": expected_context,
         }),
     )?;
-    backup.sync_all()?;
     let session = Session::open_for(selection)?;
     let device = session.device();
     submit_picture_reports(
         &reports,
-        &path,
+        backup.path(),
         |host| device.send_setter(host),
         || {
             // The captured official path schedules two 10 ms waits before
             // each page. This is pacing, not a readback or retry interval.
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            std::thread::sleep(pacing::PICTURE_PAGE);
         },
     )?;
     Ok(desired.to_vec())

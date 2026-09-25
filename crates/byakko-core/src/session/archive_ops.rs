@@ -3,6 +3,10 @@ use super::{Activity, Command, Session, Status};
 use crate::archive::{
     self, ArchiveCapabilities, ArchiveProblem, ArchiveState, NativeArchive, Review,
 };
+use crate::session::CommandPayload;
+#[cfg(test)]
+use crate::session::CompletionPayload;
+use crate::session::{DeviceActivity, Feature};
 
 impl Session {
     pub fn with_archive(mut self, capabilities: ArchiveCapabilities) -> Result<Self, String> {
@@ -41,14 +45,18 @@ impl Session {
             return Err("Device does not support native archives".into());
         }
         let operation = self.operation()?;
-        self.activity = Activity::CaptureArchive { operation };
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Read(Feature::Archive),
+        };
         self.archive_state = ArchiveState::Unverified {
             problem: ArchiveProblem::ReadRequired,
             review: None,
         };
-        Ok(Command::CaptureArchive {
+        Ok(Command {
             generation: self.generation,
             operation,
+            payload: CommandPayload::CaptureArchive {},
         })
     }
     pub fn request_archive_review(&mut self, target: NativeArchive) -> Result<Command, String> {
@@ -62,18 +70,20 @@ impl Session {
             .ok_or("Device does not support native archives")?;
         archive::validate_archive(caps, &target)?;
         let operation = self.operation()?;
-        self.activity = Activity::ReviewArchive {
+        self.activity = Activity::Device {
             operation,
-            target: target.clone(),
+            request: DeviceActivity::ReviewArchive {
+                target: target.clone(),
+            },
         };
         self.archive_state = ArchiveState::Unverified {
             problem: ArchiveProblem::ReadRequired,
             review: None,
         };
-        Ok(Command::ReviewArchive {
+        Ok(Command {
             generation: self.generation,
             operation,
-            target,
+            payload: CommandPayload::ReviewArchive { target },
         })
     }
     pub fn request_archive_apply(&mut self) -> Result<Command, String> {
@@ -95,7 +105,10 @@ impl Session {
         let expected = review.before.clone();
         let target = review.target.clone();
         let operation = self.operation()?;
-        self.activity = Activity::ApplyArchive { operation };
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Apply(Feature::Archive),
+        };
         self.status = Status::Unverified {
             problem: super::Problem::ReadRequired,
         };
@@ -103,11 +116,10 @@ impl Session {
         self.invalidate_lighting();
         self.invalidate_picture();
         self.invalidate_settings();
-        Ok(Command::ApplyArchive {
+        Ok(Command {
             generation: self.generation,
             operation,
-            expected,
-            target,
+            payload: CommandPayload::ApplyArchive { expected, target },
         })
     }
     pub(super) fn invalidate_archive(&mut self) {
@@ -263,18 +275,20 @@ mod tests {
         }
     }
     fn ready(session: &mut Session) {
-        let Command::ReviewArchive {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ReviewArchive { .. },
         } = session.request_archive_review(archive(&[2])).unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ReviewArchive {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(review(&[1], &[2])),
+            payload: CompletionPayload::ReviewArchive {
+                result: Ok(review(&[1], &[2])),
+            },
         });
     }
     #[test]
@@ -296,18 +310,21 @@ mod tests {
             serde_json::from_slice::<Command>(&serde_json::to_vec(&command).unwrap()).unwrap(),
             command
         );
-        let Command::CaptureArchive {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::CaptureArchive {},
         } = command
         else {
             unreachable!()
         };
         assert_eq!(
-            session.accept(Completion::CaptureArchive {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(archive(&[0; 5]))
+                payload: CompletionPayload::CaptureArchive {
+                    result: Ok(archive(&[0; 5]))
+                }
             }),
             Acceptance::Accepted
         );
@@ -318,17 +335,20 @@ mod tests {
                 ..
             })
         ));
-        let Command::CaptureArchive {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::CaptureArchive {},
         } = session.request_archive_capture().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::CaptureArchive {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(archive(&[1, 2])),
+            payload: CompletionPayload::CaptureArchive {
+                result: Ok(archive(&[1, 2])),
+            },
         });
         assert_eq!(
             session.archive(),
@@ -344,25 +364,29 @@ mod tests {
             serde_json::from_slice::<Command>(&serde_json::to_vec(&command).unwrap()).unwrap(),
             command
         );
-        let Command::ReviewArchive {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ReviewArchive { .. },
         } = command
         else {
             unreachable!()
         };
-        let stale = Completion::ReviewArchive {
+        let stale = Completion {
             generation: generation + 1,
             operation,
-            result: Ok(review(&[1], &[9, 8])),
+            payload: CompletionPayload::ReviewArchive {
+                result: Ok(review(&[1], &[9, 8])),
+            },
         };
         assert_eq!(session.accept(stale), Acceptance::IgnoredStale);
         assert!(session.busy());
-        let wrong = Completion::ReviewArchive {
+        let wrong = Completion {
             generation,
             operation,
-            result: Ok(review(&[1], &[7])),
+            payload: CompletionPayload::ReviewArchive {
+                result: Ok(review(&[1], &[7])),
+            },
         };
         assert_eq!(session.accept(wrong), Acceptance::Accepted);
         assert!(matches!(
@@ -372,18 +396,20 @@ mod tests {
                 ..
             })
         ));
-        let Command::ReviewArchive {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ReviewArchive { .. },
         } = session.request_archive_review(archive(&[9, 8])).unwrap()
         else {
             unreachable!()
         };
-        let valid = Completion::ReviewArchive {
+        let valid = Completion {
             generation,
             operation,
-            result: Ok(review(&[1], &[9, 8])),
+            payload: CompletionPayload::ReviewArchive {
+                result: Ok(review(&[1], &[9, 8])),
+            },
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&valid).unwrap()).unwrap(),
@@ -407,22 +433,25 @@ mod tests {
     fn another_device_write_invalidates_review_but_a_read_does_not() {
         let mut session = session();
         session.connect().unwrap();
-        let Command::ReviewArchive {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ReviewArchive { .. },
         } = session.request_archive_review(archive(&[2])).unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ReviewArchive {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(review(&[1], &[2])),
+            payload: CompletionPayload::ReviewArchive {
+                result: Ok(review(&[1], &[2])),
+            },
         });
-        let Command::Read {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::Read {},
         } = session.request_read().unwrap()
         else {
             unreachable!()
@@ -434,10 +463,10 @@ mod tests {
                 BTreeMap::from([("a".into(), Action::Disabled)]),
             )]),
         };
-        session.accept(Completion::Read {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(state),
+            payload: CompletionPayload::Read { result: Ok(state) },
         });
         assert!(matches!(session.archive(), Some(ArchiveState::Ready(_))));
         session
@@ -460,20 +489,22 @@ mod tests {
     fn archive_apply_requires_change_and_checks_stale_and_readback() {
         let mut session = session();
         session.connect().unwrap();
-        let Command::ReviewArchive {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ReviewArchive { .. },
         } = session.request_archive_review(archive(&[1])).unwrap()
         else {
             unreachable!()
         };
         let mut unchanged = review(&[1], &[1]);
         unchanged.changes.clear();
-        session.accept(Completion::ReviewArchive {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(unchanged),
+            payload: CompletionPayload::ReviewArchive {
+                result: Ok(unchanged),
+            },
         });
         assert!(session.request_archive_apply().is_err());
         ready(&mut session);
@@ -482,11 +513,10 @@ mod tests {
             serde_json::from_slice::<Command>(&serde_json::to_vec(&command).unwrap()).unwrap(),
             command
         );
-        let Command::ApplyArchive {
+        let Command {
             generation,
             operation,
-            expected,
-            target,
+            payload: CommandPayload::ApplyArchive { expected, target },
         } = command
         else {
             unreachable!()
@@ -494,26 +524,32 @@ mod tests {
         assert_eq!(expected, archive(&[1]));
         assert_eq!(target, archive(&[2]));
         assert_eq!(
-            session.accept(Completion::CaptureArchive {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(target.clone())
+                payload: CompletionPayload::CaptureArchive {
+                    result: Ok(target.clone())
+                }
             }),
             Acceptance::IgnoredStale
         );
         assert_eq!(
-            session.accept(Completion::ApplyArchive {
+            session.accept(Completion {
                 generation: generation + 1,
                 operation,
-                result: Ok(target.clone())
+                payload: CompletionPayload::ApplyArchive {
+                    result: Ok(target.clone())
+                }
             }),
             Acceptance::IgnoredStale
         );
         assert!(session.busy());
-        let mismatch = Completion::ApplyArchive {
+        let mismatch = Completion {
             generation,
             operation,
-            result: Ok(archive(&[3])),
+            payload: CompletionPayload::ApplyArchive {
+                result: Ok(archive(&[3])),
+            },
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&mismatch).unwrap()).unwrap(),
@@ -529,18 +565,20 @@ mod tests {
         ));
         assert!(session.request_archive_apply().is_err());
         ready(&mut session);
-        let Command::ApplyArchive {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyArchive { .. },
         } = session.request_archive_apply().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ApplyArchive {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(archive(&[2])),
+            payload: CompletionPayload::ApplyArchive {
+                result: Ok(archive(&[2])),
+            },
         });
         assert_eq!(
             session.archive(),
@@ -552,10 +590,10 @@ mod tests {
         let mut session = session();
         session.connect().unwrap();
         ready(&mut session);
-        let Command::ApplyArchive {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyArchive { .. },
         } = session.request_archive_apply().unwrap()
         else {
             unreachable!()
@@ -564,10 +602,12 @@ mod tests {
             message: "recovery failed".into(),
             recovery: Recovery::Failed,
         };
-        session.accept(Completion::ApplyArchive {
+        session.accept(Completion {
             generation,
             operation,
-            result: Err(failure.clone()),
+            payload: CompletionPayload::ApplyArchive {
+                result: Err(failure.clone()),
+            },
         });
         assert_eq!(
             session.archive(),

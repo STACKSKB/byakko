@@ -12,6 +12,17 @@ pub struct Identity {
     pub usage: u16,
 }
 
+impl Identity {
+    /// Stable discovery token for the same collection fields used by exact selection.
+    /// Display strings are deliberately absent because they can vary by OS locale.
+    pub fn discovery_id(&self) -> String {
+        format!(
+            "{}|{:04x}:{:04x}:{}:{:04x}:{:04x}",
+            self.path, self.vendor_id, self.product_id, self.interface, self.usage_page, self.usage
+        )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SelectionError {
     Missing,
@@ -141,6 +152,24 @@ mod tests {
                 target.select(std::slice::from_ref(&replacement)),
                 Err(SelectionError::Changed)
             );
+        }
+    }
+
+    #[test]
+    fn discovery_id_changes_with_every_selected_identity_field() {
+        let original = identity("path-a");
+        let changes: [fn(&mut Identity); 6] = [
+            |id| id.path = "path-b".into(),
+            |id| id.vendor_id += 1,
+            |id| id.product_id += 1,
+            |id| id.interface += 1,
+            |id| id.usage_page += 1,
+            |id| id.usage += 1,
+        ];
+        for change in changes {
+            let mut changed = original.clone();
+            change(&mut changed);
+            assert_ne!(original.discovery_id(), changed.discovery_id());
         }
     }
 }

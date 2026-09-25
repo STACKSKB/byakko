@@ -1,4 +1,6 @@
 use super::*;
+use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::{DeviceActivity, Feature};
 use byakko_core::{
     Action,
     session::{ApplyFailure, Recovery},
@@ -30,13 +32,20 @@ fn ready() -> Desktop {
         .with_archive(device.archive_capabilities().unwrap())
         .unwrap();
     let generation = session.connect().unwrap();
-    let Command::Read { operation, .. } = session.request_read().unwrap() else {
+    let Command {
+        operation,
+        payload: CommandPayload::Read { .. },
+        ..
+    } = session.request_read().unwrap()
+    else {
         unreachable!()
     };
-    session.accept(Completion::Read {
+    session.accept(Completion {
         generation,
         operation,
-        result: device.read(),
+        payload: CompletionPayload::Read {
+            result: device.read(),
+        },
     });
     let executor = Executor::spawn(device, Default::default()).unwrap();
     executor.set_generation(generation);
@@ -212,21 +221,29 @@ fn automatic_reconnect_preserves_staged_draft_and_ignores_late_completion() {
     app.accept_availability(Availability::Ready {
         id: "demo-2".into(),
     });
-    let byakko_core::session::Activity::Read { operation } = app.session.activity() else {
+    let byakko_core::session::Activity::Device {
+        operation,
+        request: DeviceActivity::Read(Feature::Keymap),
+    } = app.session.activity()
+    else {
         panic!("automatic reconnect did not read");
     };
     let operation = *operation;
     assert_ne!(old_generation, app.session.generation());
-    let _ = app.complete(Completion::Read {
+    let _ = app.complete(Completion {
         generation: old_generation,
         operation,
-        result: Ok(baseline.clone()),
+        payload: CompletionPayload::Read {
+            result: Ok(baseline.clone()),
+        },
     });
     assert!(app.session.busy());
-    let _ = app.complete(Completion::Read {
+    let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation,
-        result: Ok(baseline),
+        payload: CompletionPayload::Read {
+            result: Ok(baseline),
+        },
     });
     assert_eq!(app.session.status(), &Status::Ready);
     assert_eq!(app.session.draft(), draft.as_ref());
@@ -251,7 +268,10 @@ fn changed_configuration_path_forces_new_read() {
     });
     assert!(matches!(
         app.session.activity(),
-        byakko_core::session::Activity::Read { .. }
+        byakko_core::session::Activity::Device {
+            request: DeviceActivity::Read(Feature::Keymap),
+            ..
+        }
     ));
     assert!(app.session.generation() > generation);
     assert_eq!(app.selected_device.as_deref(), Some("another-path"));
@@ -274,21 +294,23 @@ fn ambiguous_and_enumeration_failure_block_automatic_reads() {
 fn failed_write_does_not_restart_automatically_after_reappearance() {
     let mut app = ready();
     app.stage(1);
-    let Command::Apply {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::Apply { .. },
     } = app.session.request_apply().unwrap()
     else {
         unreachable!()
     };
-    let _ = app.complete(Completion::Apply {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Err(ApplyFailure {
-            message: "uncertain write".into(),
-            recovery: Recovery::Unverified,
-        }),
+        payload: CompletionPayload::Apply {
+            result: Err(ApplyFailure {
+                message: "uncertain write".into(),
+                recovery: Recovery::Unverified,
+            }),
+        },
     });
     app.accept_availability(Availability::Missing);
     assert_eq!(app.auto_read, AutoRead::ManualOnly);
@@ -339,10 +361,10 @@ fn stages_only_selected_generic_layer_and_preserves_fixed_opaque_action() {
 fn close_waits_for_apply_and_keeps_failure_and_draft_visible() {
     let mut app = ready();
     app.stage(1);
-    let Command::Apply {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::Apply { .. },
     } = app.session.request_apply().unwrap()
     else {
         unreachable!()
@@ -351,13 +373,15 @@ fn close_waits_for_apply_and_keeps_failure_and_draft_visible() {
     assert_eq!(app.closing, Closing::Waiting);
     let _ = app.update(Message::DiscardAndClose);
     assert!(app.busy());
-    let _ = app.complete(Completion::Apply {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Err(ApplyFailure {
-            message: "readback failed".into(),
-            recovery: Recovery::Unverified,
-        }),
+        payload: CompletionPayload::Apply {
+            result: Err(ApplyFailure {
+                message: "readback failed".into(),
+                recovery: Recovery::Unverified,
+            }),
+        },
     });
     assert_eq!(app.closing, Closing::Open);
     assert_eq!(app.session.changes().len(), 1);
@@ -401,13 +425,19 @@ fn manual_reconnect_rebinds_even_without_a_discovery_change() {
     assert_eq!(app.selected_device.as_deref(), Some("replugged-collection"));
     assert!(app.session.generation() > old_generation);
     assert_eq!(app.session.draft(), draft.as_ref());
-    let byakko_core::session::Activity::Read { operation } = *app.session.activity() else {
+    let byakko_core::session::Activity::Device {
+        operation,
+        request: DeviceActivity::Read(Feature::Keymap),
+    } = *app.session.activity()
+    else {
         panic!("fresh binding must read before editing");
     };
-    let _ = app.complete(Completion::Read {
+    let _ = app.complete(Completion {
         generation: old_generation,
         operation,
-        result: Ok(baseline),
+        payload: CompletionPayload::Read {
+            result: Ok(baseline),
+        },
     });
     assert!(
         app.session.busy(),

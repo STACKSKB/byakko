@@ -1,4 +1,8 @@
 use super::{Activity, Command, Session, Status};
+use crate::session::CommandPayload;
+#[cfg(test)]
+use crate::session::CompletionPayload;
+use crate::session::{DeviceActivity, Feature};
 use crate::settings::{Capabilities, Edit, editor::Editor};
 
 impl Session {
@@ -36,10 +40,14 @@ impl Session {
         }
         self.settings_editor()?;
         let operation = self.operation()?;
-        self.activity = Activity::ReadSettings { operation };
-        Ok(Command::ReadSettings {
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Read(Feature::Settings),
+        };
+        Ok(Command {
             generation: self.generation,
             operation,
+            payload: CommandPayload::ReadSettings {},
         })
     }
     pub fn request_setting_apply(&mut self) -> Result<Command, String> {
@@ -48,15 +56,17 @@ impl Session {
         }
         let (expected, edit) = self.settings_editor()?.request_apply()?;
         let operation = self.operation()?;
-        self.activity = Activity::ApplySetting { operation };
+        self.activity = Activity::Device {
+            operation,
+            request: DeviceActivity::Apply(Feature::Settings),
+        };
         // A one-field settings transaction checks its own snapshot. Other
         // editors retain their last observed values and guarded write paths.
         self.invalidate_archive();
-        Ok(Command::ApplySetting {
+        Ok(Command {
             generation: self.generation,
             operation,
-            expected,
-            edit,
+            payload: CommandPayload::ApplySetting { expected, edit },
         })
     }
 }
@@ -130,40 +140,46 @@ mod tests {
         }
     }
     fn read(session: &mut Session, snapshot: Snapshot) {
-        let Command::ReadSettings {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadSettings {},
         } = session.request_settings_read().unwrap()
         else {
             unreachable!()
         };
         assert_eq!(
-            session.accept(Completion::ReadSettings {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(snapshot)
+                payload: CompletionPayload::ReadSettings {
+                    result: Ok(snapshot)
+                }
             }),
             Acceptance::Accepted
         );
     }
     fn read_keymap(session: &mut Session) {
-        let Command::Read {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::Read {},
         } = session.request_read().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::Read {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(State {
-                revision: vec![1],
-                bindings: BTreeMap::from([(
-                    "base".into(),
-                    BTreeMap::from([("a".into(), Action::Disabled)]),
-                )]),
-            }),
+            payload: CompletionPayload::Read {
+                result: Ok(State {
+                    revision: vec![1],
+                    bindings: BTreeMap::from([(
+                        "base".into(),
+                        BTreeMap::from([("a".into(), Action::Disabled)]),
+                    )]),
+                }),
+            },
         });
         assert_eq!(session.status(), &Status::Ready);
     }
@@ -177,19 +193,21 @@ mod tests {
             .edit_setting(edit("timer", Value::Number(20)))
             .unwrap();
         let original = session.baseline().cloned();
-        let Command::ApplySetting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplySetting { .. },
         } = session.request_setting_apply().unwrap()
         else {
             unreachable!()
         };
         assert_eq!(session.status(), &Status::Ready);
-        session.accept(Completion::ApplySetting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(snapshot(2, 20)),
+            payload: CompletionPayload::ApplySetting {
+                result: Ok(snapshot(2, 20)),
+            },
         });
         assert_eq!(session.status(), &Status::Ready);
         assert_eq!(session.baseline(), original.as_ref());
@@ -263,11 +281,14 @@ mod tests {
         session
             .edit_setting(edit("timer", Value::Number(25)))
             .unwrap();
-        let Command::ApplySetting {
+        let Command {
             generation,
             operation,
-            expected,
-            edit: requested_edit,
+            payload:
+                CommandPayload::ApplySetting {
+                    expected,
+                    edit: requested_edit,
+                },
         } = session.request_setting_apply().unwrap()
         else {
             unreachable!()
@@ -281,17 +302,21 @@ mod tests {
             }
         );
         assert_eq!(
-            session.accept(Completion::ReadSettings {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(snapshot(2, 25))
+                payload: CompletionPayload::ReadSettings {
+                    result: Ok(snapshot(2, 25))
+                }
             }),
             Acceptance::IgnoredStale
         );
-        let mismatch = Completion::ApplySetting {
+        let mismatch = Completion {
             generation,
             operation,
-            result: Ok(snapshot(2, 20)),
+            payload: CompletionPayload::ApplySetting {
+                result: Ok(snapshot(2, 20)),
+            },
         };
         assert_eq!(
             serde_json::from_slice::<Completion>(&serde_json::to_vec(&mismatch).unwrap()).unwrap(),
@@ -349,21 +374,23 @@ mod tests {
         ));
         read(&mut session, snapshot(1, 10));
         read_keymap(&mut session);
-        let Command::ApplySetting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplySetting { .. },
         } = session.request_setting_apply().unwrap()
         else {
             unreachable!()
         };
-        session.accept(Completion::ApplySetting {
+        session.accept(Completion {
             generation,
             operation,
-            result: Err(ApplyFailure {
-                message: "write failed".into(),
-                recovery: Recovery::Failed,
-            }),
+            payload: CompletionPayload::ApplySetting {
+                result: Err(ApplyFailure {
+                    message: "write failed".into(),
+                    recovery: Recovery::Failed,
+                }),
+            },
         });
         assert_eq!(
             session.settings().unwrap().draft().unwrap()["timer"],

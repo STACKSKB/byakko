@@ -1,4 +1,5 @@
 use super::*;
+use crate::session::{CommandPayload, CompletionPayload};
 use crate::{
     Action, Change, Descriptor, Layer, PhysicalKey, State,
     macros::{self, Content, Edit, Snapshot, recorder::DelayPolicy},
@@ -76,42 +77,47 @@ fn snapshot(revision: u8, program: Program) -> Snapshot {
 fn ready() -> Session {
     let mut session = session();
     session.connect().unwrap();
-    let Command::Read {
+    let Command {
         generation,
         operation,
+        payload: CommandPayload::Read {},
     } = session.request_read().unwrap()
     else {
         unreachable!()
     };
-    session.accept(Completion::Read {
+    session.accept(Completion {
         generation,
         operation,
-        result: Ok(State {
-            revision: vec![1],
-            bindings: BTreeMap::from([(
-                "layer".into(),
-                BTreeMap::from([("key".into(), Action::Key(4))]),
-            )]),
-        }),
+        payload: CompletionPayload::Read {
+            result: Ok(State {
+                revision: vec![1],
+                bindings: BTreeMap::from([(
+                    "layer".into(),
+                    BTreeMap::from([("key".into(), Action::Key(4))]),
+                )]),
+            }),
+        },
     });
     read_macro(&mut session, snapshot(1, program(1)));
     session
 }
 
 fn read_macro(session: &mut Session, value: Snapshot) {
-    let Command::ReadMacro {
+    let Command {
         generation,
         operation,
-        slot,
+        payload: CommandPayload::ReadMacro { slot },
     } = session.request_macro_read().unwrap()
     else {
         unreachable!()
     };
-    session.accept(Completion::ReadMacro {
+    session.accept(Completion {
         generation,
         operation,
-        slot,
-        result: Ok(value),
+        payload: CompletionPayload::ReadMacro {
+            slot,
+            result: Ok(value),
+        },
     });
 }
 

@@ -1,4 +1,5 @@
 use super::apply_error::{RestoreMismatch, settings_apply_error};
+use super::transaction::{apply_with_recovery, pacing, save_json_backup};
 use super::*;
 
 pub fn read_settings() -> Result<crate::nia87::settings::Settings> {
@@ -52,48 +53,37 @@ pub(super) fn apply_setting_with(
         return Ok(target);
     }
     let (_, device) = selection.open()?;
-    std::fs::create_dir_all(backup_dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let path = backup_dir.join(format!("settings-before-{stamp}.json"));
-    let mut backup = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
-    serde_json::to_writer_pretty(
-        &mut backup,
+    let backup = save_json_backup(
+        backup_dir,
+        "settings-before",
         &serde_json::json!({"format_version":1,"before":expected,"target":target}),
     )?;
-    backup.sync_all()?;
     let send = |data: &[u8; 64]| -> Result<()> {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(data);
         device.send_setter(&host)?;
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(pacing::SETTING_SETTER);
         Ok(())
     };
-    let result = (|| -> Result<Settings> {
-        send(&report)?;
-        let actual = read_settings_on_device(&device)?;
-        if actual != target {
-            return Err("Setting readback mismatch".into());
-        }
-        Ok(actual)
-    })();
-    match result {
-        Ok(actual) => Ok(actual),
-        Err(error) => {
-            let restore = (|| -> Result<()> {
-                send(&restore_report)?;
-                if &read_settings_on_device(&device)? != expected {
-                    return Err(RestoreMismatch("Settings restoration mismatch").into());
-                }
-                Ok(())
-            })();
-            Err(settings_apply_error(&error, restore, &path).into())
-        }
-    }
+    apply_with_recovery(
+        &backup,
+        || -> Result<Settings> {
+            send(&report)?;
+            let actual = read_settings_on_device(&device)?;
+            if actual != target {
+                return Err("Setting readback mismatch".into());
+            }
+            Ok(actual)
+        },
+        || -> Result<()> {
+            send(&restore_report)?;
+            if &read_settings_on_device(&device)? != expected {
+                return Err(RestoreMismatch("Settings restoration mismatch").into());
+            }
+            Ok(())
+        },
+        settings_apply_error,
+    )
 }
 
 /// Guarded one-setting transaction with an explicit recovery outcome.

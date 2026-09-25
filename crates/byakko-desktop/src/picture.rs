@@ -4,6 +4,7 @@ use byakko_core::picture::{
     self, Content, Edit,
     editor::{Editor, Status},
 };
+use byakko_core::session::CommandPayload;
 use iced::{
     Element, Fill,
     widget::{button, column, scrollable, text},
@@ -152,10 +153,10 @@ impl Desktop {
                     .session
                     .edit_lighting(byakko_core::lighting::Edit::Effect(effect))
                     .and_then(|_| self.session.request_lighting_apply());
-                if let Ok(byakko_core::session::Command::ApplyLighting {
+                if let Ok(byakko_core::session::Command {
                     generation,
                     operation,
-                    ..
+                    payload: CommandPayload::ApplyLighting { .. },
                 }) = &request
                 {
                     self.picture_activation = Some((*generation, *operation));

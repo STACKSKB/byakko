@@ -3,7 +3,7 @@
 use byakko_devices::{
     hid::HidDevice,
     nia87::{device, protocol},
-    rongyuan::yc500::{macro_io, macro_program},
+    rongyuan::yc500::macro_program,
 };
 use std::{fs::OpenOptions, time::Duration};
 
@@ -56,7 +56,12 @@ fn main() -> Result<()> {
     let (candidate, hid) = device::open_unique()?;
     let mut captures = Vec::new();
     for slot in [0, 49, 50] {
-        let bytes = macro_io::stable_reads(|| complete(&hid, slot))?;
+        // This boundary probe deliberately compares two diagnostic captures;
+        // normal product reads do not perform duplicate sweeps.
+        let bytes = complete(&hid, slot)?;
+        if complete(&hid, slot)? != bytes {
+            return Err(format!("Macro slot {slot} changed between diagnostic captures").into());
+        }
         let nonzero = bytes
             .iter()
             .enumerate()

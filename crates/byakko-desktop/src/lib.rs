@@ -1,4 +1,6 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
+use byakko_core::session::CompletionPayload;
+use byakko_core::session::{DeviceActivity, Feature};
 mod action_catalog;
 mod archive;
 mod audio_stream;
@@ -484,12 +486,25 @@ impl Desktop {
                 let caution = self.hold_reconnect_if_cautious();
                 let write_in_flight = matches!(
                     self.session.activity(),
-                    byakko_core::session::Activity::Apply { .. }
-                        | byakko_core::session::Activity::ApplyMacro { .. }
-                        | byakko_core::session::Activity::ApplyLighting { .. }
-                        | byakko_core::session::Activity::ApplyPicture { .. }
-                        | byakko_core::session::Activity::ApplySetting { .. }
-                        | byakko_core::session::Activity::ApplyArchive { .. }
+                    byakko_core::session::Activity::Device {
+                        request: DeviceActivity::Apply(Feature::Keymap),
+                        ..
+                    } | byakko_core::session::Activity::Device {
+                        request: DeviceActivity::Apply(Feature::Macro { .. }),
+                        ..
+                    } | byakko_core::session::Activity::Device {
+                        request: DeviceActivity::Apply(Feature::Lighting),
+                        ..
+                    } | byakko_core::session::Activity::Device {
+                        request: DeviceActivity::Apply(Feature::Picture),
+                        ..
+                    } | byakko_core::session::Activity::Device {
+                        request: DeviceActivity::Apply(Feature::Settings),
+                        ..
+                    } | byakko_core::session::Activity::Device {
+                        request: DeviceActivity::Apply(Feature::Archive),
+                        ..
+                    }
                 );
                 if write_in_flight {
                     self.auto_read = AutoRead::ManualOnly;
@@ -578,16 +593,11 @@ impl Desktop {
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
         let macro_assignment_completion = self.macro_assignment_completion(&completion);
-        let activated_picture = match &completion {
-            Completion::ApplyLighting {
-                generation,
-                operation,
-                ..
-            } => self.picture_activation == Some((*generation, *operation)),
-            _ => false,
-        };
-        let macro_draft_before_read = match &completion {
-            Completion::ReadMacro { .. } => Some(
+        let activated_picture =
+            matches!(&completion.payload, CompletionPayload::ApplyLighting { .. })
+                && self.picture_activation == Some((completion.generation, completion.operation));
+        let macro_draft_before_read = match &completion.payload {
+            CompletionPayload::ReadMacro { .. } => Some(
                 self.session
                     .macros()
                     .and_then(|editor| editor.draft())
@@ -596,34 +606,45 @@ impl Desktop {
             _ => None,
         };
         let keymap_result = matches!(
-            &completion,
-            Completion::Read { .. } | Completion::Apply { .. }
+            &completion.payload,
+            CompletionPayload::Read { .. } | CompletionPayload::Apply { .. }
         );
         let archive_result = matches!(
-            completion,
-            Completion::CaptureArchive { .. }
-                | Completion::ReviewArchive { .. }
-                | Completion::ApplyArchive { .. }
+            &completion.payload,
+            CompletionPayload::CaptureArchive { .. }
+                | CompletionPayload::ReviewArchive { .. }
+                | CompletionPayload::ApplyArchive { .. }
         );
         let lighting_result = matches!(
-            completion,
-            Completion::ReadLighting { .. } | Completion::ApplyLighting { .. }
+            &completion.payload,
+            CompletionPayload::ReadLighting { .. } | CompletionPayload::ApplyLighting { .. }
         );
         let picture_result = matches!(
-            completion,
-            Completion::ReadPicture { .. } | Completion::ApplyPicture { .. }
+            &completion.payload,
+            CompletionPayload::ReadPicture { .. } | CompletionPayload::ApplyPicture { .. }
         );
         let settings_result = matches!(
-            completion,
-            Completion::ReadSettings { .. } | Completion::ApplySetting { .. }
+            &completion.payload,
+            CompletionPayload::ReadSettings { .. } | CompletionPayload::ApplySetting { .. }
         );
         let macro_result = matches!(
-            completion,
-            Completion::ReadMacro { .. } | Completion::ApplyMacro { .. }
+            &completion.payload,
+            CompletionPayload::ReadMacro { .. } | CompletionPayload::ApplyMacro { .. }
         );
-        let macro_catalog_result = matches!(completion, Completion::ReadMacroCatalog { .. });
+        let macro_catalog_result = matches!(
+            &completion.payload,
+            CompletionPayload::ReadMacroCatalog { .. }
+        );
+        let was_scanning = self.session.macro_catalog_scanning();
         if self.session.accept(completion) == Acceptance::IgnoredStale {
             return Task::none();
+        }
+        if was_scanning
+            && !macro_catalog_result
+            && !self.session.macro_catalog_scanning()
+            && let Some(executor) = &self.executor
+        {
+            executor.cancel_macro_catalog();
         }
         if settings_result && let Some(editor) = self.session.settings() {
             self.live_settings.reconcile(editor.status());

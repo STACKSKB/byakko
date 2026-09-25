@@ -1,5 +1,6 @@
 use super::*;
 use crate::HostActivity;
+use byakko_core::session::CommandPayload;
 use byakko_core::{
     Change, State,
     lighting::{Content, HostMode, HostSource, Setting},
@@ -220,9 +221,10 @@ fn stop_during_start_restores_before_any_frame() {
     );
     assert!(
         h.executor
-            .try_submit(Command::Read {
+            .try_submit(Command {
                 generation: 7,
-                operation: 2
+                operation: 2,
+                payload: CommandPayload::Read {}
             })
             .is_err()
     );

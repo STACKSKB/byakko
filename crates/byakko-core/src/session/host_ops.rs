@@ -4,6 +4,8 @@ use super::{
     Recovery, Session, Status,
 };
 use crate::lighting::{self, Content, Edit, Evidence, Snapshot, editor};
+#[cfg(test)]
+use crate::session::{CommandPayload, CompletionPayload};
 
 impl Session {
     pub(super) fn select_default_host_mode(&mut self) {
@@ -322,39 +324,45 @@ mod tests {
         })
         .unwrap();
         session.connect().unwrap();
-        let Command::Read {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::Read {},
         } = session.request_read().unwrap()
         else {
             unreachable!()
         };
         assert_eq!(
-            session.accept(Completion::Read {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(State {
-                    revision: vec![1],
-                    bindings: BTreeMap::from([(
-                        "base".into(),
-                        BTreeMap::from([("a".into(), Action::Disabled)])
-                    )]),
-                }),
+                payload: CompletionPayload::Read {
+                    result: Ok(State {
+                        revision: vec![1],
+                        bindings: BTreeMap::from([(
+                            "base".into(),
+                            BTreeMap::from([("a".into(), Action::Disabled)])
+                        )]),
+                    })
+                }
             }),
             Acceptance::Accepted
         );
-        let Command::ReadLighting {
+        let Command {
             generation,
             operation,
+            payload: CommandPayload::ReadLighting {},
         } = session.request_lighting_read().unwrap()
         else {
             unreachable!()
         };
         assert_eq!(
-            session.accept(Completion::ReadLighting {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(snapshot()),
+                payload: CompletionPayload::ReadLighting {
+                    result: Ok(snapshot())
+                }
             }),
             Acceptance::Accepted
         );
@@ -437,10 +445,10 @@ mod tests {
     fn transport_accepted_baseline_can_start_and_matching_readback_restores_host_mode() {
         let mut session = loaded();
         session.edit_lighting(Edit::Brightness(4)).unwrap();
-        let Command::ApplyLighting {
+        let Command {
             generation,
             operation,
-            ..
+            payload: CommandPayload::ApplyLighting { .. },
         } = session.request_lighting_apply().unwrap()
         else {
             unreachable!()
@@ -453,10 +461,12 @@ mod tests {
         };
         setting.brightness = Some(4);
         assert_eq!(
-            session.accept(Completion::ApplyLighting {
+            session.accept(Completion {
                 generation,
                 operation,
-                result: Ok(accepted.clone()),
+                payload: CompletionPayload::ApplyLighting {
+                    result: Ok(accepted.clone())
+                }
             }),
             Acceptance::Accepted
         );

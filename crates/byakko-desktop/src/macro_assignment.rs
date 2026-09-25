@@ -1,5 +1,6 @@
 //! Correlate a macro save with the key binding it authorizes.
 use super::Desktop;
+use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::{
     Change,
     macros::editor::Status as MacroStatus,
@@ -130,11 +131,10 @@ impl Desktop {
         };
         if self.session.macros().is_some_and(|editor| editor.dirty()) {
             match self.session.request_macro_apply() {
-                Ok(Command::ApplyMacro {
+                Ok(Command {
                     generation,
                     operation,
-                    expected,
-                    desired,
+                    payload: CommandPayload::ApplyMacro { expected, desired },
                 }) => {
                     self.macro_assignment = Some(Pending::Saving {
                         ticket: Ticket {
@@ -143,11 +143,10 @@ impl Desktop {
                         },
                         target,
                     });
-                    self.submit(Ok(Command::ApplyMacro {
+                    self.submit(Ok(Command {
                         generation,
                         operation,
-                        expected,
-                        desired,
+                        payload: CommandPayload::ApplyMacro { expected, desired },
                     }));
                     if !self.session.busy() {
                         self.macro_assignment = None;
@@ -189,10 +188,10 @@ impl Desktop {
         }
         match self.session.request_apply() {
             Ok(
-                command @ Command::Apply {
+                command @ Command {
                     generation,
                     operation,
-                    ..
+                    payload: CommandPayload::Apply { .. },
                 },
             ) => {
                 self.macro_assignment = Some(Pending::Assigning {
@@ -242,11 +241,10 @@ impl Desktop {
         match (self.macro_assignment.as_ref()?, completion) {
             (
                 Pending::Saving { ticket, target },
-                Completion::ApplyMacro {
+                Completion {
                     generation,
                     operation,
-                    slot,
-                    result,
+                    payload: CompletionPayload::ApplyMacro { slot, result },
                 },
             ) if ticket.generation == *generation
                 && ticket.operation == *operation
@@ -259,10 +257,10 @@ impl Desktop {
             }
             (
                 Pending::Assigning { ticket, .. },
-                Completion::Apply {
+                Completion {
                     generation,
                     operation,
-                    result,
+                    payload: CompletionPayload::Apply { result },
                 },
             ) if ticket.generation == *generation && ticket.operation == *operation => {
                 Some(match result {

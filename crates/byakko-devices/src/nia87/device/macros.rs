@@ -1,4 +1,5 @@
 use super::apply_error::{RestoreMismatch, detailed, macro_apply_error};
+use super::transaction::{apply_with_recovery, pacing, save_json_backup};
 use super::transport::FeatureSetter;
 use super::{HidDevice, Result, Selection, Session, read_payload, transaction_lock};
 use serde_json;
@@ -36,9 +37,9 @@ pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> R
         device
             .send_setter(&host)
             .map_err(|error| format!("Macro {slot}, write page {page}: {error}"))?;
-        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::thread::sleep(pacing::MACRO_PAGE);
     }
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    std::thread::sleep(pacing::MACRO_SETTLE);
     Ok(())
 }
 
@@ -68,52 +69,52 @@ pub(super) fn apply_macro_with(
     new_macro: &crate::nia87::macros::Macro,
     backup_dir: &std::path::Path,
 ) -> Result<Vec<u8>> {
+    let before = crate::nia87::macros::ValidatedBeforeImage::validate(expected)?;
+    apply_macro_validated_with(selection, slot, &before, new_macro, backup_dir)
+}
+
+pub(super) fn apply_macro_validated_with(
+    selection: Selection<'_>,
+    slot: u8,
+    before: &crate::nia87::macros::ValidatedBeforeImage,
+    new_macro: &crate::nia87::macros::Macro,
+    backup_dir: &std::path::Path,
+) -> Result<Vec<u8>> {
     let _lock = transaction_lock()?;
     let target = crate::nia87::macros::encode(new_macro)?;
-    crate::nia87::macros::decode(expected)?; // Refuse to overwrite an unrecognized store we cannot restore.
+    let expected = before.as_bytes();
     if target == expected {
         return Ok(target);
     }
-    std::fs::create_dir_all(backup_dir)?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)?
-        .as_nanos();
-    let path = backup_dir.join(format!("macro-{slot}-before-{stamp}.json"));
-    let mut backup = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&path)?;
-    serde_json::to_writer_pretty(
-        &mut backup,
+    let backup = save_json_backup(
+        backup_dir,
+        &format!("macro-{slot}-before"),
         &serde_json::json!({"slot":slot,"bytes":expected}),
     )?;
-    backup.sync_all()?;
     let (_, device) = selection.open()?;
-    let result = (|| -> Result<Vec<u8>> {
-        write_macro_bytes(&device, slot, &target)?;
-        let mut actual = read_macro_on_device(&device, slot)?;
-        if actual != target {
-            // The first copy after the setter can straddle a flash transition.
-            // Retry only a mismatch, once, before treating it as a failed save.
-            std::thread::sleep(std::time::Duration::from_millis(200));
-            actual = read_macro_on_device(&device, slot)?;
-        }
-        if actual != target {
-            return Err("Macro readback mismatch".into());
-        }
-        Ok(actual)
-    })();
-    match result {
-        Ok(value) => Ok(value),
-        Err(error) => {
-            let rollback = (|| -> Result<()> {
-                write_macro_bytes(&device, slot, expected)?;
-                if read_macro_on_device(&device, slot)? != expected {
-                    return Err(RestoreMismatch("macro restoration mismatch").into());
-                }
-                Ok(())
-            })();
-            Err(macro_apply_error(error.as_ref(), rollback, &path).into())
-        }
-    }
+    apply_with_recovery(
+        &backup,
+        || -> Result<Vec<u8>> {
+            write_macro_bytes(&device, slot, &target)?;
+            let mut actual = read_macro_on_device(&device, slot)?;
+            if actual != target {
+                // The first copy after the setter can straddle a flash transition.
+                // Retry only a mismatch, once, before treating it as a failed save.
+                std::thread::sleep(pacing::MACRO_READBACK_MISMATCH);
+                actual = read_macro_on_device(&device, slot)?;
+            }
+            if actual != target {
+                return Err("Macro readback mismatch".into());
+            }
+            Ok(actual)
+        },
+        || -> Result<()> {
+            write_macro_bytes(&device, slot, expected)?;
+            if read_macro_on_device(&device, slot)? != expected {
+                return Err(RestoreMismatch("macro restoration mismatch").into());
+            }
+            Ok(())
+        },
+        macro_apply_error,
+    )
 }

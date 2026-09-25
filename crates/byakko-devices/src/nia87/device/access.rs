@@ -104,6 +104,23 @@ impl Access {
         detailed(self.apply_macro(slot, expected, new_macro, backup_dir))
     }
 
+    /// Use a before-image already validated by the portable macro adapter.
+    pub fn apply_macro_validated_detailed(
+        &self,
+        slot: u8,
+        expected: &crate::nia87::macros::ValidatedBeforeImage,
+        new_macro: &crate::nia87::macros::Macro,
+        backup_dir: &std::path::Path,
+    ) -> std::result::Result<Vec<u8>, byakko_core::session::ApplyFailure> {
+        detailed(macros::apply_macro_validated_with(
+            self.selection(),
+            slot,
+            expected,
+            new_macro,
+            backup_dir,
+        ))
+    }
+
     pub fn apply_picture_detailed(
         &self,
         expected: &[[u8; 3]],

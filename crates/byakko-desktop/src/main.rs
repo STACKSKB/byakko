@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Box::new(|| match nia87::device::availability() {
                     nia87::device::Availability::Unavailable => Availability::Missing,
                     nia87::device::Availability::Available(candidate) => Availability::Ready {
-                        id: collection_id(&candidate),
+                        id: candidate.identity().discovery_id(),
                     },
                     nia87::device::Availability::Ambiguous(candidates) => Availability::Ambiguous {
                         count: candidates.len(),
@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Box::new(move |id| {
                     let candidate = match nia87::device::availability() {
                         nia87::device::Availability::Available(candidate)
-                            if id.is_none_or(|id| collection_id(&candidate) == id) =>
+                            if id.is_none_or(|id| candidate.identity().discovery_id() == id) =>
                         {
                             candidate
                         }
@@ -63,7 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .map_err(|error| error.to_string())?;
                     let executor = Executor::spawn(BoundNia87Adapter::new(target), backups.clone())
                         .map_err(|error| error.to_string())?;
-                    Ok((collection_id(&candidate), executor))
+                    Ok((candidate.identity().discovery_id(), executor))
                 }),
                 Some(data.join("macro-labels").join("nia87")),
             )
@@ -122,20 +122,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
 }
 
-// Discovery must compare every field pinned by the executor, including metadata
-// when the operating system reuses a collection path after a quick replug.
-fn collection_id(candidate: &nia87::device::Candidate) -> String {
-    format!(
-        "{}|{:04x}:{:04x}:{}:{:04x}:{:04x}",
-        candidate.path,
-        candidate.vid,
-        candidate.pid,
-        candidate.interface,
-        candidate.usage_page,
-        candidate.usage
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,22 +138,9 @@ mod tests {
             manufacturer: None,
             product: None,
         };
-        let original = collection_id(&candidate);
-        let changes: [fn(&mut nia87::device::Candidate); 6] = [
-            |c| c.path = "/dev/hidraw4".into(),
-            |c| c.vid += 1,
-            |c| c.pid += 1,
-            |c| c.interface += 1,
-            |c| c.usage_page -= 1,
-            |c| c.usage += 1,
-        ];
-        for change in changes {
-            let mut changed = candidate.clone();
-            change(&mut changed);
-            assert_ne!(original, collection_id(&changed));
-        }
+        let original = candidate.identity().discovery_id();
         let mut renamed = candidate;
         renamed.product = Some("Localized product name".into());
-        assert_eq!(original, collection_id(&renamed));
+        assert_eq!(original, renamed.identity().discovery_id());
     }
 }

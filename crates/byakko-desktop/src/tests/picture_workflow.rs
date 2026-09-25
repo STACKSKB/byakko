@@ -1,6 +1,8 @@
 use super::*;
 use crate::picture::Message as Picture;
 use byakko_core::picture::{Channel, Content, Edit, editor::Status as PictureStatus};
+use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::{DeviceActivity, Feature};
 use macro_workflow::settle;
 
 fn send(app: &mut Desktop, message: Picture) {
@@ -66,7 +68,10 @@ fn wait_for_live_write(app: &mut Desktop) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while !matches!(
         app.session.activity(),
-        byakko_core::session::Activity::ApplyPicture { .. }
+        byakko_core::session::Activity::Device {
+            request: DeviceActivity::Apply(Feature::Picture),
+            ..
+        }
     ) {
         assert!(
             std::time::Instant::now() < deadline,
@@ -172,17 +177,23 @@ fn failed_live_write_keeps_intent_without_automatic_retry() {
         }),
     );
     wait_for_live_write(&mut app);
-    let byakko_core::session::Activity::ApplyPicture { operation } = app.session.activity() else {
+    let byakko_core::session::Activity::Device {
+        operation,
+        request: DeviceActivity::Apply(Feature::Picture),
+    } = app.session.activity()
+    else {
         panic!("expected picture apply")
     };
     let operation = *operation;
-    let _ = app.complete(Completion::ApplyPicture {
+    let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation,
-        result: Err(ApplyFailure {
-            message: "restore mismatch".into(),
-            recovery: Recovery::Failed,
-        }),
+        payload: CompletionPayload::ApplyPicture {
+            result: Err(ApplyFailure {
+                message: "restore mismatch".into(),
+                recovery: Recovery::Failed,
+            }),
+        },
     });
     assert!(!app.flush_live_picture());
     assert!(app.live_picture.blocked);
@@ -221,7 +232,10 @@ fn entering_colors_does_not_issue_reads_and_connection_preloads_once() {
     let _ = app.update(Message::Read);
     assert!(matches!(
         app.session.activity(),
-        byakko_core::session::Activity::Read { .. }
+        byakko_core::session::Activity::Device {
+            request: DeviceActivity::Read(Feature::Keymap),
+            ..
+        }
     ));
     let _ = app.update(Message::Page(Page::Picture));
     send(&mut app, Picture::Read);
@@ -237,13 +251,19 @@ fn failed_color_read_waits_for_an_explicit_retry() {
     let mut app = ready();
     let _ = app.update(Message::Page(Page::Picture));
     send(&mut app, Picture::Read);
-    let byakko_core::session::Activity::ReadPicture { operation } = app.session.activity() else {
+    let byakko_core::session::Activity::Device {
+        operation,
+        request: DeviceActivity::Read(Feature::Picture),
+    } = app.session.activity()
+    else {
         panic!("expected automatic color read");
     };
-    let _ = app.complete(Completion::ReadPicture {
+    let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation: *operation,
-        result: Err("USB read failed".into()),
+        payload: CompletionPayload::ReadPicture {
+            result: Err("USB read failed".into()),
+        },
     });
     assert!(!app.busy());
     let _ = app.update(Message::Page(Page::Keys));
@@ -356,30 +376,34 @@ fn failed_picture_apply_keeps_draft_visible_and_close_waits() {
     );
     let baseline = app.session.picture().unwrap().baseline().cloned();
     let draft = app.session.picture().unwrap().draft().cloned();
-    let Command::ApplyPicture {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ApplyPicture { .. },
     } = app.session.request_picture_apply().unwrap()
     else {
         unreachable!()
     };
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::Waiting);
-    let _ = app.complete(Completion::ReadPicture {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Ok(baseline.clone().unwrap()),
+        payload: CompletionPayload::ReadPicture {
+            result: Ok(baseline.clone().unwrap()),
+        },
     });
     assert!(app.busy());
     let failure = ApplyFailure {
         message: "restore mismatch".into(),
         recovery: Recovery::Failed,
     };
-    let _ = app.complete(Completion::ApplyPicture {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Err(failure.clone()),
+        payload: CompletionPayload::ApplyPicture {
+            result: Err(failure.clone()),
+        },
     });
     assert_eq!(app.closing, Closing::Open);
     let editor = app.session.picture().unwrap();

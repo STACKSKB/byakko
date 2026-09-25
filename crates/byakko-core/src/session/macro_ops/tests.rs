@@ -1,3 +1,4 @@
+use crate::session::{CommandPayload, CompletionPayload};
 use crate::{
     Action, Descriptor, Layer, PhysicalKey, State,
     macros::{self, Content, Edit, Program, Snapshot},
@@ -63,23 +64,26 @@ fn ready() -> Session {
         .with_macros(capabilities)
         .unwrap();
     session.connect().unwrap();
-    let Command::Read {
+    let Command {
         generation,
         operation,
+        payload: CommandPayload::Read {},
     } = session.request_read().unwrap()
     else {
         unreachable!()
     };
-    session.accept(Completion::Read {
+    session.accept(Completion {
         generation,
         operation,
-        result: Ok(State {
-            revision: vec![1],
-            bindings: BTreeMap::from([(
-                "layer".into(),
-                BTreeMap::from([("key".into(), Action::Key(4))]),
-            )]),
-        }),
+        payload: CompletionPayload::Read {
+            result: Ok(State {
+                revision: vec![1],
+                bindings: BTreeMap::from([(
+                    "layer".into(),
+                    BTreeMap::from([("key".into(), Action::Key(4))]),
+                )]),
+            }),
+        },
     });
     read(&mut session, snapshot(1, 1));
     session
@@ -98,20 +102,22 @@ fn snapshot(revision: u8, count: u32) -> Snapshot {
 }
 
 fn read(session: &mut Session, value: Snapshot) {
-    let Command::ReadMacro {
+    let Command {
         generation,
         operation,
-        slot,
+        payload: CommandPayload::ReadMacro { slot },
     } = session.request_macro_read().unwrap()
     else {
         unreachable!()
     };
     assert_eq!(
-        session.accept(Completion::ReadMacro {
+        session.accept(Completion {
             generation,
             operation,
-            slot,
-            result: Ok(value)
+            payload: CompletionPayload::ReadMacro {
+                slot,
+                result: Ok(value)
+            }
         }),
         Acceptance::Accepted
     );
@@ -124,11 +130,10 @@ fn shared_activity_excludes_other_feature_and_rejects_wrong_slot_then_verifies()
     let command = session.request_macro_apply().unwrap();
     let json = serde_json::to_vec(&command).unwrap();
     assert_eq!(serde_json::from_slice::<Command>(&json).unwrap(), command);
-    let Command::ApplyMacro {
+    let Command {
         generation,
         operation,
-        expected,
-        desired,
+        payload: CommandPayload::ApplyMacro { expected, desired },
     } = command
     else {
         unreachable!()
@@ -144,21 +149,25 @@ fn shared_activity_excludes_other_feature_and_rejects_wrong_slot_then_verifies()
     assert!(session.select_macro("scene").is_err());
     assert!(session.connect().is_err());
     assert_eq!(
-        session.accept(Completion::ApplyMacro {
+        session.accept(Completion {
             generation,
             operation,
-            slot: "wrong".into(),
-            result: Ok(snapshot(2, 2))
+            payload: CompletionPayload::ApplyMacro {
+                slot: "wrong".into(),
+                result: Ok(snapshot(2, 2))
+            }
         }),
         Acceptance::IgnoredStale
     );
     assert!(session.busy());
     assert_eq!(
-        session.accept(Completion::ApplyMacro {
+        session.accept(Completion {
             generation,
             operation,
-            slot: "scene".into(),
-            result: Ok(snapshot(2, 2))
+            payload: CompletionPayload::ApplyMacro {
+                slot: "scene".into(),
+                result: Ok(snapshot(2, 2))
+            }
         }),
         Acceptance::Accepted
     );
@@ -173,10 +182,10 @@ fn shared_activity_excludes_other_feature_and_rejects_wrong_slot_then_verifies()
 fn disconnected_macro_reply_is_stale_and_changed_reconnect_keeps_draft() {
     let mut session = ready();
     session.edit_macro(Edit::Repeat(2)).unwrap();
-    let Command::ReadMacro {
+    let Command {
         generation,
         operation,
-        slot,
+        payload: CommandPayload::ReadMacro { slot },
     } = session.request_macro_read().unwrap()
     else {
         unreachable!()
@@ -184,11 +193,13 @@ fn disconnected_macro_reply_is_stale_and_changed_reconnect_keeps_draft() {
     session.disconnect();
     session.connect().unwrap();
     assert_eq!(
-        session.accept(Completion::ReadMacro {
+        session.accept(Completion {
             generation,
             operation,
-            slot,
-            result: Ok(snapshot(1, 1))
+            payload: CompletionPayload::ReadMacro {
+                slot,
+                result: Ok(snapshot(1, 1))
+            }
         }),
         Acceptance::IgnoredStale
     );
@@ -216,22 +227,24 @@ fn apply_failure_retains_macro_and_keymap_drafts_but_neither_is_writable() {
         })
         .unwrap();
     session.edit_macro(Edit::Repeat(2)).unwrap();
-    let Command::ApplyMacro {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ApplyMacro { .. },
     } = session.request_macro_apply().unwrap()
     else {
         unreachable!()
     };
-    session.accept(Completion::ApplyMacro {
+    session.accept(Completion {
         generation,
         operation,
-        slot: "scene".into(),
-        result: Err(ApplyFailure {
-            message: "readback failed".into(),
-            recovery: Recovery::Unverified,
-        }),
+        payload: CompletionPayload::ApplyMacro {
+            slot: "scene".into(),
+            result: Err(ApplyFailure {
+                message: "readback failed".into(),
+                recovery: Recovery::Unverified,
+            }),
+        },
     });
     assert_eq!(session.changes().len(), 1);
     assert!(session.macros().unwrap().dirty());
@@ -260,24 +273,27 @@ fn binding_uses_advertised_action_and_preserves_drafts_on_rejection() {
     assert!(session.stage_macro_binding("layer", "key", "play").is_err());
     assert_eq!(session.changes(), before);
     session.revert_macro().unwrap();
-    let Command::Read {
+    let Command {
         generation,
         operation,
+        payload: CommandPayload::Read {},
     } = session.request_read().unwrap()
     else {
         unreachable!()
     };
     assert!(session.stage_macro_binding("layer", "key", "play").is_err());
-    session.accept(Completion::Read {
+    session.accept(Completion {
         generation,
         operation,
-        result: Ok(State {
-            revision: vec![1],
-            bindings: BTreeMap::from([(
-                "layer".into(),
-                BTreeMap::from([("key".into(), Action::Key(4))]),
-            )]),
-        }),
+        payload: CompletionPayload::Read {
+            result: Ok(State {
+                revision: vec![1],
+                bindings: BTreeMap::from([(
+                    "layer".into(),
+                    BTreeMap::from([("key".into(), Action::Key(4))]),
+                )]),
+            }),
+        },
     });
     // A keymap read leaves the verified macro snapshot available.
     session.stage_macro_binding("layer", "key", "play").unwrap();
@@ -289,10 +305,10 @@ fn catalog_is_complete_and_read_only_across_dirty_draft() {
     let mut session = ready();
     session.edit_macro(Edit::Repeat(2)).unwrap();
     let original_draft = session.macros().unwrap().draft().cloned();
-    let Command::ReadMacroCatalog {
+    let Command {
         generation,
         operation,
-        slots,
+        payload: CommandPayload::ReadMacroCatalog { slots },
     } = session.request_macro_catalog_read().unwrap()
     else {
         unreachable!()
@@ -300,10 +316,10 @@ fn catalog_is_complete_and_read_only_across_dirty_draft() {
     assert_eq!(slots, vec!["scene", "second", "third"]);
     assert!(session.macro_catalog_scanning());
     assert!(!session.busy());
-    let Command::ReadMacro {
+    let Command {
         generation: read_generation,
         operation: read_operation,
-        slot,
+        payload: CommandPayload::ReadMacro { slot },
     } = session.request_macro_read().unwrap()
     else {
         unreachable!()
@@ -319,20 +335,24 @@ fn catalog_is_complete_and_read_only_across_dirty_draft() {
     };
     let mut empty = snapshot(3, 1);
     empty.slot = "third".into();
-    let completion = Completion::ReadMacroCatalog {
+    let completion = Completion {
         generation,
         operation,
-        result: Ok(vec![snapshot(1, 1), occupied.clone(), empty.clone()]),
+        payload: CompletionPayload::ReadMacroCatalog {
+            result: Ok(vec![snapshot(1, 1), occupied.clone(), empty.clone()]),
+        },
     };
     assert_eq!(session.accept(completion.clone()), Acceptance::Accepted);
     assert_eq!(session.accept(completion), Acceptance::IgnoredStale);
     assert!(!session.macro_catalog_scanning());
     assert!(session.busy());
-    session.accept(Completion::ReadMacro {
+    session.accept(Completion {
         generation: read_generation,
         operation: read_operation,
-        slot,
-        result: Ok(snapshot(1, 1)),
+        payload: CompletionPayload::ReadMacro {
+            slot,
+            result: Ok(snapshot(1, 1)),
+        },
     });
     assert!(!session.busy());
     let editor = session.macros().unwrap();
@@ -371,28 +391,30 @@ fn foreground_empty_slot_is_available_before_catalog_finishes() {
 #[test]
 fn catalog_rejects_incomplete_result_and_old_generation() {
     let mut session = ready();
-    let Command::ReadMacroCatalog {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ReadMacroCatalog { .. },
     } = session.request_macro_catalog_read().unwrap()
     else {
         unreachable!()
     };
     assert_eq!(
-        session.accept(Completion::ReadMacroCatalog {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(vec![snapshot(1, 1)])
+            payload: CompletionPayload::ReadMacroCatalog {
+                result: Ok(vec![snapshot(1, 1)])
+            }
         }),
         Acceptance::Accepted
     );
     assert!(session.macros().unwrap().catalog().is_none());
     assert!(session.macros().unwrap().catalog_error().is_some());
-    let Command::ReadMacroCatalog {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ReadMacroCatalog { .. },
     } = session.request_macro_catalog_read().unwrap()
     else {
         unreachable!()
@@ -400,10 +422,12 @@ fn catalog_rejects_incomplete_result_and_old_generation() {
     session.disconnect();
     session.connect().unwrap();
     assert_eq!(
-        session.accept(Completion::ReadMacroCatalog {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(vec![snapshot(1, 1)])
+            payload: CompletionPayload::ReadMacroCatalog {
+                result: Ok(vec![snapshot(1, 1)])
+            }
         }),
         Acceptance::IgnoredStale
     );
@@ -413,10 +437,10 @@ fn catalog_rejects_incomplete_result_and_old_generation() {
 #[test]
 fn keymap_refresh_preserves_background_catalog_ticket() {
     let mut session = ready();
-    let Command::ReadMacroCatalog {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ReadMacroCatalog { .. },
     } = session.request_macro_catalog_read().unwrap()
     else {
         unreachable!()
@@ -425,22 +449,88 @@ fn keymap_refresh_preserves_background_catalog_ticket() {
     let _ = session.request_read().unwrap();
     assert!(session.macro_catalog_scanning());
     assert_eq!(
-        session.accept(Completion::ReadMacroCatalog {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(vec![]),
+            payload: CompletionPayload::ReadMacroCatalog { result: Ok(vec![]) }
         }),
         Acceptance::Accepted
     );
 }
 
 #[test]
-fn recording_invalidates_background_catalog_ticket() {
+fn failed_keymap_write_cancels_catalog_without_erasing_macro_read_failure() {
     let mut session = ready();
-    let Command::ReadMacroCatalog {
+    session.stage_macro_binding("layer", "key", "play").unwrap();
+    session.edit_macro(Edit::Repeat(2)).unwrap();
+    let staged = session.macros().unwrap().draft().cloned();
+    let Command {
         generation,
         operation,
+        payload: CommandPayload::ReadMacro { slot },
+    } = session.request_macro_read().unwrap()
+    else {
+        unreachable!()
+    };
+    session.accept(Completion {
+        generation,
+        operation,
+        payload: CompletionPayload::ReadMacro {
+            slot,
+            result: Err("slot read failed".into()),
+        },
+    });
+    let Command {
+        generation: catalog_generation,
+        operation: catalog_operation,
         ..
+    } = session.request_macro_catalog_read().unwrap();
+    assert!(session.macro_catalog_scanning());
+    let Command {
+        generation,
+        operation,
+        payload: CommandPayload::Apply { .. },
+    } = session.request_apply().unwrap()
+    else {
+        unreachable!()
+    };
+    session.accept(Completion {
+        generation,
+        operation,
+        payload: CompletionPayload::Apply {
+            result: Err(ApplyFailure {
+                message: "keymap write failed".into(),
+                recovery: Recovery::Unverified,
+            }),
+        },
+    });
+    assert!(!session.macro_catalog_scanning());
+    let editor = session.macros().unwrap();
+    assert_eq!(editor.draft(), staged.as_ref());
+    assert!(
+        matches!(editor.status(), crate::macros::editor::Status::Unverified {
+        problem: Problem::Read(reason)
+    } if reason == "slot read failed")
+    );
+    assert_eq!(editor.catalog_error(), Some("slot read failed"));
+    assert!(editor.catalog().is_none());
+    assert_eq!(
+        session.accept(Completion {
+            generation: catalog_generation,
+            operation: catalog_operation,
+            payload: CompletionPayload::ReadMacroCatalog { result: Ok(vec![]) },
+        }),
+        Acceptance::IgnoredStale
+    );
+}
+
+#[test]
+fn recording_invalidates_background_catalog_ticket() {
+    let mut session = ready();
+    let Command {
+        generation,
+        operation,
+        payload: CommandPayload::ReadMacroCatalog { .. },
     } = session.request_macro_catalog_read().unwrap()
     else {
         unreachable!()
@@ -451,10 +541,10 @@ fn recording_invalidates_background_catalog_ticket() {
     assert!(session.recording());
     assert!(!session.macro_catalog_scanning());
     assert_eq!(
-        session.accept(Completion::ReadMacroCatalog {
+        session.accept(Completion {
             generation,
             operation,
-            result: Ok(vec![]),
+            payload: CompletionPayload::ReadMacroCatalog { result: Ok(vec![]) }
         }),
         Acceptance::IgnoredStale
     );
@@ -464,10 +554,10 @@ fn recording_invalidates_background_catalog_ticket() {
 fn empty_but_bound_slot_is_visible_and_not_allocated() {
     let mut session = ready();
     session.stage_macro_binding("layer", "key", "play").unwrap();
-    let Command::ReadMacroCatalog {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ReadMacroCatalog { .. },
     } = session.request_macro_catalog_read().unwrap()
     else {
         unreachable!()
@@ -476,10 +566,12 @@ fn empty_but_bound_slot_is_visible_and_not_allocated() {
     second.slot = "second".into();
     let mut third = snapshot(3, 1);
     third.slot = "third".into();
-    session.accept(Completion::ReadMacroCatalog {
+    session.accept(Completion {
         generation,
         operation,
-        result: Ok(vec![snapshot(1, 1), second, third]),
+        payload: CompletionPayload::ReadMacroCatalog {
+            result: Ok(vec![snapshot(1, 1), second, third]),
+        },
     });
     assert_eq!(
         session

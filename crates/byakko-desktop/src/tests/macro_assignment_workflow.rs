@@ -1,4 +1,6 @@
 use super::*;
+use byakko_core::session::CompletionPayload;
+use byakko_core::session::{DeviceActivity, Feature};
 use byakko_core::{
     macros::{Edit, editor::Status as MacroStatus},
     session::{Activity, ApplyFailure, Recovery},
@@ -25,7 +27,10 @@ fn dirty_macro_saves_then_assigns_the_captured_key() {
     app.save_and_assign_macro("hold".into());
     assert!(matches!(
         app.session.activity(),
-        Activity::ApplyMacro { .. }
+        Activity::Device {
+            request: DeviceActivity::Apply(Feature::Macro { .. }),
+            ..
+        }
     ));
     let _ = app.update(Message::SelectKey("Alpha".into()));
     macro_workflow::settle(&mut app);
@@ -56,28 +61,36 @@ fn failed_macro_save_never_stages_key_assignment() {
     let _ = app.update(Message::Macro(macro_editor::Message::Edit(Edit::Repeat(1))));
     app.repeat_input = "1".into();
     app.save_and_assign_macro("hold".into());
-    let Activity::ApplyMacro { operation, slot } = app.session.activity().clone() else {
+    let Activity::Device {
+        operation,
+        request: DeviceActivity::Apply(Feature::Macro { slot }),
+    } = app.session.activity().clone()
+    else {
         panic!("save did not start");
     };
     let generation = app.session.generation();
-    let _ = app.complete(Completion::ApplyMacro {
+    let _ = app.complete(Completion {
         generation,
         operation: operation + 1,
-        slot: slot.clone(),
-        result: Err(ApplyFailure {
-            message: "stale".into(),
-            recovery: Recovery::NotAttempted,
-        }),
+        payload: CompletionPayload::ApplyMacro {
+            slot: slot.clone(),
+            result: Err(ApplyFailure {
+                message: "stale".into(),
+                recovery: Recovery::NotAttempted,
+            }),
+        },
     });
     assert!(app.macro_assignment.is_some());
-    let _ = app.complete(Completion::ApplyMacro {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        slot,
-        result: Err(ApplyFailure {
-            message: "write failed".into(),
-            recovery: Recovery::Verified,
-        }),
+        payload: CompletionPayload::ApplyMacro {
+            slot,
+            result: Err(ApplyFailure {
+                message: "write failed".into(),
+                recovery: Recovery::Verified,
+            }),
+        },
     });
     assert!(app.macro_assignment.is_none());
     assert!(matches!(
@@ -115,18 +128,24 @@ fn macro_transport_failure_reconnect_restores_other_editors_and_keeps_macro_draf
     app.repeat_input = "1".into();
     let macro_draft = app.session.macros().unwrap().draft().cloned();
     app.save_and_assign_macro("hold".into());
-    let Activity::ApplyMacro { operation, slot } = app.session.activity().clone() else {
+    let Activity::Device {
+        operation,
+        request: DeviceActivity::Apply(Feature::Macro { slot }),
+    } = app.session.activity().clone()
+    else {
         panic!("macro save did not start");
     };
     let generation = app.session.generation();
-    let _ = app.complete(Completion::ApplyMacro {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        slot,
-        result: Err(ApplyFailure {
-            message: "transport lost during macro save".into(),
-            recovery: Recovery::Unverified,
-        }),
+        payload: CompletionPayload::ApplyMacro {
+            slot,
+            result: Err(ApplyFailure {
+                message: "transport lost during macro save".into(),
+                recovery: Recovery::Unverified,
+            }),
+        },
     });
     assert!(matches!(
         app.session.macros().unwrap().status(),
@@ -149,7 +168,13 @@ fn macro_transport_failure_reconnect_restores_other_editors_and_keeps_macro_draf
     });
     let _ = app.update(Message::Read);
     assert!(app.session.generation() > generation);
-    assert!(matches!(app.session.activity(), Activity::Read { .. }));
+    assert!(matches!(
+        app.session.activity(),
+        Activity::Device {
+            request: DeviceActivity::Read(Feature::Keymap),
+            ..
+        }
+    ));
     macro_workflow::settle(&mut app);
 
     assert_eq!(app.session.status(), &Status::Ready);
@@ -178,17 +203,23 @@ fn key_failure_reports_macro_saved_without_claiming_assignment() {
     let mut app = loaded_pointer();
     let key_before = app.session.baseline().unwrap().bindings["Studio"]["Beta"].clone();
     app.save_and_assign_macro("play".into());
-    let Activity::Apply { operation } = app.session.activity() else {
+    let Activity::Device {
+        operation,
+        request: DeviceActivity::Apply(Feature::Keymap),
+    } = app.session.activity()
+    else {
         panic!("key assignment did not start");
     };
     let operation = *operation;
-    let _ = app.complete(Completion::Apply {
+    let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation,
-        result: Err(ApplyFailure {
-            message: "readback failed".into(),
-            recovery: Recovery::Failed,
-        }),
+        payload: CompletionPayload::Apply {
+            result: Err(ApplyFailure {
+                message: "readback failed".into(),
+                recovery: Recovery::Failed,
+            }),
+        },
     });
     assert!(app.macro_assignment.is_none());
     assert_eq!(
@@ -229,7 +260,11 @@ fn close_stays_open_when_macro_saves_but_key_assignment_cannot_start() {
     let _ = app.update(Message::Macro(macro_editor::Message::Edit(Edit::Repeat(1))));
     app.repeat_input = "1".into();
     app.save_and_assign_macro("hold".into());
-    let Activity::ApplyMacro { operation, slot } = app.session.activity().clone() else {
+    let Activity::Device {
+        operation,
+        request: DeviceActivity::Apply(Feature::Macro { slot }),
+    } = app.session.activity().clone()
+    else {
         panic!("macro save did not start");
     };
     let generation = app.session.generation();
@@ -240,11 +275,13 @@ fn close_stays_open_when_macro_saves_but_key_assignment_cannot_start() {
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::Waiting);
     app.executor = None;
-    let _ = app.complete(Completion::ApplyMacro {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        slot,
-        result: Ok(snapshot),
+        payload: CompletionPayload::ApplyMacro {
+            slot,
+            result: Ok(snapshot),
+        },
     });
     assert_eq!(app.closing, Closing::Open);
     assert!(app.macro_assignment.is_none());

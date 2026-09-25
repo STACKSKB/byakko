@@ -1,6 +1,8 @@
 use super::*;
 use crate::lighting::Message as Lighting;
 use byakko_core::lighting::{Channel, Color, Content, Edit, editor::Status as LightingStatus};
+use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::{DeviceActivity, Feature};
 use macro_workflow::settle;
 
 fn send(app: &mut Desktop, message: Lighting) {
@@ -61,33 +63,39 @@ fn reconnect_keeps_both_keymap_and_lighting_conflict_diagnostics() {
 
     let mut changed_keys = app.session.baseline().unwrap().clone();
     changed_keys.revision.push(2);
-    let Command::Read {
+    let Command {
         generation,
         operation,
+        payload: CommandPayload::Read {},
     } = app.session.request_read().unwrap()
     else {
         unreachable!()
     };
-    app.session.accept(Completion::Read {
+    app.session.accept(Completion {
         generation,
         operation,
-        result: Ok(changed_keys),
+        payload: CompletionPayload::Read {
+            result: Ok(changed_keys),
+        },
     });
     assert!(matches!(app.session.status(), Status::Conflict { .. }));
 
     let mut changed_lighting = app.session.lighting().unwrap().baseline().unwrap().clone();
     changed_lighting.revision.push(2);
-    let Command::ReadLighting {
+    let Command {
         generation,
         operation,
+        payload: CommandPayload::ReadLighting {},
     } = app.session.request_lighting_read().unwrap()
     else {
         unreachable!()
     };
-    app.session.accept(Completion::ReadLighting {
+    app.session.accept(Completion {
         generation,
         operation,
-        result: Ok(changed_lighting),
+        payload: CompletionPayload::ReadLighting {
+            result: Ok(changed_lighting),
+        },
     });
     assert!(matches!(
         app.session.lighting().unwrap().status(),
@@ -202,20 +210,22 @@ fn close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic() {
     send(&mut app, Lighting::Edit(Edit::Brightness(42)));
     let baseline = app.session.lighting().unwrap().baseline().cloned();
     let draft = app.session.lighting().unwrap().draft().cloned();
-    let Command::ApplyLighting {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ApplyLighting { .. },
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
     };
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::Waiting);
-    let _ = app.complete(Completion::ApplyLighting {
+    let _ = app.complete(Completion {
         generation,
         operation: operation + 1,
-        result: Ok(baseline.clone().unwrap()),
+        payload: CompletionPayload::ApplyLighting {
+            result: Ok(baseline.clone().unwrap()),
+        },
     });
     assert_eq!(app.closing, Closing::Waiting);
     assert!(app.busy());
@@ -223,10 +233,12 @@ fn close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic() {
         message: "readback mismatch".into(),
         recovery: Recovery::Failed,
     };
-    let _ = app.complete(Completion::ApplyLighting {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Err(failure.clone()),
+        payload: CompletionPayload::ApplyLighting {
+            result: Err(failure.clone()),
+        },
     });
     assert_eq!(app.closing, Closing::Open);
     let editor = app.session.lighting().unwrap();
@@ -247,21 +259,26 @@ fn close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic() {
 fn verified_lighting_close_checks_its_result_despite_keymap_invalidation() {
     let mut app = loaded();
     send(&mut app, Lighting::Edit(Edit::Brightness(42)));
-    let Command::ApplyLighting {
+    let Command {
         generation,
         operation,
-        mut expected,
-        desired,
+        payload:
+            CommandPayload::ApplyLighting {
+                mut expected,
+                desired,
+            },
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
     };
     let _ = app.update(Message::Close);
     expected.content = Content::Editable(desired);
-    let _ = app.complete(Completion::ApplyLighting {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Ok(expected),
+        payload: CompletionPayload::ApplyLighting {
+            result: Ok(expected),
+        },
     });
     // complete() returned the exit task; it must not classify keymap ReadRequired as lighting failure.
     assert_eq!(app.closing, Closing::Waiting);
@@ -276,21 +293,23 @@ fn verified_lighting_close_checks_its_result_despite_keymap_invalidation() {
 fn failed_lighting_write_requires_manual_reconnect_and_keeps_diagnostic() {
     let mut app = loaded();
     send(&mut app, Lighting::Edit(Edit::Brightness(42)));
-    let Command::ApplyLighting {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ApplyLighting { .. },
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
     };
-    let _ = app.complete(Completion::ApplyLighting {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Err(ApplyFailure {
-            message: "lighting readback uncertain".into(),
-            recovery: Recovery::Unverified,
-        }),
+        payload: CompletionPayload::ApplyLighting {
+            result: Err(ApplyFailure {
+                message: "lighting readback uncertain".into(),
+                recovery: Recovery::Unverified,
+            }),
+        },
     });
     app.accept_availability(Availability::Missing);
     assert_eq!(app.auto_read, AutoRead::ManualOnly);
@@ -369,21 +388,23 @@ fn lighting_retry_rebinds_and_applies_retained_intent_after_fresh_read() {
         Duration::ZERO,
     );
     app.session.edit_lighting(Edit::Brightness(42)).unwrap();
-    let Command::ApplyLighting {
+    let Command {
         generation,
         operation,
-        ..
+        payload: CommandPayload::ApplyLighting { .. },
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
     };
-    let _ = app.complete(Completion::ApplyLighting {
+    let _ = app.complete(Completion {
         generation,
         operation,
-        result: Err(ApplyFailure {
-            message: "selected collection changed".into(),
-            recovery: Recovery::NotAttempted,
-        }),
+        payload: CompletionPayload::ApplyLighting {
+            result: Err(ApplyFailure {
+                message: "selected collection changed".into(),
+                recovery: Recovery::NotAttempted,
+            }),
+        },
     });
     app.attach = Box::new(|expected| {
         assert_eq!(expected, None);
@@ -399,7 +420,10 @@ fn lighting_retry_rebinds_and_applies_retained_intent_after_fresh_read() {
     );
     assert!(matches!(
         app.session.activity(),
-        byakko_core::session::Activity::ReadLighting { .. }
+        byakko_core::session::Activity::Device {
+            request: DeviceActivity::Read(Feature::Lighting),
+            ..
+        }
     ));
     settle(&mut app);
     let editor = app.session.lighting().unwrap();

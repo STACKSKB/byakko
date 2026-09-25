@@ -7,6 +7,7 @@ mod lighting;
 mod macros;
 mod picture;
 mod settings;
+mod transaction;
 mod transport;
 
 use crate::hid::HidDevice;
