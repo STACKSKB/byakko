@@ -1,5 +1,6 @@
 use super::*;
 use crate::session::{CommandPayload, CompletionPayload};
+use crate::session::{FeatureCommand, FeatureResult};
 use crate::{
     Action, Change, Descriptor, Layer, PhysicalKey, State,
     macros::{self, Content, Edit, Snapshot, recorder::DelayPolicy},
@@ -80,7 +81,7 @@ fn ready() -> Session {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::Read {},
+        payload: CommandPayload::Keymap(FeatureCommand::Read(())),
     } = session.request_read().unwrap()
     else {
         unreachable!()
@@ -88,15 +89,13 @@ fn ready() -> Session {
     session.accept(Completion {
         generation,
         operation,
-        payload: CompletionPayload::Read {
-            result: Ok(State {
-                revision: vec![1],
-                bindings: BTreeMap::from([(
-                    "layer".into(),
-                    BTreeMap::from([("key".into(), Action::Key(4))]),
-                )]),
-            }),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(State {
+            revision: vec![1],
+            bindings: BTreeMap::from([(
+                "layer".into(),
+                BTreeMap::from([("key".into(), Action::Key(4))]),
+            )]),
+        }))),
     });
     read_macro(&mut session, snapshot(1, program(1)));
     session
@@ -106,7 +105,7 @@ fn read_macro(session: &mut Session, value: Snapshot) {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ReadMacro { slot },
+        payload: CommandPayload::Macro(FeatureCommand::Read(slot)),
     } = session.request_macro_read().unwrap()
     else {
         unreachable!()
@@ -114,9 +113,9 @@ fn read_macro(session: &mut Session, value: Snapshot) {
     session.accept(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ReadMacro {
+        payload: CompletionPayload::Macro {
             slot,
-            result: Ok(value),
+            result: FeatureResult::Read(Ok(value)),
         },
     });
 }

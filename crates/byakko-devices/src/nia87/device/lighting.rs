@@ -1,5 +1,5 @@
-use super::apply_error::{ApplyError, RestoreMismatch, lighting_apply_error};
-use super::transaction::{apply_with_recovery, pacing, save_json_backup};
+use super::apply_error::{ApplyError, lighting_apply_error};
+use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::*;
 use byakko_core::session::{ApplyFailure, Recovery};
 
@@ -255,27 +255,25 @@ fn apply_lighting_unlocked(
         return submitted_lighting(expected, &target);
     }
 
-    apply_with_recovery(
+    let restore_report = lighting_restore_report(expected);
+    apply_roundtrip(
         &backup,
-        || -> Result<crate::nia87::lighting::Lighting> {
-            write_lighting_report(&device, &target)?;
-            let actual = read_lighting_on_device(&device)?;
-            if !lighting_matches_report(&actual, &target, expected) {
-                return Err(
-                    "Lighting readback differs in setting or reserved response bytes".into(),
-                );
-            }
-            Ok(actual)
+        VerifiedStep {
+            write: || write_lighting_report(&device, &target),
+            matches: |actual: &crate::nia87::lighting::Lighting| {
+                lighting_matches_report(actual, &target, expected)
+            },
+            mismatch: "Lighting readback differs in setting or reserved response bytes",
         },
-        || -> Result<()> {
-            let report = lighting_restore_report(expected);
-            write_lighting_report(&device, &report)?;
-            let actual = read_lighting_on_device(&device)?;
-            if !lighting_matches_report(&actual, &report, expected) {
-                return Err(RestoreMismatch("Lighting restoration could not be verified").into());
-            }
-            Ok(())
+        VerifiedStep {
+            write: || write_lighting_report(&device, &restore_report),
+            matches: |actual: &crate::nia87::lighting::Lighting| {
+                lighting_matches_report(actual, &restore_report, expected)
+            },
+            mismatch: "Lighting restoration could not be verified",
         },
+        || read_lighting_on_device(&device),
+        None,
         lighting_apply_error,
     )
 }

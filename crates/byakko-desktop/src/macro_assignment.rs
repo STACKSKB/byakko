@@ -1,10 +1,11 @@
 //! Correlate a macro save with the key binding it authorizes.
 use super::Desktop;
-use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::CompletionPayload;
+use byakko_core::session::FeatureResult;
 use byakko_core::{
     Change,
     macros::editor::Status as MacroStatus,
-    session::{Command, Completion, Status},
+    session::{Completion, Status},
 };
 
 #[derive(Clone, Debug)]
@@ -131,23 +132,15 @@ impl Desktop {
         };
         if self.session.macros().is_some_and(|editor| editor.dirty()) {
             match self.session.request_macro_apply() {
-                Ok(Command {
-                    generation,
-                    operation,
-                    payload: CommandPayload::ApplyMacro { expected, desired },
-                }) => {
+                Ok(command) => {
                     self.macro_assignment = Some(Pending::Saving {
                         ticket: Ticket {
-                            generation,
-                            operation,
+                            generation: command.generation,
+                            operation: command.operation,
                         },
                         target,
                     });
-                    self.submit(Ok(Command {
-                        generation,
-                        operation,
-                        payload: CommandPayload::ApplyMacro { expected, desired },
-                    }));
+                    self.submit(Ok(command));
                     if !self.session.busy() {
                         self.macro_assignment = None;
                         self.macro_notice = Some(self.notice.take().unwrap_or_else(|| {
@@ -155,7 +148,6 @@ impl Desktop {
                         }));
                     }
                 }
-                Ok(_) => unreachable!("macro apply returned another command"),
                 Err(reason) => self.macro_notice = Some(reason),
             }
         } else {
@@ -187,17 +179,11 @@ impl Desktop {
             return;
         }
         match self.session.request_apply() {
-            Ok(
-                command @ Command {
-                    generation,
-                    operation,
-                    payload: CommandPayload::Apply { .. },
-                },
-            ) => {
+            Ok(command) => {
                 self.macro_assignment = Some(Pending::Assigning {
                     ticket: Ticket {
-                        generation,
-                        operation,
+                        generation: command.generation,
+                        operation: command.operation,
                     },
                     target,
                 });
@@ -212,7 +198,6 @@ impl Desktop {
                     ));
                 }
             }
-            Ok(_) => unreachable!("keymap apply returned another command"),
             Err(reason) => {
                 let _ = self.session.revert();
                 self.macro_notice = Some(format!("Macro saved; key was not assigned: {reason}"));
@@ -244,7 +229,11 @@ impl Desktop {
                 Completion {
                     generation,
                     operation,
-                    payload: CompletionPayload::ApplyMacro { slot, result },
+                    payload:
+                        CompletionPayload::Macro {
+                            slot,
+                            result: FeatureResult::Apply(result),
+                        },
                 },
             ) if ticket.generation == *generation
                 && ticket.operation == *operation
@@ -260,7 +249,7 @@ impl Desktop {
                 Completion {
                     generation,
                     operation,
-                    payload: CompletionPayload::Apply { result },
+                    payload: CompletionPayload::Keymap(FeatureResult::Apply(result)),
                 },
             ) if ticket.generation == *generation && ticket.operation == *operation => {
                 Some(match result {

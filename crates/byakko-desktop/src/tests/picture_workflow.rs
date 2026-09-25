@@ -3,6 +3,7 @@ use crate::picture::Message as Picture;
 use byakko_core::picture::{Channel, Content, Edit, editor::Status as PictureStatus};
 use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::session::{DeviceActivity, Feature};
+use byakko_core::session::{FeatureCommand, FeatureResult};
 use macro_workflow::settle;
 
 fn send(app: &mut Desktop, message: Picture) {
@@ -188,12 +189,10 @@ fn failed_live_write_keeps_intent_without_automatic_retry() {
     let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation,
-        payload: CompletionPayload::ApplyPicture {
-            result: Err(ApplyFailure {
-                message: "restore mismatch".into(),
-                recovery: Recovery::Failed,
-            }),
-        },
+        payload: CompletionPayload::Picture(FeatureResult::Apply(Err(ApplyFailure {
+            message: "restore mismatch".into(),
+            recovery: Recovery::Failed,
+        }))),
     });
     assert!(!app.flush_live_picture());
     assert!(app.live_picture.blocked);
@@ -261,9 +260,7 @@ fn failed_color_read_waits_for_an_explicit_retry() {
     let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation: *operation,
-        payload: CompletionPayload::ReadPicture {
-            result: Err("USB read failed".into()),
-        },
+        payload: CompletionPayload::Picture(FeatureResult::Read(Err("USB read failed".into()))),
     });
     assert!(!app.busy());
     let _ = app.update(Message::Page(Page::Keys));
@@ -379,7 +376,7 @@ fn failed_picture_apply_keeps_draft_visible_and_close_waits() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ApplyPicture { .. },
+        payload: CommandPayload::Picture(FeatureCommand::Apply { .. }),
     } = app.session.request_picture_apply().unwrap()
     else {
         unreachable!()
@@ -389,9 +386,7 @@ fn failed_picture_apply_keeps_draft_visible_and_close_waits() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ReadPicture {
-            result: Ok(baseline.clone().unwrap()),
-        },
+        payload: CompletionPayload::Picture(FeatureResult::Read(Ok(baseline.clone().unwrap()))),
     });
     assert!(app.busy());
     let failure = ApplyFailure {
@@ -401,9 +396,7 @@ fn failed_picture_apply_keeps_draft_visible_and_close_waits() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyPicture {
-            result: Err(failure.clone()),
-        },
+        payload: CompletionPayload::Picture(FeatureResult::Apply(Err(failure.clone()))),
     });
     assert_eq!(app.closing, Closing::Open);
     let editor = app.session.picture().unwrap();

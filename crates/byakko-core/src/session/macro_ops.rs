@@ -1,7 +1,8 @@
 //! Macro-facing session operations. The parent owns the one operation sequence.
-use super::{Activity, Command, Session, Status};
+use super::{Command, Session, Status};
 use crate::session::CommandPayload;
-use crate::session::{DeviceActivity, Feature};
+use crate::session::Feature;
+use crate::session::FeatureCommand;
 use crate::{
     Change,
     macros::{Capabilities, Choice, Edit, editor::Editor},
@@ -179,16 +180,11 @@ impl Session {
             return Err("Device is disconnected".into());
         }
         let slot = self.macro_editor()?.slot().to_owned();
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Read(Feature::Macro { slot: slot.clone() }),
-        };
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::ReadMacro { slot },
-        })
+        self.begin_feature(
+            Feature::Macro { slot: slot.clone() },
+            FeatureCommand::Read(slot),
+            CommandPayload::Macro,
+        )
     }
 
     pub fn request_macro_catalog_read(&mut self) -> Result<Command, String> {
@@ -222,19 +218,15 @@ impl Session {
             return Err("Device is disconnected".into());
         }
         let (expected, desired) = self.macro_editor()?.request_apply()?;
-        let operation = self.operation()?;
-        self.macro_catalog_operation = None;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Apply(Feature::Macro {
+        let command = self.begin_feature(
+            Feature::Macro {
                 slot: expected.slot.clone(),
-            }),
-        };
+            },
+            FeatureCommand::Apply { expected, desired },
+            CommandPayload::Macro,
+        )?;
+        self.macro_catalog_operation = None;
         self.invalidate_archive();
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::ApplyMacro { expected, desired },
-        })
+        Ok(command)
     }
 }

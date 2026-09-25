@@ -1,5 +1,5 @@
-use super::apply_error::{RestoreMismatch, settings_apply_error};
-use super::transaction::{apply_with_recovery, pacing, save_json_backup};
+use super::apply_error::settings_apply_error;
+use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::*;
 
 pub fn read_settings() -> Result<crate::nia87::settings::Settings> {
@@ -42,7 +42,7 @@ pub(super) fn apply_setting_with(
     setting: crate::nia87::settings::Setting,
     backup_dir: &std::path::Path,
 ) -> Result<crate::nia87::settings::Settings> {
-    use crate::nia87::settings::{SettingPlan, Settings};
+    use crate::nia87::settings::SettingPlan;
     let _lock = transaction_lock()?;
     let SettingPlan {
         target,
@@ -65,23 +65,20 @@ pub(super) fn apply_setting_with(
         std::thread::sleep(pacing::SETTING_SETTER);
         Ok(())
     };
-    apply_with_recovery(
+    apply_roundtrip(
         &backup,
-        || -> Result<Settings> {
-            send(&report)?;
-            let actual = read_settings_on_device(&device)?;
-            if actual != target {
-                return Err("Setting readback mismatch".into());
-            }
-            Ok(actual)
+        VerifiedStep {
+            write: || send(&report),
+            matches: |actual: &crate::nia87::settings::Settings| *actual == target,
+            mismatch: "Setting readback mismatch",
         },
-        || -> Result<()> {
-            send(&restore_report)?;
-            if &read_settings_on_device(&device)? != expected {
-                return Err(RestoreMismatch("Settings restoration mismatch").into());
-            }
-            Ok(())
+        VerifiedStep {
+            write: || send(&restore_report),
+            matches: |actual: &crate::nia87::settings::Settings| actual == expected,
+            mismatch: "Settings restoration mismatch",
         },
+        || read_settings_on_device(&device),
+        None,
         settings_apply_error,
     )
 }

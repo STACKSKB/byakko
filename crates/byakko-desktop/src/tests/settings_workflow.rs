@@ -2,6 +2,7 @@ use super::*;
 use crate::settings::Message as Settings;
 use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::session::{DeviceActivity, Feature};
+use byakko_core::session::{FeatureCommand, FeatureResult};
 use byakko_core::settings::{Content, Edit, Value, editor::Status as SettingsStatus};
 use macro_workflow::settle;
 use std::time::{Duration, Instant};
@@ -192,7 +193,7 @@ fn failed_setting_apply_retains_draft_and_blocks_close() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ApplySetting { .. },
+        payload: CommandPayload::Settings(FeatureCommand::Apply { .. }),
     } = app.session.request_setting_apply().unwrap()
     else {
         unreachable!()
@@ -202,9 +203,7 @@ fn failed_setting_apply_retains_draft_and_blocks_close() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ReadSettings {
-            result: Ok(baseline.clone().unwrap()),
-        },
+        payload: CompletionPayload::Settings(FeatureResult::Read(Ok(baseline.clone().unwrap()))),
     });
     assert!(app.busy());
     let failure = ApplyFailure {
@@ -214,9 +213,7 @@ fn failed_setting_apply_retains_draft_and_blocks_close() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplySetting {
-            result: Err(failure.clone()),
-        },
+        payload: CompletionPayload::Settings(FeatureResult::Apply(Err(failure.clone()))),
     });
     assert_eq!(app.closing, Closing::Open);
     let editor = app.session.settings().unwrap();

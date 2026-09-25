@@ -1,5 +1,6 @@
 use super::*;
 use byakko_core::session::CompletionPayload;
+use byakko_core::session::FeatureResult;
 use byakko_core::session::{DeviceActivity, Feature};
 use byakko_core::{
     macros::{Edit, editor::Status as MacroStatus},
@@ -72,24 +73,24 @@ fn failed_macro_save_never_stages_key_assignment() {
     let _ = app.complete(Completion {
         generation,
         operation: operation + 1,
-        payload: CompletionPayload::ApplyMacro {
+        payload: CompletionPayload::Macro {
             slot: slot.clone(),
-            result: Err(ApplyFailure {
+            result: FeatureResult::Apply(Err(ApplyFailure {
                 message: "stale".into(),
                 recovery: Recovery::NotAttempted,
-            }),
+            })),
         },
     });
     assert!(app.macro_assignment.is_some());
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyMacro {
+        payload: CompletionPayload::Macro {
             slot,
-            result: Err(ApplyFailure {
+            result: FeatureResult::Apply(Err(ApplyFailure {
                 message: "write failed".into(),
                 recovery: Recovery::Verified,
-            }),
+            })),
         },
     });
     assert!(app.macro_assignment.is_none());
@@ -139,12 +140,12 @@ fn macro_transport_failure_reconnect_restores_other_editors_and_keeps_macro_draf
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyMacro {
+        payload: CompletionPayload::Macro {
             slot,
-            result: Err(ApplyFailure {
+            result: FeatureResult::Apply(Err(ApplyFailure {
                 message: "transport lost during macro save".into(),
                 recovery: Recovery::Unverified,
-            }),
+            })),
         },
     });
     assert!(matches!(
@@ -214,12 +215,10 @@ fn key_failure_reports_macro_saved_without_claiming_assignment() {
     let _ = app.complete(Completion {
         generation: app.session.generation(),
         operation,
-        payload: CompletionPayload::Apply {
-            result: Err(ApplyFailure {
-                message: "readback failed".into(),
-                recovery: Recovery::Failed,
-            }),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+            message: "readback failed".into(),
+            recovery: Recovery::Failed,
+        }))),
     });
     assert!(app.macro_assignment.is_none());
     assert_eq!(
@@ -278,9 +277,9 @@ fn close_stays_open_when_macro_saves_but_key_assignment_cannot_start() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyMacro {
+        payload: CompletionPayload::Macro {
             slot,
-            result: Ok(snapshot),
+            result: FeatureResult::Apply(Ok(snapshot)),
         },
     });
     assert_eq!(app.closing, Closing::Open);

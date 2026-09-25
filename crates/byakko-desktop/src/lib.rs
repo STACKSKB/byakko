@@ -1,5 +1,6 @@
 //! Desktop adapter. Domain decisions remain in core; firmware lives outside views.
 use byakko_core::session::CompletionPayload;
+use byakko_core::session::FeatureResult;
 use byakko_core::session::{DeviceActivity, Feature};
 mod action_catalog;
 mod archive;
@@ -593,11 +594,16 @@ impl Desktop {
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
         let macro_assignment_completion = self.macro_assignment_completion(&completion);
-        let activated_picture =
-            matches!(&completion.payload, CompletionPayload::ApplyLighting { .. })
-                && self.picture_activation == Some((completion.generation, completion.operation));
+        let activated_picture = matches!(
+            &completion.payload,
+            CompletionPayload::Lighting(FeatureResult::Apply(_))
+        ) && self.picture_activation
+            == Some((completion.generation, completion.operation));
         let macro_draft_before_read = match &completion.payload {
-            CompletionPayload::ReadMacro { .. } => Some(
+            CompletionPayload::Macro {
+                result: FeatureResult::Read(_),
+                ..
+            } => Some(
                 self.session
                     .macros()
                     .and_then(|editor| editor.draft())
@@ -605,32 +611,15 @@ impl Desktop {
             ),
             _ => None,
         };
-        let keymap_result = matches!(
-            &completion.payload,
-            CompletionPayload::Read { .. } | CompletionPayload::Apply { .. }
-        );
+        let keymap_result = matches!(&completion.payload, CompletionPayload::Keymap(_));
         let archive_result = matches!(
             &completion.payload,
-            CompletionPayload::CaptureArchive { .. }
-                | CompletionPayload::ReviewArchive { .. }
-                | CompletionPayload::ApplyArchive { .. }
+            CompletionPayload::Archive(_) | CompletionPayload::ReviewArchive { .. }
         );
-        let lighting_result = matches!(
-            &completion.payload,
-            CompletionPayload::ReadLighting { .. } | CompletionPayload::ApplyLighting { .. }
-        );
-        let picture_result = matches!(
-            &completion.payload,
-            CompletionPayload::ReadPicture { .. } | CompletionPayload::ApplyPicture { .. }
-        );
-        let settings_result = matches!(
-            &completion.payload,
-            CompletionPayload::ReadSettings { .. } | CompletionPayload::ApplySetting { .. }
-        );
-        let macro_result = matches!(
-            &completion.payload,
-            CompletionPayload::ReadMacro { .. } | CompletionPayload::ApplyMacro { .. }
-        );
+        let lighting_result = matches!(&completion.payload, CompletionPayload::Lighting(_));
+        let picture_result = matches!(&completion.payload, CompletionPayload::Picture(_));
+        let settings_result = matches!(&completion.payload, CompletionPayload::Settings(_));
+        let macro_result = matches!(&completion.payload, CompletionPayload::Macro { .. });
         let macro_catalog_result = matches!(
             &completion.payload,
             CompletionPayload::ReadMacroCatalog { .. }

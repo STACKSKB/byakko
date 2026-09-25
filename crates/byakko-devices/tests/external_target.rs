@@ -1,6 +1,7 @@
 //! A tablet-shaped descriptor exercises the portable binding contract without
 //! claiming support for Wacom reports or continuous ring values.
 use byakko_core::session::{CommandPayload, CompletionPayload};
+use byakko_core::session::{FeatureCommand, FeatureResult};
 use byakko_core::{
     Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State,
     session::{Acceptance, Command, Completion, Session, Status},
@@ -63,7 +64,7 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
     let generation = session.connect().unwrap();
     let Command {
         operation,
-        payload: CommandPayload::Read { .. },
+        payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         ..
     } = session.request_read().unwrap()
     else {
@@ -73,9 +74,7 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::Read {
-                result: device.read()
-            }
+            payload: CompletionPayload::Keymap(FeatureResult::Read(device.read()))
         }),
         Acceptance::Accepted
     );
@@ -100,9 +99,12 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
     }
     let Command {
         operation,
-        payload: CommandPayload::Apply {
-            expected, changes, ..
-        },
+        payload:
+            CommandPayload::Keymap(FeatureCommand::Apply {
+                expected,
+                desired: changes,
+                ..
+            }),
         ..
     } = session.request_apply().unwrap()
     else {
@@ -113,7 +115,7 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
         session.accept(Completion {
             generation,
             operation,
-            payload: CompletionPayload::Apply { result }
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(result))
         }),
         Acceptance::Accepted
     );

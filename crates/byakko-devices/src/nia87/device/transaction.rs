@@ -5,7 +5,7 @@
 //! substitutes another keyboard. Feature-specific reads, comparisons, and
 //! recovery plans remain in their feature modules.
 use super::Result;
-use super::apply_error::ApplyError;
+use super::apply_error::{ApplyError, RestoreMismatch};
 use serde::Serialize;
 use std::fmt;
 use std::io::Write;
@@ -108,6 +108,56 @@ pub(super) fn apply_with_recovery<T>(
     }
 }
 
+/// For features with a direct before/after setter, keep the ordered write,
+/// complete readback, comparison, and verified restore in one place. Only a
+/// mismatched first read may be retried (the observed macro flash case).
+pub(super) struct VerifiedStep<W, M> {
+    pub write: W,
+    pub matches: M,
+    pub mismatch: &'static str,
+}
+
+pub(super) fn apply_roundtrip<T, TW, TM, BW, BM>(
+    backup: &DurableBackup,
+    target: VerifiedStep<TW, TM>,
+    before: VerifiedStep<BW, BM>,
+    read: impl Fn() -> Result<T>,
+    mismatch_retry: Option<Duration>,
+    error: fn(&dyn fmt::Display, Result<()>, &Path) -> ApplyError,
+) -> Result<T>
+where
+    TW: FnOnce() -> Result<()>,
+    TM: Fn(&T) -> bool,
+    BW: FnOnce() -> Result<()>,
+    BM: Fn(&T) -> bool,
+{
+    apply_with_recovery(
+        backup,
+        || {
+            (target.write)()?;
+            let mut actual = read()?;
+            if let (false, Some(delay)) = ((target.matches)(&actual), mismatch_retry) {
+                std::thread::sleep(delay);
+                actual = read()?;
+            }
+            if (target.matches)(&actual) {
+                Ok(actual)
+            } else {
+                Err(target.mismatch.into())
+            }
+        },
+        || {
+            (before.write)()?;
+            if (before.matches)(&read()?) {
+                Ok(())
+            } else {
+                Err(RestoreMismatch(before.mismatch).into())
+            }
+        },
+        error,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::apply_error::{RestoreMismatch, macro_apply_error};
@@ -174,5 +224,81 @@ mod tests {
         })();
         assert!(!transaction.unwrap_err().to_string().is_empty());
         assert!(!setter_called);
+    }
+
+    #[test]
+    fn roundtrip_retries_only_a_mismatch_and_restores_after_read_error() {
+        let backup = DurableBackup {
+            path: "before.json".into(),
+            stamp: 1,
+        };
+        let steps = std::cell::RefCell::new(Vec::new());
+        let reads = std::cell::Cell::new(0);
+        let actual = apply_roundtrip(
+            &backup,
+            VerifiedStep {
+                write: || {
+                    steps.borrow_mut().push("write target");
+                    Ok(())
+                },
+                matches: |value: &i32| *value == 2,
+                mismatch: "mismatch",
+            },
+            VerifiedStep {
+                write: || {
+                    steps.borrow_mut().push("restore");
+                    Ok(())
+                },
+                matches: |value: &i32| *value == 1,
+                mismatch: "restore mismatch",
+            },
+            || {
+                steps.borrow_mut().push("read");
+                reads.set(reads.get() + 1);
+                Ok(if reads.get() == 1 { 0 } else { 2 })
+            },
+            Some(Duration::ZERO),
+            macro_apply_error,
+        )
+        .unwrap();
+        assert_eq!(actual, 2);
+        assert_eq!(*steps.borrow(), ["write target", "read", "read"]);
+
+        steps.borrow_mut().clear();
+        reads.set(0);
+        let failure = super::super::apply_error::detailed::<i32>(apply_roundtrip(
+            &backup,
+            VerifiedStep {
+                write: || {
+                    steps.borrow_mut().push("write target");
+                    Ok(())
+                },
+                matches: |value: &i32| *value == 2,
+                mismatch: "mismatch",
+            },
+            VerifiedStep {
+                write: || {
+                    steps.borrow_mut().push("restore");
+                    Ok(())
+                },
+                matches: |value: &i32| *value == 1,
+                mismatch: "restore mismatch",
+            },
+            || {
+                steps.borrow_mut().push("read");
+                reads.set(reads.get() + 1);
+                if reads.get() == 1 {
+                    Err("read failed".into())
+                } else {
+                    Ok(1)
+                }
+            },
+            Some(Duration::ZERO),
+            macro_apply_error,
+        ))
+        .unwrap_err();
+        assert_eq!(failure.recovery, Recovery::Verified);
+        assert!(failure.message.contains("read failed"));
+        assert_eq!(*steps.borrow(), ["write target", "read", "restore", "read"]);
     }
 }

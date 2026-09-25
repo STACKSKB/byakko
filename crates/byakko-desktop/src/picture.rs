@@ -5,6 +5,7 @@ use byakko_core::picture::{
     editor::{Editor, Status},
 };
 use byakko_core::session::CommandPayload;
+use byakko_core::session::FeatureCommand;
 use iced::{
     Element, Fill,
     widget::{button, column, scrollable, text},
@@ -156,7 +157,7 @@ impl Desktop {
                 if let Ok(byakko_core::session::Command {
                     generation,
                     operation,
-                    payload: CommandPayload::ApplyLighting { .. },
+                    payload: CommandPayload::Lighting(FeatureCommand::Apply { .. }),
                 }) = &request
                 {
                     self.picture_activation = Some((*generation, *operation));

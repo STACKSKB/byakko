@@ -3,6 +3,7 @@ use crate::lighting::Message as Lighting;
 use byakko_core::lighting::{Channel, Color, Content, Edit, editor::Status as LightingStatus};
 use byakko_core::session::{CommandPayload, CompletionPayload};
 use byakko_core::session::{DeviceActivity, Feature};
+use byakko_core::session::{FeatureCommand, FeatureResult};
 use macro_workflow::settle;
 
 fn send(app: &mut Desktop, message: Lighting) {
@@ -66,7 +67,7 @@ fn reconnect_keeps_both_keymap_and_lighting_conflict_diagnostics() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::Read {},
+        payload: CommandPayload::Keymap(FeatureCommand::Read(())),
     } = app.session.request_read().unwrap()
     else {
         unreachable!()
@@ -74,9 +75,7 @@ fn reconnect_keeps_both_keymap_and_lighting_conflict_diagnostics() {
     app.session.accept(Completion {
         generation,
         operation,
-        payload: CompletionPayload::Read {
-            result: Ok(changed_keys),
-        },
+        payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(changed_keys))),
     });
     assert!(matches!(app.session.status(), Status::Conflict { .. }));
 
@@ -85,7 +84,7 @@ fn reconnect_keeps_both_keymap_and_lighting_conflict_diagnostics() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ReadLighting {},
+        payload: CommandPayload::Lighting(FeatureCommand::Read(())),
     } = app.session.request_lighting_read().unwrap()
     else {
         unreachable!()
@@ -93,9 +92,7 @@ fn reconnect_keeps_both_keymap_and_lighting_conflict_diagnostics() {
     app.session.accept(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ReadLighting {
-            result: Ok(changed_lighting),
-        },
+        payload: CompletionPayload::Lighting(FeatureResult::Read(Ok(changed_lighting))),
     });
     assert!(matches!(
         app.session.lighting().unwrap().status(),
@@ -213,7 +210,7 @@ fn close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ApplyLighting { .. },
+        payload: CommandPayload::Lighting(FeatureCommand::Apply { .. }),
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
@@ -223,9 +220,7 @@ fn close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic() {
     let _ = app.complete(Completion {
         generation,
         operation: operation + 1,
-        payload: CompletionPayload::ApplyLighting {
-            result: Ok(baseline.clone().unwrap()),
-        },
+        payload: CompletionPayload::Lighting(FeatureResult::Apply(Ok(baseline.clone().unwrap()))),
     });
     assert_eq!(app.closing, Closing::Waiting);
     assert!(app.busy());
@@ -236,9 +231,7 @@ fn close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyLighting {
-            result: Err(failure.clone()),
-        },
+        payload: CompletionPayload::Lighting(FeatureResult::Apply(Err(failure.clone()))),
     });
     assert_eq!(app.closing, Closing::Open);
     let editor = app.session.lighting().unwrap();
@@ -263,10 +256,10 @@ fn verified_lighting_close_checks_its_result_despite_keymap_invalidation() {
         generation,
         operation,
         payload:
-            CommandPayload::ApplyLighting {
+            CommandPayload::Lighting(FeatureCommand::Apply {
                 mut expected,
                 desired,
-            },
+            }),
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
@@ -276,9 +269,7 @@ fn verified_lighting_close_checks_its_result_despite_keymap_invalidation() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyLighting {
-            result: Ok(expected),
-        },
+        payload: CompletionPayload::Lighting(FeatureResult::Apply(Ok(expected))),
     });
     // complete() returned the exit task; it must not classify keymap ReadRequired as lighting failure.
     assert_eq!(app.closing, Closing::Waiting);
@@ -296,7 +287,7 @@ fn failed_lighting_write_requires_manual_reconnect_and_keeps_diagnostic() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ApplyLighting { .. },
+        payload: CommandPayload::Lighting(FeatureCommand::Apply { .. }),
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
@@ -304,12 +295,10 @@ fn failed_lighting_write_requires_manual_reconnect_and_keeps_diagnostic() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyLighting {
-            result: Err(ApplyFailure {
-                message: "lighting readback uncertain".into(),
-                recovery: Recovery::Unverified,
-            }),
-        },
+        payload: CompletionPayload::Lighting(FeatureResult::Apply(Err(ApplyFailure {
+            message: "lighting readback uncertain".into(),
+            recovery: Recovery::Unverified,
+        }))),
     });
     app.accept_availability(Availability::Missing);
     assert_eq!(app.auto_read, AutoRead::ManualOnly);
@@ -391,7 +380,7 @@ fn lighting_retry_rebinds_and_applies_retained_intent_after_fresh_read() {
     let Command {
         generation,
         operation,
-        payload: CommandPayload::ApplyLighting { .. },
+        payload: CommandPayload::Lighting(FeatureCommand::Apply { .. }),
     } = app.session.request_lighting_apply().unwrap()
     else {
         unreachable!()
@@ -399,12 +388,10 @@ fn lighting_retry_rebinds_and_applies_retained_intent_after_fresh_read() {
     let _ = app.complete(Completion {
         generation,
         operation,
-        payload: CompletionPayload::ApplyLighting {
-            result: Err(ApplyFailure {
-                message: "selected collection changed".into(),
-                recovery: Recovery::NotAttempted,
-            }),
-        },
+        payload: CompletionPayload::Lighting(FeatureResult::Apply(Err(ApplyFailure {
+            message: "selected collection changed".into(),
+            recovery: Recovery::NotAttempted,
+        }))),
     });
     app.attach = Box::new(|expected| {
         assert_eq!(expected, None);

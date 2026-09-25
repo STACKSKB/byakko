@@ -36,93 +36,79 @@ impl<T> Envelope<T> {
 pub type Command = Envelope<CommandPayload>;
 pub type Completion = Envelope<CompletionPayload>;
 
+/// Read and apply share one operation shape across all feature types.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FeatureCommand<S, E, R = ()> {
+    Read(R),
+    Apply { expected: S, desired: E },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FeatureResult<S> {
+    Read(Result<S, String>),
+    Apply(Result<S, ApplyFailure>),
+}
+
+impl<S> FeatureResult<S> {
+    pub fn activity(&self, feature: Feature) -> DeviceActivity {
+        match self {
+            Self::Read(_) => DeviceActivity::Read(feature),
+            Self::Apply(_) => DeviceActivity::Apply(feature),
+        }
+    }
+
+    pub fn failed_write(&self) -> bool {
+        matches!(self, Self::Apply(Err(_)))
+    }
+
+    fn accept<C>(
+        self,
+        context: &mut C,
+        read: impl FnOnce(&mut C, Result<S, String>),
+        apply: impl FnOnce(&mut C, Result<S, ApplyFailure>) -> bool,
+    ) -> bool {
+        match self {
+            Self::Read(result) => {
+                read(context, result);
+                false
+            }
+            Self::Apply(result) => apply(context, result),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum CommandPayload {
-    Read {},
-    Apply {
-        expected: State,
-        changes: Vec<Change>,
-    },
-    ReadMacro {
-        slot: String,
-    },
+    Keymap(FeatureCommand<State, Vec<Change>>),
+    Macro(FeatureCommand<crate::macros::Snapshot, crate::macros::Program, String>),
+    Lighting(FeatureCommand<crate::lighting::Snapshot, crate::lighting::Setting>),
+    Picture(FeatureCommand<crate::picture::Snapshot, BTreeMap<String, [u8; 3]>>),
+    Settings(FeatureCommand<crate::settings::Snapshot, crate::settings::Edit>),
+    Archive(FeatureCommand<crate::archive::NativeArchive, crate::archive::NativeArchive>),
     ReadMacroCatalog {
         slots: Vec<String>,
     },
-    ApplyMacro {
-        expected: crate::macros::Snapshot,
-        desired: crate::macros::Program,
-    },
-    ReadLighting {},
-    ApplyLighting {
-        expected: crate::lighting::Snapshot,
-        desired: crate::lighting::Setting,
-    },
-    ReadPicture {},
-    ApplyPicture {
-        expected: crate::picture::Snapshot,
-        desired: BTreeMap<String, [u8; 3]>,
-    },
-    ReadSettings {},
-    ApplySetting {
-        expected: crate::settings::Snapshot,
-        edit: crate::settings::Edit,
-    },
-    CaptureArchive {},
     ReviewArchive {
-        target: crate::archive::NativeArchive,
-    },
-    ApplyArchive {
-        expected: crate::archive::NativeArchive,
         target: crate::archive::NativeArchive,
     },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum CompletionPayload {
-    Read {
-        result: Result<State, String>,
-    },
-    Apply {
-        result: Result<State, ApplyFailure>,
-    },
-    ReadMacro {
+    Keymap(FeatureResult<State>),
+    Macro {
         slot: String,
-        result: Result<crate::macros::Snapshot, String>,
+        result: FeatureResult<crate::macros::Snapshot>,
     },
+    Lighting(FeatureResult<crate::lighting::Snapshot>),
+    Picture(FeatureResult<crate::picture::Snapshot>),
+    Settings(FeatureResult<crate::settings::Snapshot>),
+    Archive(FeatureResult<crate::archive::NativeArchive>),
     ReadMacroCatalog {
         result: Result<Vec<crate::macros::Snapshot>, String>,
     },
-    ApplyMacro {
-        slot: String,
-        result: Result<crate::macros::Snapshot, ApplyFailure>,
-    },
-    ReadLighting {
-        result: Result<crate::lighting::Snapshot, String>,
-    },
-    ApplyLighting {
-        result: Result<crate::lighting::Snapshot, ApplyFailure>,
-    },
-    ReadPicture {
-        result: Result<crate::picture::Snapshot, String>,
-    },
-    ApplyPicture {
-        result: Result<crate::picture::Snapshot, ApplyFailure>,
-    },
-    ReadSettings {
-        result: Result<crate::settings::Snapshot, String>,
-    },
-    ApplySetting {
-        result: Result<crate::settings::Snapshot, ApplyFailure>,
-    },
-    CaptureArchive {
-        result: Result<crate::archive::NativeArchive, String>,
-    },
     ReviewArchive {
         result: Result<crate::archive::Review, String>,
-    },
-    ApplyArchive {
-        result: Result<crate::archive::NativeArchive, ApplyFailure>,
     },
 }
 
@@ -511,20 +497,39 @@ impl Session {
         Ok(self.next_operation)
     }
 
-    pub fn request_read(&mut self) -> Result<Command, String> {
-        if self.busy() || self.status == Status::Disconnected {
-            return Err("No connected idle device is available for reading".into());
-        }
+    /// Allocate correlation and pending activity together so feature requests
+    /// cannot drift between the command sent and the operation being awaited.
+    fn begin_feature<S, E, R>(
+        &mut self,
+        feature: Feature,
+        request: FeatureCommand<S, E, R>,
+        wrap: impl FnOnce(FeatureCommand<S, E, R>) -> CommandPayload,
+    ) -> Result<Command, String> {
         let operation = self.operation()?;
+        let activity = match &request {
+            FeatureCommand::Read(_) => DeviceActivity::Read(feature),
+            FeatureCommand::Apply { .. } => DeviceActivity::Apply(feature),
+        };
         self.activity = Activity::Device {
             operation,
-            request: DeviceActivity::Read(Feature::Keymap),
+            request: activity,
         };
         Ok(Command {
             generation: self.generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: wrap(request),
         })
+    }
+
+    pub fn request_read(&mut self) -> Result<Command, String> {
+        if self.busy() || self.status == Status::Disconnected {
+            return Err("No connected idle device is available for reading".into());
+        }
+        self.begin_feature(
+            Feature::Keymap,
+            FeatureCommand::Read(()),
+            CommandPayload::Keymap,
+        )
     }
 
     pub fn request_apply(&mut self) -> Result<Command, String> {
@@ -537,17 +542,16 @@ impl Session {
             return Err("No keymap changes are staged".into());
         }
         validate_changes(&self.descriptor, &changes)?;
-        let operation = self.operation()?;
-        self.activity = Activity::Device {
-            operation,
-            request: DeviceActivity::Apply(Feature::Keymap),
-        };
+        let command = self.begin_feature(
+            Feature::Keymap,
+            FeatureCommand::Apply {
+                expected,
+                desired: changes,
+            },
+            CommandPayload::Keymap,
+        )?;
         self.invalidate_archive();
-        Ok(Command {
-            generation: self.generation,
-            operation,
-            payload: CommandPayload::Apply { expected, changes },
-        })
+        Ok(command)
     }
 
     pub fn activity(&self) -> &Activity {
@@ -655,119 +659,92 @@ impl Session {
         }
         // Each payload is correlated and handled in one exhaustive dispatch.
         match payload {
-            CompletionPayload::Read { result } => self.finish_device_operation(
+            CompletionPayload::Keymap(result) => self.finish_device_operation(
                 operation,
-                DeviceActivity::Read(Feature::Keymap),
+                result.activity(Feature::Keymap),
                 |session| {
-                    session.accept_read(result);
-                    false
+                    result.accept(session, Self::accept_read, |session, result| {
+                        session.accept_apply(result);
+                        session.status != Status::Ready
+                    })
                 },
             ),
-            CompletionPayload::Apply { result } => self.finish_device_operation(
+            CompletionPayload::Macro { slot, result } => self.finish_device_operation(
                 operation,
-                DeviceActivity::Apply(Feature::Keymap),
-                |session| {
-                    session.accept_apply(result);
-                    session.status != Status::Ready
-                },
-            ),
-            CompletionPayload::ReadMacro { slot, result } => self.finish_device_operation(
-                operation,
-                DeviceActivity::Read(Feature::Macro { slot }),
+                result.activity(Feature::Macro { slot }),
                 |session| {
                     let editor = session.macros.as_mut().expect("pending macros capability");
-                    editor.accept_read(result);
-                    false
+                    result.accept(
+                        editor,
+                        crate::macros::editor::Editor::accept_read,
+                        |editor, result| {
+                            editor.accept_apply(result);
+                            editor.status() != &crate::macros::editor::Status::Ready
+                        },
+                    )
                 },
             ),
-            CompletionPayload::ApplyMacro { slot, result } => self.finish_device_operation(
+            CompletionPayload::Lighting(result) => self.finish_device_operation(
                 operation,
-                DeviceActivity::Apply(Feature::Macro { slot }),
+                result.activity(Feature::Lighting),
                 |session| {
-                    let editor = session.macros.as_mut().expect("pending macros capability");
-                    editor.accept_apply(result);
-                    editor.status() != &crate::macros::editor::Status::Ready
+                    result.accept(
+                        session,
+                        |session, result| {
+                            session
+                                .lighting
+                                .as_mut()
+                                .expect("pending lighting capability")
+                                .accept_read(result)
+                        },
+                        Self::accept_lighting_apply,
+                    )
                 },
             ),
-            CompletionPayload::ReadLighting { result } => self.finish_device_operation(
+            CompletionPayload::Picture(result) => self.finish_device_operation(
                 operation,
-                DeviceActivity::Read(Feature::Lighting),
-                |session| {
-                    let editor = session
-                        .lighting
-                        .as_mut()
-                        .expect("pending lighting capability");
-                    editor.accept_read(result);
-                    false
-                },
-            ),
-            CompletionPayload::ApplyLighting { result } => self.finish_device_operation(
-                operation,
-                DeviceActivity::Apply(Feature::Lighting),
-                |session| session.accept_lighting_apply(result),
-            ),
-            CompletionPayload::ReadPicture { result } => self.finish_device_operation(
-                operation,
-                DeviceActivity::Read(Feature::Picture),
+                result.activity(Feature::Picture),
                 |session| {
                     let editor = session
                         .picture
                         .as_mut()
                         .expect("pending picture capability");
-                    editor.accept_read(result);
-                    false
+                    result.accept(
+                        editor,
+                        crate::picture::editor::Editor::accept_read,
+                        |editor, result| {
+                            editor.accept_apply(result);
+                            editor.status() != &crate::picture::editor::Status::Ready
+                        },
+                    )
                 },
             ),
-            CompletionPayload::ApplyPicture { result } => self.finish_device_operation(
+            CompletionPayload::Settings(result) => self.finish_device_operation(
                 operation,
-                DeviceActivity::Apply(Feature::Picture),
-                |session| {
-                    let editor = session
-                        .picture
-                        .as_mut()
-                        .expect("pending picture capability");
-                    editor.accept_apply(result);
-                    editor.status() != &crate::picture::editor::Status::Ready
-                },
-            ),
-            CompletionPayload::ReadSettings { result } => self.finish_device_operation(
-                operation,
-                DeviceActivity::Read(Feature::Settings),
+                result.activity(Feature::Settings),
                 |session| {
                     let editor = session
                         .settings
                         .as_mut()
                         .expect("pending settings capability");
-                    editor.accept_read(result);
-                    false
+                    result.accept(
+                        editor,
+                        crate::settings::editor::Editor::accept_read,
+                        |editor, result| {
+                            editor.accept_apply(result);
+                            editor.status() != &crate::settings::editor::Status::Ready
+                        },
+                    )
                 },
             ),
-            CompletionPayload::ApplySetting { result } => self.finish_device_operation(
+            CompletionPayload::Archive(result) => self.finish_device_operation(
                 operation,
-                DeviceActivity::Apply(Feature::Settings),
+                result.activity(Feature::Archive),
                 |session| {
-                    let editor = session
-                        .settings
-                        .as_mut()
-                        .expect("pending settings capability");
-                    editor.accept_apply(result);
-                    editor.status() != &crate::settings::editor::Status::Ready
-                },
-            ),
-            CompletionPayload::CaptureArchive { result } => self.finish_device_operation(
-                operation,
-                DeviceActivity::Read(Feature::Archive),
-                |session| {
-                    session.accept_archive_capture(result);
-                    false
-                },
-            ),
-            CompletionPayload::ApplyArchive { result } => self.finish_device_operation(
-                operation,
-                DeviceActivity::Apply(Feature::Archive),
-                |session| {
-                    session.accept_archive_apply(result);
-                    false
+                    result.accept(session, Self::accept_archive_capture, |session, result| {
+                        session.accept_archive_apply(result);
+                        false
+                    })
                 },
             ),
             CompletionPayload::ReadMacroCatalog { result } => {
@@ -1030,7 +1007,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = session.request_read().unwrap()
         else {
             panic!("expected read command")
@@ -1039,7 +1016,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::Read { result }
+                payload: CompletionPayload::Keymap(FeatureResult::Read(result))
             }),
             Acceptance::Accepted
         );
@@ -1052,7 +1029,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = session.request_read().unwrap()
         else {
             unreachable!()
@@ -1063,7 +1040,7 @@ mod tests {
         let Command {
             generation: next_generation,
             operation: next_operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = session.request_read().unwrap()
         else {
             unreachable!()
@@ -1072,9 +1049,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::Read {
-                    result: Ok(state(1, 4))
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(state(1, 4))))
             }),
             Acceptance::IgnoredStale
         );
@@ -1082,9 +1057,7 @@ mod tests {
             session.accept(Completion {
                 generation: next_generation,
                 operation: next_operation + 1,
-                payload: CompletionPayload::Read {
-                    result: Ok(state(2, 4))
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(state(2, 4))))
             }),
             Acceptance::IgnoredStale
         );
@@ -1092,9 +1065,7 @@ mod tests {
             session.accept(Completion {
                 generation: next_generation,
                 operation: next_operation,
-                payload: CompletionPayload::Apply {
-                    result: Ok(state(2, 4))
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(state(2, 4))))
             }),
             Acceptance::IgnoredStale
         );
@@ -1110,9 +1081,7 @@ mod tests {
             session.accept(Completion {
                 generation: next_generation,
                 operation: next_operation,
-                payload: CompletionPayload::Read {
-                    result: Ok(state(2, 4))
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(state(2, 4))))
             }),
             Acceptance::Accepted
         );
@@ -1162,7 +1131,11 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Apply { expected, changes },
+            payload:
+                CommandPayload::Keymap(FeatureCommand::Apply {
+                    expected,
+                    desired: changes,
+                }),
         } = session.request_apply().unwrap()
         else {
             unreachable!()
@@ -1177,9 +1150,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::Apply {
-                    result: Err(failure.clone())
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(failure.clone())))
             }),
             Acceptance::Accepted
         );
@@ -1206,7 +1177,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Apply { .. },
+            payload: CommandPayload::Keymap(FeatureCommand::Apply { .. }),
         } = session.request_apply().unwrap()
         else {
             unreachable!()
@@ -1215,9 +1186,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::Apply {
-                    result: Ok(state(2, 6))
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(state(2, 6))))
             }),
             Acceptance::Accepted
         );
@@ -1250,7 +1219,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Apply { .. },
+            payload: CommandPayload::Keymap(FeatureCommand::Apply { .. }),
         } = session.request_apply().unwrap()
         else {
             unreachable!()
@@ -1259,9 +1228,7 @@ mod tests {
             session.accept(Completion {
                 generation,
                 operation,
-                payload: CompletionPayload::Apply {
-                    result: Ok(state(2, 5))
-                }
+                payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(state(2, 5))))
             }),
             Acceptance::Accepted
         );
@@ -1281,7 +1248,7 @@ mod tests {
             serde_json::json!({
                 "generation": command.generation,
                 "operation": command.operation,
-                "payload": { "Read": {} }
+                "payload": { "Keymap": { "Read": null } }
             })
         );
         assert_eq!(
@@ -1291,7 +1258,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Read {},
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
         } = command
         else {
             unreachable!()
@@ -1299,9 +1266,7 @@ mod tests {
         let completion = Completion {
             generation,
             operation,
-            payload: CompletionPayload::Read {
-                result: Ok(state(1, 4)),
-            },
+            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(state(1, 4)))),
         };
         let encoded = serde_json::to_vec(&completion).unwrap();
         let decoded = serde_json::from_slice::<Completion>(&encoded).unwrap();
@@ -1314,7 +1279,7 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Apply { .. },
+            payload: CommandPayload::Keymap(FeatureCommand::Apply { .. }),
         } = apply
         else {
             unreachable!()
@@ -1322,12 +1287,10 @@ mod tests {
         let failure = Completion {
             generation,
             operation,
-            payload: CompletionPayload::Apply {
-                result: Err(ApplyFailure {
-                    message: "write failed".into(),
-                    recovery: Recovery::Failed,
-                }),
-            },
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
+                message: "write failed".into(),
+                recovery: Recovery::Failed,
+            }))),
         };
         let encoded = serde_json::to_vec(&failure).unwrap();
         assert_eq!(
@@ -1343,12 +1306,8 @@ mod tests {
         let command = session.request_read().unwrap();
         let pending = session.activity().clone();
         for payload in [
-            CompletionPayload::Apply {
-                result: Ok(state(1, 4)),
-            },
-            CompletionPayload::ReadLighting {
-                result: Err("wrong feature".into()),
-            },
+            CompletionPayload::Keymap(FeatureResult::Apply(Ok(state(1, 4)))),
+            CompletionPayload::Lighting(FeatureResult::Read(Err("wrong feature".into()))),
             CompletionPayload::ReadMacroCatalog {
                 result: Ok(Vec::new()),
             },
@@ -1365,9 +1324,9 @@ mod tests {
             assert!(session.baseline().is_none());
         }
         assert_eq!(
-            session.accept(command.map(|_| CompletionPayload::Read {
-                result: Ok(state(1, 4)),
-            })),
+            session.accept(
+                command.map(|_| CompletionPayload::Keymap(FeatureResult::Read(Ok(state(1, 4)))))
+            ),
             Acceptance::Accepted
         );
         assert_eq!(session.status(), &Status::Ready);
@@ -1398,7 +1357,11 @@ mod tests {
         let Command {
             generation,
             operation,
-            payload: CommandPayload::Apply { expected, changes },
+            payload:
+                CommandPayload::Keymap(FeatureCommand::Apply {
+                    expected,
+                    desired: changes,
+                }),
         } = command
         else {
             unreachable!()
@@ -1414,9 +1377,7 @@ mod tests {
         let completion = Completion {
             generation,
             operation,
-            payload: CompletionPayload::Apply {
-                result: Ok(applied.clone()),
-            },
+            payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(applied.clone()))),
         };
         let encoded = serde_json::to_vec(&completion).unwrap();
         assert_eq!(
