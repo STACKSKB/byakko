@@ -126,10 +126,10 @@ optional source-inventory script, not the Cargo build or the renderer itself.
   supplemental notices. The renderer inventory is repaired and records its
   source/patch hashes. Cargo fetches other dependencies with their own notices;
   no third-party binary notice bundle is shipped by this pre-alpha.
-- [ ] **Check dependency advisories.** Also run a current dependency
-  advisory check; no `cargo audit`/`cargo deny` command was installed for this
-  review, so no current vulnerability clearance is claimed.
-- [ ] **Publish one accurate support/acceptance matrix and recovery guide.**
+- [x] **Check dependency advisories.** Current RustSec check reports no known
+  vulnerabilities and one informational `ttf-parser` maintenance warning;
+  see [audit record](dependency-source-audit.md#current-rustsec-check-2026-09-25).
+- [x] **Publish one accurate support/acceptance matrix and recovery guide.**
   Reconcile README, parity ledger, Linux setup, AGENTS and dated acceptance notes.
   State supported Nia87 USB/firmware scope, automatic-write behavior, backup
   locations, transport versus readback evidence, unaccepted capabilities and
@@ -225,3 +225,15 @@ physical interaction will be coordinated around the user's availability.
 - [x] Windows historical failure evidence reconciled offline; exact byte diffs
   recorded in the investigation. No fault-run transport trace exists. Cause
   and recovery acceptance remain open; no new fault experiment was performed.
+
+- [x] All four product crates check successfully for `x86_64-pc-windows-msvc`
+  from Linux. This is compile checking, not Windows linking or runtime evidence.
+- [x] Current RustSec advisory scan completed with no ignored advisories; zero
+  known vulnerabilities, one upstream unmaintained-font-parser warning recorded.
+
+- [ ] Supervised Linux lighting follow-up: visible mode/color switching confirmed,
+  but the user saw no brightness difference at steady green 4 versus 1. Normal
+  command readbacks matched. Exact raw lighting archive restore mismatched and
+  rolled back with Verified recovery; original visible settings were restored
+  afterward with user-approved canonical RGB bytes. Root cause and physical
+  brightness remain open; see the Linux handoff and fault investigation.

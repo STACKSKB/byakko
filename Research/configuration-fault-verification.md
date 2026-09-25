@@ -242,3 +242,20 @@ reads, selector-dependent responses or host transport defects. No root cause
 is claimed and no fault test was repeated. Before a new experiment, review the
 current baseline and propose a bounded trace-producing test to the user; do not
 reuse the historical multi-section fixture blindly.
+
+## New Linux mismatch during an ordinary explicit restore (2026-09-25)
+
+See [supervised Linux test](../docs/linux-handoff.md#supervised-lighting-check-and-restoration-2026-09-25).
+There was no injected fault. Restoring the original Wave/rainbow lighting bytes
+from steady green planned a single lighting setter and no other section writes.
+The complete target readback mismatched; automatic rollback then fully verified
+its own before-image (steady green at brightness 1). The original visible
+settings were subsequently restored through the normal lighting command at the
+user's direction, with the codec's canonical rainbow RGB bytes retained.
+
+The original raw target used `FF FF FF`; ordinary encoding uses `FA FF FA`.
+This is a candidate factor to inspect, not an established cause of the full
+archive mismatch. No trace or mismatched snapshot was retained by that restore
+path, so do not infer its actual failing section. This narrow Verified recovery
+is new Linux evidence, not proof that the old multi-section Windows failure is
+fixed. Preserve diagnostics before proposing any further write experiment.

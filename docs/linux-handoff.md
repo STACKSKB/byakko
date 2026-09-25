@@ -46,7 +46,9 @@ captures and vendor fixtures under ignored paths are not in Git.
   initial read-only checks. Capture a new local archive with
   `target/release/byakko-cli capture-archive NEW_PATH.json` using one complete
   sweep. Do not duplicate the sweep or reread every section as a preflight.
-  Where an earlier archive already exists, compare offline with
+  Agent-directed diagnostic captures may be repeated as needed (user
+  clarification, 2026-09-25); this does not change the executable's single-sweep
+  policy. Where an earlier archive already exists, compare offline with
   `target/release/byakko-cli compare-archives FIRST.json SECOND.json`; an empty
   JSON list means the native configuration matches. The comparison runs offline
   and uses the same forward/reverse preflight as archive review, so an
@@ -338,3 +340,47 @@ establish physical writes, playback, power-cycle persistence, GUI behavior or
 recovery. The desktop/CLI release build and all 376 selected product tests also
 passed at this source; recovery classification tests do not prove hardware
 recovery.
+
+## Supervised lighting check and restoration (2026-09-25)
+
+The user authorized a backed-up brightness round trip, then requested a larger
+4→1 comparison and steady color. All commands used the same selected Linux node.
+The source was `f8583d7` for product code (later commits changed documentation).
+Ordinary setters returned TransportAccepted; separate reads matched submission.
+
+Observed sequence:
+
+1. Wave/rainbow brightness 4→3 read back correctly. The test's extra raw-byte
+   assertion stopped because the codec also canonicalized rainbow RGB from
+   `FF FF FF` to `FA FF FA`. The submitted snapshot predicted the same bytes;
+   this was deterministic host encoding, not unexplained device drift. A full
+   diagnostic archive confirmed only lighting indices 3, 5 and 7 differed.
+2. At the user's request, Wave brightness 3→1 read back with only byte 3 changed.
+3. Steady green (effect 1, fixed RGB `00 FF 00`) at brightness 4, then 1, read
+   back correctly. Only raw byte 3 changed between those two static states.
+   The user confirmed the keyboard became steady green, but reported no visible
+   brightness difference. Physical brightness behavior remains unresolved.
+4. The user requested original-state restoration. Offline comparison of a fresh
+   current archive against the original planned **only one lighting change**,
+   no keys/macros/colors/settings. The existing native restore example wrote
+   that lighting report, but complete target verification mismatched. Automatic
+   recovery then verified the preceding steady-green brightness-1 archive.
+   No fault was injected. The pre-restore backup matched that captured state.
+5. After the user selected visible-settings restoration, the normal lighting
+   command restored Wave/rainbow at 4, speed 2, right, and a separate read matched
+   the submitted state. Original lighting bytes 5 and 7 remain canonicalized to
+   250 instead of 255. Do not call this exact raw restoration.
+
+The failed exact-restore backup is
+`Research/captures/backups/configuration-before-1790321203738684791.json`, SHA-256
+`f205abfac43e0b3976ed1f6adc040f88b5d9fce65e257b4a0e3785e9bc19458f`.
+Local captures, proposal files, readbacks, plan and restore stdout/stderr are
+under `/tmp/byakko-readonly-20260925-r49cg5m_`. The exact-restore run had no
+transport trace, and the application did not retain its mismatched capture;
+there is insufficient evidence to identify that mismatch's bytes or cause.
+
+This establishes one current Linux automatic recovery result (`Verified`) and
+visible mode/color switching. It does not resolve the earlier Windows collateral
+changes, establish exact raw archive restoration, or prove brightness dimming.
+The user has been asked to obtain official-app brightness packet/visual evidence
+from the Windows Agent before changing the codec. No further setters are implied.

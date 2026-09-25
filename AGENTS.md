@@ -27,6 +27,11 @@ CLI file workflows may read once to establish the file's current baseline;
 the executor must not repeat that preflight. Archive capture/verification uses
 one complete sweep, not duplicated sweeps and section-by-section rereads.
 
+Clarification (user-directed, 2026-09-25): the one-pass rule governs normal
+behavior of the emitted Byakko executable. The investigating agent may repeat
+read-only captures as often as needed for diagnosis and acceptance evidence.
+Do not turn diagnostic repetition into redundant automatic runtime preflights.
+
 ## Product constraints
 
 - Native Windows/Linux desktop, Rust + Iced. No JavaScript, Electron, webview,
