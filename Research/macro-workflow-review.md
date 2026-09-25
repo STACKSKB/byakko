@@ -14,7 +14,7 @@ The available executable identified itself as Nia87 Driver, ProductVersion
 2.1.97.0 / FileVersion 2.1.97. Its launch failed because Windows denied desktop
 access (`GetCursorPos`, 0x80070005). No current UI screenshots, control actions,
 local draft edits or keyboard writes were obtained. Live workflow profiling
-remains pending restored interactive desktop access.
+is deferred: the user cannot RDP into Windows and will restore access later.
 
 Existing evidence supports keyboard/mouse-button recording, manual movement,
 optional fixed delay, counted repeats 1–65,535, and distinct slot contents and

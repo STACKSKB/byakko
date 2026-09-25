@@ -219,7 +219,10 @@ the Linux task; it should not be repeated.
 
 ### WIN-20260925-005: Profile the official macro editing and assignment workflow
 - Revision: 1
-- Status: awaiting Windows desktop access
+- Status: deferred by user availability
+- Current direction: The user cannot RDP into Windows and has deferred restoring
+  desktop access. Do not retry live UI automation until the user says access is
+  available. Keep the existing partial result; Linux will finish its own fixes.
 - Progress: Revision 1 returned existing evidence on 2026-09-25. The available
   official executable is Nia87 Driver 2.1.97.0; its launch failed with
   `GetCursorPos failed: Access is denied (0x80070005)`. No UI controls were
