@@ -2,8 +2,8 @@
 
 The pre-alpha is a source checkout. No CI/CD, installer, signing service or
 prebuilt binary download is required. Build the Iced desktop and independent
-CLI explicitly; the root package's default GUI is the retained egui research
-application.
+CLI explicitly. The retired egui application is no longer a build feature or
+target; no legacy UI modules are compiled.
 
 ## Prerequisites
 

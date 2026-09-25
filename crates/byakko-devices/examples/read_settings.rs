@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let [output] = arguments.as_slice() else {
         return Err("Usage: read_settings NEW_COMPLETION.json".into());
@@ -22,9 +22,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .write(true)
         .create_new(true)
         .open(output)?;
+    let candidates = nia87::device::candidates()?;
+    let [candidate] = candidates.as_slice() else {
+        return Err(format!("Expected one Nia87 collection; found {}", candidates.len()).into());
+    };
+    let target = nia87::device::Target::from_candidate(candidate)?;
     let mut session =
         Session::new(nia87::descriptor())?.with_settings(nia87::settings_adapter::capabilities())?;
-    let executor = Executor::spawn(nia87::Nia87Adapter, Default::default())?;
+    let executor = Executor::spawn(nia87::BoundNia87Adapter::new(target), Default::default())?;
     executor.set_generation(session.connect()?);
     executor
         .try_submit(session.request_settings_read()?)

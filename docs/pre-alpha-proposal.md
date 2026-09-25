@@ -15,6 +15,22 @@ No server, web UI or browser HID support is being implemented in this slice.
 This replaces incremental feature expansion as the immediate priority; it does
 not reduce the full configurator parity objective.
 
+## Current decisions
+
+The current desktop is native Rust + Iced, with `byakko-core`,
+`byakko-devices`, and `byakko-desktop` as the product boundary. Byakko-owned
+code, documentation, and assets are GPL-3.0-or-later. The root egui application
+and its Cargo feature have been retired. Current feature
+status and unresolved acceptance gates live in [backend architecture](backend-architecture.md)
+and [Linux handoff](linux-handoff.md).
+
+## Historical 2026-09-21 proposal and rationale
+
+The dated material below records the initial exploration. Its egui selection,
+permissive-only project-license constraint, and package sketch were superseded
+by the decisions above; preserve it as research history rather than current
+implementation guidance.
+
 ## What went wrong
 
 The prototype grew around screens and experiments instead of an application

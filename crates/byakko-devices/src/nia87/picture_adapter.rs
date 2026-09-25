@@ -75,23 +75,11 @@ fn checked_native(snapshot: &picture::Snapshot) -> Result<(Vec<[u8; 3]>, [u8; 2]
     Ok((colors, context))
 }
 
-pub fn read() -> Result<picture::Snapshot, String> {
-    read_with(&device::Access::unique())
-}
-
 pub(super) fn read_with(access: &device::Access) -> Result<picture::Snapshot, String> {
     let (colors, context) = access
         .read_picture_with_context()
         .map_err(|error| error.to_string())?;
     project(&colors, context)
-}
-
-pub fn apply(
-    expected: &picture::Snapshot,
-    desired: &BTreeMap<String, [u8; 3]>,
-    backup: &Path,
-) -> Result<picture::Snapshot, ApplyFailure> {
-    apply_with(&device::Access::unique(), expected, desired, backup)
 }
 
 pub(super) fn apply_with(

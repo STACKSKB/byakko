@@ -1,5 +1,6 @@
 //! Reversible multi-section archive check, with no macro binding or playback.
-use byakko::{
+mod support;
+use byakko_devices::nia87::{
     configuration, device,
     lighting::Lighting,
     macros::{self, Macro, MacroEvent},
@@ -61,6 +62,7 @@ fn main() -> device::Result<()> {
     replies[0][2] = 2;
     target.settings = Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3])?;
     let backups = std::path::Path::new("Research/captures/backups");
+    let access = support::access()?;
     #[cfg(feature = "research-tools")]
     if let Some(opcode) = fault_opcode {
         // Reserve the trace path before any test write. Actual trace collection
@@ -75,9 +77,9 @@ fn main() -> device::Result<()> {
             .write(true)
             .create_new(true)
             .open(&trace_path)?;
-        let (run, trace) = byakko::research_trace::with_trace(|| {
-            byakko::research_fault::with_fault(opcode, true, || {
-                device::apply_configuration(&original, &target, backups, |s| {
+        let (run, trace) = byakko_devices::research_trace::with_trace(|| {
+            byakko_devices::research_fault::with_fault(opcode, true, || {
+                support::apply_configuration(&access, &original, &target, backups, |s| {
                     println!("Fault test: {s}")
                 })
             })
@@ -112,11 +114,11 @@ fn main() -> device::Result<()> {
         }
         // Independently read changed sections after the transaction released
         // its lock; recovery itself compared every section and all50 macros.
-        if device::snapshot()? != original.keymaps
-            || device::read_macro(49)? != original.macros[49]
-            || device::read_picture()? != original.picture
-            || device::read_lighting()? != original.lighting
-            || device::read_settings()? != original.settings
+        if access.snapshot()? != original.keymaps
+            || access.read_macro(49)? != original.macros[49]
+            || access.read_picture_with_context()?.0 != original.picture
+            || access.read_lighting()? != original.lighting
+            || access.read_settings()? != original.settings
         {
             return Err("Post-recovery independent readback mismatch".into());
         }
@@ -125,10 +127,12 @@ fn main() -> device::Result<()> {
         );
         return Ok(());
     }
-    let applied =
-        device::apply_configuration(&original, &target, backups, |s| println!("Apply: {s}"))?;
-    let restored =
-        device::apply_configuration(&applied, &original, backups, |s| println!("Restore: {s}"))?;
+    let applied = support::apply_configuration(&access, &original, &target, backups, |s| {
+        println!("Apply: {s}")
+    })?;
+    let restored = support::apply_configuration(&access, &applied, &original, backups, |s| {
+        println!("Restore: {s}")
+    })?;
     if restored != original {
         return Err("Complete restoration mismatch".into());
     }

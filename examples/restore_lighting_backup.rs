@@ -1,5 +1,6 @@
 //! Restore a known lighting backup through the normal verified transaction.
-use byakko::{device, lighting::Lighting};
+mod support;
+use byakko_devices::nia87::{device, lighting::Lighting};
 
 fn main() -> device::Result<()> {
     let path = std::env::args()
@@ -11,8 +12,9 @@ fn main() -> device::Result<()> {
     }
     let saved: Lighting = serde_json::from_value(backup["before"].clone())?;
     let desired = saved.recognized_setting().ok_or("Unknown saved mode")?;
-    let current = device::read_lighting()?;
-    let after = device::apply_lighting(
+    let access = support::access()?;
+    let current = access.read_lighting()?;
+    let after = access.apply_lighting(
         &current,
         &desired,
         std::path::Path::new("Research/captures/backups"),

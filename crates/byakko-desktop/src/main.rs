@@ -5,7 +5,7 @@ mod demo;
 use byakko_core::session::Session;
 use byakko_desktop::discovery::Availability;
 use byakko_devices::{
-    Executor, KeymapDevice,
+    Device, Executor,
     nia87::{self, BoundNia87Adapter},
 };
 

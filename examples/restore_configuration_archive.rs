@@ -1,5 +1,6 @@
 //! Explicit recovery using a captured current state and a durable target archive.
-fn main() -> byakko::device::Result<()> {
+mod support;
+fn main() -> byakko_devices::nia87::device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !(2..=3).contains(&args.len()) {
         return Err(
@@ -13,9 +14,9 @@ fn main() -> byakko::device::Result<()> {
             "Transport tracing requires the research-tools feature; no device access".into(),
         );
     }
-    let current = byakko::configuration::load(std::path::Path::new(&args[0]))?;
-    let original = byakko::configuration::load(std::path::Path::new(&args[1]))?;
-    let plan = byakko::configuration_plan::plan(&current, &original)?;
+    let current = byakko_devices::nia87::configuration::load(std::path::Path::new(&args[0]))?;
+    let original = byakko_devices::nia87::configuration::load(std::path::Path::new(&args[1]))?;
+    let plan = byakko_devices::nia87::configuration_plan::plan(&current, &original)?;
     println!(
         "Restoring {} bindings, macros {:?}, {} colors, lighting {}, {} settings",
         plan.key_bindings,
@@ -24,8 +25,10 @@ fn main() -> byakko::device::Result<()> {
         plan.lighting,
         plan.settings.len()
     );
+    let access = support::access()?;
     let apply = || {
-        byakko::device::apply_configuration(
+        support::apply_configuration(
+            &access,
             &current,
             &original,
             std::path::Path::new("Research/captures/backups"),
@@ -41,13 +44,13 @@ fn main() -> byakko::device::Result<()> {
             .write(true)
             .create_new(true)
             .open(trace_path)?;
-        let (run, trace) = byakko::research_trace::with_trace(apply);
+        let (run, trace) = byakko_devices::research_trace::with_trace(apply);
         let outcome = match &run {
             Ok(Ok(_)) => "Complete original archive restored and verified".to_owned(),
             Ok(Err(error)) => error.to_string(),
             Err(error) => error.clone(),
         };
-        let saved = (|| -> byakko::device::Result<()> {
+        let saved = (|| -> byakko_devices::nia87::device::Result<()> {
             serde_json::to_writer_pretty(
                 &mut output,
                 &serde_json::json!({

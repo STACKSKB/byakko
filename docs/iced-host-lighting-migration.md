@@ -1,6 +1,6 @@
 # Iced host lighting migration boundary
 
-The egui baseline runs screen color and playback lighting through separate
+Historical egui baseline (retired 2026-09-26): it ran screen color and playback lighting through separate
 threads (`src/screen_stream.rs` and `src/audio_stream.rs`). Those loops open a
 `HostLightingSession`, send frames, and explicitly restore the saved effect.
 That session now captures the selected Nia87 HID target and checks it on both

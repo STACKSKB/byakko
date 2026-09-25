@@ -1,5 +1,6 @@
 //! Explicit hardware storage check. No binding or playback; restore an empty slot.
-use byakko::{
+mod support;
+use byakko_devices::nia87::{
     device,
     macros::{self, Macro, MacroEvent},
 };
@@ -53,7 +54,7 @@ fn main() -> device::Result<()> {
         .write(true)
         .create_new(true)
         .open(&trace_path)?;
-    let (result, trace) = byakko::research_trace::with_trace(|| run(&args[0]));
+    let (result, trace) = byakko_devices::research_trace::with_trace(|| run(&args[0]));
     serde_json::to_writer_pretty(
         &mut trace_file,
         &serde_json::json!({
@@ -68,7 +69,7 @@ fn main() -> device::Result<()> {
 }
 
 fn run(baseline: &str) -> device::Result<()> {
-    let original = byakko::configuration::load(std::path::Path::new(baseline))?;
+    let original = byakko_devices::nia87::configuration::load(std::path::Path::new(baseline))?;
     let slot = 49;
     if original.keymaps.firmware != 0x100
         || original.keymaps.profile != 0
@@ -86,7 +87,8 @@ fn run(baseline: &str) -> device::Result<()> {
     }
     let desired = fixture();
     let encoded = macros::encode(&desired)?;
-    let current = device::capture_configuration(|done, total| {
+    let access = support::access()?;
+    let current = access.capture_configuration(|done, total| {
         if done % 20 == 0 {
             println!("Before: {done}/{total}");
         }
@@ -96,7 +98,7 @@ fn run(baseline: &str) -> device::Result<()> {
     }
     let backups = std::path::Path::new("Research/captures/backups");
     let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> device::Result<()> {
-        let written = device::apply_macro(slot as u8, &original.macros[slot], &desired, backups)?;
+        let written = access.apply_macro(slot as u8, &original.macros[slot], &desired, backups)?;
         if written != encoded || macros::decode(&written)? != desired {
             return Err("Mixed-event macro readback mismatch".into());
         }
@@ -111,9 +113,9 @@ fn run(baseline: &str) -> device::Result<()> {
     // Always attempt restoration after the test, even if the test reported an
     // uncertain error. The original archive and per-write backups remain on disk.
     let restore = (|| -> device::Result<()> {
-        let current = device::read_macro(slot as u8)?;
+        let current = access.read_macro(slot as u8)?;
         if current != original.macros[slot] {
-            let restored = device::apply_macro(
+            let restored = access.apply_macro(
                 slot as u8,
                 &current,
                 &macros::decode(&original.macros[slot])?,
@@ -123,7 +125,7 @@ fn run(baseline: &str) -> device::Result<()> {
                 return Err("Slot restoration mismatch".into());
             }
         }
-        let after = device::capture_configuration(|done, total| {
+        let after = access.capture_configuration(|done, total| {
             if done % 20 == 0 {
                 println!("After: {done}/{total}");
             }

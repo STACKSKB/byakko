@@ -1,7 +1,7 @@
 //! Read-only end-to-end probe of the same command path used by the desktop.
 use byakko_core::session::CompletionPayload;
 use byakko_core::session::FeatureResult;
-use byakko_core::session::{Completion, KeymapSession, Status};
+use byakko_core::session::{Completion, Session, Status};
 use byakko_devices::{Executor, nia87};
 use std::{
     fs::OpenOptions,
@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let [output] = arguments.as_slice() else {
         return Err("Usage: read_keymap NEW_COMPLETION.json".into());
@@ -20,8 +20,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .write(true)
         .create_new(true)
         .open(output)?;
-    let mut session = KeymapSession::new(nia87::descriptor())?;
-    let executor = Executor::spawn(nia87::Nia87Adapter, Default::default())?;
+    let candidates = nia87::device::candidates()?;
+    let [candidate] = candidates.as_slice() else {
+        return Err(format!("Expected one Nia87 collection; found {}", candidates.len()).into());
+    };
+    let target = nia87::device::Target::from_candidate(candidate)?;
+    let mut session = Session::new(nia87::descriptor())?;
+    let executor = Executor::spawn(nia87::BoundNia87Adapter::new(target), Default::default())?;
     executor.set_generation(session.connect()?);
     executor
         .try_submit(session.request_read()?)

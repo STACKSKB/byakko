@@ -164,8 +164,6 @@ pub trait Device: Send + 'static {
     }
 }
 
-pub use Device as KeymapDevice;
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,9 +1,8 @@
 //! Read-only WASAPI loopback probe. Prints metadata and levels, never audio.
-#[path = "../src/audio_sample.rs"]
-mod audio_sample;
+use byakko_devices::audio_sample::AudioSampler;
 
 fn main() -> Result<(), String> {
-    let mut sampler = audio_sample::AudioSampler::new()?;
+    let mut sampler = AudioSampler::new()?;
     println!("render endpoint sample rate: {} Hz", sampler.sample_rate());
     let mut frames = 0usize;
     let mut peak = 0.0f32;

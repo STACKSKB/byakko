@@ -1,11 +1,12 @@
 //! Bounded replay of the current Nia87 sleep setter; restores all four timers.
-use byakko::{
+mod support;
+use byakko_devices::nia87::{
     device::{self, Result},
     settings::Settings,
 };
 
-fn send(values: [u16; 4]) -> Result<()> {
-    let (_, device) = device::open_unique()?;
+fn send(target: &device::Target, values: [u16; 4]) -> Result<()> {
+    let (_, device) = device::open_expected(target)?;
     let mut host = [0; 65];
     host[1] = 0x12;
     host[8] = 0xed;
@@ -28,11 +29,13 @@ fn save(path: &str, settings: &Settings) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let maps = device::snapshot()?;
+    let target = support::target()?;
+    let access = device::Access::bound(target.clone());
+    let maps = access.snapshot()?;
     if maps.firmware != 0x100 || maps.profile != 0 {
         return Err("Unvalidated firmware/profile".into());
     }
-    let original = device::read_settings()?;
+    let original = access.read_settings()?;
     if original.sleep_seconds() != [120, 120, 600, 600] {
         return Err("Unexpected timer fixture; no writes sent".into());
     }
@@ -42,18 +45,18 @@ fn main() -> Result<()> {
     let prefix = format!("Research/captures/sleep-replay-{stamp}");
     save(&format!("{prefix}-before.json"), &original)?;
     let result = (|| -> Result<bool> {
-        send([180, 120, 600, 600])?;
-        let actual = device::read_settings()?;
+        send(&target, [180, 120, 600, 600])?;
+        let actual = access.read_settings()?;
         save(&format!("{prefix}-after.json"), &actual)?;
         Ok(actual.sleep_seconds() == [180, 120, 600, 600]
             && [0x91, 0x97, 0x86]
                 .iter()
                 .all(|&op| actual.raw_reply(op) == original.raw_reply(op)))
     })();
-    send(original.sleep_seconds())?;
-    let restored = device::read_settings()?;
+    send(&target, original.sleep_seconds())?;
+    let restored = access.read_settings()?;
     save(&format!("{prefix}-restored.json"), &restored)?;
-    if restored != original || device::snapshot()? != maps {
+    if restored != original || access.snapshot()? != maps {
         return Err("Full restoration comparison failed".into());
     }
     println!(

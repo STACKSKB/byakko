@@ -52,14 +52,14 @@ key output or graphical interaction correctness.
 
 Iced 0.14 uses tiny-skia and system fonts here; WGPU, egui and the bundled Fira
 font are absent from the desktop's normal dependency graph. The legacy root
-GUI still uses egui when built separately or as part of all-feature workspace
-checks. `tools/check_dependency_licenses.py --package byakko-desktop` audits the
+GUI remains in the repository as a research baseline, but is no longer the
+ordinary desktop path. `tools/check_dependency_licenses.py --package byakko-desktop` audits the
 Windows/Linux normal/build metadata separately; distribution asset notices and
 source-header review remain required. Core compiles independently for WASM;
 the native desktop is not a browser frontend.
 
 `crates/byakko-devices` now provides the serialized native executor and a small
-`KeymapDevice` effect contract. Nia87 codecs, mapping, transactions and archives
+`Device` effect contract. Nia87 codecs, mapping, transactions and archives
 live under `byakko-devices::nia87`; native HID, storage and feature-gated research
 instrumentation live in devices too. Its dependencies are core, Serde/JSON and
 target-specific OS bindings. Root compatibility modules re-export the same
@@ -120,7 +120,7 @@ error adapter, retaining its previous wire sequence, delays and diagnostics.
 
 Macro commands now use the same executor as keymaps. `session::Session` owns one
 generation, monotonically increasing operation sequence and `Activity` enum for
-both surfaces; the compatibility name `KeymapSession` refers to that same owner.
+both surfaces; `Session` is the single owner type.
 Keymap trust and macro trust are independent from pending activity. Every
 request, edit, slot switch and revert checks the shared activity guard. Replies
 must match kind, generation, operation and macro slot before any state changes;
@@ -129,10 +129,11 @@ the macro editor separately checks the returned snapshot's backend and slot.
 Each surface retains its own baseline/draft for its distinct data. A failed
 macro operation retains the draft and requires rereading before another save.
 Reconnect preserves dirty drafts; a changed observed revision enters conflict.
-Keymap reads/writes invalidate macro trust; macro writes invalidate keymap trust
-before dispatch, because earlier hardware recovery showed unexplained changes
-outside the intended fields. Reverting a draft does not restore trust. A
-generation change rejects queued old work but cannot interrupt started I/O;
+Successful feature writes retain unrelated cached baselines. Keymap, macro,
+lighting, picture and settings each own their feature-specific state; a write
+does not invalidate another feature or restart library discovery. Selector
+changes invalidate selector-dependent picture data and require a new picture
+read. A generation change rejects queued old work but cannot interrupt started I/O;
 desktop close continues to wait on the shared activity before dropping the
 executor. Process termination is not a rollback guarantee.
 
@@ -200,7 +201,11 @@ binding preferences are dropped with a notice. Import never stages a keymap
 binding or changes the selected slot. Names currently persist through exported
 documents, not automatically across app restarts. See `macro-documents.md`.
 
-Byakko currently has a native egui frontend for the Nia87. The shared Keys editor now uses an injectable backend interface; the rest of the application is **not yet backend-neutral**. The long-term goal is to reuse the frontend and its interaction patterns for other keyboard backends, including potential QMK/VIA adapters, without making those backends emulate Nia87 packets or its fixed feature set. This is an internal architecture direction, not a public SDK commitment. The current Nia87 safety and recovery work remains independent of this migration.
+**Historical egui migration notes (retired 2026-09-26):** the old prototype
+used an injectable keymap backend, but its UI and adapter files have been
+removed. The Iced application is the current native frontend. The following
+paragraphs record the old prototype's tested boundary and remain as dated
+research evidence, not current implementation status.
 
 ## Implemented first slice
 
