@@ -302,3 +302,58 @@ of successful restoration. Revalidate its baseline if the device state changes
 before a future approved test. Trace-enabled release build and strict Clippy
 passed; an existing trace path was rejected before device access with its
 contents unchanged. No live traced setter has been tested by this preparation.
+
+## Approved traced Linux lighting-only restore (2026-09-25)
+
+The user subsequently approved the prepared test: **"You have my approval.
+Continue with the goal."** The trace-enabled example was run once against the
+prepared current/target files. It planned zero key bindings, macros, picture
+colors or settings, and one lighting change: RGB bytes `FA FF FA` → `FF FF FF`,
+retaining Wave/rainbow effect 4, speed 2, brightness 4 and option byte 8.
+
+The operation returned failure for complete target mismatch, then verified
+recovery to the full current before-image. Unlike the earlier attempt, its
+mismatched capture and transport trace were retained. Comparing target to actual
+shows **only three differences**: lighting raw bytes 5, 6 and 7 were each 180
+(`B4`) instead of 255 (`FF`). Every other captured byte in all sections matched
+the target. The durable backup exactly matches the prepared before-image.
+
+The trace contains 496 events, zero dropped events, and exactly two setters:
+
+| Sequence | Elapsed microseconds | Event and payload (excluding host report ID) |
+| --- | ---: | --- |
+| 0 | 55,006 | Target setter `07 04 02 04 08 FF FF FF E9` + 55 zeros; transport OK |
+| 19 | 1,616,495 | Lighting getter reply `87 04 02 04 08 B4 B4 B4` + 56 zeros |
+| 266 | 9,770,584 | Recovery setter `07 04 02 04 08 FA FF FA F3` + 55 zeros; transport OK |
+| 285 | 11,321,614 | Lighting getter reply `87 04 02 04 08 FA FF FA` + 56 zeros |
+
+Both getter exchanges succeeded with the adapter's 65-byte host framing.
+The trace records API-level exchanges, not USB bus traffic or internal firmware
+execution. It establishes that the host submitted the exact intended white
+bytes and received different RGB bytes, while the canonical near-white bytes
+round-tripped during recovery. Device-side treatment of literal white is the
+supported inference for this run; no extra host setter or unrelated captured
+change explains it. The existing ordinary lighting codec already substitutes
+`FA FF FA` for white, consistent with the observed official writer convention.
+
+This narrows the new Linux archive failure to RGB exact-restoration semantics.
+It does not reconstruct the earlier discarded Linux capture or establish the
+cause of the historical Windows macro/picture differences. The Windows recovery
+capture also contains `B4 B4 B4`, but its missing setter trace prevents proving
+that the same transition occurred there.
+
+Current Linux state after this test is the fully verified before-image:
+Wave/rainbow at 4, speed 2, right, RGB `FA FF FA`. No additional setter was sent
+after verified recovery. The user has been asked to choose between rejecting
+affected exact-restoration plans before writes and an explicit reviewed
+visible-settings conversion; no silent canonicalization or weakened equality
+check has been added.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| `Research/captures/backups/configuration-before-1790324547062601492.json` | `c5a056cbb6edb9e3994d9acdd4aca71fd63c3743dffea8e88e89e5b47bdd0a04` |
+| `Research/captures/backups/configuration-apply-mismatch-1790324547062601492.json` | `7e31eb9641d03d704a115eb2e987afc32aad4afb7dba05f12a9fca4f73578524` |
+| `/tmp/byakko-restore-review-20260925-kp8s7pec/approved-restore-trace.json` | `d8bbbf0a5d92cfc45a256202319ae7b41362eb72ed7f7baeaec1de0578c72175` |
+
+The temporary directory also retains `approved-restore.stdout` and
+`approved-restore.stderr`. The command exited 1 with `Recovery::Verified`.

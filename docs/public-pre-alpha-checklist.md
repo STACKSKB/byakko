@@ -241,6 +241,11 @@ physical interaction will be coordinated around the user's availability.
   Linux unit under fixed camera settings, with full baseline restoration. This
   closes that narrow brightness observation, not the exact archive restore gate
   or Windows behavior. See [brightness evidence](../Research/brightness-investigation.md).
+  **Traced restore follow-up:** the approved lighting-only run isolated its
+  mismatch to `FF FF FF` → `B4 B4 B4` readback, with no other changed bytes and
+  verified full rollback to the canonical `FA FF FA` baseline. The user-facing
+  exact-restore policy is pending a decision; historical Windows collateral
+  changes remain a separate unresolved gate.
 
 - [x] Archive mismatch diagnostics now retain complete forward/recovery readbacks
   beside the before-image after recovery finishes, with persistence failures
