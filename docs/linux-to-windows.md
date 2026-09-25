@@ -179,3 +179,30 @@ the Linux task; it should not be repeated.
 - Constraints: Preserve checkout work and captures; no keyboard writes, GUI
   acceptance claims, CI/CD, installers or dependency updates. Do not rerun a
   completed ID/revision solely because the source branch advances.
+
+### WIN-20260925-004: Inspect the newly located official lighting capture
+- Revision: 1
+- Status: pending
+- Source commit: `e1af8b7`
+- Scope: read-only analysis of an existing capture; may proceed while 002 awaits
+  camera positioning. No physical interaction or new capture is requested.
+- User authorization: Direct Git-backed coordination and diagnostic reads are
+  authorized. This extends 001 only to evidence that was absent from its inspected
+  checkout and subsequently located by the Windows agent.
+- Request: Inspect
+  `C:\Users\two\.codex\worktrees\5d1f\Byakko\Research\captures\official-2026-09-24-hid-sequence.json`.
+  You reported locating it but had not reanalyzed it. Determine whether it contains
+  official steady-effect brightness changes, especially the same effect/RGB with
+  differing byte 3. Report the observed brightness values by effect, and any
+  accompanying setters, RGB changes, getter responses or timing that distinguish
+  them from Byakko's single lighting setter. Use existing capture metadata/UI
+  evidence only; do not infer displayed values or physical dimming from bytes.
+  If every relevant setter has the same brightness, say so and retain the
+  unresolved conclusion instead of expanding the analysis to unrelated evidence.
+- Evidence/output needed: File hash, format/provenance, exact relevant report
+  payloads and sequence indices, timing availability, matched comparisons and
+  limitations. Identify whether this changes the conclusion of 001. Return the
+  ID/revision directly to Linux; do not copy vendor executable/source into Git.
+- Constraints: No new device I/O, webcam capture, official-app actions, code
+  edits or keyboard writes. Preserve the original capture and other worktree.
+  Do not repeat completed 003 checks or blocked 002 physical actions.
