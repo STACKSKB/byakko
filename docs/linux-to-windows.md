@@ -152,7 +152,12 @@ the Linux task; it should not be repeated.
 
 ### WIN-20260925-003: Validate Windows source build and tests
 - Revision: 1
-- Status: pending
+- Status: completed
+- Result: Windows returned all requested checks passed at exact source
+  `e1af8b7fc68719164cd2f295912d591de1910e39`: 372 product tests, 2 renderer tests,
+  formatting, strict Clippy, desktop/CLI release linking. No GUI/hardware launch.
+  Full environment, command and log record is in
+  `docs/public-pre-alpha-checklist.md` under Windows verification.
 - Source commit: `e1af8b7`
 - Scope: local build/test only; perform after request 002 so results remain clear.
 - User authorization: Fix the flagged pre-alpha review issues, use local checks

@@ -102,7 +102,7 @@ optional source-inventory script, not the Cargo build or the renderer itself.
 - [x] **Close the confirmed code/tool findings above.** Rerun strict formatting,
   Clippy, product tests, helper checks, renderer regressions and source inventory
   against the final release commit. Preserve logs with the commit/toolchain.
-- [ ] **Record local Windows/Linux release checks.** Build the selected Iced
+- [x] **Record local Windows/Linux release checks.** Build the selected Iced
   desktop, CLI and helper with the lockfile. Record the tested toolchain and
   source revision; keep research tools/legacy egui separate from the product.
   No CI/CD. Recheck core's WebAssembly build where the target is installed.
@@ -266,6 +266,42 @@ Exact commands, exit codes, toolchain and individual logs are retained locally
 in `/tmp/byakko-prealpha-final-e1af8b7/results.json` and sibling logs. The directory
 name identifies the product code; the results manifest records the full tested
 commit above. The WebAssembly target is not installed, so no new wasm build is
-claimed. Windows native linking/tests are requested as `WIN-20260925-003`.
+claimed. Windows native linking/tests completed as `WIN-20260925-003` below.
 These checks close the four original code/documentation findings; the physical
 acceptance and recovery gates remain open.
+
+## Windows verification after fixes
+
+The Windows agent completed `WIN-20260925-003`, revision 1, against exact source
+`e1af8b7fc68719164cd2f295912d591de1910e39`, extracted with `git archive` into
+`C:\Users\two\code\Byakko\Research\captures\WIN-20260925-003-r1-source`.
+It verified 320 paths and Git blob IDs against that tree: no missing, extra or
+changed files. The shared checkout and captures were preserved.
+
+Environment: Windows 10 Pro 22H2 build 19045.6466, x64; Rust 1.98.0
+(`88d9e12ae`, LLVM 22.1.8), Cargo 1.98.0 (`797e8a9bc`), MSVC 14.44.35207.
+`CARGO_TARGET_DIR` was `C:\Users\two\code\Byakko\target\windows-request-e1af8b7`.
+All of these commands returned exit code 0:
+
+```text
+cargo fmt --all -- --check
+cargo test --locked --offline -p byakko-core -p byakko-devices -p byakko-desktop -p byakko-cli
+cargo clippy --locked --offline -p byakko-core -p byakko-devices -p byakko-desktop -p byakko-cli --all-targets -- -D warnings
+cargo test --locked --offline -p iced_tiny_skia --lib
+cargo build --release --locked --offline -p byakko-desktop -p byakko-cli
+```
+
+Product tests: 372 passed, none failed or ignored (CLI 12+3, core 75, desktop 85,
+devices 196, external-target integration 1). Renderer: both clipping regressions
+passed. Native Windows release linking succeeded for desktop and CLI. The
+platform-specific test count differs from Linux's 377; no tests were ignored.
+
+Logs are retained on Windows under `C:\Users\two\code\Byakko\Research\captures`,
+with prefix `WIN-20260925-003-r1-` and suffixes `fmt.log`, `tests.log`,
+`clippy.log`, `renderer.log`, `release.log`, and `build-exits.json`.
+The source archive is `WIN-20260925-003-r1-source.zip`. Cargo/rustup emitted
+`could not canonicalize path C:\Users\two`; this did not fail any check.
+
+These results are reported by the Windows agent, not executed on Linux. No GUI
+or hardware was launched by these checks, and no physical acceptance is implied.
+Subsequent commits through this record change documentation only.
