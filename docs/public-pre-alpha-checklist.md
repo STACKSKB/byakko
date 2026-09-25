@@ -12,8 +12,18 @@ build/test commands and a source checkout; release automation, signing and
 installer integration are not prerequisites imposed by this review. Ask the
 user before changing exposed behavior, UX or release feature availability.
 Physical tests and Windows official-app packet captures are coordinated with
-the user. Remaining acceptance questions below are evidence to resolve, not
-authorization to disable features or expand the pre-alpha scope.
+the user. The 2026-09-25 archive scope decision below specifically defers full
+archive restore from the public UI; other remaining acceptance questions are
+evidence to resolve, not authorization to change exposed behavior.
+
+### Native archive restore scope decision (2026-09-25)
+
+The user approved removing full archive import/review/restore from the
+pre-alpha Iced UI. The Diagnostic capture page retains capture/export. This closes the public release exposure gate by deferral. It does not fix
+the raw-white mismatch or older Windows collateral changes. Core/device APIs,
+tests and research restore examples remain available to developers outside the
+public workflow, and automatic per-feature before-image backups remain in
+place.
 
 The renderer builds from tracked sources: the issue identified below is in the
 optional source-inventory script, not the Cargo build or the renderer itself.
@@ -62,15 +72,14 @@ optional source-inventory script, not the Cargo build or the renderer itself.
 
 ### Device safety and functional acceptance
 
-- [ ] **Resolve the existing archive recovery gate before exposing archive
-  Apply publicly.** The recorded injected fault caused unplanned macro/picture
-  changes. Recovery at `nia87/device/configuration.rs:234–255` repairs only the
-  planned macro slots/picture differences; final verification catches remaining
-  mismatches, but cannot repair those collateral changes. Capture a correlated
-  controlled fault trace, establish the cause, and demonstrate restoration of
-  the complete before-image. Preserve the failure evidence. If unresolved,
-  ask the user how to expose the limitation; do not silently disable Apply.
-  See [fault evidence](../Research/configuration-fault-verification.md).
+- [x] **Defer full archive restore from the public pre-alpha UI.** The recorded
+  injected fault caused unplanned macro/picture changes, and the exact raw-white
+  restore later mismatched before verified rollback. The user approved keeping
+  the UI capture/export-only while leaving core/device APIs and
+  research restore examples available to developers. This closes the public
+  release exposure gate by deferral; it does not establish the cause or fix
+  either failure. Keep the historical gate open for any future public restore
+  workflow. See [fault evidence](../Research/configuration-fault-verification.md).
 - [ ] **Accept partial-upload and interrupted-write behavior.** Exercise
   transport errors before and after picture pages, settings/keymap/macro writes,
   and lighting setters using bounded tests and coordinated hardware checks.
@@ -243,9 +252,10 @@ physical interaction will be coordinated around the user's availability.
   or Windows behavior. See [brightness evidence](../Research/brightness-investigation.md).
   **Traced restore follow-up:** the approved lighting-only run isolated its
   mismatch to `FF FF FF` → `B4 B4 B4` readback, with no other changed bytes and
-  verified full rollback to the canonical `FA FF FA` baseline. The user-facing
-  exact-restore policy is pending a decision; historical Windows collateral
-  changes remain a separate unresolved gate.
+  verified full rollback to the canonical `FA FF FA` baseline. The user later
+  directed that full archive restore be deferred from the public UI. Historical
+  Windows collateral changes and the raw-white mismatch remain unresolved;
+  scope deferral closes only the current public exposure gate.
 
 - [x] Archive mismatch diagnostics now retain complete forward/recovery readbacks
   beside the before-image after recovery finishes, with persistence failures
@@ -313,4 +323,19 @@ The source archive is `WIN-20260925-003-r1-source.zip`. Cargo/rustup emitted
 
 These results are reported by the Windows agent, not executed on Linux. No GUI
 or hardware was launched by these checks, and no physical acceptance is implied.
-Subsequent commits through this record change documentation only.
+These native Windows results precede the archive UI deferral described below.
+
+
+## Archive UI deferral validation (2026-09-25)
+
+After removing archive import/review/apply from Iced, all 85 desktop tests and
+strict desktop Clippy passed on Linux. The Linux desktop release build and
+`x86_64-pc-windows-msvc` desktop cross-target check also passed. Capture/export
+regressions cover retaining captured bytes when the path changes, requiring a
+capture before export, and failed/stale/device-generation export completions.
+Static review found no remaining desktop request to review or apply an archive.
+
+Logs are `/tmp/byakko-archive-deferral-{tests,clippy,build,windows-check}.log`.
+This change has no new rendered GUI or native Windows runtime acceptance; a
+cross-target check does not establish either. Retained core/device restore APIs
+and automatic per-feature backups were not changed.

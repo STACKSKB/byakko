@@ -40,9 +40,11 @@ exports the per-key color snapshot after the keymap read. `read-lighting` and
 and exports the complete snapshot, including opaque revision bytes, without
 decoding backend-owned content in the CLI. `capture-archive <new-file>` saves a
 complete opaque native backup after one complete backend capture sweep; it
-refuses to overwrite an existing path. `review-archive <file>` reads that
-wrapper, captures the device again, and prints only the changed section
-summaries; it sends no setter. `read` output is also a complete keymap state
+refuses to overwrite an existing path. This is the diagnostic archive workflow
+retained in the pre-alpha UI, which offers capture/export only. The CLI's
+`review-archive <file>` command reads that wrapper, captures the device again,
+and prints only the changed section summaries; it sends no setter. `read`
+output is also a complete keymap state
 file. After editing its bindings, `plan-keymap <state-file>` compares it with
 one device read establishing the current baseline and reports the intended
 changes. `apply-keymap <state-file>`
@@ -109,11 +111,16 @@ selector comparison. The CLI does not duplicate the Nia87 matrix mapping.
 Physical Iced bulk-picture uploads and visible color changes have bounded
 acceptance evidence; CLI picture writes and picture recovery remain open.
 
-Later CLI work can expose archive apply workflows. It should
-show the target identity and operation result, preserve opaque values, and use
-the same expected-state check, durable backup, readback and typed recovery
-outcome as the desktop. CLI flags are presentation; they must not grow a second
-protocol implementation or bypass the session.
+Full archive restore is deferred from the public pre-alpha UI by user
+direction. The lower-level core/device restore APIs, tests and research
+examples remain available to developers outside that workflow; the unresolved
+raw-white mismatch and older Windows collateral changes remain documented in
+the acceptance notes. An archive apply CLI is not part of this pre-alpha. If a
+future public CLI workflow is proposed, it must show the target identity and
+operation result, preserve opaque values, and use the same expected-state
+check, durable backup, readback and typed recovery outcome provided by the shared session/executor. CLI
+flags are presentation; they must not grow a second protocol implementation
+or bypass the session.
 
 ## Browser slice
 

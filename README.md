@@ -41,6 +41,12 @@ keymap snapshot. Apply/restore commands write device state. Start with the
 [read-only Linux sequence](docs/linux-handoff.md) before any Linux write test.
 Backups use the [normal-user data directory](docs/local-storage.md).
 
+The Iced Diagnostic capture page provides native archive capture and export
+for diagnostics. Full archive import/review/restore is deferred from the
+pre-alpha UI because a recorded restore mismatch remains unresolved. Automatic
+before-image backups for individual feature writes remain in place; see the
+[support and recovery notes](docs/pre-alpha-support.md).
+
 ## Status and development
 
 - [Current acceptance ledger](docs/parity-status.md) and [pre-alpha checklist](docs/public-pre-alpha-checklist.md)

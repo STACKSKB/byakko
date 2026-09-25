@@ -32,6 +32,18 @@ behavior of the emitted Byakko executable. The investigating agent may repeat
 read-only captures as often as needed for diagnosis and acceptance evidence.
 Do not turn diagnostic repetition into redundant automatic runtime preflights.
 
+## Native archive pre-alpha scope (user-directed, 2026-09-25)
+
+The public pre-alpha Iced UI exposes native archive capture/export as a
+diagnostic tool only. Do not expose archive import, review or restore/apply in
+that UI. Retain the core/device archive APIs, tests and research examples for
+developer use, along with automatic per-feature before-image backups for normal
+feature writes. Do not add an exact-restore white guard or semantic conversion
+as part of this scope change. This defers the archive restore workflow and
+closes its public release exposure gate; it does not fix the recorded raw-white
+restore mismatch or the older Windows collateral changes. Research restore
+remains available to developers outside the public workflow.
+
 ## Product constraints
 
 - Native Windows/Linux desktop, Rust + Iced. No JavaScript, Electron, webview,
@@ -152,9 +164,10 @@ Do not turn diagnostic repetition into redundant automatic runtime preflights.
   selector-dependent picture data and requires a new picture read, which may
   be requested as part of the selector activation flow. Do not claim a per-write fresh selector comparison.
   A full Nia87 archive contains only the picture response under its captured
-  selector. Its preflight must reject a restore that changes both the lighting
-  selector and picture colors in one transaction; there is no verified
-  multi-selector backup or recovery representation yet.
+  selector. Retained developer restore APIs reject a restore that changes both
+  the lighting selector and picture colors in one transaction; there is no
+  verified multi-selector backup or recovery representation yet. The public
+  pre-alpha Iced page is capture/export-only; see the scope clarification above.
   Recent physical evidence covers rebuilt Iced bulk picture submissions and
   visible steady-lighting choices; retain the earlier failed picture recovery
   as an unresolved concern. Do not broaden that evidence into archive restore,
@@ -168,7 +181,9 @@ Do not turn diagnostic repetition into redundant automatic runtime preflights.
 
 - The pure model, memory backend, Nia87 adapter, and Iced keymap, macro,
   built-in global lighting, per-key picture, scalar settings and native archive
-  capture/review/apply workflows now exercise the approved boundary. Iced
+  capture/export workflow now exercise the approved boundary. Archive
+  review/restore APIs remain for developer research but are absent from the
+  public pre-alpha UI. Iced
   picture submissions have bounded physical acceptance evidence: repeated
   full-image uploads and visible color changes succeeded. Successful ordinary
   writes mean transport accepted, with cached backup and explicit later read
@@ -176,9 +191,9 @@ Do not turn diagnostic repetition into redundant automatic runtime preflights.
   unresolved. RGB storage is separate from selecting the global picture
   effect. Settings stage one field per native transaction; Iced physical
   write/restore acceptance remains open.
-  Native archive apply now has typed recovery outcomes and a reviewed Iced
-  action, but has no live write acceptance in this slice; the earlier failed
-  automatic recovery remains open. Iced now has a read-only, bounded USB
+  Native archive restore APIs retain typed recovery outcomes for developer
+  research, but archive restore is deferred from the public pre-alpha UI; the
+  earlier failed automatic recovery remains unresolved. Iced now has a read-only, bounded USB
   discovery worker and an idle reconnect flow. Each desktop executor holds an
   immutable Nia87 HID target, including recovery opens; never fall back to an
   arbitrary unique match after a target check fails. A user-assisted physical
