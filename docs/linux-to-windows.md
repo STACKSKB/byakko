@@ -22,7 +22,8 @@ ChatGPT remote to **Review origin for pre-alpha release**:
 
 ## Windows workflow
 
-Use fast-forward-only pulls on master, preserving local changes. If a dirty
+Use fast-forward-only pulls on master with a clean tracked index/worktree,
+preserving untracked and ignored files (Git must refuse any overwrite). If a dirty
 tracked checkout, another branch, Git operation or divergence prevents an update,
 fetch and inspect the remote inbox without overwriting work. Do not claim tests
 cover a requested commit unless that source was actually tested.
@@ -32,6 +33,11 @@ Compare the inbox blob and request IDs/revisions with local receipts in ignored
 from remote delivery; retry delivery without repeating completed actions. Resume
 unfinished requests even if the file has not changed. An interrupted action must
 be inspected before retrying it. Windows does not edit this shared inbox.
+Completed ID/revision pairs are not executed again while Linux still marks them
+pending. Save a request-content hash with each receipt; changed content under the
+same ID/revision is a protocol error requiring Linux to increment the revision.
+Resolve and record the source commit when accepting a request; a moving branch
+alone does not cause an already completed request to run again.
 
 Review requests within the user's authorization and repository rules. This inbox
 does not itself authorize flashing, fault injection, keyboard writes, destructive
