@@ -2,6 +2,13 @@
 
 Status: unresolved physical behavior; no codec change justified yet.
 
+The user confirmed that Linux and Windows have different physical Nia87 units.
+Keep baselines, restoration targets and physical conclusions specific to each
+unit. Both cameras are available for observation. The Linux camera was checked
+read-only after the user released another camera session: the keyboard and
+exposed switch LEDs are visible, but no paired brightness images have been
+captured yet. Do not infer brightness behavior from that setup frame.
+
 The supervised Linux test changed steady green from brightness 4 to 1. The
 readback changed only raw byte 3, but the user reported no visible dimming.
 Visible mode/color switching worked. See [Linux evidence](../docs/linux-handoff.md).

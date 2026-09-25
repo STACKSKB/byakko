@@ -49,6 +49,11 @@ work to Luna where useful.
 The schedule depends on the Windows Codex host being available; it is not an
 always-on external service. No-change checks remain quiet.
 
+The user confirmed on 2026-09-25 that Linux and Windows have different physical
+Nia87 units attached. Record board identity, baseline and observations separately;
+a successful result on one unit does not establish acceptance on the other.
+Never transfer a unit's full native baseline to the other unit for restoration.
+
 ## Request template
 
 ```markdown
