@@ -102,3 +102,56 @@ the Linux task; it should not be repeated.
   are local to that host. The keyboard is currently restored to Wave/rainbow,
   brightness 4, speed 2, right, with canonical RGB `FA FF FA`. Exact raw archive
   restoration remains an open gate, separate from brightness.
+
+### WIN-20260925-002: Observe official steady-green brightness with camera
+- Revision: 1
+- Status: pending
+- Source commit: `e1af8b7`
+- Scope: one bounded official-app physical brightness comparison with packet
+  capture and camera observation, followed by baseline restoration.
+- User authorization: In response to the prepared comparison approval question,
+  the user said the Windows agent has a camera pointed at the keyboard for direct
+  observation and will also position the Linux laptop camera. Proceed with the
+  proposed max/minimum-nonzero comparison using your camera; no need for the user
+  to relay results. This does not authorize fault injection or full archive Apply.
+- Request: Execute the bounded comparison described in
+  `Research/brightness-investigation.md`. Save the present board identity and
+  complete baseline before changing lighting. Establish that your camera shows
+  this keyboard, then capture all official-app commands for steady green at the
+  highest and lowest nonzero brightness using actual UI labels. Observe after
+  equal two-second settling intervals. Keep ambient conditions/exposure/gain
+  fixed if possible; otherwise report the visual comparison's limits. Release
+  the official session before diagnostic reads. Restore the saved visible
+  lighting settings through the normal lighting path, read back, and report
+  exact-byte equality or canonicalization separately. Finish with one read-only
+  full archive comparison for unrelated changes.
+- Evidence/output needed: Source/firmware/collection identity; baseline and
+  final archive hashes; complete ordered setter/getter payloads and timing;
+  displayed values; camera evidence paths/hashes and observed brightness change;
+  exact restoration result. Separate observation from hypotheses. Return this
+  ID/revision directly to the Linux task.
+- Constraints: Only this brightness comparison and baseline restoration; no
+  unrelated setting/key/macro/picture changes, no fault injection, no firmware
+  flashing, no full archive restore. One configurator owner at a time. If the
+  camera cannot observe meaningfully, unexpected behavior occurs, or restoration
+  fails, retain evidence and report rather than repeating setters blindly.
+
+### WIN-20260925-003: Validate Windows source build and tests
+- Revision: 1
+- Status: pending
+- Source commit: `e1af8b7`
+- Scope: local build/test only; perform after request 002 so results remain clear.
+- User authorization: Fix the flagged pre-alpha review issues, use local checks
+  without CI/CD, and coordinate directly with the Windows agent through Git.
+- Request: Validate this exact source (or report inability to obtain a safe
+  checkout). Run formatting, locked tests for core/devices/desktop/CLI, strict
+  Clippy for those four packages with all targets, the two vendored renderer
+  tests, and a release build of byakko-desktop plus byakko-cli as documented in
+  `docs/source-build.md`. Use cached dependencies/offline when possible. Do not
+  launch the GUI against hardware. Report failures without making broad fixes.
+- Evidence/output needed: Full tested commit ID, Windows/toolchain versions,
+  exact commands, exit codes, test totals and retained log paths. A Linux cross-
+  target check does not substitute for this Windows link/build verification.
+- Constraints: Preserve checkout work and captures; no keyboard writes, GUI
+  acceptance claims, CI/CD, installers or dependency updates. Do not rerun a
+  completed ID/revision solely because the source branch advances.
