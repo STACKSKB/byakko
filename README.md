@@ -37,8 +37,9 @@ pending save and asks before discarding edits. Discovery runs in the background;
 new connections load each feature once and retain drafts. Conflicts and failed
 writes hold automatic refresh until an explicit Read / reconnect. That action
 replaces the worker even if discovery missed an unplug/replug.
-The richer assignment catalog, custom shortcut form and host lighting
-are pending frontend milestones. Lighting/picture saves report transport
+The assignment catalog supports category navigation, search aliases, physical-key
+capture and capability-described custom shortcuts. Host lighting and the macro
+interaction review remain frontend milestones. Lighting/picture saves report transport
 acceptance after established pacing; settings saves include one readback.
 
 The independent CLI uses the same session/executor contract:

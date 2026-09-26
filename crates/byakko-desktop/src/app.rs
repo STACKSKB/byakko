@@ -8,7 +8,7 @@ use crate::{
     controller::recording::Controller as Recording,
     form::{
         application::{Closing, Message, Page},
-        files, keymap, lighting, macros, picture, recording, settings,
+        catalog, files, keymap, lighting, macros, picture, recording, settings,
     },
     input, view,
     widget::panels::UiStyle,
@@ -155,6 +155,7 @@ impl App {
                 self.recording_notice(result, was_recording);
             }
             Message::Page(page) => {
+                self.keys.catalog.input = catalog::InputMode::Browse;
                 self.page = page;
                 if page == Page::Picture
                     && self.session.lighting().is_some_and(|editor| editor.dirty())
@@ -169,12 +170,29 @@ impl App {
             Message::Picture(message) => return self.update_picture(message),
             Message::Settings(message) => return self.update_settings(message),
             Message::Macros(message) => return self.update_macro(message),
-            Message::Keys(message) => {
-                if let Some(change) = self.keys.update(message, self.session.descriptor()) {
-                    self.notice = self.session.edit(change).err().unwrap_or_default();
+            Message::Keys(message) => match self.keys.update(message, self.session.keymap()) {
+                Ok(Some(keymap::Intent::Edit(change))) => match self.session.edit(change) {
+                    Ok(()) => {
+                        self.keys.sync_shortcut(self.session.keymap());
+                        self.notice.clear();
+                    }
+                    Err(reason) => self.notice = reason,
+                },
+                Ok(Some(keymap::Intent::Scroll(scroll))) => {
+                    let task = match scroll {
+                        catalog::Scroll::Top => crate::widget::catalog::top(),
+                        catalog::Scroll::Section(category) => {
+                            crate::widget::catalog::jump(category)
+                        }
+                        catalog::Scroll::Measure => crate::widget::catalog::visible(),
+                    };
+                    return task.map(|message| Message::Keys(keymap::Message::Catalog(message)));
                 }
-            }
+                Ok(None) => {}
+                Err(reason) => self.notice = reason,
+            },
             Message::Read if !self.session.busy() => {
+                self.keys.catalog.input = catalog::InputMode::Browse;
                 self.autosave.clear();
                 self.assignment_binding = None;
                 let request = self.link.read(&mut self.session);
@@ -184,7 +202,10 @@ impl App {
                 let request = self.session.save();
                 return self.submit(request);
             }
-            Message::Revert => self.notice = self.session.revert().err().unwrap_or_default(),
+            Message::Revert => {
+                self.notice = self.session.revert().err().unwrap_or_default();
+                self.keys.sync_shortcut(self.session.keymap());
+            }
             Message::Poll(_) => return self.poll(),
             Message::Scan => return self.scan(),
             Message::Close => return self.close(),
@@ -312,6 +333,7 @@ impl App {
     fn begin_file(&mut self, operation: files::Operation) -> Task<Message> {
         match self.files.begin(operation, &self.session) {
             Ok(job) => {
+                self.keys.catalog.input = catalog::InputMode::Browse;
                 self.link.invalidate_discovery();
                 self.notice.clear();
                 job.task().map(Message::FileComplete)
@@ -517,7 +539,11 @@ impl App {
         if self.session.busy() || self.session.catalog_scanning() || self.autosave.pending() {
             return Task::none();
         }
-        match self.link.scan(&mut self.session) {
+        let request = self.link.scan(&mut self.session);
+        if !matches!(self.session.connection(), Connection::Connected { .. }) {
+            self.keys.catalog.input = catalog::InputMode::Browse;
+        }
+        match request {
             Ok(Some(command)) => self.submit(Ok(command)),
             Ok(None) => Task::none(),
             Err(reason) => {
@@ -536,6 +562,7 @@ impl App {
             }
         };
         self.notice.clear();
+        self.keys.catalog.input = catalog::InputMode::Browse;
         self.link.invalidate_discovery();
         match self.link.executor() {
             Some(worker) => {
@@ -565,6 +592,7 @@ impl App {
             Ok(completion) => self.complete(completion),
             Err(TryRecvError::Empty) => Task::none(),
             Err(TryRecvError::Disconnected) => {
+                self.keys.catalog.input = catalog::InputMode::Browse;
                 self.autosave.clear();
                 self.assignment_binding = None;
                 if self.recording.pending() {
@@ -597,9 +625,13 @@ impl App {
         match outcome {
             Outcome::Ignored => return Task::none(),
             Outcome::Loaded => {
+                self.keys.sync_shortcut(self.session.keymap());
                 self.notice = "Keymap loaded.".into();
             }
-            Outcome::Saved => self.notice = "Assignments saved and read back.".into(),
+            Outcome::Saved => {
+                self.keys.sync_shortcut(self.session.keymap());
+                self.notice = "Assignments saved and read back.".into();
+            }
             Outcome::LightingLoaded => self.notice = "Lighting loaded.".into(),
             Outcome::LightingSaved => self.notice = "Lighting applied.".into(),
             Outcome::PictureLoaded => self.notice = "Key colors loaded.".into(),
@@ -714,6 +746,7 @@ impl App {
     }
 
     fn close(&mut self) -> Task<Message> {
+        self.keys.catalog.input = catalog::InputMode::Browse;
         self.link.invalidate_discovery();
         if self.session.recording() || self.recording.pending() {
             match self.recording.finish(&mut self.session, Instant::now()) {
@@ -750,6 +783,18 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         let mut subscriptions = vec![close];
+        if self.page == Page::Keys
+            && self.keys.catalog.input == catalog::InputMode::Capture
+            && !self.session.busy()
+            && !self.files.busy()
+            && !self.session.recording()
+            && !self.recording.pending()
+        {
+            subscriptions.push(iced::event::listen_with(|event, _, _| {
+                input::catalog::capture(event)
+                    .map(|message| Message::Keys(keymap::Message::Catalog(message)))
+            }));
+        }
         if self.session.recording() || self.recording.pending() {
             subscriptions.push(iced::event::listen_with(|event, status, _| {
                 input::recording::captures(&event, status)

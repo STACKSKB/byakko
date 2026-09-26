@@ -1138,3 +1138,139 @@ fn a_failed_connection_read_can_retry_on_the_same_inventory() {
     }
     assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
+
+#[test]
+fn assignment_search_and_physical_capture_stage_only_advertised_actions() {
+    use crate::form::catalog::{InputMode, Message as Catalog};
+    use iced::keyboard::key::Code;
+    let (mut app, reads) = app(false);
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    let _ = app.update(Message::Keys(keymap::Message::Key("Alpha".into())));
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(Catalog::Search(
+        "b".into(),
+    ))));
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(
+        Catalog::SubmitSearch,
+    )));
+    assert_eq!(
+        app.session.keymap().draft().unwrap()["Typing"]["Alpha"],
+        Action::Key(5)
+    );
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(Catalog::Capture)));
+    let captured = input::catalog::capture(key_event(Code::KeyA, true)).unwrap();
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(captured)));
+    assert_eq!(app.keys.catalog.input, InputMode::Browse);
+    assert_eq!(
+        app.session.keymap().draft().unwrap()["Typing"]["Alpha"],
+        Action::Key(4)
+    );
+    assert!(input::catalog::capture(key_event(Code::KeyA, false)).is_none());
+    for event in [
+        key_event(Code::Escape, true),
+        Event::Window(window::Event::Unfocused),
+    ] {
+        let _ = app.update(Message::Keys(keymap::Message::Catalog(Catalog::Capture)));
+        let _ = app.update(Message::Keys(keymap::Message::Catalog(
+            input::catalog::capture(event).unwrap(),
+        )));
+        assert_eq!(app.keys.catalog.input, InputMode::Browse);
+        assert!(!app.session.keymap().dirty());
+    }
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(Catalog::Capture)));
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(Catalog::Captured(
+        0xff,
+    ))));
+    assert!(app.notice.contains("not supported"));
+    assert!(!app.session.keymap().dirty());
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn shortcut_messages_stage_save_reload_and_reset_using_advertised_choices() {
+    use crate::form::shortcut::Message as Shortcut;
+    let (mut app, reads) = app(false);
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    let caps = app.session.descriptor().shortcuts.as_ref().unwrap().clone();
+    let modifier = caps.modifiers[0].usage;
+    let second = caps.modifiers[1].usage;
+    let key = caps.keys[1].usage;
+    let _ = app.update(Message::Keys(keymap::Message::Key("Alpha".into())));
+    for message in [
+        Shortcut::ToggleModifier(modifier),
+        Shortcut::SelectKey(key),
+        Shortcut::Stage,
+    ] {
+        let _ = app.update(Message::Keys(keymap::Message::Shortcut(message)));
+    }
+    assert_eq!(
+        app.session.keymap().draft().unwrap()["Typing"]["Alpha"],
+        Action::Shortcut {
+            modifiers: vec![modifier],
+            key
+        }
+    );
+    let _ = app.update(Message::Keys(keymap::Message::Shortcut(
+        Shortcut::ToggleModifier(second),
+    )));
+    let _ = app.update(Message::Keys(keymap::Message::Shortcut(
+        Shortcut::ToggleModifier(0xffff),
+    )));
+    assert_eq!(app.keys.shortcut.modifiers, [modifier, second]);
+    assert!(app.keys.shortcut.error.is_some());
+    assert!(
+        app.notice.is_empty(),
+        "shortcut validation stays in its form"
+    );
+    let _ = app.update(Message::Keys(keymap::Message::Shortcut(Shortcut::Stage)));
+    assert!(app.keys.shortcut.error.is_none());
+    let expected = Action::Shortcut {
+        modifiers: vec![modifier, second],
+        key,
+    };
+    assert_eq!(
+        app.session.keymap().draft().unwrap()["Typing"]["Alpha"],
+        expected
+    );
+    let _ = app.update(Message::Save);
+    drain(&mut app);
+    assert!(!app.session.keymap().dirty());
+    assert_eq!(
+        app.session.keymap().baseline().unwrap().bindings["Typing"]["Alpha"],
+        expected
+    );
+    let _ = app.update(Message::Keys(keymap::Message::Key("Beta".into())));
+    assert!(app.keys.shortcut.modifiers.is_empty());
+    assert!(app.keys.shortcut.key.is_none());
+    let _ = app.update(Message::Keys(keymap::Message::Key("Alpha".into())));
+    assert_eq!(app.keys.shortcut.modifiers, [modifier, second]);
+    assert_eq!(app.keys.shortcut.key, Some(key));
+    let _ = app.update(Message::Keys(keymap::Message::Layer("Navigation".into())));
+    assert!(app.keys.shortcut.modifiers.is_empty());
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "staging and navigation never reread the device"
+    );
+}
+
+#[test]
+fn device_work_cancels_key_capture_instead_of_rearming_it_after_completion() {
+    use crate::form::catalog::{InputMode, Message as Catalog};
+    let (mut app, _) = app(false);
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    edit(&mut app);
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(Catalog::Capture)));
+    assert_eq!(app.keys.catalog.input, InputMode::Capture);
+    let _ = app.update(Message::Save);
+    assert_eq!(app.keys.catalog.input, InputMode::Browse);
+    drain(&mut app);
+    let saved = app.session.keymap().draft().unwrap().clone();
+    let _ = app.update(Message::Keys(keymap::Message::Catalog(Catalog::Captured(
+        4,
+    ))));
+    assert_eq!(app.session.keymap().draft(), Some(&saved));
+    assert!(!app.session.keymap().dirty());
+}

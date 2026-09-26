@@ -112,6 +112,8 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [x] Restore files, local labels and diagnostic capture through the new
   architecture. Developer archive restore remains outside public UI.
 - [x] Restore automatic discovery and reconnect behavior.
+- [x] Restore assignment catalog navigation/search, physical-key capture and
+  capability-described custom shortcuts.
 - [ ] Restore host lighting lifecycle, OS samplers and verified restoration.
 - [ ] Remove remaining obsolete native forwarding/error-erasure paths, retaining
   fixtures and useful research commands. Narrow APIs around demonstrated callers.
@@ -277,8 +279,35 @@ attachment, changed identity, ordinary read retry, held failed-write diagnostics
 bounded/stale discovery and read-only refresh on a backend without macros.
 No hardware writes or physical reconnect acceptance were performed.
 
-Temporary gaps: the full assignment catalog and custom shortcut form, macro
-interaction review and host streaming.
+The assignment checkpoint restores the complete category catalog, measured
+section navigation and highlighted section tracking. Categories navigate without
+hiding other groups; word search covers advertised labels, numpad aliases and
+category names. Enter selects a unique exact or unique remaining match. Physical
+key capture is local and one-shot, accepts only an advertised action, and ends on
+Escape, focus loss, navigation or device work.
+
+Custom shortcut controls use advertised modifier/key choices and bounds.
+Unsubmitted choices and local errors belong to `form/shortcut.rs`; the existing
+core capability validator composes and validates staged actions. Changing a
+target/layer or accepting an assignment reloads the form from the shared draft.
+Presentation lives under `view/`; measured Iced operations live under `widget/`.
+No form owns a second editable keymap. The memory demo now advertises shortcuts,
+numpad and system choices so these controls can be exercised without hardware.
+
+Workspace tests (82 core, 60 desktop, 216 devices plus external integration,
+seven CLI tests), strict Clippy, formatting and locked development builds pass.
+Message tests cover search/capture, one/two-modifier staging and saving, target
+resets, local validation errors and capture cancellation during saves. No native
+wire changes or hardware writes; rendered layout remains unaccepted.
+
+The macro interaction audit found specific remaining regressions to fix next:
+valid repeat input must stage immediately and invalid text must block Save/Assign;
+event controls need advertised labels and choices instead of raw identifiers;
+unchanged reads must preserve unsubmitted event fields and replacement target;
+successful sequence edits must reset/collapse the composer while rejected edits
+retain input. Restore the established limit/help text and New/Inspect flow.
+
+Temporary gaps: macro interaction corrections/review and host streaming.
 The native APIs, codecs, OS samplers, direct transaction tests and research tools
 remain. Passive catalog priority is restored; host scheduling returns with its
 feature milestone.

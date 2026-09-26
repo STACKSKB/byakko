@@ -9,7 +9,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, container, row, scrollable, text, text_input},
+    widget::{column, container, row},
 };
 pub fn workspace<'a>(
     form: &'a Form,
@@ -44,32 +44,24 @@ pub fn view<'a>(
     editable: bool,
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
-    let can_assign = editable
-        && form.selected.as_ref().is_some_and(|id| {
-            descriptor
-                .keys
-                .iter()
-                .any(|key| &key.id == id && key.writable)
-        });
-    let query = form.search.to_lowercase();
-    let choices = column(
-        descriptor
-            .actions
-            .iter()
-            .enumerate()
-            .filter(|(_, choice)| choice.label.to_lowercase().contains(&query))
-            .map(|(index, choice)| {
-                button(text(&choice.label))
-                    .on_press_maybe(can_assign.then_some(Message::Assign(index)))
-                    .into()
-            }),
-    )
-    .spacing(style.spacing.s);
-    let assignments = column![
-        text_input("Search assignments", &form.search).on_input(Message::Search),
-        scrollable(choices).height(Fill)
-    ]
-    .spacing(style.spacing.s);
+    let can_assign = editable && form.can_assign(editor);
+    let mut assignments = row![super::catalog::view(
+        &form.catalog,
+        &descriptor.actions,
+        form.selected_action(editor),
+        can_assign,
+        style
+    )]
+    .spacing(style.spacing.l);
+    if let Some(caps) = &descriptor.shortcuts {
+        assignments = assignments.push(
+            container(
+                super::shortcut::view(&form.shortcut, caps, can_assign, style)
+                    .map(Message::Shortcut),
+            )
+            .width(style.fields.regular),
+        );
+    }
     column![
         workspace(form, descriptor, editor, true, style),
         container(assignments).width(Fill).height(Fill)
