@@ -26,6 +26,10 @@ struct ObservedDevice {
     fail_lighting: bool,
 }
 impl Device for ObservedDevice {
+    fn capture_archive(&mut self) -> Result<byakko_core::model::archive::NativeArchive, String> {
+        self.feature_calls.lock().unwrap().push("capture-archive");
+        self.memory.capture_archive()
+    }
     fn read_lighting(&mut self) -> Result<byakko_core::model::lighting::Snapshot, String> {
         self.feature_calls.lock().unwrap().push("read-lighting");
         self.memory.read_lighting()
@@ -196,6 +200,10 @@ fn macro_messages_discover_read_candidate_edit_and_assign_once() {
     )));
     drain(&mut app);
     assert_eq!(app.notice, "Macro saved and assigned.");
+    assert_eq!(
+        app.files.form.bindings.get("Spare").map(String::as_str),
+        Some("play-Spare")
+    );
     assert!(!app.session.macros().unwrap().dirty());
     assert_eq!(
         app.session.keymap().baseline().unwrap().bindings["Typing"]["Alpha"],
@@ -227,6 +235,8 @@ fn partial_assignment_failure_keeps_saved_macro_and_discard_prompt() {
     drain(&mut app);
     assert_eq!(app.closing, Closing::Open);
     assert!(app.notice.starts_with("Macro saved; assignment failed."));
+    assert!(!app.files.form.bindings.contains_key("Greeting"));
+    assert!(app.assignment_binding.is_none());
     assert_eq!(
         app.session.macros().unwrap().draft().unwrap().repeat_count,
         2
@@ -546,6 +556,103 @@ fn feature_app(fail_lighting: bool) -> (App, Arc<Mutex<Vec<&'static str>>>) {
 
 fn elapsed(app: &mut App) {
     let _ = app.update(Message::Poll(Instant::now() + Duration::from_secs(61)));
+}
+
+#[test]
+fn file_completion_survives_close_and_import_stages_only_the_selected_draft() {
+    let (mut app, reads) = ready_to_record();
+    let directory = file_test_directory("import-close");
+    let path = directory.join("macro.json");
+    let mut document = app
+        .session
+        .export_macro_document("Imported name".into(), None)
+        .unwrap();
+    document.source_slot = "Preserved".into();
+    document.program.repeat_count = 7;
+    byakko_devices::storage::macros::save_new(&path, &document).unwrap();
+    let before = reads.load(Ordering::SeqCst);
+    let _ = app.update(Message::Files(files::Message::MacroPath(
+        path.to_string_lossy().into(),
+    )));
+    let job = app
+        .files
+        .begin(files::Operation::ImportMacro, &app.session)
+        .unwrap();
+    let _ = app.update(Message::Page(Page::Settings));
+    let _ = app.update(Message::Macros(macros::Message::Repeat("22".into())));
+    assert_ne!(app.page, Page::Settings);
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+    let _ = app.update(Message::FileComplete(job.run()));
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
+    assert_eq!(app.session.macros().unwrap().slot(), "Greeting");
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        7
+    );
+    assert_eq!(app.macros.repeat, "7");
+    assert_eq!(app.files.form.name("Greeting"), "Imported name");
+    assert_eq!(reads.load(Ordering::SeqCst), before);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn failed_file_operation_reopens_a_waiting_window_and_retains_the_draft() {
+    let (mut app, _) = ready_to_record();
+    let directory = file_test_directory("export-close");
+    let path = directory.join("existing.json");
+    std::fs::write(&path, b"keep me").unwrap();
+    let before = app.session.macros().unwrap().draft().unwrap().clone();
+    app.files.form.macro_path = path.to_string_lossy().into();
+    let job = app
+        .files
+        .begin(files::Operation::ExportMacro, &app.session)
+        .unwrap();
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+    let _ = app.update(Message::FileComplete(job.run()));
+    assert_eq!(app.closing, Closing::Open);
+    assert!(!app.notice.is_empty());
+    assert_eq!(app.session.macros().unwrap().draft(), Some(&before));
+    assert_eq!(std::fs::read(&path).unwrap(), b"keep me");
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn archive_navigation_is_passive_and_explicit_capture_exports_raw_bytes() {
+    let (mut app, calls) = feature_app(false);
+    let baseline = app.session.keymap().baseline().unwrap().clone();
+    let _ = app.update(Message::Page(Page::Archive));
+    assert!(calls.lock().unwrap().is_empty());
+    let _ = app.update(Message::Files(files::Message::Capture));
+    drain(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["capture-archive"]);
+    assert_eq!(app.session.keymap().baseline(), Some(&baseline));
+    let directory = file_test_directory("archive");
+    let path = directory.join("capture.json");
+    app.files.form.archive_path = path.to_string_lossy().into();
+    let job = app
+        .files
+        .begin(files::Operation::ExportArchive, &app.session)
+        .unwrap();
+    let _ = app.update(Message::FileComplete(job.run()));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        app.session.archive().unwrap().captured().unwrap().bytes
+    );
+    assert_eq!(*calls.lock().unwrap(), ["capture-archive"]);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+fn file_test_directory(name: &str) -> std::path::PathBuf {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "byakko-desktop-{name}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir(&path).unwrap();
+    path
 }
 
 #[test]

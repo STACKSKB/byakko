@@ -12,15 +12,27 @@ use iced::{
     Element, Fill,
     widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input},
 };
-pub fn view<'a>(
-    form: &'a Form,
-    editor: &'a Editor<MacroRules>,
-    library: &'a Library,
-    idle: bool,
-    target: Option<(&str, &str)>,
-    scanning: bool,
-    style: &'a UiStyle,
-) -> Element<'a, Message> {
+pub struct View<'a> {
+    pub form: &'a Form,
+    pub editor: &'a Editor<MacroRules>,
+    pub library: &'a Library,
+    pub names: &'a crate::form::files::Form,
+    pub idle: bool,
+    pub target: Option<(&'a str, &'a str)>,
+    pub scanning: bool,
+    pub style: &'a UiStyle,
+}
+pub fn view(input: View<'_>) -> Element<'_, Message> {
+    let View {
+        form,
+        editor,
+        library,
+        names,
+        idle,
+        target,
+        scanning,
+        style,
+    } = input;
     let editable = idle && editor.status() == &Status::Ready && editor.draft().is_some();
     let slots = column(editor.capabilities().slots.iter().map(|slot| {
         let occupancy = match library.occupancy(&slot.id) {
@@ -29,7 +41,7 @@ pub fn view<'a>(
             Some(Occupancy::Opaque) => "preserved",
             Some(Occupancy::Unknown) | None => "unread",
         };
-        button(text(format!("{} · {occupancy}", slot.label)))
+        button(text(format!("{} · {occupancy}", names.name(&slot.id))))
             .on_press_maybe((idle && !editor.dirty()).then(|| Message::Select(slot.id.clone())))
             .into()
     }))

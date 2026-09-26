@@ -1,23 +1,9 @@
 //! Bounded portable macro documents and legacy Nia87 import.
 use crate::nia87::{macro_adapter, macro_file as legacy, macros as native};
 use byakko_core::model::macros::{Content, Document};
-use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Write},
-    path::Path,
-};
+use std::path::Path;
 
 pub const MAX_FILE_BYTES: usize = 64 * 1024;
-
-fn validate(document: &Document) -> Result<(), String> {
-    if document.format_version != 2
-        || document.backend_id.is_empty()
-        || document.source_slot.is_empty()
-    {
-        return Err("Unsupported macro document version or empty backend/slot".into());
-    }
-    Ok(())
-}
 
 pub fn decode(bytes: &[u8]) -> Result<Document, String> {
     if bytes.len() > MAX_FILE_BYTES {
@@ -56,12 +42,12 @@ pub fn decode(bytes: &[u8]) -> Result<Document, String> {
         }
         _ => serde_json::from_value(version).map_err(|error| error.to_string())?,
     };
-    validate(&document)?;
+    byakko_core::validation::macros::validate_document(&document)?;
     Ok(document)
 }
 
 pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
-    validate(document)?;
+    byakko_core::validation::macros::validate_document(document)?;
     let mut bytes = serde_json::to_vec_pretty(document).map_err(|error| error.to_string())?;
     bytes.push(b'\n');
     if bytes.len() > MAX_FILE_BYTES {
@@ -71,38 +57,11 @@ pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
 }
 
 pub fn load(path: &Path) -> Result<Document, String> {
-    if !std::fs::metadata(path)
-        .map_err(|error| error.to_string())?
-        .is_file()
-    {
-        return Err("Macro path is not a regular file".into());
-    }
-    let file = File::open(path).map_err(|error| error.to_string())?;
-    if !file
-        .metadata()
-        .map_err(|error| error.to_string())?
-        .is_file()
-    {
-        return Err("Macro path is not a regular file".into());
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_FILE_BYTES as u64 + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|error| error.to_string())?;
-    decode(&bytes)
+    decode(&super::read_bytes(path, MAX_FILE_BYTES as u64)?)
 }
-
 pub fn save_new(path: &Path, document: &Document) -> Result<(), String> {
-    let bytes = encode(document)?;
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| error.to_string())?;
-    file.write_all(&bytes).map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())
+    super::write_new(path, &encode(document)?)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

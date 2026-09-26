@@ -8,7 +8,7 @@ use byakko_devices::{
 };
 use std::{path::PathBuf, time::Duration};
 
-const USAGE: &str = "byakko-cli [--demo] <devices|describe|read|plan-keymap FILE|apply-keymap FILE|list-macros|read-macro SLOT|plan-macro FILE|apply-macro FILE|assign-macro SLOT LAYER KEY BINDING|read-lighting|read-picture|read-settings|plan-lighting FILE|apply-lighting FILE|plan-picture FILE|apply-picture FILE|plan-settings FILE|apply-settings FILE>";
+const USAGE: &str = "byakko-cli [--demo] <devices|describe|read|plan-keymap FILE|apply-keymap FILE|list-macros|read-macro SLOT|plan-macro FILE|apply-macro FILE|assign-macro SLOT LAYER KEY BINDING|read-lighting|read-picture|read-settings|plan-lighting FILE|apply-lighting FILE|plan-picture FILE|apply-picture FILE|plan-settings FILE|apply-settings FILE|capture-archive NEW_FILE|compare-archives BEFORE TARGET>";
 
 #[derive(Debug, PartialEq)]
 enum Feature {
@@ -20,6 +20,11 @@ enum Feature {
 #[derive(Debug, PartialEq)]
 enum Command {
     Help,
+    CaptureArchive(PathBuf),
+    CompareArchives {
+        before: PathBuf,
+        target: PathBuf,
+    },
     Devices,
     Describe,
     Read,
@@ -55,6 +60,11 @@ fn parse(arguments: &[String]) -> Result<(bool, Command), String> {
     let command = match arguments {
         [] => Command::Help,
         [name] if name == "--help" => Command::Help,
+        [name, path] if name == "capture-archive" => Command::CaptureArchive(path.into()),
+        [name, before, target] if name == "compare-archives" => Command::CompareArchives {
+            before: before.into(),
+            target: target.into(),
+        },
         [name] if name == "devices" => Command::Devices,
         [name] if name == "describe" => Command::Describe,
         [name] if name == "read" => Command::Read,
@@ -109,6 +119,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
+    if let Command::CompareArchives { before, target } = &command {
+        let before =
+            byakko_devices::storage::load_json(before, byakko_cli::archive::MAX_JSON_BYTES)?;
+        let target =
+            byakko_devices::storage::load_json(target, byakko_cli::archive::MAX_JSON_BYTES)?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&byakko_cli::archive::compare_archives(
+                &before, &target
+            )?)?
+        );
+        return Ok(());
+    }
     if command == Command::Devices {
         if demo {
             println!("Demo keyboard (memory)");
@@ -117,6 +140,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         return Ok(());
     }
+    let capture_output = match &command {
+        Command::CaptureArchive(path) => Some(byakko_devices::storage::reserve_new(path)?),
+        _ => None,
+    };
     let memory = demo.then(byakko_devices::memory::demo).transpose()?;
     let descriptor = memory
         .as_ref()
@@ -176,6 +203,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let timeout = Duration::from_secs(30);
     match command {
+        Command::CaptureArchive(path) => {
+            let captured = byakko_cli::archive::capture_archive(
+                &mut session,
+                &executor,
+                Duration::from_secs(180),
+            )?;
+            byakko_devices::storage::write_json(
+                capture_output.expect("capture reserved its output before discovery"),
+                &captured,
+            )?;
+            println!("Diagnostic archive exported to {}", path.display());
+        }
         Command::Read => println!(
             "{}",
             serde_json::to_string_pretty(&byakko_cli::read_keymap(

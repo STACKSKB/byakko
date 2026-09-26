@@ -1,4 +1,6 @@
 pub mod application;
+pub mod archive;
+pub mod files;
 pub mod keymap;
 pub mod lighting;
 pub mod macros;

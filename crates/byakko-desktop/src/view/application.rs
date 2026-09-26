@@ -2,7 +2,7 @@
 use crate::{
     form::{
         application::{Closing, Message, Page},
-        keymap, lighting, macros, picture, recording, settings,
+        files, keymap, lighting, macros, picture, recording, settings,
     },
     view,
     widget::panels::UiStyle,
@@ -24,6 +24,9 @@ pub struct View<'a> {
     pub lighting: &'a lighting::Form,
     pub picture: &'a picture::Form,
     pub settings: &'a settings::Form,
+    pub files: &'a files::Form,
+    pub files_busy: bool,
+    pub names_available: bool,
     pub recording_options: &'a recording::Options,
     pub recording_pending: bool,
     pub page: Page,
@@ -32,7 +35,10 @@ pub struct View<'a> {
     pub style: &'a UiStyle,
 }
 pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
-    let idle = !input.session.busy() && !input.session.recording() && !input.recording_pending;
+    let idle = !input.session.busy()
+        && !input.files_busy
+        && !input.session.recording()
+        && !input.recording_pending;
     let editable = idle
         && matches!(input.session.connection(), Connection::Connected { .. })
         && input.session.keymap().status() == &Status::Ready;
@@ -50,6 +56,9 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         button("Settings").on_press_maybe(
             (idle && input.session.settings().is_some()).then_some(Message::Page(Page::Settings))
         ),
+        button("Diagnostic archive").on_press_maybe(
+            (idle && input.session.archive().is_some()).then_some(Message::Page(Page::Archive))
+        ),
         button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)),
         button("Save assignments")
             .on_press_maybe((editable && input.session.keymap().dirty()).then_some(Message::Save)),
@@ -58,8 +67,8 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
     ]
     .spacing(input.style.spacing.s);
     let status = if input.closing == Closing::Waiting {
-        "Waiting for the device operation before closing…"
-    } else if input.session.busy() {
+        "Waiting for the operation before closing…"
+    } else if input.session.busy() || input.files_busy {
         "Working…"
     } else {
         input.notice
@@ -104,6 +113,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
 }
 
 fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
+    let idle = !input.session.busy() && !input.files_busy;
     if (input.session.recording() || input.recording_pending)
         && let Some(editor) = input.session.macros()
     {
@@ -149,14 +159,14 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     input.keys,
                     input.session.descriptor(),
                     input.session.keymap(),
-                    true,
+                    !input.files_busy,
                     input.style
                 )
                 .map(Message::Keys),
                 view::recording::controls(
                     input.recording_options,
                     view::recording::Phase::Idle {
-                        editable: !input.session.busy()
+                        editable: idle
                             && editor.status() == &Status::Ready
                             && editor.draft().is_some_and(|program| editor
                                 .capabilities()
@@ -166,15 +176,24 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     input.style
                 )
                 .map(Message::Record),
-                view::macros::view(
-                    input.macros,
+                view::files::macros(
+                    input.files,
                     editor,
-                    library,
-                    !input.session.busy(),
-                    input.keys.target(),
-                    input.session.catalog_scanning(),
+                    idle,
+                    input.names_available,
                     input.style
                 )
+                .map(Message::Files),
+                view::macros::view(view::macros::View {
+                    form: input.macros,
+                    editor,
+                    library,
+                    names: input.files,
+                    idle,
+                    target: input.keys.target(),
+                    scanning: input.session.catalog_scanning(),
+                    style: input.style,
+                })
                 .map(Message::Macros),
             ]
             .spacing(input.style.spacing.m)
@@ -195,8 +214,8 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                 view::lighting::view(
                     input.lighting,
                     editor,
-                    !input.session.busy() || editor.submitted().is_some(),
-                    !input.session.busy(),
+                    !input.files_busy && (!input.session.busy() || editor.submitted().is_some()),
+                    idle,
                     input.style
                 )
                 .map(Message::Lighting),
@@ -211,9 +230,10 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                 input.picture,
                 input.session.descriptor(),
                 editor,
-                (!input.session.busy() || editor.submitted().is_some())
+                !input.files_busy
+                    && (!input.session.busy() || editor.submitted().is_some())
                     && picture_is_displayed(input.session),
-                !input.session.busy(),
+                idle,
                 input.style,
             )
             .map(Message::Picture),
@@ -232,8 +252,8 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                 view::settings::view(
                     input.settings,
                     editor,
-                    !input.session.busy() || editor.submitted().is_some(),
-                    !input.session.busy(),
+                    !input.files_busy && (!input.session.busy() || editor.submitted().is_some()),
+                    idle,
                     input.style
                 )
                 .map(Message::Settings),
@@ -242,6 +262,17 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
             .height(Fill)
             .into(),
             None => text("Settings are unavailable for this keyboard.").into(),
+        },
+        Page::Archive => match input.session.archive() {
+            Some(capture) => view::archive::view(
+                input.files,
+                capture,
+                idle,
+                matches!(input.session.connection(), Connection::Connected { .. }),
+                input.style,
+            )
+            .map(Message::Files),
+            None => text("Diagnostic capture is unavailable for this keyboard.").into(),
         },
     }
 }

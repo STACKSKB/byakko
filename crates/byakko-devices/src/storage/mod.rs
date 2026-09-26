@@ -1,4 +1,10 @@
 //! Stable per-user GUI data location. No current-directory fallback.
+pub mod json;
+pub mod labels;
+pub mod macros;
+pub use json::{
+    load_json, read_bytes, read_json, reserve_new, save_new_json, write_json, write_new,
+};
 use std::{ffi::OsString, io, path::PathBuf};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

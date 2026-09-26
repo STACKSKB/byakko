@@ -1,4 +1,5 @@
 //! Synchronous client of the same pure session used by Iced.
+pub mod archive;
 mod features;
 use byakko_core::{
     contract::Command,
@@ -14,21 +15,7 @@ pub use features::{
 };
 use std::time::{Duration, Instant};
 
-/// Shared file boundary for snapshot commands; no metadata/read double pass.
-pub fn read_json<T: serde::de::DeserializeOwned>(
-    reader: impl std::io::Read,
-    limit: u64,
-) -> Result<T, Box<dyn std::error::Error>> {
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    reader
-        .take(limit.checked_add(1).ok_or("Invalid JSON limit")?)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > limit {
-        return Err("Snapshot exceeds its JSON size limit".into());
-    }
-    Ok(serde_json::from_slice(&bytes)?)
-}
+pub use byakko_devices::storage::read_json;
 
 /// Only reads use a timeout. Once a save begins, wait for its recovery outcome.
 fn execute(

@@ -2,10 +2,11 @@
 use crate::{
     config::Config,
     controller::autosave::{Autosave, Feature as AutoFeature},
+    controller::files::{Accepted as FileAccepted, Files},
     controller::recording::Controller as Recording,
     form::{
         application::{Closing, Message, Page},
-        keymap, lighting, macros, picture, recording, settings,
+        files, keymap, lighting, macros, picture, recording, settings,
     },
     input, view,
     widget::panels::UiStyle,
@@ -34,6 +35,8 @@ struct App {
     picture: picture::Form,
     settings: settings::Form,
     autosave: Autosave,
+    files: Files,
+    assignment_binding: Option<(String, String)>,
     config: Config,
     page: Page,
     worker: Option<Executor>,
@@ -50,6 +53,7 @@ pub fn run(
     attach: impl Fn(Option<&str>) -> Result<(String, Executor), String> + 'static,
 ) -> iced::Result {
     let mut app = App::new(session, Box::new(attach));
+    app.files = Files::new(&app.session, config.data_directory.clone());
     app.config = config;
     let initial = std::cell::RefCell::new(Some(app));
     iced::application(
@@ -76,6 +80,8 @@ pub fn run(
 impl App {
     fn new(session: Session, attach: Box<Attach>) -> Self {
         Self {
+            files: Files::new(&session, None),
+            assignment_binding: None,
             keys: keymap::Form::new(session.descriptor()),
             macros: macros::Form::default(),
             recording: Recording::default(),
@@ -108,7 +114,19 @@ impl App {
         if self.closing != Closing::Open
             && !matches!(
                 message,
-                Message::Poll(_) | Message::Close | Message::Discard | Message::KeepEditing
+                Message::Poll(_)
+                    | Message::Close
+                    | Message::Discard
+                    | Message::KeepEditing
+                    | Message::FileComplete(_)
+            )
+        {
+            return Task::none();
+        }
+        if self.files.busy()
+            && !matches!(
+                message,
+                Message::FileComplete(_) | Message::Poll(_) | Message::Close
             )
         {
             return Task::none();
@@ -125,6 +143,8 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::Files(message) => return self.update_files(message),
+            Message::FileComplete(completion) => return self.complete_file(completion),
             Message::Record(message) => {
                 let was_recording = self.session.recording();
                 let result =
@@ -201,11 +221,16 @@ impl App {
     }
 
     fn load_page(&mut self) -> Task<Message> {
-        if self.session.busy() || !matches!(self.session.connection(), Connection::Connected { .. })
+        if self.session.busy()
+            || self.files.busy()
+            || !matches!(self.session.connection(), Connection::Connected { .. })
         {
             return Task::none();
         }
         let request = match self.page {
+            Page::Macros if self.files.needs_labels() => {
+                return self.begin_file(files::Operation::LoadLabels);
+            }
             Page::Lighting if self.session.lighting().is_some_and(needs_read) => {
                 Some(self.session.read_lighting())
             }
@@ -224,6 +249,7 @@ impl App {
 
     fn flush_saves(&mut self, now: Instant, flush: bool) -> Task<Message> {
         if self.session.busy()
+            || self.files.busy()
             || self.session.recording()
             || self.recording.pending()
             || self.closing == Closing::ConfirmDiscard
@@ -270,6 +296,62 @@ impl App {
                 self.notice = "Changes queued for automatic apply.".into();
             }
             Err(reason) => self.notice = reason,
+        }
+    }
+
+    fn update_files(&mut self, message: files::Message) -> Task<Message> {
+        if self.session.busy() {
+            return Task::none();
+        }
+        match message {
+            files::Message::MacroPath(path) => self.files.form.macro_path = path,
+            files::Message::ArchivePath(path) => self.files.form.archive_path = path,
+            files::Message::Name(name) => {
+                if let Some(editor) = self.session.macros() {
+                    self.files.form.rename(editor.slot(), name);
+                }
+            }
+            files::Message::Begin(operation) => return self.begin_file(operation),
+            files::Message::Capture => {
+                let request = self.session.capture_archive();
+                return self.submit(request);
+            }
+        }
+        Task::none()
+    }
+
+    fn begin_file(&mut self, operation: files::Operation) -> Task<Message> {
+        match self.files.begin(operation, &self.session) {
+            Ok(job) => {
+                self.notice.clear();
+                job.task().map(Message::FileComplete)
+            }
+            Err(reason) => {
+                self.notice = reason;
+                Task::none()
+            }
+        }
+    }
+
+    fn complete_file(&mut self, completion: crate::controller::files::Completion) -> Task<Message> {
+        match self.files.accept(completion, &mut self.session) {
+            None => return Task::none(),
+            Some(Err(reason)) => {
+                self.closing = Closing::Open;
+                self.notice = reason;
+                return Task::none();
+            }
+            Some(Ok(FileAccepted::Imported(notice))) => {
+                self.notice = notice;
+                self.macros
+                    .sync(self.session.macros().and_then(|editor| editor.draft()));
+            }
+            Some(Ok(FileAccepted::Finished(notice))) => self.notice = notice,
+        }
+        if self.closing == Closing::Waiting {
+            self.close()
+        } else {
+            Task::none()
         }
     }
 
@@ -408,7 +490,15 @@ impl App {
             Message::Read => self.session.read_macro(),
             Message::Save => self.session.save_macro(),
             Message::Assign(binding) => match self.keys.target() {
-                Some((layer, key)) => self.session.save_and_assign_macro(layer, key, &binding),
+                Some((layer, key)) => {
+                    let request = self.session.save_and_assign_macro(layer, key, &binding);
+                    if request.is_ok()
+                        && let Some(editor) = self.session.macros()
+                    {
+                        self.assignment_binding = Some((editor.slot().to_owned(), binding));
+                    }
+                    request
+                }
                 None => Err("Select a key before assigning a macro".into()),
             },
             Message::Revert => {
@@ -485,6 +575,7 @@ impl App {
                 worker.set_generation(0);
                 self.worker = None;
                 self.autosave.clear();
+                self.assignment_binding = None;
                 if self.recording.pending() {
                     let _ = self.recording.finish(&mut self.session, Instant::now());
                 }
@@ -523,6 +614,17 @@ impl App {
             Outcome::PictureSaved => self.notice = "Key colors applied.".into(),
             Outcome::SettingsLoaded => self.notice = "Settings loaded.".into(),
             Outcome::SettingsSaved => self.notice = "Setting saved and read back.".into(),
+            Outcome::ArchiveCaptured => self.notice = "Diagnostic archive captured.".into(),
+            Outcome::ArchiveCaptureFailed(problem) => {
+                self.closing = Closing::Open;
+                self.notice = match problem {
+                    byakko_core::library::archive::CaptureProblem::Capture(reason)
+                    | byakko_core::library::archive::CaptureProblem::InvalidResult(reason) => {
+                        reason
+                    }
+                };
+                return Task::none();
+            }
             Outcome::Continue(command) => return self.submit(Ok(command)),
             Outcome::MacroLoaded => {
                 self.macros
@@ -544,6 +646,9 @@ impl App {
                 return Task::none();
             }
             Outcome::AssignmentSucceeded { macro_saved } => {
+                if let Some((slot, binding)) = self.assignment_binding.take() {
+                    self.files.form.bindings.insert(slot, binding);
+                }
                 self.notice = if macro_saved {
                     "Macro saved and assigned."
                 } else {
@@ -555,6 +660,7 @@ impl App {
                 macro_saved,
                 problem,
             } => {
+                self.assignment_binding = None;
                 self.closing = Closing::Open;
                 let reason = match problem {
                     WorkflowProblem::Device(problem) => problem_text(&problem),
@@ -590,6 +696,7 @@ impl App {
                 return Task::none();
             }
             Outcome::Conflict => {
+                self.assignment_binding = None;
                 self.closing = Closing::Open;
                 self.notice =
                     "The observed feature differs from your edit baseline. Edits are retained."
@@ -597,6 +704,7 @@ impl App {
                 return Task::none();
             }
             Outcome::Failed(problem) => {
+                self.assignment_binding = None;
                 self.closing = Closing::Open;
                 self.notice = problem_text(&problem);
                 return Task::none();
@@ -623,7 +731,7 @@ impl App {
                 }
             }
         }
-        if self.session.busy() {
+        if self.session.busy() || self.files.busy() {
             self.closing = Closing::Waiting;
         } else if self.autosave.pending() {
             self.closing = Closing::Waiting;
@@ -667,6 +775,9 @@ impl App {
             lighting: &self.lighting,
             picture: &self.picture,
             settings: &self.settings,
+            files: &self.files.form,
+            files_busy: self.files.busy(),
+            names_available: self.files.can_save_labels(),
             recording_options: self.recording.options(),
             recording_pending: self.recording.pending(),
             page: self.page,

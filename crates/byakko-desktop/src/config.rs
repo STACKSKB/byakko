@@ -1,8 +1,9 @@
 //! Application timing configuration, supplied by the native composition root.
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 #[derive(Clone, Debug)]
 pub struct Config {
+    pub data_directory: Option<PathBuf>,
     /// Batching window for per-key color painting.
     pub auto_save_delay: Duration,
     /// Short batching window for scalar settings and onboard lighting edits.
@@ -12,6 +13,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            data_directory: None,
             auto_save_delay: Duration::from_secs(2),
             short_edit_delay: Duration::from_millis(200),
         }
@@ -36,6 +38,7 @@ impl Config {
             return Err("BYAKKO_AUTO_SAVE_DELAY_MS must be from 0 to 10000".into());
         }
         Ok(Self {
+            data_directory: None,
             auto_save_delay: Duration::from_millis(milliseconds),
             short_edit_delay: Self::default().short_edit_delay,
         })

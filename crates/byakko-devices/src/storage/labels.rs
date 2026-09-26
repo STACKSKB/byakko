@@ -3,8 +3,8 @@ use byakko_core::model::macros::Choice;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File, OpenOptions},
-    io::{Read, Write},
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
@@ -126,18 +126,12 @@ pub fn load_latest(
     let Some((_, path)) = latest(directory)? else {
         return Ok(None);
     };
-    let mut bytes = Vec::new();
-    File::open(&path)
-        .and_then(|file| {
-            file.take(MAX_SNAPSHOT_BYTES as u64 + 1)
-                .read_to_end(&mut bytes)
-        })
-        .map_err(|error| {
-            format!(
-                "Could not read newest macro labels {}: {error}",
-                path.display()
-            )
-        })?;
+    let bytes = super::read_bytes(&path, MAX_SNAPSHOT_BYTES as u64).map_err(|error| {
+        format!(
+            "Could not read newest macro labels {}: {error}",
+            path.display()
+        )
+    })?;
     if bytes.len() > MAX_SNAPSHOT_BYTES {
         return Err(format!(
             "Newest macro labels {} exceed 32 KiB",
