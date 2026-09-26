@@ -16,6 +16,8 @@ pub enum Phase {
 
 pub fn preview<'a>(
     program: &'a byakko_core::model::macros::Program,
+    descriptor: &'a byakko_core::model::keymap::Descriptor,
+    caps: &'a byakko_core::model::macros::Capabilities,
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
     scrollable(
@@ -23,7 +25,7 @@ pub fn preview<'a>(
             text(format!(
                 "{}: {} · {} ms",
                 index + 1,
-                super::macros::action_label(&event.action),
+                super::macros::action_label(&event.action, descriptor, caps),
                 event.delay_ms
             ))
             .into()

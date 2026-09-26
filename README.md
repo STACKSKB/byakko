@@ -16,6 +16,12 @@ local names and diagnostic archive capture/export are restored. Other frontend w
 not a feature-complete release. See [plan.md](plan.md) for current scope and
 [rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 
+Application source is grouped by responsibility. Core has `model/`, `editor/`,
+`validation/`, `library/`, `recorder/`, `projection/` and `workflow/`, with
+feature files inside each. Editors share one load/edit/revert/save lifecycle.
+Desktop forms and views live under `form/` and `view/`; native backends retain
+their protocol and board boundaries. The ownership map is in [plan.md](plan.md).
+
 ## Build and run
 
 Use the [source-build instructions](docs/source-build.md) for prerequisites,
@@ -38,8 +44,10 @@ new connections load each feature once and retain drafts. Conflicts and failed
 writes hold automatic refresh until an explicit Read / reconnect. That action
 replaces the worker even if discovery missed an unplug/replug.
 The assignment catalog supports category navigation, search aliases, physical-key
-capture and capability-described custom shortcuts. Host lighting and the macro
-interaction review remain frontend milestones. Lighting/picture saves report transport
+capture and capability-described custom shortcuts. Macro repeat edits stage
+immediately; event choices use advertised names and rejected edits retain inputs.
+Host lighting and rendered interaction acceptance remain milestones.
+Lighting/picture saves report transport
 acceptance after established pacing; settings saves include one readback.
 
 The independent CLI uses the same session/executor contract:

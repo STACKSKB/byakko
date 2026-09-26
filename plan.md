@@ -101,8 +101,8 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [x] Rebuild macro library/editor and pure save-and-assign workflow.
   Preserve unknown slots, candidate reads, count rules and partial outcomes.
 - [x] Restore exclusive local macro recording through the shared macro draft.
-- [ ] Complete macro interaction review, including user-facing event choices
-  and rendered layout.
+- [x] Complete macro interaction corrections and regression checks.
+- [ ] Review rendered macro and assignment layouts with the user.
 - [x] Before expanding features, consolidate the shared editor lifecycle and
   feature implementations under `editor/`. Put the other application roles in
   top-level folders as requested. Remove the macro lifecycle duplication and
@@ -117,6 +117,11 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [ ] Restore host lighting lifecycle, OS samplers and verified restoration.
 - [ ] Remove remaining obsolete native forwarding/error-erasure paths, retaining
   fixtures and useful research commands. Narrow APIs around demonstrated callers.
+  Make typed apply/recovery results authoritative inside native transactions;
+  remove `ApplyError`, `RestoreMismatch` and archive error downcasts. Keep the
+  immutable-target `Access` boundary and actual research entrypoints, converting
+  to their display errors only at the outer boundary. Portable snapshot adapters
+  still own meaningful byte validation and projection.
 - [ ] Review ownership/docs, run workspace checks, compare protocol sequences
   and record outstanding physical gates.
 
@@ -300,14 +305,25 @@ Message tests cover search/capture, one/two-modifier staging and saving, target
 resets, local validation errors and capture cancellation during saves. No native
 wire changes or hardware writes; rendered layout remains unaccepted.
 
-The macro interaction audit found specific remaining regressions to fix next:
-valid repeat input must stage immediately and invalid text must block Save/Assign;
-event controls need advertised labels and choices instead of raw identifiers;
-unchanged reads must preserve unsubmitted event fields and replacement target;
-successful sequence edits must reset/collapse the composer while rejected edits
-retain input. Restore the established limit/help text and New/Inspect flow.
+The macro interaction checkpoint restores immediate repeat staging, preserving
+the user's exact text. Invalid or unapplied counts block both Save and Assign,
+including assignment of an otherwise clean macro. Event choices and labels come
+from advertised capabilities and the assignment descriptor; loaded key usages
+outside the ordinary catalog retain a fallback choice. The form owns only text
+and a Closed/New/Replace composer state, not another macro draft.
 
-Temporary gaps: macro interaction corrections/review and host streaming.
+Unchanged program reads retain unfinished fields even when the revision changes.
+Failed and stale reads retain them too. New slots and accepted sequence edits
+reset the composer; rejected edits and failed reverts leave inputs intact.
+The established New/Inspect flow, wait-after label and advertised limits return.
+
+All-feature workspace tests (82 core, 68 desktop, 216 devices plus external
+integration, seven CLI tests), strict all-target/all-feature Clippy, formatting
+and locked native development builds pass. Native transactions did not change;
+no hardware writes were performed. Rendered layouts and playback remain
+unaccepted by these headless checks.
+
+Temporary gaps: host streaming and rendered interaction acceptance.
 The native APIs, codecs, OS samplers, direct transaction tests and research tools
 remain. Passive catalog priority is restored; host scheduling returns with its
 feature milestone.

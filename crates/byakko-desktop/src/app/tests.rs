@@ -193,8 +193,11 @@ fn macro_messages_discover_read_candidate_edit_and_assign_once() {
         "Add reads its candidate once"
     );
     let _ = app.update(Message::Macros(macros::Message::Repeat("1".into())));
-    let _ = app.update(Message::Macros(macros::Message::ApplyRepeat));
-    let _ = app.update(Message::Macros(macros::Message::Insert));
+    let _ = app.update(Message::Macros(macros::Message::NewEvent));
+    let _ = app.update(Message::Macros(macros::Message::Kind(macros::Kind::Key)));
+    let _ = app.update(Message::Macros(macros::Message::Value("4".into())));
+    let _ = app.update(Message::Macros(macros::Message::Delay("0".into())));
+    let _ = app.update(Message::Macros(macros::Message::StageEvent));
     let _ = app.update(Message::Keys(keymap::Message::Key("Alpha".into())));
     let _ = app.update(Message::Macros(macros::Message::Assign(
         "play-Spare".into(),
@@ -227,7 +230,6 @@ fn partial_assignment_failure_keeps_saved_macro_and_discard_prompt() {
     let _ = app.update(Message::Macros(macros::Message::Select("Greeting".into())));
     drain(&mut app);
     let _ = app.update(Message::Macros(macros::Message::Repeat("2".into())));
-    let _ = app.update(Message::Macros(macros::Message::ApplyRepeat));
     let _ = app.update(Message::Keys(keymap::Message::Key("Alpha".into())));
     let _ = app.update(Message::Macros(macros::Message::Assign(
         "play-Greeting".into(),
@@ -337,6 +339,139 @@ fn ready_to_record() -> (App, Arc<AtomicUsize>) {
     let _ = app.update(Message::Macros(macros::Message::Select("Greeting".into())));
     drain(&mut app);
     (app, reads)
+}
+
+#[test]
+fn repeat_text_stages_immediately_and_invalid_text_blocks_save_and_clean_assignment() {
+    let (mut app, _) = ready_to_record();
+    let _ = app.update(Message::Macros(macros::Message::Event(0)));
+    let _ = app.update(Message::Macros(macros::Message::Delay("unfinished".into())));
+    let _ = app.update(Message::Macros(macros::Message::Repeat(" 03 ".into())));
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        3
+    );
+    assert_eq!(app.macros.repeat, " 03 ");
+    assert_eq!(app.macros.delay, "unfinished");
+    assert_eq!(app.macros.composer, macros::Composer::Replace(0));
+    let _ = app.update(Message::Macros(macros::Message::Save));
+    drain(&mut app);
+    assert!(!app.session.macros().unwrap().dirty());
+    let _ = app.update(Message::Keys(keymap::Message::Key("Alpha".into())));
+    for invalid in ["", "oops", "0", "65536"] {
+        let _ = app.update(Message::Macros(macros::Message::Repeat(invalid.into())));
+        for message in [
+            macros::Message::Save,
+            macros::Message::Assign("play-Greeting".into()),
+        ] {
+            let _ = app.update(Message::Macros(message));
+            assert!(!app.session.busy());
+            assert!(!app.notice.is_empty());
+            assert!(app.assignment_binding.is_none());
+            assert_eq!(app.macros.repeat, invalid);
+            assert_eq!(
+                app.session.macros().unwrap().draft().unwrap().repeat_count,
+                3
+            );
+        }
+    }
+    assert!(!app.session.keymap().dirty());
+}
+
+#[test]
+fn unchanged_macro_content_preserves_composer_across_new_revision_and_failed_reads() {
+    use byakko_core::contract::FeatureResult;
+    let (mut app, _) = ready_to_record();
+    let _ = app.update(Message::Macros(macros::Message::Event(1)));
+    let _ = app.update(Message::Macros(macros::Message::Delay("unfinished".into())));
+    let mut snapshot = app.session.macros().unwrap().baseline().unwrap().clone();
+    snapshot.revision.push(42);
+    let command = app.session.read_macro().unwrap();
+    let mut stale = command.clone().map(|_| CompletionPayload::Macro {
+        slot: "Greeting".into(),
+        result: FeatureResult::Read(Ok(snapshot.clone())),
+    });
+    stale.generation = stale.generation.wrapping_add(1);
+    let _ = app.complete(stale);
+    assert!(app.session.busy());
+    assert_eq!(app.macros.delay, "unfinished");
+    assert_eq!(app.macros.composer, macros::Composer::Replace(1));
+    let _ = app.complete(command.map(|_| CompletionPayload::Macro {
+        slot: "Greeting".into(),
+        result: FeatureResult::Read(Ok(snapshot.clone())),
+    }));
+    for result in [Ok(snapshot), Err("Injected read failure".into())] {
+        let command = app.session.read_macro().unwrap();
+        let _ = app.complete(command.map(|_| CompletionPayload::Macro {
+            slot: "Greeting".into(),
+            result: FeatureResult::Read(result),
+        }));
+        assert_eq!(app.macros.delay, "unfinished");
+        assert_eq!(app.macros.composer, macros::Composer::Replace(1));
+    }
+}
+
+#[test]
+fn changed_slot_resets_composer_even_with_identical_program() {
+    use byakko_core::contract::FeatureResult;
+    let (mut app, _) = ready_to_record();
+    let _ = app.update(Message::Macros(macros::Message::Event(0)));
+    let _ = app.update(Message::Macros(macros::Message::Delay("unfinished".into())));
+    let mut snapshot = app.session.macros().unwrap().baseline().unwrap().clone();
+    app.session.select_macro("Spare").unwrap();
+    snapshot.slot = "Spare".into();
+    let command = app.session.read_macro().unwrap();
+    let _ = app.complete(command.map(|_| CompletionPayload::Macro {
+        slot: "Spare".into(),
+        result: FeatureResult::Read(Ok(snapshot)),
+    }));
+    assert_eq!(app.macros.composer, macros::Composer::Closed);
+    assert_ne!(app.macros.delay, "unfinished");
+}
+
+#[test]
+fn macro_composer_resets_only_after_accepted_sequence_edit() {
+    use byakko_core::contract::FeatureResult;
+    let (mut app, _) = ready_to_record();
+    let original = app.session.macros().unwrap().draft().unwrap().clone();
+    let _ = app.update(Message::Macros(macros::Message::Event(0)));
+    for invalid in ["unfinished", "4294967295"] {
+        let _ = app.update(Message::Macros(macros::Message::Delay(invalid.into())));
+        let _ = app.update(Message::Macros(macros::Message::StageEvent));
+        assert_eq!(app.macros.composer, macros::Composer::Replace(0));
+        assert_eq!(app.macros.delay, invalid);
+        assert_eq!(app.session.macros().unwrap().draft(), Some(&original));
+    }
+    let command = app.session.read_macro().unwrap();
+    let _ = app.update(Message::Macros(macros::Message::Revert));
+    assert_eq!(app.macros.composer, macros::Composer::Replace(0));
+    assert_eq!(app.macros.delay, "4294967295");
+    let _ = app.update(Message::Macros(macros::Message::Delay("99".into())));
+    assert_eq!(app.macros.delay, "4294967295", "busy inputs are disabled");
+    let snapshot = app.session.macros().unwrap().baseline().unwrap().clone();
+    let _ = app.complete(command.map(|_| CompletionPayload::Macro {
+        slot: "Greeting".into(),
+        result: FeatureResult::Read(Ok(snapshot)),
+    }));
+    let _ = app.update(Message::Macros(macros::Message::Delay("19".into())));
+    let _ = app.update(Message::Macros(macros::Message::StageEvent));
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().events[0].delay_ms,
+        19
+    );
+    assert_eq!(app.macros.composer, macros::Composer::Closed);
+    let _ = app.update(Message::Macros(macros::Message::Event(0)));
+    let _ = app.update(Message::Macros(macros::Message::NewEvent));
+    assert_eq!(app.macros.composer, macros::Composer::New);
+    let _ = app.update(Message::Macros(macros::Message::Kind(macros::Kind::Key)));
+    let _ = app.update(Message::Macros(macros::Message::Value("5".into())));
+    let _ = app.update(Message::Macros(macros::Message::Delay("0".into())));
+    let _ = app.update(Message::Macros(macros::Message::StageEvent));
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().events.len(),
+        original.events.len() + 1
+    );
+    assert_eq!(app.macros.composer, macros::Composer::Closed);
 }
 
 fn key_event(code: iced::keyboard::key::Code, pressed: bool) -> Event {
