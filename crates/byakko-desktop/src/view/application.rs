@@ -14,7 +14,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, container, row, text},
+    widget::{button, column, container, row, scrollable, text},
 };
 
 /// Borrowed render inputs, assembled for a frame; no effects or owned state.
@@ -215,26 +215,28 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     input.style
                 )
                 .map(Message::Record),
-                view::files::macros(
-                    input.files,
-                    editor,
-                    idle,
-                    input.names_available,
-                    input.style
-                )
-                .map(Message::Files),
-                view::macros::view(view::macros::View {
-                    form: input.macros,
-                    editor,
-                    descriptor: input.session.descriptor(),
-                    library,
-                    names: input.files,
-                    idle,
-                    target: input.keys.target(),
-                    scanning: input.session.catalog_scanning(),
-                    style: input.style,
-                })
-                .map(Message::Macros),
+                view::macros::view(
+                    view::macros::View {
+                        form: input.macros,
+                        editor,
+                        descriptor: input.session.descriptor(),
+                        library,
+                        names: input.files,
+                        idle,
+                        target: input.keys.target(),
+                        scanning: input.session.catalog_scanning(),
+                        style: input.style,
+                    },
+                    view::files::macros(
+                        input.files,
+                        editor,
+                        idle,
+                        input.names_available,
+                        input.style,
+                    )
+                    .map(Message::Files),
+                    Message::Macros
+                ),
             ]
             .spacing(input.style.spacing.m)
             .height(Fill)
@@ -251,26 +253,33 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     input.style
                 )
                 .map(Message::Keys),
-                view::lighting::view(
-                    input.lighting,
-                    editor,
-                    !input.host_preparing
-                        && input.session.host().is_idle()
-                        && !input.files_busy
-                        && (!input.session.busy() || editor.submitted().is_some()),
-                    idle,
-                    input.style
+                scrollable(
+                    column![
+                        view::lighting::view(
+                            input.lighting,
+                            editor,
+                            !input.host_preparing
+                                && input.session.host().is_idle()
+                                && !input.files_busy
+                                && (!input.session.busy() || editor.submitted().is_some()),
+                            idle,
+                            input.style
+                        )
+                        .map(Message::Lighting),
+                        view::host::view(
+                            input.host,
+                            editor,
+                            idle,
+                            input.host_preparing,
+                            input.session.host().phase(),
+                            input.style
+                        )
+                        .map(Message::Host),
+                    ]
+                    .spacing(input.style.spacing.l)
                 )
-                .map(Message::Lighting),
-                view::host::view(
-                    input.host,
-                    editor,
-                    idle,
-                    input.host_preparing,
-                    input.session.host().phase(),
-                    input.style
-                )
-                .map(Message::Host),
+                .spacing(f32::from(input.style.scrollbar_inset))
+                .height(Fill),
             ]
             .spacing(input.style.spacing.m)
             .height(Fill)

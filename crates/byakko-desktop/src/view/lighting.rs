@@ -9,8 +9,8 @@ use byakko_core::{
     projection::lighting,
 };
 use iced::{
-    Element, Fill,
-    widget::{button, column, row, scrollable, text},
+    Element,
+    widget::{button, column, row, text},
 };
 
 pub fn view<'a>(
@@ -78,5 +78,5 @@ pub fn view<'a>(
         };
         content = content.push(text(explanation));
     }
-    scrollable(content).height(Fill).into()
+    content.into()
 }
