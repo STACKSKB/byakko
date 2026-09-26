@@ -21,6 +21,10 @@ pub struct Form {
 }
 
 impl Form {
+    pub fn target(&self) -> Option<(&str, &str)> {
+        Some((&self.layer, self.selected.as_deref()?))
+    }
+
     pub fn new(descriptor: &Descriptor) -> Self {
         Self {
             layer: descriptor.layers[0].id.clone(),
@@ -45,11 +49,10 @@ impl Form {
         None
     }
 
-    pub fn view<'a>(
+    pub fn workspace<'a>(
         &'a self,
         descriptor: &'a Descriptor,
         editor: &'a Editor,
-        editable: bool,
         style: &'a UiStyle,
     ) -> Element<'a, Message> {
         let layers = row(descriptor.layers.iter().map(|layer| {
@@ -68,6 +71,16 @@ impl Form {
             physical_board::labels_for_layer(descriptor, editor.draft(), &self.layer),
             |key| Some(Message::Key(key.id.clone())),
         );
+        column![layers, board].spacing(style.spacing.m).into()
+    }
+
+    pub fn view<'a>(
+        &'a self,
+        descriptor: &'a Descriptor,
+        editor: &'a Editor,
+        editable: bool,
+        style: &'a UiStyle,
+    ) -> Element<'a, Message> {
         let can_assign = editable
             && self.selected.as_ref().is_some_and(|id| {
                 descriptor
@@ -95,8 +108,7 @@ impl Form {
         ]
         .spacing(style.spacing.s);
         column![
-            layers,
-            board,
+            self.workspace(descriptor, editor, style),
             container(assignments).width(Fill).height(Fill)
         ]
         .spacing(style.spacing.l)

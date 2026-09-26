@@ -32,15 +32,22 @@ fn execute(
     command: Command,
     timeout: Option<Duration>,
 ) -> Result<Outcome, String> {
-    if let Err(completion) = executor.try_submit(command) {
-        return Ok(session.accept(*completion));
-    }
+    let mut ready = executor
+        .try_submit(command)
+        .err()
+        .map(|completion| *completion);
     let deadline = timeout.map(|timeout| Instant::now() + timeout);
     loop {
         let remaining = deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()));
-        match executor.receive(remaining) {
+        match ready.take().map_or_else(|| executor.receive(remaining), Ok) {
             Ok(completion) => match session.accept(completion) {
-                Outcome::Ignored => continue,
+                Outcome::Ignored | Outcome::CatalogLoaded | Outcome::CatalogFailed(_) => continue,
+                Outcome::Continue(command) => {
+                    ready = executor
+                        .try_submit(command)
+                        .err()
+                        .map(|completion| *completion)
+                }
                 outcome => return Ok(outcome),
             },
             Err(error) => {
@@ -49,6 +56,96 @@ fn execute(
                 return Err(format!("Device operation did not complete: {error}"));
             }
         }
+    }
+}
+
+pub fn read_macro(
+    session: &mut Session,
+    executor: &Executor,
+    slot: &str,
+    timeout: Duration,
+) -> Result<byakko_core::macros::Snapshot, String> {
+    if matches!(session.connection(), Connection::Disconnected) {
+        executor.set_generation(session.connect()?);
+    }
+    session.select_macro(slot)?;
+    let command = session.read_macro()?;
+    match execute(session, executor, command, Some(timeout))? {
+        Outcome::MacroLoaded => Ok(session
+            .macros()
+            .and_then(|editor| editor.baseline())
+            .expect("loaded macro owns a baseline")
+            .clone()),
+        outcome => Err(format!("Macro read did not load: {outcome:?}")),
+    }
+}
+
+/// Discovery is itself the foreground task for this CLI command.
+pub fn list_macros(
+    session: &mut Session,
+    executor: &Executor,
+    timeout: Duration,
+) -> Result<(), String> {
+    if matches!(session.connection(), Connection::Disconnected) {
+        executor.set_generation(session.connect()?);
+    }
+    let command = session.request_macro_catalog()?;
+    if let Err(completion) = executor.try_submit(command) {
+        return Err(format!(
+            "Macro discovery could not start: {:?}",
+            session.accept(*completion)
+        ));
+    }
+    let deadline = Instant::now() + timeout;
+    loop {
+        let completion =
+            match executor.receive(Some(deadline.saturating_duration_since(Instant::now()))) {
+                Ok(completion) => completion,
+                Err(error) => {
+                    executor.set_generation(0);
+                    session.disconnect();
+                    return Err(format!("Macro discovery did not complete: {error}"));
+                }
+            };
+        match session.accept(completion) {
+            Outcome::Ignored => continue,
+            Outcome::CatalogLoaded => return Ok(()),
+            outcome => return Err(format!("Macro discovery did not load: {outcome:?}")),
+        }
+    }
+}
+
+pub fn apply_macro(
+    session: &mut Session,
+    executor: &Executor,
+    target: &byakko_core::macros::Snapshot,
+) -> Result<byakko_core::macros::Snapshot, String> {
+    if session.macros().is_some_and(|editor| editor.dirty()) {
+        return Err("Save or revert staged macro edits before applying a macro file".into());
+    }
+    session.stage_macro_snapshot(target)?;
+    let command = session.save_macro()?;
+    match execute(session, executor, command, None)? {
+        Outcome::MacroSaved => Ok(session
+            .macros()
+            .and_then(|editor| editor.baseline())
+            .expect("saved macro owns a baseline")
+            .clone()),
+        outcome => Err(format!("Macro save did not verify: {outcome:?}")),
+    }
+}
+
+pub fn assign_macro(
+    session: &mut Session,
+    executor: &Executor,
+    layer: &str,
+    key: &str,
+    binding: &str,
+) -> Result<(), String> {
+    let command = session.save_and_assign_macro(layer, key, binding)?;
+    match execute(session, executor, command, None)? {
+        Outcome::AssignmentSucceeded { .. } => Ok(()),
+        outcome => Err(format!("Macro assignment did not complete: {outcome:?}")),
     }
 }
 
@@ -135,6 +232,41 @@ pub fn apply_keymap(
 mod tests {
     use super::*;
     use byakko_core::Action;
+
+    #[test]
+    fn macro_file_and_assignment_share_session_transitions() {
+        use byakko_core::macros::{Content, Edit};
+        let device = byakko_devices::memory::demo().unwrap();
+        let mut session = Session::new(device.descriptor().clone())
+            .unwrap()
+            .with_macros(device.macro_capabilities().unwrap().clone())
+            .unwrap();
+        let worker = Executor::spawn(device, Default::default()).unwrap();
+        let timeout = Duration::from_secs(2);
+        list_macros(&mut session, &worker, timeout).unwrap();
+        let mut target = read_macro(&mut session, &worker, "Greeting", timeout).unwrap();
+        let Content::Editable(program) = &mut target.content else {
+            panic!("demo macro is editable")
+        };
+        program.repeat_count = 2;
+        let saved = apply_macro(&mut session, &worker, &target).unwrap();
+        assert_eq!(saved.content, target.content);
+        assert!(
+            apply_macro(&mut session, &worker, &target).is_err(),
+            "stale file is rejected"
+        );
+        read_keymap(&mut session, &worker, timeout).unwrap();
+        session.edit_macro(Edit::Repeat(3)).unwrap();
+        assign_macro(&mut session, &worker, "Typing", "Alpha", "play-Greeting").unwrap();
+        assert!(!session.macros().unwrap().dirty());
+        assert_eq!(session.macros().unwrap().draft().unwrap().repeat_count, 3);
+        assert_eq!(
+            session.keymap().baseline().unwrap().bindings["Typing"]["Alpha"],
+            Action::Named {
+                id: "play-Greeting".into()
+            }
+        );
+    }
 
     #[test]
     fn file_planning_is_atomic_and_apply_uses_shared_core() {

@@ -15,39 +15,138 @@ use std::{
     time::Duration,
 };
 
+struct Catalog {
+    generation: u64,
+    operation: u64,
+    slots: Vec<String>,
+    snapshots: Vec<byakko_core::macros::Snapshot>,
+}
+impl Catalog {
+    fn finish(self, result: Result<Vec<byakko_core::macros::Snapshot>, String>) -> Completion {
+        Completion {
+            generation: self.generation,
+            operation: self.operation,
+            payload: CompletionPayload::ReadMacroCatalog { result },
+        }
+    }
+}
 pub struct Executor {
     commands: SyncSender<Command>,
     completions: Receiver<Completion>,
     generation: Arc<AtomicU64>,
+    catalog_submitted: AtomicU64,
+    catalog_cancelled: Arc<AtomicU64>,
 }
 
 impl Executor {
     pub fn spawn(mut device: impl Device, backup_dir: PathBuf) -> std::io::Result<Self> {
-        let (commands, requests) = mpsc::sync_channel::<Command>(1);
+        // One passive scan and one foreground ticket may be queued together.
+        let (commands, requests) = mpsc::sync_channel::<Command>(2);
         let (responses, completions) = mpsc::sync_channel(1);
         let generation = Arc::new(AtomicU64::new(0));
         let active_generation = Arc::clone(&generation);
+        let catalog_cancelled = Arc::new(AtomicU64::new(0));
+        let worker_cancelled = Arc::clone(&catalog_cancelled);
         std::thread::Builder::new()
             .name("byakko-device".into())
             .spawn(move || {
                 let mut latest = None;
-                while let Ok(command) = requests.recv() {
-                    let token = (command.generation, command.operation);
-                    let completion = if token.0 == 0
-                        || token.0 != active_generation.load(Ordering::Acquire)
-                        || latest.is_some_and(|previous| token <= previous)
-                    {
-                        failure(
-                            &command,
-                            "Stale or duplicate device command".into(),
-                            Recovery::NotAttempted,
-                        )
+                let mut catalog: Option<Catalog> = None;
+                loop {
+                    let command = if catalog.is_some() {
+                        match requests.try_recv() {
+                            Ok(command) => Some(command),
+                            Err(TryRecvError::Empty) => None,
+                            Err(TryRecvError::Disconnected) => break,
+                        }
                     } else {
-                        latest = Some(token);
-                        execute(&mut device, &command, &backup_dir)
+                        match requests.recv() {
+                            Ok(command) => Some(command),
+                            Err(_) => break,
+                        }
                     };
-                    if responses.send(completion).is_err() {
-                        break;
+                    if let Some(command) = command {
+                        let token = (command.generation, command.operation);
+                        if token.0 == 0
+                            || token.0 != active_generation.load(Ordering::Acquire)
+                            || latest.is_some_and(|previous| token <= previous)
+                        {
+                            if responses
+                                .send(failure(
+                                    &command,
+                                    "Stale or duplicate device command".into(),
+                                    Recovery::NotAttempted,
+                                ))
+                                .is_err()
+                            {
+                                break;
+                            }
+                            continue;
+                        }
+                        latest = Some(token);
+                        if let CommandPayload::ReadMacroCatalog { slots } = &command.payload {
+                            if let Some(previous) = catalog.take()
+                                && responses
+                                    .send(previous.finish(Err("Macro catalog replaced".into())))
+                                    .is_err()
+                            {
+                                break;
+                            }
+                            catalog = Some(Catalog {
+                                generation: command.generation,
+                                operation: command.operation,
+                                slots: slots.clone(),
+                                snapshots: Vec::new(),
+                            });
+                            continue;
+                        }
+                        let macro_write = matches!(
+                            &command.payload,
+                            CommandPayload::Macro(FeatureCommand::Apply { .. })
+                        );
+                        let completion = execute(&mut device, &command, &backup_dir);
+                        let failed_write = failed_write(&completion.payload);
+                        if responses.send(completion).is_err() {
+                            break;
+                        }
+                        if (macro_write || failed_write)
+                            && let Some(previous) = catalog.take()
+                            && responses
+                                .send(
+                                    previous
+                                        .finish(Err("Macro catalog invalidated by write".into())),
+                                )
+                                .is_err()
+                        {
+                            break;
+                        }
+                    } else if let Some(scan) = catalog.as_mut() {
+                        let cancelled = scan.generation
+                            != active_generation.load(Ordering::Acquire)
+                            || scan.operation <= worker_cancelled.load(Ordering::Acquire);
+                        let finished = if cancelled {
+                            Some(Err("Macro catalog cancelled".into()))
+                        } else if scan.snapshots.len() == scan.slots.len() {
+                            Some(Ok(std::mem::take(&mut scan.snapshots)))
+                        } else {
+                            let slot = &scan.slots[scan.snapshots.len()];
+                            match catch_unwind(AssertUnwindSafe(|| device.read_macro(slot)))
+                                .unwrap_or_else(
+                                    |_| Err("Macro catalog device read panicked".into()),
+                                ) {
+                                Ok(snapshot) => {
+                                    scan.snapshots.push(snapshot);
+                                    None
+                                }
+                                Err(reason) => Some(Err(reason)),
+                            }
+                        };
+                        if let Some(result) = finished {
+                            let scan = catalog.take().expect("active catalog");
+                            if responses.send(scan.finish(result)).is_err() {
+                                break;
+                            }
+                        }
                     }
                 }
             })?;
@@ -55,6 +154,8 @@ impl Executor {
             commands,
             completions,
             generation,
+            catalog_submitted: AtomicU64::new(0),
+            catalog_cancelled,
         })
     }
 
@@ -64,6 +165,10 @@ impl Executor {
     }
 
     pub fn try_submit(&self, command: Command) -> Result<(), Box<Completion>> {
+        if matches!(command.payload, CommandPayload::ReadMacroCatalog { .. }) {
+            self.catalog_submitted
+                .fetch_max(command.operation, Ordering::AcqRel);
+        }
         self.commands.try_send(command).map_err(|error| {
             let (command, message) = match error {
                 TrySendError::Full(command) => (command, "Device command queue is full"),
@@ -71,6 +176,14 @@ impl Executor {
             };
             Box::new(failure(&command, message.into(), Recovery::NotAttempted))
         })
+    }
+
+    /// Stop a submitted scan after its current slot and emit a correlated error.
+    pub fn cancel_catalog(&self) {
+        self.catalog_cancelled.fetch_max(
+            self.catalog_submitted.load(Ordering::Acquire),
+            Ordering::AcqRel,
+        );
     }
 
     pub fn try_receive(&self) -> Result<Completion, TryRecvError> {
@@ -200,6 +313,19 @@ impl DeviceCall<'_> {
     }
 }
 
+fn failed_write(payload: &CompletionPayload) -> bool {
+    match payload {
+        CompletionPayload::Keymap(result) => result.failed_write(),
+        CompletionPayload::Macro { result, .. } => result.failed_write(),
+        CompletionPayload::Lighting(result) => result.failed_write(),
+        CompletionPayload::Picture(result) => result.failed_write(),
+        CompletionPayload::Settings(result) => result.failed_write(),
+        CompletionPayload::Archive(result) => result.failed_write(),
+        CompletionPayload::ReadMacroCatalog { .. } | CompletionPayload::ReviewArchive { .. } => {
+            false
+        }
+    }
+}
 fn failure(command: &Command, message: String, recovery: Recovery) -> Completion {
     DeviceCall::Rejected(ApplyFailure { message, recovery }).dispatch(command)
 }

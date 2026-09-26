@@ -306,6 +306,13 @@ impl Device for MemoryDevice {
             return Err(reject("Opaque macro cannot be edited".into()));
         }
         macros::validate_program(&storage.capabilities, desired).map_err(reject)?;
+        if !storage
+            .capabilities
+            .editable_repeat_counts
+            .contains(&desired.repeat_count)
+        {
+            return Err(reject("Repeat count cannot be newly programmed".into()));
+        }
         let next_number = stored
             .revision_number
             .checked_add(1)
@@ -551,6 +558,49 @@ fn demo_descriptor() -> Descriptor {
     }
 }
 
+fn demo_macro_capabilities() -> macros::Capabilities {
+    let slots = ["Greeting", "Spare", "Preserved"]
+        .into_iter()
+        .map(|id| macros::Choice {
+            id: id.into(),
+            label: id.into(),
+        })
+        .collect::<Vec<_>>();
+    let bindings = slots
+        .iter()
+        .map(|slot| macros::Binding {
+            slot: slot.id.clone(),
+            id: format!("play-{}", slot.id),
+            label: format!("Play {}", slot.label),
+            action: Action::Named {
+                id: format!("play-{}", slot.id),
+            },
+            required_repeat_count: None,
+        })
+        .collect();
+    macros::Capabilities {
+        backend_id: "memory".into(),
+        slots,
+        repeat_counts: 0..=65535,
+        editable_repeat_counts: 1..=65535,
+        delays_ms: 0..=65535,
+        keys: Some(4..=231),
+        buttons: Vec::new(),
+        movement: None,
+        backend_actions: Vec::new(),
+        bindings,
+        byte_budget: Some(macros::ByteBudget {
+            limit: 250,
+            overhead: 3,
+            key: 3,
+            button: 3,
+            movement: 5,
+            backend: 3,
+            inline_delays: 0..=254,
+            extended_delay: 3,
+        }),
+    }
+}
 pub fn demo() -> Result<MemoryDevice, String> {
     let descriptor = demo_descriptor();
     let state = State {
@@ -570,7 +620,46 @@ pub fn demo() -> Result<MemoryDevice, String> {
             })
             .collect(),
     };
-    MemoryDevice::new(descriptor, state)
+    let capabilities = demo_macro_capabilities();
+    let snapshots = capabilities
+        .slots
+        .iter()
+        .enumerate()
+        .map(|(index, slot)| macros::Snapshot {
+            backend_id: capabilities.backend_id.clone(),
+            slot: slot.id.clone(),
+            revision: vec![index as u8, 0],
+            content: match index {
+                0 => macros::Content::Editable(macros::Program {
+                    repeat_count: 1,
+                    events: vec![
+                        macros::Event {
+                            action: macros::Action::Key {
+                                usage: 4,
+                                pressed: true,
+                            },
+                            delay_ms: 20,
+                        },
+                        macros::Event {
+                            action: macros::Action::Key {
+                                usage: 4,
+                                pressed: false,
+                            },
+                            delay_ms: 0,
+                        },
+                    ],
+                }),
+                1 => macros::Content::Editable(macros::Program {
+                    repeat_count: 0,
+                    events: vec![],
+                }),
+                _ => macros::Content::Opaque {
+                    reason: "Unrecognized demo macro bytes".into(),
+                },
+            },
+        })
+        .collect();
+    MemoryDevice::new(descriptor, state)?.with_macros(capabilities, snapshots)
 }
 
 #[cfg(test)]
@@ -579,6 +668,103 @@ mod tests {
     use byakko_core::{Action, Layer, PhysicalKey};
     use std::collections::BTreeMap;
 
+    #[test]
+    fn demo_macros_keep_configured_free_and_opaque_slots_distinct() {
+        let mut device = demo().unwrap();
+        let caps = device.macro_capabilities().unwrap().clone();
+        assert_eq!(caps.slots.len(), 3);
+        assert_eq!(caps.editable_repeat_counts, 1..=65535);
+        assert!(
+            matches!(device.read_macro("Greeting").unwrap().content, macros::Content::Editable(program) if !program.events.is_empty())
+        );
+        let free = device.read_macro("Spare").unwrap();
+        assert!(
+            matches!(&free.content, macros::Content::Editable(program) if program.repeat_count == 0 && program.events.is_empty())
+        );
+        assert!(
+            device
+                .apply_macro(
+                    &free,
+                    &macros::Program {
+                        repeat_count: 0,
+                        events: vec![]
+                    },
+                    Path::new("unused")
+                )
+                .is_err()
+        );
+        assert!(matches!(
+            device.read_macro("Preserved").unwrap().content,
+            macros::Content::Opaque { .. }
+        ));
+        assert_eq!(device.read_macro("Spare").unwrap(), free);
+        for binding in &caps.bindings {
+            assert!(
+                !device
+                    .descriptor()
+                    .actions
+                    .iter()
+                    .any(|choice| choice.action == binding.action)
+            );
+        }
+    }
+    #[test]
+    fn demo_bindings_require_macro_workflow_and_still_save_and_assign() {
+        use crate::Executor;
+        use byakko_core::session::{Outcome, Session};
+        use std::time::Duration;
+        let device = demo().unwrap();
+        let caps = device.macro_capabilities().unwrap().clone();
+        let mut session = Session::new(device.descriptor().clone())
+            .unwrap()
+            .with_macros(caps.clone())
+            .unwrap();
+        let worker = Executor::spawn(device, Default::default()).unwrap();
+        worker.set_generation(session.connect().unwrap());
+        worker.try_submit(session.read().unwrap()).unwrap();
+        assert_eq!(
+            session.accept(worker.receive(Some(Duration::from_secs(2))).unwrap()),
+            Outcome::Loaded
+        );
+        for binding in &caps.bindings {
+            assert!(
+                session
+                    .edit(Change {
+                        layer: "Typing".into(),
+                        key: "Alpha".into(),
+                        action: binding.action.clone()
+                    })
+                    .is_err()
+            );
+        }
+        worker.try_submit(session.read_macro().unwrap()).unwrap();
+        assert_eq!(
+            session.accept(worker.receive(Some(Duration::from_secs(2))).unwrap()),
+            Outcome::MacroLoaded
+        );
+        session.edit_macro(macros::Edit::Repeat(2)).unwrap();
+        worker
+            .try_submit(
+                session
+                    .save_and_assign_macro("Typing", "Alpha", "play-Greeting")
+                    .unwrap(),
+            )
+            .unwrap();
+        let Outcome::Continue(assign) =
+            session.accept(worker.receive(Some(Duration::from_secs(2))).unwrap())
+        else {
+            panic!("saved macro must request assignment")
+        };
+        worker.try_submit(assign).unwrap();
+        assert_eq!(
+            session.accept(worker.receive(Some(Duration::from_secs(2))).unwrap()),
+            Outcome::AssignmentSucceeded { macro_saved: true }
+        );
+        assert_eq!(
+            session.keymap().baseline().unwrap().bindings["Typing"]["Alpha"],
+            caps.bindings[0].action
+        );
+    }
     fn fixture() -> (Descriptor, State) {
         let descriptor = Descriptor {
             backend_id: "memory".into(),

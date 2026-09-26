@@ -2,6 +2,7 @@
 mod app;
 pub mod config;
 mod keymap;
+mod macros;
 pub mod panels;
 pub mod physical_board;
 

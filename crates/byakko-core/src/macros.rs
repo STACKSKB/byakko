@@ -208,6 +208,7 @@ pub fn validate_capabilities(capabilities: &Capabilities) -> Result<(), String> 
     let mut bindings = BTreeSet::new();
     for binding in &capabilities.bindings {
         if !slots.contains(binding.slot.as_str())
+            || matches!(binding.action, crate::Action::Opaque { .. })
             || binding.id.is_empty()
             || binding.label.is_empty()
             || binding
@@ -307,5 +308,6 @@ pub fn edit(capabilities: &Capabilities, program: &Program, edit: Edit) -> Resul
     Ok(next)
 }
 
+pub mod library;
 #[cfg(test)]
 mod tests;

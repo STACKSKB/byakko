@@ -65,6 +65,21 @@ impl Editor {
             return Err("Read and verify before editing".into());
         }
         validate_edit(descriptor, &change)?;
+        self.stage(change)
+    }
+    /// Macro capability validation owns the binding action; keymap owns its target.
+    pub(crate) fn bind_macro(
+        &mut self,
+        descriptor: &Descriptor,
+        change: Change,
+    ) -> Result<(), String> {
+        if self.status() != &Status::Ready {
+            return Err("Read and verify before assigning a macro".into());
+        }
+        validate_changes(descriptor, std::slice::from_ref(&change))?;
+        self.stage(change)
+    }
+    fn stage(&mut self, change: Change) -> Result<(), String> {
         self.values.update(|draft| {
             *draft
                 .get_mut(&change.layer)
