@@ -501,7 +501,7 @@ fn selected_access() -> device::Result<device::Access> {
 }
 
 fn apply_failure(
-    failure: byakko_core::session::ApplyFailure,
+    failure: byakko_core::contract::ApplyFailure,
 ) -> Box<dyn std::error::Error + Send + Sync> {
     format!("{}; recovery: {:?}", failure.message, failure.recovery).into()
 }

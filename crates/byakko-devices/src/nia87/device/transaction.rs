@@ -156,7 +156,7 @@ where
 mod tests {
     use super::super::apply_error::{RestoreMismatch, macro_apply_error};
     use super::*;
-    use byakko_core::session::Recovery;
+    use byakko_core::contract::Recovery;
 
     #[test]
     fn verified_path_never_restores_and_failure_preserves_recovery_status() {

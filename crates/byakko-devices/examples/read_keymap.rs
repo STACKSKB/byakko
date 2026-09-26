@@ -1,7 +1,7 @@
 //! Read-only end-to-end probe of the same command path used by the desktop.
-use byakko_core::session::CompletionPayload;
-use byakko_core::session::FeatureResult;
-use byakko_core::session::{Completion, Session, Status};
+use byakko_core::contract::CompletionPayload;
+use byakko_core::contract::FeatureResult;
+use byakko_core::contract::{Command, CommandPayload, Completion, FeatureCommand};
 use byakko_devices::{Executor, nia87};
 use std::{
     fs::OpenOptions,
@@ -25,11 +25,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Err(format!("Expected one Nia87 collection; found {}", candidates.len()).into());
     };
     let target = nia87::device::Target::from_candidate(candidate)?;
-    let mut session = Session::new(nia87::descriptor())?;
     let executor = Executor::spawn(nia87::BoundNia87Adapter::new(target), Default::default())?;
-    executor.set_generation(session.connect()?);
+    executor.set_generation(1);
     executor
-        .try_submit(session.request_read()?)
+        .try_submit(Command {
+            generation: 1,
+            operation: 1,
+            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
+        })
         .map_err(|_| "Read submission failed")?;
     let deadline = Instant::now() + Duration::from_secs(30);
     let completion = loop {
@@ -52,10 +55,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ..
         }
     );
-    session.accept(completion);
-    if !read_ok || *session.status() != Status::Ready {
-        return Err(format!("Read failed; completion preserved: {:?}", session.status()).into());
+    if !read_ok {
+        return Err("Read failed; completion preserved".into());
     }
-    println!("Verified keymap read through core and executor; no setters sent.");
+    println!("Captured read completion. No setters sent.");
     Ok(())
 }

@@ -4,9 +4,12 @@ A native, USB-first Menel Nia87 configurator using Rust and Iced, direct HID
 access and stock firmware. No JavaScript, Electron, webview or vendor helper
 is needed by the product.
 
-This is a **source-only pre-alpha** for Windows and Linux. It is not feature
-complete. Read the [support and recovery notes](docs/pre-alpha-support.md) for
-current behavior, physical acceptance and known limits.
+This branch is an **application rewrite in progress**, starting from `3db624f`.
+The old application controllers have been removed. The replacement currently
+supports keymap read, staged assignment, save, revert and manual reconnect through
+Iced and an independent CLI. Other frontend workflows are being rebuilt; this is
+not a feature-complete release. See [plan.md](plan.md) for current scope and
+[rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 
 ## Build and run
 
@@ -22,11 +25,12 @@ Omit `--demo` to discover and read the connected keyboard. The demo uses an
 in-memory keyboard. Linux hardware access needs the narrow permission setup in
 [Linux installation](docs/linux-install.md); run as your ordinary desktop user.
 
-The keyboard stays visible while key, macro, lighting and settings controls
-change around it. Keys/macros use staged saves; lighting and settings send
-queued choices automatically. Color drags commit after release and the idle
-delay. Ordinary lighting/picture uploads report transport acceptance; they do
-not claim an immediate verified readback. See [autosave behavior](docs/desktop-configuration.md).
+The keymap view uses device-supplied physical geometry and action choices. Edits
+stay in the core editor until Save assignments. Save uses the cached before-image
+and the existing native backup/write/readback transaction. Closing waits for a
+pending save and asks before discarding edits. Automatic discovery/reconnect,
+the richer assignment catalog, custom shortcut form, macros, lighting, per-key
+colors, settings and diagnostic capture are pending frontend milestones.
 
 The independent CLI uses the same session/executor contract:
 
@@ -34,23 +38,29 @@ The independent CLI uses the same session/executor contract:
 cargo run --release --locked -p byakko-cli -- --help
 cargo run --release --locked -p byakko-cli -- devices
 cargo run --release --locked -p byakko-cli -- read
+cargo run --release --locked -p byakko-cli -- --demo read
 ```
 
 The first two commands are discovery/help; `read` sends getters and prints a
-keymap snapshot. Apply/restore commands write device state. Start with the
+keymap snapshot. `plan-keymap FILE` validates edits from a complete snapshot;
+`apply-keymap FILE` writes with a backup and verifies the result. `--demo` uses
+memory only. Other previous CLI commands are not exposed on this checkpoint.
+Start with the
 [read-only Linux sequence](docs/linux-handoff.md) before any Linux write test.
 Backups use the [normal-user data directory](docs/local-storage.md).
 
-The Iced Diagnostic capture page provides native archive capture and export
-for diagnostics. Full archive import/review/restore is deferred from the
-pre-alpha UI because a recorded restore mismatch remains unresolved. Automatic
-before-image backups for individual feature writes remain in place; see the
-[support and recovery notes](docs/pre-alpha-support.md).
+Native device APIs, research tools, codecs and fixtures are retained. Public
+archive capture/export will return in its planned milestone; archive restore
+remains a developer operation. Existing recovery failures are not fixed by this
+rewrite. The [support and recovery notes](docs/pre-alpha-support.md) describe
+the previous executable and physical evidence, not acceptance of this rewrite.
 
 ## Status and development
 
-- [Current acceptance ledger](docs/parity-status.md) and [pre-alpha checklist](docs/public-pre-alpha-checklist.md)
-- [Application architecture](docs/pre-alpha-proposal.md) and [frontend contract](docs/frontend-contract.md)
+- [Current rewrite architecture and sequence](plan.md)
+- [Engineering rules](AGENTS.md) and [constraint inventory](docs/rewrite-constraints.md)
+- [Previous implementation acceptance ledger](docs/parity-status.md) and [pre-alpha checklist](docs/public-pre-alpha-checklist.md)
+- [Previous architecture](docs/pre-alpha-proposal.md) and [previous frontend contract](docs/frontend-contract.md)
 - [Dependency/source inventory](docs/dependency-source-audit.md)
 - [Performance observations and limits](docs/performance-baseline.md)
 

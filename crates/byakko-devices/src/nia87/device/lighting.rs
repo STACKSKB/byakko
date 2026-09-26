@@ -1,7 +1,7 @@
 use super::apply_error::{ApplyError, lighting_apply_error};
 use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::*;
-use byakko_core::session::{ApplyFailure, Recovery};
+use byakko_core::contract::{ApplyFailure, Recovery};
 
 /// Read one raw-preserving global-lighting response.
 pub fn read_lighting() -> Result<crate::nia87::lighting::Lighting> {
@@ -212,7 +212,7 @@ pub fn apply_lighting_detailed(
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
-) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::session::ApplyFailure> {
+) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::contract::ApplyFailure> {
     detailed(apply_lighting(expected, setting, backup_dir))
 }
 

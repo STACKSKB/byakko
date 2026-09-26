@@ -4,7 +4,7 @@ use super::{
     device::Access,
 };
 use byakko_core::archive::{ArchiveCapabilities, NativeArchive, Review, SectionChange};
-use byakko_core::session::{ApplyFailure, Recovery};
+use byakko_core::contract::{ApplyFailure, Recovery};
 use std::path::Path;
 
 const BACKEND_ID: &str = "nia87";

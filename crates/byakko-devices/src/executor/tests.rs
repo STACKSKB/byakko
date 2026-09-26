@@ -1,950 +1,212 @@
-use crate::Device;
-use byakko_core::session::{CommandPayload, CompletionPayload};
-use byakko_core::session::{FeatureCommand, FeatureResult};
-use byakko_core::{Change, State, macros};
-
 use super::*;
-use std::{
-    collections::BTreeMap,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-        mpsc::{self, Receiver, Sender},
-    },
-    time::Duration,
-};
+use byakko_core::{Change, State};
+use std::{collections::BTreeMap, sync::atomic::AtomicUsize};
 
-struct MemoryDevice {
-    state: State,
-    writes: Arc<AtomicUsize>,
+struct Probe {
+    calls: Arc<AtomicUsize>,
+    panic: bool,
 }
-
-struct PanickingDevice;
-
-struct CatalogDevice {
-    reads: Arc<AtomicUsize>,
-}
-
-struct FlakyCatalogDevice {
-    reads: Arc<AtomicUsize>,
-}
-
-struct GatedCatalogDevice {
-    entered: Sender<()>,
-    release: Receiver<()>,
-    slots_read: Arc<AtomicUsize>,
-    fail_apply: bool,
-}
-
-impl Device for GatedCatalogDevice {
+impl Device for Probe {
     fn read(&mut self) -> Result<State, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        assert!(!self.panic, "device panic");
         Ok(State {
             revision: vec![1],
             bindings: BTreeMap::new(),
         })
     }
     fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        if self.fail_apply {
-            return Err(ApplyFailure {
-                message: "keymap write failed".into(),
-                recovery: Recovery::Unverified,
-            });
-        }
         self.read().map_err(|message| ApplyFailure {
             message,
-            recovery: Recovery::NotAttempted,
-        })
-    }
-    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
-        if self.slots_read.fetch_add(1, Ordering::SeqCst) == 0 {
-            self.entered.send(()).unwrap();
-            self.release.recv().unwrap();
-        }
-        Ok(macros::Snapshot {
-            backend_id: "test".into(),
-            slot: slot.into(),
-            revision: vec![1],
-            content: macros::Content::Editable(macros::Program {
-                repeat_count: 1,
-                events: vec![],
-            }),
+            recovery: Recovery::Unverified,
         })
     }
 }
-
-#[test]
-fn foreground_read_runs_between_catalog_slots() {
-    let (entered_tx, entered_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    let slots_read = Arc::new(AtomicUsize::new(0));
-    let worker = Executor::spawn(
-        GatedCatalogDevice {
-            entered: entered_tx,
-            release: release_rx,
-            slots_read: slots_read.clone(),
-            fail_apply: false,
-        },
-        PathBuf::new(),
-    )
-    .unwrap();
-    worker.set_generation(1);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::ReadMacroCatalog {
-                slots: vec!["first".into(), "second".into()],
-            },
-        })
-        .unwrap();
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::Macro(FeatureCommand::Read("selected".into())),
-        })
-        .unwrap();
-    release_tx.send(()).unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 2,
-            payload: CompletionPayload::Macro {
-                result: FeatureResult::Read(Ok(_)),
-                ..
-            }
-        }
-    ));
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 1,
-            payload: CompletionPayload::ReadMacroCatalog { result: Ok(_) }
-        }
-    ));
-    assert_eq!(slots_read.load(Ordering::SeqCst), 3);
-}
-
-#[test]
-fn keymap_read_and_apply_resume_unfinished_catalog() {
-    let (entered_tx, entered_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    let slots_read = Arc::new(AtomicUsize::new(0));
-    let worker = Executor::spawn(
-        GatedCatalogDevice {
-            entered: entered_tx,
-            release: release_rx,
-            slots_read: slots_read.clone(),
-            fail_apply: false,
-        },
-        PathBuf::new(),
-    )
-    .unwrap();
-    worker.set_generation(1);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::ReadMacroCatalog {
-                slots: vec!["first".into(), "second".into()],
-            },
-        })
-        .unwrap();
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
-        })
-        .unwrap();
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 3,
-            payload: CommandPayload::Keymap(FeatureCommand::Apply {
-                expected: State {
-                    revision: vec![1],
-                    bindings: BTreeMap::new(),
-                },
-                desired: vec![],
-            }),
-        })
-        .unwrap();
-    release_tx.send(()).unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 2,
-            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(_)))
-        }
-    ));
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 3,
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(_)))
-        }
-    ));
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 1,
-            payload: CompletionPayload::ReadMacroCatalog { result: Ok(_) }
-        }
-    ));
-    assert_eq!(slots_read.load(Ordering::SeqCst), 2);
-}
-
-#[test]
-fn failed_keymap_apply_stops_unfinished_catalog() {
-    let (entered_tx, entered_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    let slots_read = Arc::new(AtomicUsize::new(0));
-    let worker = Executor::spawn(
-        GatedCatalogDevice {
-            entered: entered_tx,
-            release: release_rx,
-            slots_read: slots_read.clone(),
-            fail_apply: true,
-        },
-        PathBuf::new(),
-    )
-    .unwrap();
-    worker.set_generation(1);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::ReadMacroCatalog {
-                slots: vec!["first".into(), "second".into()],
-            },
-        })
-        .unwrap();
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::Keymap(FeatureCommand::Apply {
-                expected: State {
-                    revision: vec![1],
-                    bindings: BTreeMap::new(),
-                },
-                desired: vec![],
-            }),
-        })
-        .unwrap();
-    release_tx.send(()).unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 2,
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(_)))
-        }
-    ));
-    assert_eq!(slots_read.load(Ordering::SeqCst), 1);
-    assert!(matches!(
-        worker.completions.try_recv(),
-        Err(TryRecvError::Empty)
-    ));
-}
-
-#[test]
-fn explicit_cancel_stops_catalog_after_current_slot() {
-    let (entered_tx, entered_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
-    let slots_read = Arc::new(AtomicUsize::new(0));
-    let worker = Executor::spawn(
-        GatedCatalogDevice {
-            entered: entered_tx,
-            release: release_rx,
-            slots_read: slots_read.clone(),
-            fail_apply: false,
-        },
-        PathBuf::new(),
-    )
-    .unwrap();
-    worker.set_generation(1);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::ReadMacroCatalog {
-                slots: vec!["first".into(), "second".into()],
-            },
-        })
-        .unwrap();
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    worker.cancel_macro_catalog();
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::Macro(FeatureCommand::Read("selected".into())),
-        })
-        .unwrap();
-    release_tx.send(()).unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 2,
-            payload: CompletionPayload::Macro {
-                result: FeatureResult::Read(Ok(_)),
-                ..
-            }
-        }
-    ));
-    assert_eq!(slots_read.load(Ordering::SeqCst), 2);
-    assert!(matches!(
-        worker.completions.try_recv(),
-        Err(TryRecvError::Empty)
-    ));
-}
-
-impl Device for CatalogDevice {
-    fn read(&mut self) -> Result<State, String> {
-        unreachable!()
-    }
-    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        unreachable!()
-    }
-    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
-        self.reads.fetch_add(1, Ordering::SeqCst);
-        Ok(macros::Snapshot {
-            backend_id: "test".into(),
-            slot: slot.into(),
-            revision: vec![1],
-            content: macros::Content::Editable(macros::Program {
-                repeat_count: 1,
-                events: vec![],
-            }),
-        })
-    }
-}
-
-impl Device for FlakyCatalogDevice {
-    fn read(&mut self) -> Result<State, String> {
-        unreachable!()
-    }
-    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        unreachable!()
-    }
-    fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
-        if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
-            return Err("macro slot first, read page 1: transport error".into());
-        }
-        Ok(macros::Snapshot {
-            backend_id: "test".into(),
-            slot: slot.into(),
-            revision: vec![1],
-            content: macros::Content::Editable(macros::Program {
-                repeat_count: 1,
-                events: vec![],
-            }),
-        })
-    }
-}
-
-#[test]
-fn failed_catalog_read_completes_and_explicit_retry_can_finish() {
-    let reads = Arc::new(AtomicUsize::new(0));
-    let worker = Executor::spawn(
-        FlakyCatalogDevice {
-            reads: reads.clone(),
-        },
-        PathBuf::new(),
-    )
-    .unwrap();
-    worker.set_generation(1);
-    let slots = vec!["first".into(), "second".into()];
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::ReadMacroCatalog {
-                slots: slots.clone(),
-            },
-        })
-        .unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 1,
-            payload: CompletionPayload::ReadMacroCatalog { result: Err(_) }
-        }
-    ));
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::ReadMacroCatalog { slots },
-        })
-        .unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 2,
-            payload: CompletionPayload::ReadMacroCatalog { result: Ok(_) }
-        }
-    ));
-    assert_eq!(reads.load(Ordering::SeqCst), 3);
-}
-
-#[test]
-fn catalog_reads_every_requested_slot_in_one_correlated_command() {
-    let reads = Arc::new(AtomicUsize::new(0));
-    let worker = Executor::spawn(
-        CatalogDevice {
-            reads: reads.clone(),
-        },
-        PathBuf::new(),
-    )
-    .unwrap();
-    worker.set_generation(3);
-    worker
-        .try_submit(Command {
-            generation: 3,
-            operation: 5,
-            payload: CommandPayload::ReadMacroCatalog {
-                slots: vec!["first".into(), "second".into()],
-            },
-        })
-        .unwrap();
-    let Completion {
+fn command(generation: u64, operation: u64) -> Command {
+    Command {
         generation,
         operation,
-        payload: CompletionPayload::ReadMacroCatalog { result },
-    } = worker
-        .completions
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap()
-    else {
-        unreachable!()
-    };
-    assert_eq!((generation, operation), (3, 5));
-    assert_eq!(
-        result
-            .unwrap()
-            .iter()
-            .map(|snapshot| snapshot.slot.as_str())
-            .collect::<Vec<_>>(),
-        vec!["first", "second"]
-    );
-    assert_eq!(reads.load(Ordering::SeqCst), 2);
-}
-impl Device for PanickingDevice {
-    fn read(&mut self) -> Result<State, String> {
-        panic!("read panic")
-    }
-    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        panic!("write panic")
+        payload: CommandPayload::Keymap(FeatureCommand::Read(())),
     }
 }
-
 #[test]
-fn panicked_write_returns_correlated_unverified_completion() {
-    let worker = Executor::spawn(PanickingDevice, PathBuf::new()).unwrap();
-    worker.set_generation(7);
-    worker
-        .try_submit(Command {
-            generation: 7,
-            operation: 9,
-            payload: CommandPayload::Keymap(FeatureCommand::Apply {
-                expected: State {
-                    revision: vec![],
-                    bindings: BTreeMap::new(),
-                },
-                desired: vec![],
-            }),
-        })
-        .unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 7,
-            operation: 9,
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
-                recovery: Recovery::Unverified,
-                ..
-            })))
-        }
-    ));
-}
-impl Device for MemoryDevice {
-    fn read(&mut self) -> Result<State, String> {
-        Ok(self.state.clone())
-    }
-    fn apply(&mut self, expected: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        if expected != &self.state {
-            return Err(ApplyFailure {
-                message: "Conflict".into(),
-                recovery: Recovery::NotAttempted,
-            });
-        }
-        self.writes.fetch_add(1, Ordering::SeqCst);
-        Ok(self.state.clone())
-    }
-}
-
-#[test]
-fn worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access() {
-    let writes = Arc::new(AtomicUsize::new(0));
-    let state = State {
-        revision: vec![42],
-        bindings: BTreeMap::new(),
-    };
+fn stale_and_duplicate_commands_are_correlated_without_io() {
+    let calls = Arc::new(AtomicUsize::new(0));
     let worker = Executor::spawn(
-        MemoryDevice {
-            state: state.clone(),
-            writes: writes.clone(),
+        Probe {
+            calls: Arc::clone(&calls),
+            panic: false,
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(2);
+    for (generation, operation, success) in
+        [(1, 1, false), (2, 2, true), (2, 2, false), (2, 1, false)]
+    {
+        worker.try_submit(command(generation, operation)).unwrap();
+        let completion = worker.receive(Some(Duration::from_secs(2))).unwrap();
+        assert_eq!(
+            (completion.generation, completion.operation),
+            (generation, operation)
+        );
+        assert!(
+            matches!(completion.payload, CompletionPayload::Keymap(FeatureResult::Read(result)) if result.is_ok() == success)
+        );
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+#[test]
+fn panic_becomes_correlated_completion_and_worker_continues() {
+    let worker = Executor::spawn(
+        Probe {
+            calls: Arc::new(AtomicUsize::new(0)),
+            panic: true,
         },
         PathBuf::new(),
     )
     .unwrap();
     worker.set_generation(1);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
-        })
-        .unwrap();
+    for operation in 1..=2 {
+        worker.try_submit(command(1, operation)).unwrap();
+        let completion = worker.receive(Some(Duration::from_secs(2))).unwrap();
+        assert_eq!(completion.operation, operation);
+        assert!(matches!(
+            completion.payload,
+            CompletionPayload::Keymap(FeatureResult::Read(Err(_)))
+        ));
+    }
+}
+#[test]
+fn receive_can_time_out_without_losing_worker() {
+    let worker = Executor::spawn(
+        Probe {
+            calls: Arc::new(AtomicUsize::new(0)),
+            panic: false,
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
     assert_eq!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 1,
-            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(state.clone())))
-        }
+        worker.receive(Some(Duration::ZERO)),
+        Err(RecvTimeoutError::Timeout)
     );
-    let apply = Command {
-        generation: 1,
-        operation: 2,
-        payload: CommandPayload::Keymap(FeatureCommand::Apply {
-            expected: state,
-            desired: vec![],
-        }),
-    };
-    worker.try_submit(apply.clone()).unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(Ok(_))),
-            ..
-        }
-    ));
-    worker.try_submit(apply).unwrap();
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
-                recovery: Recovery::NotAttempted,
-                ..
-            }))),
-            ..
-        }
-    ));
-    assert_eq!(writes.load(Ordering::SeqCst), 1);
 }
 
-struct BlockingDevice {
-    state: State,
-    writes: Arc<AtomicUsize>,
-    entered: Sender<()>,
-    release: Receiver<()>,
+struct GatedProbe {
+    entered: mpsc::SyncSender<()>,
+    release: mpsc::Receiver<()>,
+    calls: Arc<AtomicUsize>,
 }
-
-impl Device for BlockingDevice {
+impl Device for GatedProbe {
     fn read(&mut self) -> Result<State, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
         self.entered.send(()).unwrap();
-        self.release
-            .recv_timeout(Duration::from_secs(2))
-            .map_err(|error| error.to_string())?;
-        Ok(self.state.clone())
+        self.release.recv().unwrap();
+        Ok(State {
+            revision: vec![1],
+            bindings: BTreeMap::new(),
+        })
     }
-
     fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        self.writes.fetch_add(1, Ordering::SeqCst);
-        Ok(self.state.clone())
+        unreachable!("only read commands are submitted")
     }
 }
-
-fn blocked_worker() -> (Executor, Sender<()>, Arc<AtomicUsize>, State) {
-    let state = State {
-        revision: vec![1],
-        bindings: BTreeMap::new(),
-    };
-    let writes = Arc::new(AtomicUsize::new(0));
-    let (entered_tx, entered_rx) = mpsc::channel();
-    let (release_tx, release_rx) = mpsc::channel();
+#[test]
+fn bounded_queue_rejects_overflow_and_rechecks_generation_before_io() {
+    let (entered, waiting) = mpsc::sync_channel(1);
+    let (release, resumed) = mpsc::sync_channel(1);
+    let calls = Arc::new(AtomicUsize::new(0));
     let worker = Executor::spawn(
-        BlockingDevice {
-            state: state.clone(),
-            writes: writes.clone(),
-            entered: entered_tx,
-            release: release_rx,
+        GatedProbe {
+            entered,
+            release: resumed,
+            calls: Arc::clone(&calls),
         },
         PathBuf::new(),
     )
     .unwrap();
     worker.set_generation(1);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
-        })
-        .unwrap();
-    entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-    (worker, release_tx, writes, state)
-}
-
-#[test]
-fn reconnect_rejects_queued_old_apply_without_writing() {
-    let (worker, release, writes, state) = blocked_worker();
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::Keymap(FeatureCommand::Apply {
-                expected: state,
-                desired: vec![],
-            }),
-        })
-        .unwrap();
+    worker.try_submit(command(1, 1)).unwrap();
+    waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker.try_submit(command(1, 2)).unwrap();
+    let overflow = worker.try_submit(command(1, 3)).unwrap_err();
+    assert_eq!((overflow.generation, overflow.operation), (1, 3));
+    assert!(matches!(
+        overflow.payload,
+        CompletionPayload::Keymap(FeatureResult::Read(Err(_)))
+    ));
     worker.set_generation(2);
     release.send(()).unwrap();
+    let first = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(first.operation, 1);
+    let queued = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(queued.operation, 2);
     assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 1,
-            payload: CompletionPayload::Keymap(FeatureResult::Read(Ok(_)))
-        }
+        queued.payload,
+        CompletionPayload::Keymap(FeatureResult::Read(Err(_)))
     ));
-    assert!(matches!(
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap(),
-        Completion {
-            generation: 1,
-            operation: 2,
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
-                recovery: Recovery::NotAttempted,
-                ..
-            })))
-        }
-    ));
-    assert_eq!(writes.load(Ordering::SeqCst), 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
-#[test]
-fn full_queue_returns_correlated_rejection_to_core() {
-    let (worker, release, writes, state) = blocked_worker();
-    let apply = |operation| Command {
-        generation: 1,
-        operation,
-        payload: CommandPayload::Keymap(FeatureCommand::Apply {
-            expected: state.clone(),
-            desired: vec![],
-        }),
-    };
-    worker.try_submit(apply(2)).unwrap();
-    worker.try_submit(apply(3)).unwrap();
-    assert!(matches!(
-        *worker.try_submit(apply(4)).unwrap_err(),
-        Completion {
-            generation: 1,
-            operation: 4,
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(Err(ApplyFailure {
-                recovery: Recovery::NotAttempted,
-                ..
-            })))
-        }
-    ));
-    worker.set_generation(0);
-    release.send(()).unwrap();
-    worker
-        .completions
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap();
-    worker
-        .completions
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap();
-    worker
-        .completions
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap();
-    assert_eq!(writes.load(Ordering::SeqCst), 0);
+struct CountedMemory {
+    device: crate::memory::MemoryDevice,
+    reads: Arc<AtomicUsize>,
+    applies: Arc<AtomicUsize>,
 }
-
-fn macro_snapshot() -> macros::Snapshot {
-    macros::Snapshot {
-        backend_id: "memory".into(),
-        slot: "slot-00".into(),
-        revision: vec![1],
-        content: macros::Content::Editable(macros::Program {
-            repeat_count: 1,
-            events: vec![],
-        }),
+impl Device for CountedMemory {
+    fn read(&mut self) -> Result<State, String> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.device.read()
+    }
+    fn apply(
+        &mut self,
+        expected: &State,
+        desired: &[Change],
+        backup: &Path,
+    ) -> Result<State, ApplyFailure> {
+        self.applies.fetch_add(1, Ordering::SeqCst);
+        self.device.apply(expected, desired, backup)
     }
 }
-
 #[test]
-fn default_macro_operations_are_typed_unsupported_results() {
-    let state = State {
-        revision: vec![],
-        bindings: BTreeMap::new(),
+fn public_session_save_delivers_one_apply_without_an_extra_read_command() {
+    use byakko_core::{
+        Action,
+        session::{Outcome, Session},
     };
+    let device = crate::memory::demo().unwrap();
+    let mut session = Session::new(device.descriptor().clone()).unwrap();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let applies = Arc::new(AtomicUsize::new(0));
     let worker = Executor::spawn(
-        MemoryDevice {
-            state,
-            writes: Arc::new(AtomicUsize::new(0)),
+        CountedMemory {
+            device,
+            reads: Arc::clone(&reads),
+            applies: Arc::clone(&applies),
         },
         PathBuf::new(),
     )
     .unwrap();
-    worker.set_generation(1);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::Macro(FeatureCommand::Read("slot-00".into())),
-        })
-        .unwrap();
-    assert!(
-        matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 1, operation: 1, payload: CompletionPayload::Macro { slot, result: FeatureResult::Read(Err(message)) } }
-            if slot == "slot-00" && message.contains("unsupported"))
-    );
-    let expected = macro_snapshot();
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::Macro(FeatureCommand::Apply {
-                expected: expected.clone(),
-                desired: macros::Program {
-                    repeat_count: 1,
-                    events: vec![],
-                },
-            }),
-        })
-        .unwrap();
-    assert!(
-        matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 1, operation: 2, payload: CompletionPayload::Macro { slot, result: FeatureResult::Apply(Err(ApplyFailure { recovery: Recovery::NotAttempted, message })) } }
-            if slot == expected.slot && message.contains("unsupported"))
-    );
-}
-
-struct OrderedDevice {
-    log: Arc<std::sync::Mutex<Vec<&'static str>>>,
-}
-
-impl Device for OrderedDevice {
-    fn read(&mut self) -> Result<State, String> {
-        self.log.lock().unwrap().push("keymap read");
-        Ok(State {
-            revision: vec![],
-            bindings: BTreeMap::new(),
-        })
-    }
-    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        self.log.lock().unwrap().push("keymap apply");
-        Ok(State {
-            revision: vec![],
-            bindings: BTreeMap::new(),
-        })
-    }
-    fn read_macro(&mut self, _: &str) -> Result<macros::Snapshot, String> {
-        self.log.lock().unwrap().push("macro read");
-        Ok(macro_snapshot())
-    }
-    fn apply_macro(
-        &mut self,
-        _: &macros::Snapshot,
-        _: &macros::Program,
-        _: &Path,
-    ) -> Result<macros::Snapshot, ApplyFailure> {
-        self.log.lock().unwrap().push("macro apply");
-        Ok(macro_snapshot())
-    }
-}
-
-#[test]
-fn one_worker_orders_keymap_and_macro_operations() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let worker = Executor::spawn(OrderedDevice { log: log.clone() }, PathBuf::new()).unwrap();
-    worker.set_generation(1);
-    let expected = macro_snapshot();
-    let commands = [
-        Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::Keymap(FeatureCommand::Read(())),
-        },
-        Command {
-            generation: 1,
-            operation: 2,
-            payload: CommandPayload::Macro(FeatureCommand::Read(expected.slot.clone())),
-        },
-        Command {
-            generation: 1,
-            operation: 3,
-            payload: CommandPayload::Keymap(FeatureCommand::Apply {
-                expected: State {
-                    revision: vec![],
-                    bindings: BTreeMap::new(),
-                },
-                desired: vec![],
-            }),
-        },
-        Command {
-            generation: 1,
-            operation: 4,
-            payload: CommandPayload::Macro(FeatureCommand::Apply {
-                expected,
-                desired: macros::Program {
-                    repeat_count: 1,
-                    events: vec![],
-                },
-            }),
-        },
-    ];
-    for command in commands {
-        worker.try_submit(command).unwrap();
-        worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-    }
+    worker.set_generation(session.connect().unwrap());
+    worker.try_submit(session.read().unwrap()).unwrap();
     assert_eq!(
-        *log.lock().unwrap(),
-        ["keymap read", "macro read", "keymap apply", "macro apply"]
+        session.accept(worker.receive(Some(Duration::from_secs(2))).unwrap()),
+        Outcome::Loaded
     );
-}
-
-#[test]
-fn old_generation_macro_apply_is_rejected_before_device_access() {
-    let log = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let worker = Executor::spawn(OrderedDevice { log: log.clone() }, PathBuf::new()).unwrap();
-    worker.set_generation(2);
-    worker
-        .try_submit(Command {
-            generation: 1,
-            operation: 1,
-            payload: CommandPayload::Macro(FeatureCommand::Apply {
-                expected: macro_snapshot(),
-                desired: macros::Program {
-                    repeat_count: 1,
-                    events: vec![],
-                },
-            }),
+    session
+        .edit(Change {
+            layer: "Studio".into(),
+            key: "Alpha".into(),
+            action: Action::Key(5),
         })
         .unwrap();
-    assert!(
-        matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 1, operation: 1, payload: CompletionPayload::Macro { slot, result: FeatureResult::Apply(Err(ApplyFailure { recovery: Recovery::NotAttempted, .. })) } }
-            if slot == "slot-00")
+    worker.try_submit(session.save().unwrap()).unwrap();
+    assert_eq!(
+        session.accept(worker.receive(Some(Duration::from_secs(2))).unwrap()),
+        Outcome::Saved
     );
-    assert!(log.lock().unwrap().is_empty());
-}
-
-struct PanickingMacroDevice;
-
-impl Device for PanickingMacroDevice {
-    fn read(&mut self) -> Result<State, String> {
-        unreachable!()
-    }
-    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        unreachable!()
-    }
-    fn apply_macro(
-        &mut self,
-        _: &macros::Snapshot,
-        _: &macros::Program,
-        _: &Path,
-    ) -> Result<macros::Snapshot, ApplyFailure> {
-        panic!("macro write panic")
-    }
-}
-
-#[test]
-fn panicked_macro_write_returns_correlated_unverified_completion() {
-    let worker = Executor::spawn(PanickingMacroDevice, PathBuf::new()).unwrap();
-    worker.set_generation(7);
-    worker
-        .try_submit(Command {
-            generation: 7,
-            operation: 9,
-            payload: CommandPayload::Macro(FeatureCommand::Apply {
-                expected: macro_snapshot(),
-                desired: macros::Program {
-                    repeat_count: 1,
-                    events: vec![],
-                },
-            }),
-        })
-        .unwrap();
-    assert!(
-        matches!(worker.completions.recv_timeout(Duration::from_secs(2)).unwrap(),
-            Completion { generation: 7, operation: 9, payload: CompletionPayload::Macro { slot, result: FeatureResult::Apply(Err(ApplyFailure { recovery: Recovery::Unverified, .. })) } }
-            if slot == "slot-00")
-    );
+    assert!(!session.keymap().dirty());
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    assert_eq!(applies.load(Ordering::SeqCst), 1);
 }

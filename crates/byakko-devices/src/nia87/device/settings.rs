@@ -87,6 +87,6 @@ pub fn apply_setting_detailed(
     expected: &crate::nia87::settings::Settings,
     setting: crate::nia87::settings::Setting,
     backup_dir: &std::path::Path,
-) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::session::ApplyFailure> {
+) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::contract::ApplyFailure> {
     detailed(apply_setting(expected, setting, backup_dir))
 }

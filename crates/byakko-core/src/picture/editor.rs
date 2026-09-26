@@ -1,7 +1,7 @@
 //! Deterministic picture draft and verified readback.
 use super::{Capabilities, Channel, Content, Edit, Evidence, Snapshot, validate_snapshot};
+use crate::contract::ApplyFailure;
 use crate::draft::Draft;
-use crate::session::ApplyFailure;
 use std::collections::BTreeMap;
 
 pub type Status = crate::draft::Status<Snapshot>;

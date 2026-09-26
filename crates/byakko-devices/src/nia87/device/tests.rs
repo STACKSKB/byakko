@@ -51,7 +51,7 @@ mod lighting_tests {
 
     #[test]
     fn reserved_picture_slots_are_rejected_before_device_access() {
-        use byakko_core::session::Recovery;
+        use byakko_core::contract::Recovery;
         let expected = vec![[0; 3]; 128];
         let mut desired = expected.clone();
         desired[126] = [1, 2, 3];
@@ -67,7 +67,7 @@ mod lighting_tests {
 
     #[test]
     fn detailed_keymap_preflight_errors_have_no_recovery_attempt() {
-        use byakko_core::session::Recovery;
+        use byakko_core::contract::Recovery;
         let expected = super::Snapshot {
             format_version: 1,
             firmware: 0x0100,
@@ -100,7 +100,7 @@ mod lighting_tests {
 
     #[test]
     fn keymap_rollback_error_preserves_diagnostic_and_typed_outcome() {
-        use byakko_core::session::Recovery;
+        use byakko_core::contract::Recovery;
         let backup = std::path::Path::new("backup.json");
         let verified = super::keymap_apply_error(&"write failed", Ok(()), backup);
         assert_eq!(verified.0.recovery, Recovery::Verified);

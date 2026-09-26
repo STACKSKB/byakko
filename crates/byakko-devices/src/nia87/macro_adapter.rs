@@ -1,11 +1,11 @@
 //! Translation between portable macro values and the Nia87 simple macro store.
 use crate::nia87::{actions, device, macros as native};
 use byakko_core::{
+    contract::{ApplyFailure, Recovery},
     macros::{
         self, Action, Binding, ButtonChoice, ByteBudget, Capabilities, Choice, Content, Event,
         Program, Snapshot,
     },
-    session::{ApplyFailure, Recovery},
 };
 use std::path::Path;
 

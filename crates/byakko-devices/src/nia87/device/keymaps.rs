@@ -80,7 +80,7 @@ pub fn apply_keymaps_detailed(
     base: &[[u8; 4]],
     function: &[[u8; 4]],
     backup_dir: &std::path::Path,
-) -> std::result::Result<Snapshot, byakko_core::session::ApplyFailure> {
+) -> std::result::Result<Snapshot, byakko_core::contract::ApplyFailure> {
     detailed(apply_keymaps(expected, base, function, backup_dir))
 }
 

@@ -3,7 +3,7 @@ use super::{
     Capabilities, Content, Edit, Snapshot, Value, validate_capabilities, validate_snapshot,
     validate_value,
 };
-use crate::{draft::Draft, session::ApplyFailure};
+use crate::{contract::ApplyFailure, draft::Draft};
 use std::collections::BTreeMap;
 
 pub type Status = crate::draft::Status<Snapshot>;

@@ -117,14 +117,14 @@ pub fn apply_picture_detailed(
     expected: &[[u8; 3]],
     desired: &[[u8; 3]],
     backup_dir: &std::path::Path,
-) -> std::result::Result<Vec<[u8; 3]>, byakko_core::session::ApplyFailure> {
+) -> std::result::Result<Vec<[u8; 3]>, byakko_core::contract::ApplyFailure> {
     detailed(apply_picture(expected, desired, backup_dir))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use byakko_core::session::Recovery;
+    use byakko_core::contract::Recovery;
 
     #[test]
     fn picture_upload_sends_seven_pages_and_stops_on_transport_failure() {

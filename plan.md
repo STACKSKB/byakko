@@ -74,7 +74,7 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [x] Replace engineering rules and write this plan.
 - [x] Review detailed constraint inventory against previous rules and current
   macro encoding/pacing, including the 250-byte upload versus 256-byte snapshot.
-- [ ] Replace old session, desktop/CLI controllers and worker with working keymap
+- [x] Replace old session, desktop/CLI controllers and worker with working keymap
   read/edit/save/revert/reconnect slice. Include retained drafts, close behavior,
   typed completion and deliberately different memory device. No live writes.
 - [ ] Rebuild macro library/editor/recording and pure save-and-assign workflow.
@@ -104,13 +104,42 @@ Do not claim a rewrite fixes the recorded recovery failures.
 
 ## Current status
 
-Branch and engineering documents are in place. Source replacement has not begun:
-automatic approval review rejected the implementation agent's edits because it
-still treats the earlier audit-only instruction as active. The current active
-goal authorizes the rewrite; an explicit user confirmation has been requested to
-resolve this review conflict. The existing application source remains intact.
+The user explicitly confirmed source replacement on 2026-09-26, superseding the
+audit-only restriction. The old core session workflows, desktop controllers, CLI
+controllers and host worker scheduler are removed. The replacement keymap path
+has a separate connection state, keymap editor and typed outcomes; both clients
+use the new session and finite-command executor. The shared simulator has three
+keys, three named layers and a read-only key. Native wire behavior is retained.
 
-After authorization is resolved, the new keymap slice is the first integration
-checkpoint. Other frontend workflows may then be temporarily unavailable until
-their milestones are implemented. No rewrite build/test/UI or physical acceptance
-is claimed yet. The full objective remains active; documentation alone is not done.
+Integration review is complete. Workspace library/binary/integration tests,
+strict all-target/all-feature Clippy, formatting, and locked native development
+builds pass. The built CLI completed demo read -> plan-keymap -> apply-keymap
+against memory. Review caught and fixed file apply accidentally including an
+unrelated existing draft; it now rejects that situation without changing edits.
+The executor test counts one initial read and one apply, with no extra read.
+
+Native transaction diff review found only type-namespace/import changes; report
+bytes, HID selection, pacing, backup and recovery logic are unchanged. No live
+device writes were performed. New UI rendering, physical output and Linux runtime
+behavior have not been accepted.
+
+Commands run at this checkpoint:
+
+```text
+cargo test --workspace --all-features --offline --lib --bins --tests
+cargo test -p byakko-cli --offline
+cargo clippy --workspace --all-targets --all-features --offline -- -D warnings
+cargo fmt --all -- --check
+cargo build --locked --offline -p byakko-desktop -p byakko-cli
+target/debug/byakko-cli --demo read
+target/debug/byakko-cli --demo plan-keymap target/rewrite-smoke/keymap.json
+target/debug/byakko-cli --demo apply-keymap target/rewrite-smoke/keymap.json
+```
+
+Temporary gaps: automatic discovery/reconnect, the full assignment catalog and
+custom shortcut form, macros/recording/save-and-assign, coalesced lighting/picture/
+settings, host streaming, local labels/file workflows and diagnostic capture.
+The native APIs, codecs, OS samplers, direct transaction tests and research tools
+remain. Passive catalog priority and host worker scheduling return with their
+feature milestones; a finite catalog command is not passive background discovery.
+The full rewrite remains incomplete; this checkpoint is not configurator parity.

@@ -1,5 +1,5 @@
 //! Shared deterministic draft lifecycle for complete device snapshots.
-use crate::session::{ApplyFailure, Problem};
+use crate::contract::{ApplyFailure, Problem};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -43,6 +43,12 @@ impl<S: Clone + Eq, V: Clone + Eq> Draft<S, V> {
     }
     pub fn stage(&mut self, value: V) {
         self.draft = Some(value);
+    }
+    pub fn update<R>(
+        &mut self,
+        edit: impl FnOnce(&mut V) -> Result<R, String>,
+    ) -> Result<R, String> {
+        edit(self.draft.as_mut().ok_or("No draft")?)
     }
     pub fn revert(&mut self, editable: fn(&S) -> Option<&V>) -> Result<(), String> {
         let baseline = self.baseline.as_ref().ok_or("No baseline")?;
