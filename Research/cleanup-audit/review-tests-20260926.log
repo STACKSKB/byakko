@@ -1,0 +1,484 @@
+warn: could not canonicalize path C:\Users\two
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.76s
+     Running unittests src\main.rs (target\debug\deps\byakko-09ca7890f48e21c5.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\byakko-hidraw-access.rs (target\debug\deps\byakko_hidraw_access-6c45c6b467d19743.exe)
+
+running 2 tests
+test tests::exact_observed_descriptor_only ... ok
+test tests::strict_hidraw_name_rejects_traversal_and_extra_text ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\bin\rpc_capture.rs (target\debug\deps\rpc_capture-66a29252cc50b4c7.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\byakko_cli-4e6c9ded82b40537.exe)
+
+running 12 tests
+test lighting::tests::malformed_stale_and_opaque_files_do_not_stage ... ok
+test tests::cli_reads_macro_snapshot_and_preserves_opaque_revision_bytes ... ok
+test lighting::tests::known_host_mode_exit_uses_the_same_revision_checked_apply ... ok
+test settings::tests::rejects_stale_multi_opaque_and_malformed_files_without_staging ... ok
+test macro_snapshot::tests::applies_reviewed_program_and_rereads_memory_device ... ok
+test lighting::tests::plan_apply_and_reread_use_shared_transaction ... ok
+test settings::tests::plans_one_field_and_applies_through_verified_memory_readback ... ok
+test tests::cli_reads_keymap_colors_lighting_and_settings_through_shared_executor ... ok
+test keymap::tests::plan_and_apply_use_the_same_session_and_reject_stale_revisions ... ok
+test macro_snapshot::tests::rejects_stale_opaque_malformed_and_zero_without_draft_mutation ... ok
+test picture::tests::plans_two_colors_applies_once_and_rereads_complete_map ... ok
+test picture::tests::rejects_stale_incomplete_extra_and_opaque_without_staging ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\deps\byakko_cli-0cc790ed1aaa896f.exe)
+
+running 3 tests
+test native_macro_restore::tests::exact_empty_backup_is_restorable_but_noncanonical_bytes_are_not ... ok
+test tests::archive_comparison_is_classified_as_offline ... ok
+test tests::parser_rejects_wrong_arity_and_unknown_commands ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\byakko_core-f73461f1743f3efa.exe)
+
+running 77 tests
+test action_category_tests::keyboard_usage_groups_are_semantic ... ok
+test action_category_tests::old_action_choices_without_category_remain_readable ... ok
+test lighting::controls::tests::generated_edits_preserve_unedited_fields ... ok
+test lighting::editor::tests::known_host_mode_can_be_explicitly_replaced_with_an_onboard_effect ... ok
+test lighting::controls::tests::host_parameters_use_the_same_control_projection ... ok
+test macros::editor::tests::malformed_outcomes_and_failed_apply_preserve_draft ... ok
+test macros::editor::tests::binding_requires_ready_clean_editable_program_and_advertised_count ... ok
+test macros::recorder::tests::capacity_rejection_is_atomic_and_stop_can_fill_exact_limit ... ok
+test macros::editor::tests::dirty_read_conflicts_but_matching_read_retains_draft ... ok
+test macros::editor::tests::legacy_zero_count_remains_readable_but_cannot_be_newly_saved_or_bound ... ok
+test macros::recorder::tests::measured_waits_follow_previous_edge_and_keep_prefix_unchanged ... ok
+test macros::editor::tests::rejected_edits_are_atomic_and_dirty_slot_change_is_rejected ... ok
+test lighting::controls::tests::rejects_invalid_settings_before_projection ... ok
+test macros::recorder::tests::duplicate_edges_do_not_change_draft_or_clock ... ok
+test lighting::tests::legacy_snapshot_defaults_to_readback_evidence ... ok
+test macros::editor::tests::opaque_is_readable_but_not_editable_and_slot_change_clears_clean_state ... ok
+test lighting::controls::tests::projects_only_advertised_controls_for_three_effect_shapes ... ok
+test macros::recorder::tests::fixed_delay_reserves_its_actual_cost_and_fits_exactly ... ok
+test macros::recorder::tests::initial_idle_is_omitted_and_fixed_terminal_is_stable ... ok
+test macros::recorder::tests::stop_releases_multiple_held_inputs_in_reverse_order ... ok
+test macros::recorder::tests::too_long_stop_clamps_held_interval ... ok
+test macros::tests::byte_budget_rejects_invalid_models_and_checked_overflow ... ok
+test macros::tests::edits_preserve_wait_after_and_use_backend_ranges_not_nia_widths ... ok
+test macros::tests::opaque_snapshot_round_trips_without_a_decodable_program ... ok
+test picture::tests::optional_display_effect_preserves_older_catalog_json ... ok
+test session::archive_ops::tests::rejects_invalid_target_and_invalid_capture_without_losing_operation_guard ... ok
+test picture::tests::picture_evidence_defaults_to_readback_for_legacy_json ... ok
+test session::archive_ops::tests::another_device_write_invalidates_review_but_a_read_does_not ... ok
+test session::archive_ops::tests::failed_apply_retains_review_but_path_change_clears_intent ... ok
+test session::archive_ops::tests::archive_apply_requires_change_and_checks_stale_and_readback ... ok
+test macros::tests::malformed_or_unsupported_edits_do_not_replace_original ... ok
+test session::host_ops::tests::host_parameters_are_transient_and_rejected_edits_leave_draft_unchanged ... ok
+test macros::tests::binding_catalog_checks_identity_slot_and_repeat_policy ... ok
+test session::host_ops::tests::stop_during_start_and_stale_events_preserve_owned_activity ... ok
+test session::host_ops::tests::transport_acceptance_cannot_complete_host_restoration ... ok
+test session::archive_ops::tests::review_binds_target_and_ignores_stale_completions ... ok
+test session::host_ops::tests::transport_accepted_baseline_can_start_and_matching_readback_restores_host_mode ... ok
+test session::host_ops::tests::uncertain_restore_invalidates_lighting_until_read ... ok
+test session::lighting_ops::tests::accepted_lighting_write_records_evidence_but_read_requires_readback ... ok
+test session::lighting_ops::tests::brightness_write_keeps_picture_verified_but_selector_write_invalidates_it ... ok
+test session::lighting_ops::tests::opaque_and_invalid_edits_do_not_create_drafts ... ok
+test session::lighting_ops::tests::dirty_reconnect_conflict_and_mismatched_apply_preserve_draft ... ok
+test session::lighting_ops::tests::shared_activity_and_failed_write_invalidate_other_surfaces ... ok
+test session::lighting_ops::tests::scalar_successes_keep_other_drafts_and_failure_invalidates_ready_caches ... ok
+test session::lighting_ops::tests::successful_lighting_apply_preserves_last_observed_keymap ... ok
+test session::macro_files::tests::begin_requires_eligible_target_and_import_validates_atomically ... ok
+test session::macro_files::tests::export_keeps_retained_unverified_draft_and_failures_preserve_trust ... ok
+test session::macro_files::tests::file_activity_excludes_edits_device_io_recording_and_slot_change ... ok
+test session::macro_files::tests::stale_kind_token_and_connection_completions_are_ignored ... ok
+test session::macro_ops::tests::apply_failure_retains_macro_and_keymap_drafts_but_neither_is_writable ... ok
+test session::macro_ops::tests::binding_uses_advertised_action_and_preserves_drafts_on_rejection ... ok
+test session::macro_ops::tests::catalog_rejects_incomplete_result_and_old_generation ... ok
+test session::macro_ops::tests::disconnected_macro_reply_is_stale_and_changed_reconnect_keeps_draft ... ok
+test session::macro_ops::tests::catalog_is_complete_and_read_only_across_dirty_draft ... ok
+test session::macro_ops::tests::empty_but_bound_slot_is_visible_and_not_allocated ... ok
+test session::macro_ops::tests::failed_keymap_write_cancels_catalog_without_erasing_macro_read_failure ... ok
+test session::macro_ops::tests::foreground_empty_slot_is_available_before_catalog_finishes ... ok
+test session::macro_ops::tests::keymap_refresh_preserves_background_catalog_ticket ... ok
+test session::macro_ops::tests::recording_invalidates_background_catalog_ticket ... ok
+test session::picture_ops::tests::accepted_write_records_transport_evidence_and_read_requires_readback ... ok
+test session::macro_ops::tests::shared_activity_excludes_other_feature_and_rejects_wrong_slot_then_verifies ... ok
+test session::picture_ops::tests::capability_and_snapshot_shape_reject_invalid_keys_but_allow_fn_led ... ok
+test session::picture_ops::tests::keymap_refresh_keeps_a_verified_picture_draft ... ok
+test session::picture_ops::tests::opaque_read_is_lossless_and_not_editable ... ok
+test session::settings_ops::tests::catalog_and_snapshot_validation_reject_invalid_values ... ok
+test session::picture_ops::tests::stale_conflict_and_failed_readback_preserve_draft ... ok
+test session::settings_ops::tests::only_one_field_can_be_staged_and_apply_carries_one_edit ... ok
+test session::settings_ops::tests::opaque_conflict_and_failure_preserve_draft ... ok
+test session::settings_ops::tests::successful_setting_apply_preserves_last_observed_keymap ... ok
+test session::tests::dirty_reconnect_matching_read_retains_draft_and_difference_conflicts ... ok
+test session::tests::failed_and_mismatched_apply_keep_baseline_and_draft_unverified ... ok
+test session::tests::failed_read_preserves_draft_and_matching_apply_becomes_ready ... ok
+test session::tests::commands_and_results_round_trip_as_owned_json_values ... ok
+test session::tests::rejects_old_connection_and_out_of_order_completions ... ok
+test session::tests::same_ticket_wrong_feature_or_direction_does_not_consume_pending_read ... ok
+test session::tests::opaque_action_survives_apply_command_and_verified_completion ... ok
+test session::tests::shortcut_schema_is_checked_when_session_is_created ... ok
+
+test result: ok. 77 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\byakko_desktop-0e16c77f34e83f7f.exe)
+
+running 105 tests
+test action_catalog::tests::highlight_follows_the_top_section_and_the_end_of_the_list ... ok
+test config::tests::default_delays_keep_per_key_batching_longer_than_single_edits ... ok
+test action_catalog::tests::browsing_includes_all_sections_and_search_accepts_num_alias ... ok
+test lighting::live::tests::slider_intent_coalesces_and_effect_resets_old_parameters ... ok
+test macro_binding_view::tests::defaults_to_first_mode_compatible_with_repeat_count ... ok
+test macro_binding_view::tests::falls_back_to_first_choice_to_expose_its_restriction ... ok
+test action_catalog::tests::section_jump_uses_rendered_coordinates_not_estimated_row_counts ... ok
+test lighting::live::tests::onboard_color_uses_the_short_default_coalescing_window ... ok
+test lighting::screen::tests::refresh_retains_missing_selection_and_edits_freeze_during_streaming ... ok
+test color_picker::tests::picker_roundtrips_colors_and_preserves_hue_at_black ... ok
+test color_picker::tests::selecting_another_key_discards_an_active_drag ... ok
+test macro_binding_view::tests::explicit_choice_takes_precedence ... ok
+test macro_binding_view::tests::preserves_the_selected_keys_advertised_binding ... ok
+test config::tests::explicit_delay_is_validated_and_zero_is_supported ... ok
+test color_picker::tests::drag_publishes_only_on_finish_and_never_twice ... ok
+test recording_input::tests::physical_keypad_and_modifier_sides_stay_distinct ... ok
+test recording_input::tests::key_table_has_unique_physical_codes ... ok
+test picture::batching_tests::each_stroke_restarts_the_configured_idle_deadline ... ok
+test physical_board::tests::long_or_unknown_actions_stay_legible_and_keep_full_description ... ok
+test recording::tests::widget_clicks_and_motion_are_excluded_but_focus_loss_always_finishes ... ok
+test physical_board::tests::displayed_actions_follow_the_selected_draft_layer ... ok
+test recording_input::tests::ignores_repeat_and_unidentified_inputs ... ok
+test recording_input::tests::release_and_mouse_buttons_keep_edges ... ok
+test physical_board::tests::descriptor_bounds_include_stagger_and_tall_keys ... ok
+test discovery::tests::command_invalidates_older_scan_reply ... ok
+test sampler_worker::tests::preparation_failure_is_delivered_by_both_policies ... ok
+test sampler_worker::tests::repeated_start_is_rejected_and_stop_is_idempotent ... ok
+test sampler_worker::tests::stop_before_ready_does_not_publish_ready_or_allow_restart ... ok
+test sampler_worker::tests::audio_terminal_failure_is_retained_behind_pending_frame ... ok
+test tests::ambiguous_and_enumeration_failure_block_automatic_reads ... ok
+test sampler_worker::tests::dropping_receiver_releases_sampler_on_its_worker_thread ... ok
+test sampler_worker::tests::receiver_drop_unblocks_pending_audio_failure ... ok
+test tests::archive_workflow::device_change_during_export_keeps_close_open ... ok
+test sampler_worker::tests::screen_terminal_failure_may_be_dropped_behind_pending_frame ... ok
+test tests::archive_workflow::stale_export_completion_cannot_complete_a_new_export ... ok
+test tests::archive_workflow::failed_export_keeps_close_open_and_reports_error ... ok
+test tests::archive_workflow::export_requires_a_capture_without_starting_device_work ... ok
+test tests::automatic_reconnect_preserves_staged_draft_and_ignores_late_completion ... ok
+test tests::dirty_close_modal_blocks_background_edits_until_dismissed ... ok
+test tests::changed_configuration_path_forces_new_read ... ok
+test tests::failed_write_does_not_restart_automatically_after_reappearance ... ok
+test tests::close_waits_for_apply_and_keeps_failure_and_draft_visible ... ok
+test tests::failed_manual_reconnect_retires_the_stale_executor_and_keeps_drafts ... ok
+test tests::macro_workflow::form_projection_preserves_every_demo_action_and_wait ... ok
+test tests::macro_workflow::explicit_new_empty_slot_stages_editable_count_without_changing_stored_zero ... ok
+test macro_files::tests::export_keeps_unverified_state_and_close_waits_for_its_result ... ok
+test macro_files::tests::failed_and_stale_imports_cannot_replace_program_or_metadata_or_close_the_window ... ok
+test macro_files::tests::import_stages_only_selected_slot_and_roundtrips_metadata_without_binding ... ok
+test macro_files::tests::corrupt_newest_label_snapshot_is_visible_on_attach ... ok
+test tests::archive_workflow::diagnostic_capture_is_explicit_and_path_changes_preserve_its_bytes ... ok
+test tests::lighting_workflow::failed_lighting_write_requires_manual_reconnect_and_keeps_diagnostic ... ok
+test tests::lighting_workflow::close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic ... ok
+test tests::lighting_workflow::verified_lighting_close_checks_its_result_despite_keymap_invalidation ... ok
+test tests::lighting_workflow::reconnect_keeps_both_keymap_and_lighting_conflict_diagnostics ... ok
+test tests::passive_discovery_tick_keeps_dirty_close_confirmation_open ... ok
+test tests::macro_workflow::macro_scan_is_passive_and_navigation_keeps_the_same_scan ... ok
+test tests::picture_workflow::failed_color_read_waits_for_an_explicit_retry ... ok
+test tests::macro_workflow::assigning_macro_does_not_save_unrelated_key_draft ... ok
+test tests::macro_workflow::failed_read_preserves_unsubmitted_form_input ... ok
+test tests::macro_workflow::add_checks_candidates_before_catalog_completes ... ok
+test tests::macro_workflow::editing_repeat_count_preserves_an_unsubmitted_event_edit ... ok
+test tests::macro_workflow::macro_failure_prevents_close_and_stale_success_cannot_hide_it ... ok
+test tests::lighting_workflow::live_effect_click_survives_an_unrelated_read ... ok
+test tests::macro_assignment_workflow::close_stays_open_when_macro_saves_but_key_assignment_cannot_start ... ok
+test tests::macro_assignment_workflow::invalid_count_and_unrelated_key_edits_stop_before_save ... ok
+test tests::macro_assignment_workflow::key_failure_reports_macro_saved_without_claiming_assignment ... ok
+test tests::macro_assignment_workflow::failed_macro_save_never_stages_key_assignment ... ok
+test tests::lighting_workflow::live_onboard_choices_apply_and_queue_during_the_first_write ... ok
+test tests::settings_workflow::queued_settings_coalesce_latest_value_per_field_and_preserve_failure_intent ... ok
+test tests::lighting_workflow::mode_choice_is_immediate_and_latest_rapid_choice_survives_completion ... ok
+test tests::shortcut_validation_stays_local_and_clears_after_valid_edits_or_load ... ok
+test tests::macro_workflow::add_uses_first_free_slot_and_capacity_disables_further_adds ... ok
+test tests::stages_only_selected_generic_layer_and_preserves_fixed_opaque_action ... ok
+test tests::lighting_workflow::lighting_uses_capabilities_and_memory_executor_without_losing_other_drafts ... ok
+test tests::macro_workflow::repeat_edit_stages_without_a_separate_set_button_and_invalid_text_blocks_save ... ok
+test tests::typed_assignment_updates_board_legend_and_revert_restores_it ... ok
+test tests::macro_workflow::slot_editor_opens_during_background_catalog_scan ... ok
+test tests::macro_workflow::chosen_playback_assigns_and_verifies_without_leaving_macros ... ok
+test tests::macro_workflow::reselecting_ready_macro_keeps_candidate_and_does_not_read_again ... ok
+test tests::manual_reconnect_rebinds_even_without_a_discovery_change ... ok
+test tests::macro_assignment_workflow::dirty_macro_saves_then_assigns_the_captured_key ... ok
+test tests::lighting_workflow::per_key_mode_activates_in_lighting_and_effect_choice_returns_in_place ... ok
+test macro_files::tests::labels_save_locally_and_load_on_next_attach_without_device_write ... ok
+test tests::macro_workflow::messages_edit_and_verify_a_memory_slot_without_losing_keymap_draft ... ok
+test tests::macro_workflow::rejected_input_is_atomic_and_sequence_edits_clear_replacement_target ... ok
+test tests::lighting_workflow::lighting_retry_rebinds_and_applies_retained_intent_after_fresh_read ... ok
+test tests::macro_workflow::unchanged_slot_read_preserves_unsubmitted_event_fields ... ok
+test tests::lighting_workflow::lighting_page_uses_explicit_read_and_keeps_cached_snapshot_on_revisit ... ok
+test tests::recording_workflow::closing_finalizes_recording_before_asking_to_discard_and_no_input_runs_after_stop ... ok
+test tests::settings_workflow::failed_setting_apply_retains_draft_and_blocks_close ... ok
+test tests::settings_workflow::settings_page_uses_explicit_read_and_keeps_verified_snapshot_across_navigation ... ok
+test tests::recording_workflow::focused_recording_excludes_edits_and_io_then_releases_on_focus_loss ... ok
+test tests::picture_workflow::brush_paints_new_keys_and_batches_until_the_configured_gap ... ok
+test tests::recording_workflow::unsupported_input_stops_recording_with_accepted_held_releases ... ok
+test tests::picture_workflow::failed_live_write_keeps_intent_without_automatic_retry ... ok
+test tests::picture_workflow::live_channel_edit_submits_immediately_and_replaces_only_its_channel ... ok
+test tests::stages_general_one_and_two_modifier_shortcuts_from_device_choices ... ok
+test tests::picture_workflow::picker_activity_defers_existing_paint_and_drag_blocks_sending ... ok
+test tests::macro_assignment_workflow::macro_transport_failure_reconnect_restores_other_editors_and_keeps_macro_draft ... ok
+test tests::settings_workflow::live_settings_accept_multiple_fields_while_first_write_is_in_flight ... ok
+test tests::picture_workflow::live_color_edits_coalesce_while_a_write_is_in_flight ... ok
+test tests::macro_workflow::binding_requires_saved_compatible_macro_and_uses_backend_action ... ok
+test tests::settings_workflow::generic_settings_stage_one_field_and_save_through_executor ... ok
+test tests::picture_workflow::live_color_refreshes_a_stale_picture_without_a_manual_read ... ok
+test tests::picture_workflow::entering_colors_does_not_issue_reads_and_connection_preloads_once ... ok
+
+test result: ok. 105 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running unittests src\main.rs (target\debug\deps\byakko_desktop-78f60b36bf81ecf6.exe)
+
+running 1 test
+test tests::discovery_identity_includes_metadata_even_when_path_is_reused ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\lib.rs (target\debug\deps\byakko_devices-463a04090a4ce0f2.exe)
+
+running 221 tests
+test audio_sample::windows::tests::extensible_header_uses_byte_18_for_valid_bits ... ok
+test audio_sample::windows::tests::float_nonfinite_and_silent_packets_are_zero ... ok
+test device::tests::host_frames_match_the_selected_source_and_band_count ... ok
+test audio_sample::windows::tests::converts_interleaved_pcm_to_mono ... ok
+test audio_bands::tests::rejects_bad_rates_and_contains_nonfinite_samples ... ok
+test executor::receive_tests::blocking_receive_handles_completion_timeout_and_disconnect ... ok
+test executor::host_tests::stop_during_start_restores_before_any_frame ... ok
+test executor::host_tests::bounded_frame_queue_cannot_delay_stop ... ok
+test hid::selection::tests::discovery_id_changes_with_every_selected_identity_field ... ok
+test executor::host_tests::failed_frame_restores_and_reports_failure ... ok
+test hid::selection::tests::target_requires_one_exact_identity ... ok
+test hid::windows::tests::parses_windows_interface_number ... ok
+test executor::tests::catalog_reads_every_requested_slot_in_one_correlated_command ... ok
+test executor::tests::foreground_read_runs_between_catalog_slots ... ok
+test hid::selection::tests::classifies_empty_single_many_and_enumeration_failure ... ok
+test executor::tests::keymap_read_and_apply_resume_unfinished_catalog ... ok
+test hid::windows::tests::identifies_nia_paths_only_for_partial_inventory_errors ... ok
+test executor::tests::full_queue_returns_correlated_rejection_to_core ... ok
+test executor::tests::old_generation_macro_apply_is_rejected_before_device_access ... ok
+test executor::tests::explicit_cancel_stops_catalog_after_current_slot ... ok
+test executor::tests::panicked_macro_write_returns_correlated_unverified_completion ... ok
+test executor::tests::panicked_write_returns_correlated_unverified_completion ... ok
+test executor::tests::default_macro_operations_are_typed_unsupported_results ... ok
+test executor::tests::reconnect_rejects_queued_old_apply_without_writing ... ok
+test executor::tests::failed_keymap_apply_stops_unfinished_catalog ... ok
+test macro_files::tests::legacy_conversion_preserves_metadata_and_actions ... ok
+test executor::tests::one_worker_orders_keymap_and_macro_operations ... ok
+test macro_files::tests::roundtrip_and_rejections ... ok
+test memory::tests::lighting_conflict_invalid_edit_and_opaque_state_preserve_snapshot ... ok
+test memory::tests::macro_revision_has_fixed_length_after_repeated_writes ... ok
+test memory::tests::archive_capture_and_review_use_the_serial_executor ... ok
+test executor::tests::failed_catalog_read_completes_and_explicit_retry_can_finish ... ok
+test memory::tests::macro_builder_requires_exact_declared_slots_and_valid_content ... ok
+test memory::tests::one_field_memory_setting_apply_checks_baseline_and_constraints ... ok
+test memory::tests::opaque_action_survives_apply_and_revision_advances ... ok
+test executor::tests::worker_preserves_tokens_and_rejects_duplicate_writes_before_device_access ... ok
+test memory::tests::opaque_macro_is_read_only_and_other_slot_remains_unchanged ... ok
+test memory::tests::picture_conflict_and_invalid_color_map_leave_snapshot_unchanged ... ok
+test memory::tests::reserved_key_is_rejected_without_changing_state ... ok
+test memory::tests::picture_commands_run_through_the_serial_executor ... ok
+test memory::tests::stale_expected_state_does_not_change_device ... ok
+test memory::tests::stale_macro_snapshot_and_invalid_program_leave_all_slots_unchanged ... ok
+test nia87::actions::tests::combo_accepts_only_the_four_single_modifiers ... ok
+test memory::tests::settings_read_and_apply_use_the_serial_executor ... ok
+test nia87::actions::tests::macro_binding_round_trips_valid_slots_and_modes ... ok
+test memory::tests::session_and_single_executor_apply_then_reread_memory_macro ... ok
+test nia87::actions::tests::ordinary_key_round_trips_as_a_four_byte_binding ... ok
+test nia87::actions::tests::presets_contain_verified_keyboard_and_pointer_actions ... ok
+test nia87::actions::tests::presets_have_typed_catalog_groups ... ok
+test nia87::actions::tests::two_modifier_shortcut_uses_vendor_key2_position ... ok
+test nia87::actions::tests::system_controls_are_advertised_with_their_exact_catalog_bindings ... ok
+test nia87::adapter::tests::rejects_unvalidated_identity ... ok
+test nia87::adapter::tests::preset_identity_is_independent_of_its_display_label ... ok
+test nia87::adapter::tests::catalog_choices_match_decoded_bindings ... ok
+test nia87::board::tests::keymap_mask_preserves_iso_positions_but_protects_fn_and_empty_slots ... ok
+test nia87::adapter::tests::standard_non_tkl_key_choices_use_ordinary_action_encoding ... ok
+test nia87::configuration_plan::tests::archive_cannot_write_picture_while_switching_its_active_selector ... ok
+test nia87::configuration_plan::tests::archive_plan_preserves_unmapped_keymap_data_but_rejects_new_edits ... ok
+test executor::receive_tests::unbounded_receive_waits_for_a_later_completion ... ok
+test nia87::configuration_plan::tests::plans_supported_changes ... ok
+test nia87::configuration_plan::tests::rejects_opaque_and_unrestorable_changes ... ok
+test nia87::configuration_plan::tests::rejects_opaque_lighting_bytes ... ok
+test nia87::adapter::tests::shortcut_choices_cover_editable_ordinary_keys_and_round_trip ... ok
+test nia87::configuration_plan::tests::rejects_unsafe_setting_values_and_opaque_bytes ... ok
+test nia87::device::apply_error::tests::lighting_recovery_distinguishes_verified_from_failed ... ok
+test nia87::configuration_plan::tests::rejects_each_invalid_macro_binding_field ... ok
+test nia87::device::apply_error::tests::every_rollback_path_preserves_typed_outcome_through_detailed ... ok
+test nia87::configuration_plan::tests::unmapped_picture_slots_are_archival_but_not_writable ... ok
+test nia87::configuration_plan::tests::reserved_picture_and_keymap_slots_are_not_writable ... ok
+test nia87::device::apply_error::tests::macro_recovery_keeps_diagnostic_and_typed_outcome ... ok
+test nia87::configuration_plan::tests::unchanged_unknown_setting_is_archival_but_changed_value_needs_safe_rollback ... ok
+test nia87::configuration_plan::tests::unchanged_unknown_macro_is_archival_but_changed_unknown_macro_is_rejected ... ok
+test nia87::device::apply_error::tests::picture_transport_error_is_uncertain_without_a_speculative_restore ... ok
+test nia87::device::apply_error::tests::settings_recovery_is_typed_and_preserves_diagnostic ... ok
+test audio_bands::tests::silence_is_dark_and_tone_peaks_at_the_expected_probe ... ok
+test nia87::device::keymaps::tests::matrix_read_requests_each_page_once ... ok
+test nia87::device::lighting::submission_tests::ordinary_submission_sends_once_without_read_or_restore ... ok
+test nia87::device::lighting::submission_tests::submitted_revision_changes_only_known_setting_bytes ... ok
+test nia87::device::picture::tests::picture_context_tracks_effect_and_option_but_not_brightness ... ok
+test nia87::device::picture::tests::picture_read_stops_at_transport_error ... ok
+test nia87::device::picture::tests::picture_snapshot_reads_each_page_once_without_identity_queries ... ok
+test nia87::device::picture::tests::picture_upload_sends_seven_pages_and_stops_on_transport_failure ... ok
+test nia87::device::picture::tests::unmapped_picture_slot_is_rejected_before_device_access ... ok
+test nia87::device::picture::tests::wrong_size_and_reserved_slot_are_rejected_before_sending ... ok
+test nia87::device::tests::lighting_tests::detailed_keymap_preflight_errors_have_no_recovery_attempt ... ok
+test nia87::device::tests::lighting_tests::keymap_rollback_error_preserves_diagnostic_and_typed_outcome ... ok
+test nia87::device::tests::lighting_tests::reserved_picture_slots_are_rejected_before_device_access ... ok
+test nia87::device::tests::lighting_tests::reserved_slot_is_rejected_before_device_access ... ok
+test nia87::device::tests::lighting_tests::restore_report_recreates_known_fields_without_sending_opaque_tail ... ok
+test nia87::device::tests::lighting_tests::unmapped_keymap_slot_is_rejected_before_device_access ... ok
+test nia87::device::transaction::tests::roundtrip_retries_only_a_mismatch_and_restores_after_read_error ... ok
+test nia87::adapter::tests::round_trips_every_raw_slot ... ok
+test nia87::device::transaction::tests::verified_path_never_restores_and_failure_preserves_recovery_status ... ok
+test nia87::device::transport::tests::availability_classifies_zero_one_and_multiple_collections ... ok
+test nia87::device::transport::tests::enumeration_failure_is_a_distinct_availability_state ... ok
+test nia87::device::transaction::tests::backup_error_stops_before_setter ... ok
+test nia87::adapter::tests::rejects_stale_or_hidden_edit ... ok
+test nia87::device::transport::tests::feature_read_reports_request_phase_and_preserves_io_cause ... ok
+test nia87::device::transport::tests::target_selects_only_one_exact_collection_identity ... ok
+test nia87::host_adapter::tests::baseline_rejects_opaque_and_forged_values_before_access ... ok
+test nia87::host_lighting::tests::music_preserves_all_32_bands_and_zero_pads_tail ... ok
+test nia87::host_lighting::tests::screen_header_checksum_wraps_without_consuming_pixel_fields ... ok
+test nia87::host_adapter::tests::advertised_music_modes_select_distinct_native_effects ... ok
+test nia87::device::transport::tests::operating_system_lock_excludes_second_handle_and_releases_on_drop ... ok
+test nia87::adapter::tests::legacy_named_expected_state_still_passes_exact_revision_preflight ... ok
+test nia87::layout::tests::contains_87_physical_keys ... ok
+test nia87::keymap_policy::tests::preserves_opaque_entries_but_rejects_edits_outside_known_keys ... ok
+test nia87::layout::tests::keys_do_not_overlap_within_a_row ... ok
+test nia87::layout::tests::known_usages_are_unique_and_labeled ... ok
+test nia87::lighting::tests::bulk_picture_requires_exactly_128_rgb_triples ... ok
+test nia87::lighting::tests::bulk_picture_reports_have_exact_headers_and_roundtrip_rgb_across_pages ... ok
+test nia87::lighting::tests::per_key_color_uses_layout_index_and_bit7 ... ok
+test nia87::host_adapter::tests::music_parameters_encode_each_option_brightness_and_color_mode ... ok
+test nia87::lighting::tests::requests_use_inherited_commands_and_checksums ... ok
+test nia87::lighting::tests::write_matches_pb_fields_and_rejects_unsupported_modes ... ok
+test nia87::archive_adapter::tests::archive_decode_rejects_wrong_identity_and_malformed_bytes ... ok
+test nia87::lighting::tests::response_and_picture_pages_preserve_unknown_bytes ... ok
+test nia87::lighting_adapter::tests::captured_baseline_is_editable_and_keeps_raw_revision ... ok
+test nia87::lighting_adapter::tests::every_native_effect_has_a_plain_english_capability_label ... ok
+test nia87::lighting_adapter::tests::forged_or_unrepresentable_baselines_never_reach_write ... ok
+test nia87::lighting_adapter::tests::catalog_excludes_host_effects_and_codec_round_trips ... ok
+test nia87::lighting_adapter::tests::same_effect_rainbow_keeps_dormant_native_rgb ... ok
+test nia87::lighting_adapter::tests::recognized_stored_host_mode_can_exit_to_an_onboard_effect ... ok
+test nia87::lighting_adapter::tests::transport_accepted_revision_remains_editable_but_cannot_forge_content ... ok
+test nia87::macro_adapter::tests::opaque_and_forged_snapshots_cannot_be_drafted ... ok
+test nia87::adapter::tests::alternate_disabled_form_is_visible_without_rewriting_its_raw_bytes ... ok
+test nia87::archive_adapter::tests::review_rejects_restore_direction_that_cannot_recreate_original_settings ... ok
+test macro_files::tests::files_are_bounded_and_existing_outputs_are_never_overwritten ... ok
+test nia87::macro_file::tests::rejects_version_slot_mode_and_invalid_macro ... ok
+test nia87::macro_adapter::tests::accepted_long_encoding_retains_exact_before_image ... ok
+test nia87::macro_adapter::tests::binding_capabilities_retain_wire_modes_and_explicit_count_policy ... ok
+test nia87::macro_file::tests::rejects_oversize_before_parse_and_bounds_reader ... ok
+test nia87::macros::tests::captured_official_mouse_macro_matches_native_event_bytes ... ok
+test nia87::macro_adapter::tests::mixed_events_preserve_order_zero_wait_and_wheel_edges ... ok
+test nia87::macros::tests::empty_clear_and_malformed_inputs ... ok
+test nia87::adapter::tests::shortcuts_round_trip_and_validate ... ok
+test nia87::macros::tests::fixed_vector_covers_modifiers_buttons_movement_and_delays ... ok
+test macro_labels::tests::positional_legacy_snapshot_uses_supplied_slot_order ... ok
+test nia87::macros::tests::reports_have_exact_headers_and_final_page ... ok
+test nia87::macro_file::tests::maximum_encoded_macro_round_trips ... ok
+test nia87::macros::tests::safe_boundary_and_overflow ... ok
+test nia87::macros::tests::shorter_macro_replaces_all_pages_of_longer_macro ... ok
+test nia87::macros::tests::validated_before_image_retains_noncanonical_bytes_for_recovery ... ok
+test nia87::macros::tests::zero_and_max_delay_round_trip ... ok
+test nia87::macros::tests::zero_delay_tail_across_page_boundary_is_sent ... ok
+test nia87::picture_adapter::tests::advertised_picture_effect_exists_in_lighting_catalog ... ok
+test nia87::picture_adapter::tests::every_physical_key_has_a_unique_picture_slot ... ok
+test nia87::profiles::tests::rejects_reserved_slot_mismatch_and_unverified_firmware ... ok
+test nia87::protocol::tests::complete_reports_match_independent_nia87_vectors ... ok
+test nia87::picture_adapter::tests::native_mapping_covers_fn_and_last_writable_key_and_preserves_padding ... ok
+test nia87::protocol::tests::full_reports_preserve_page_boundaries_and_header_checksums ... ok
+test nia87::protocol::tests::full_reports_reject_unwritable_slots_and_wrong_lengths ... ok
+test nia87::picture_adapter::tests::forged_content_or_revision_is_rejected_before_native_apply ... ok
+test nia87::profiles::tests::imported_unmapped_slot_is_archival_but_cannot_be_staged_for_write ... ok
+test nia87::protocol::tests::matrix_pages_preserve_every_four_byte_slot ... ok
+test nia87::protocol::tests::read_requests_match_confirmed_identity_headers ... ok
+test nia87::protocol::tests::single_key_reports_keep_binding_bytes_and_check_slot_bounds ... ok
+test nia87::macro_file::tests::rejects_malformed_truncated_and_unknown_fields ... ok
+test nia87::profiles::tests::round_trip_preserves_unknown_and_reserved_bytes ... ok
+test nia87::recovery_keymaps::tests::invalid_shape_and_reserved_difference_rejected ... ok
+test nia87::recovery_keymaps::tests::known_observation_selects_actual_differences_only ... ok
+test nia87::recovery_keymaps::tests::unreadable_one_change_selects_one_slot ... ok
+test nia87::recovery_keymaps::tests::unreadable_unchanged_selects_none ... ok
+test nia87::recovery_verification::tests::failed_first_capture_reports_both_read_errors ... ok
+test nia87::recovery_verification::tests::failed_first_capture_reports_retry_mismatch ... ok
+test nia87::adapter::tests::rejects_new_opaque_and_unadvertised_actions_but_preserves_raw_baseline ... ok
+test nia87::recovery_verification::tests::failed_first_capture_retries_once_and_accepts_match ... ok
+test nia87::recovery_verification::tests::matching_first_capture_does_not_retry ... ok
+test nia87::profiles::tests::rejects_malformed_truncated_and_wrong_size ... ok
+test nia87::macro_adapter::tests::rejects_width_capacity_and_foreign_actions ... ok
+test nia87::recovery_verification::tests::mismatched_first_capture_does_not_retry ... ok
+test nia87::settings::tests::backlight_setter_preserves_unknown_options_and_restores_exact_raw_state ... ok
+test nia87::profiles::tests::rejects_wrong_board_and_version ... ok
+test macro_labels::tests::corrupt_newest_does_not_fall_back ... ok
+test nia87::settings::tests::rejects_truncated_or_wrong_opcode_replies ... ok
+test nia87::settings::tests::decodes_captured_fields_and_preserves_reserved_bytes ... ok
+test nia87::settings::tests::requests_and_safe_setters_use_bit7_framing ... ok
+test nia87::settings::tests::setting_plan_rejects_unencodable_forward_or_recovery_values ... ok
+test nia87::settings::tests::setting_plans_preserve_other_fields_and_prepare_recovery ... ok
+test nia87::configuration::tests::maximum_byte_values_fit_file_limit ... ok
+test nia87::configuration::tests::round_trip_preserves_every_raw_section ... ok
+test nia87::settings::tests::sleep_uses_verified_current_layout_and_validates_all_fields ... ok
+test nia87::settings_adapter::tests::forged_or_truncated_baseline_is_rejected ... ok
+test nia87::settings_adapter::tests::noncanonical_native_values_are_retained_as_opaque ... ok
+test nia87::settings_adapter::tests::sleep_field_mapping_converts_minutes_and_preserves_other_timers ... ok
+test nia87::settings_adapter::tests::snapshot_round_trips_all_four_full_native_replies ... ok
+test research_fault::tests::after_delivery_only_fires_on_success ... ok
+test research_fault::tests::before_delivery_is_single_shot_and_opcode_specific ... ok
+test research_fault::tests::panic_resets_scope ... ok
+test research_fault::tests::arm_is_local_to_the_calling_thread ... ok
+test research_fault::tests::trace_distinguishes_pre_and_post_delivery_injection ... ok
+test research_fault::tests::trace_preserves_inflight_event_on_transmit_panic ... ok
+test research_fault::tests::trace_records_transport_success_and_error ... ok
+test research_trace::tests::getter_error_keeps_partial_buffer_and_error ... ok
+test research_trace::tests::getter_panic_remains_unfinished_and_mixed_order_is_sequential ... ok
+test research_trace::tests::getter_success_keeps_full_reply_and_transport_length ... ok
+test research_trace::tests::malformed_length_is_traced_without_validation ... ok
+test research_trace::tests::nested_scope_does_not_reset_outer ... ok
+test research_trace::tests::panic_retains_unfinished_and_resets ... ok
+test rongyuan::yc500::macro_io::tests::exchange_error_is_preserved ... ok
+test rongyuan::yc500::macro_io::tests::invalid_slot_is_rejected_before_exchange ... ok
+test rongyuan::yc500::macro_io::tests::read_sequence_requests_one_complete_copy ... ok
+test rongyuan::yc500::matrix::tests::synthetic_board_uses_its_own_safe_geometry_with_yc500_commands ... ok
+test screen_sample::tests::averages_rgb_without_alpha_or_spatial_bias ... ok
+test screen_sample::tests::maps_normalized_points_inside_display_bounds ... ok
+test screen_sample::tests::selected_display_never_falls_back_for_a_stale_id ... ok
+test storage::tests::linux_prefers_xdg_and_falls_back_to_home ... ok
+test storage::tests::windows_prefers_local_appdata_and_falls_back_to_profile ... ok
+test macro_labels::tests::round_trip_fifty_slots_and_reject_invalid_names ... ok
+test nia87::lighting_adapter::tests::preflight_covers_every_declared_effect_and_rejects_sentinel_alias ... ok
+test research_trace::tests::scope_is_thread_local_and_capped ... ok
+test nia87::archive_adapter::tests::apply_preflight_rejections_are_typed_not_attempted ... ok
+test nia87::archive_adapter::tests::section_summary_uses_both_forward_and_reverse_plan ... ok
+test nia87::configuration::tests::rejects_wrong_identity_truncation_and_oversize ... ok
+test executor::host_tests::failed_restore_is_reported_as_failed_recovery ... ok
+test executor::host_tests::generation_change_and_drop_each_restore_active_session ... ok
+test nia87::archive_adapter::tests::offline_comparison_reports_changes_without_a_device ... ok
+test nia87::configuration::tests::rejects_missing_or_wrong_length_sections_and_opcode ... ok
+test nia87::device::transport::tests::feature_read_reports_response_phase_and_sends_once ... ok
+test nia87::macro_adapter::tests::byte_budget_matches_native_encoding_boundaries ... ok
+test nia87::device::configuration::evidence_tests::retains_complete_readback_without_overwriting_existing_evidence ... ok
+
+test result: ok. 221 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests\external_target.rs (target\debug\deps\external_target-11e7c5a04aa937a9.exe)
+
+running 1 test
+test discrete_tablet_controls_use_the_same_draft_and_device_contract ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

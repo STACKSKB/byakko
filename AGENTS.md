@@ -1,9 +1,10 @@
 # Byakko engineering rules
 
 This is a functional-first house. Read this file before changing code. The
-approved direction is `docs/pre-alpha-proposal.md`, amended below for browser
-delivery. Iced is the selected desktop toolkit; the egui application is a
-research baseline, not the structure to port.
+approved direction is `docs/pre-alpha-proposal.md`, amended here for browser
+delivery. Iced is the selected desktop toolkit; the egui application was retired
+in `3471866` and remains only a research baseline. Dated implementation evidence
+and open acceptance gates are in `docs/engineering-status.md`.
 For a Linux checkout, start with `docs/linux-handoff.md` and retain the
 read-only-first device acceptance sequence there.
 
@@ -48,16 +49,12 @@ remains available to developers outside the public workflow.
 
 - Native Windows/Linux desktop, Rust + Iced. No JavaScript, Electron, webview,
   QML or vendor helper in the desktop product or its build.
-- Treat the core/session command and completion types as a frontend contract.
-  Iced and `byakko-cli` are independent clients; a future
-  static browser SPA may reuse the portable model via WebAssembly. Keep any web
-  bootstrap/transport code out of the native executable and do not require a
-  local Node.js server. Browser HID access still follows browser permissions;
-  do not promise native plug-and-play behavior from a web page.
-- Keep core logic usable from a future browser frontend or a service exposing
-  the native backend. Browser support is an architectural requirement now, not
-  authorization to add a web stack or server now. Never assume browsers can
-  access every HID interface or bypass browser permission prompts.
+- Treat the owned, serializable core/session command and completion types as a
+  frontend contract. Iced and `byakko-cli` are independent clients. Keep core
+  usable by a future static browser SPA via WebAssembly or a service adapter;
+  this does not authorize a web stack or server now. Keep web bootstrap and
+  transport out of the native executable; require no local Node.js server.
+  Browser HID still needs permission and may not expose every interface.
 - USB Nia87 stock firmware first. Do not flash firmware. Preserve the full
   configurator parity objective; QMK/VIA and 2.4 GHz are later capabilities.
 - Original implementation and UX. Do not copy vendor or Sharkfin source.
@@ -67,8 +64,8 @@ remains available to developers outside the public workflow.
 - This is a personal pre-alpha: no CI/CD requirement. Use local reproducible
   build/test commands. Ask the user about UX/behavior/design decisions and
   coordinate physical or Windows official-app capture work with them.
-- Finish functional parity or reach a genuine user-input blocker before visual
-  polish. The later visual direction is a white-tiger identity with no gradients,
+- Pursue functional parity when authorized, before visual polish. The later
+  visual direction is a white-tiger identity with no gradients,
   consistent spacing and alignment, a clear attention hierarchy, concise text,
   and useful SVG/Unicode symbols. Keep it legible to first-time GUI users while
   retaining fast expert workflows; do not imitate either reference app.
@@ -94,16 +91,15 @@ remains available to developers outside the public workflow.
   independent backend and should reuse the portable contract, not emulate
   Rongyuan reports. Follow `docs/protocol-family-boundary.md`; do not build a
   general report interpreter.
-- Implement in `crates/byakko-{core,devices,desktop}`. The legacy root package
-  may depend on these packages; the new desktop must not depend on the legacy
-  package. Board-specific Nia87 behavior and data belong under
+- Implement the product in `crates/byakko-{core,devices,desktop}`. The retired
+  egui root application must not be revived; the root package retains research
+  tools and may depend on the product crates. Desktop
+  must not depend on root. Board-specific Nia87 behavior belongs under
   `byakko-devices::nia87`; proven shared codecs and effects belong in their
-  exact Rongyuan protocol-family module. Root re-exports are compatibility
-  only. Do not maintain duplicate codecs.
+  exact Rongyuan protocol-family module. Do not maintain duplicate codecs.
 - Core has no GUI types, filesystem paths, HID handles, threads, clocks,
   networking, environment reads or platform conditionals. Supply inputs such
-  as timestamps explicitly. Transport-facing commands/results use owned,
-  serializable values; in-process channels are an adapter, not the contract.
+  as timestamps explicitly; in-process channels are an adapter, not the contract.
 - One owner per device baseline and draft. Derive dirty state and projections;
   do not synchronize multiple mutable representations of the same data.
 - Use algebraic data types and exhaustive matches for operation states and
@@ -130,6 +126,17 @@ remains available to developers outside the public workflow.
   A matching inventory entry does not authorize feature reports: Nia87 opens
   must still verify the board collection and report shape. Keep tablet/other
   input-report semantics separate from the keyboard configuration protocol.
+- Each desktop executor binds an immutable Nia87 HID target, including recovery
+  opens; never fall back to an arbitrary unique match after a target check
+  fails. Before automatic reconnect, preserve feature-specific conflict and
+  failed-write diagnostics and require a deliberate manual read. Reconnect
+  replaces the old executor and rejects stale completions while retaining edits.
+- Host screen-average and playback-music modes use a bounded selected-device
+  frame path and separate OS samplers. Start only from a verified editable
+  lighting baseline; Stop and close require verified restoration. A recognized
+  host mode left after a crash can be replaced only by explicit onboard-effect
+  selection through the guarded lighting transaction. Keep unknown replies
+  opaque; send no automatic reset on startup.
 - Recording is an exclusive local session activity. Feed explicit timestamps
   into core, reserve held-input releases, and finish before close or focus loss.
   Do not poll the device worker while only recording, or capture global input.
@@ -147,127 +154,54 @@ remains available to developers outside the public workflow.
 - Portable Nia87 keymap edits must use advertised typed actions. New opaque
   four-byte bindings are not programmable through the frontend contract;
   existing opaque values remain lossless in reads and native archives.
-- CLI file workflows may read once to establish the file's current baseline;
-  the serialized executor must not repeat that preflight. Keymap and settings
-  writes use the shared session path, a cached before-image backup, then one
-  complete post-write feature readback. Settings permits one scalar field per
-  apply. Ordinary global-lighting and picture setters report transport
-  acceptance after their known pacing; they do not imply device readback.
-  The macro snapshot-file workflow plans against one fresh slot revision and
-  stages through the correlated session import and guarded executor. Do not
-  confuse that backend snapshot with a portable macro document; changed
-  programs with stored repeat count zero remain unwritable pending playback
-  evidence.
-  The per-key color file workflow requires a complete advertised map and a
-  matching cached picture revision/context; it stages changed colors through
-  one session command. A real lighting selector change invalidates
-  selector-dependent picture data and requires a new picture read, which may
-  be requested as part of the selector activation flow. Do not claim a per-write fresh selector comparison.
-  A full Nia87 archive contains only the picture response under its captured
-  selector. Retained developer restore APIs reject a restore that changes both
-  the lighting selector and picture colors in one transaction; there is no
-  verified multi-selector backup or recovery representation yet. The public
-  pre-alpha Iced page is capture/export-only; see the scope clarification above.
-  Recent physical evidence covers rebuilt Iced bulk picture submissions and
-  visible steady-lighting choices; retain the earlier failed picture recovery
-  as an unresolved concern. Do not broaden that evidence into archive restore,
-  power-cycle persistence, or general recovery acceptance.
-  Keep CLI command parsing closed and typed; load only the file associated with
-  that command. Preserve offline archive comparison before device discovery
-  and use the shared bounded JSON reader for snapshot inputs.
-  Read-only CLI commands remain appropriate for unattended Linux smoke tests.
+- Settings permits one scalar field per apply. The macro snapshot-file workflow
+  plans against one fresh slot revision and stages through correlated session
+  import and the guarded executor. Its backend snapshot is not a portable macro
+  document; changed programs with stored repeat count zero remain unwritable.
+- Per-key color files require a complete advertised map and matching cached
+  picture revision/context; stage changed colors through one session command.
+  Do not claim a per-write fresh selector comparison. A full Nia87 archive has
+  only the picture response under its captured selector. Developer restore APIs
+  reject a transaction changing both the selector and picture colors until a
+  verified multi-selector backup/recovery representation exists.
+- Keep CLI parsing closed and typed, load only the command's associated file,
+  preserve offline archive comparison before discovery, and use the shared
+  bounded JSON reader for snapshot inputs. Read-only CLI commands are suitable
+  for unattended Linux smoke tests.
 
 ## Work sequence and evidence
 
-- The pure model, memory backend, Nia87 adapter, and Iced keymap, macro,
-  built-in global lighting, per-key picture, scalar settings and native archive
-  capture/export workflow now exercise the approved boundary. Archive
-  review/restore APIs remain for developer research but are absent from the
-  public pre-alpha UI. Iced
-  picture submissions have bounded physical acceptance evidence: repeated
-  full-image uploads and visible color changes succeeded. Successful ordinary
-  writes mean transport accepted, with cached backup and explicit later read
-  available. The earlier failed picture recovery discrepancy remains
-  unresolved. RGB storage is separate from selecting the global picture
-  effect. Settings stage one field per native transaction; Iced physical
-  write/restore acceptance remains open.
-  Native archive restore APIs retain typed recovery outcomes for developer
-  research, but archive restore is deferred from the public pre-alpha UI; the
-  earlier failed automatic recovery remains unresolved. Iced now has a read-only, bounded USB
-  discovery worker and an idle reconnect flow. Each desktop executor holds an
-  immutable Nia87 HID target, including recovery opens; never fall back to an
-  arbitrary unique match after a target check fails. A user-assisted physical
-  unplug/replug and fresh read were observed on 2026-09-23; Linux runtime
-  acceptance remains open. Before an automatic reconnect,
-  preserve feature-specific conflict or failed-write diagnostics and require
-  a deliberate manual read; keymap status alone does not cover other editors.
-  Iced screen-average lighting now
-  has a pure session lifecycle, a bounded frame path through the selected
-  device executor, and a separate OS sampler. It advertises Start only from a
-  verified editable lighting baseline and requires verified restoration on
-  Stop/close. This is headless-verified only: physical Iced streaming, focus
-  loss, disconnect behavior and Linux capture/runtime acceptance remain open.
-  Iced playback music now uses the same host lifecycle with 32-band OS audio
-  sampling. Its temporary brightness, option and color controls come from a
-  portable host-mode schema; the Nia87 adapter alone translates these into
-  firmware reports. This is headless verified, with physical and Linux runtime
-  acceptance still open. A recognized host mode left stored after a crash can
-  be replaced only by an explicit onboard-effect choice through the normal
-  guarded lighting transaction; unknown responses remain opaque, and startup
-  sends no automatic reset. Physical acceptance of this exit path is open.
-  2.4 GHz remains a later capability. Do not pursue
-  speculative UI polish or accessibility work before architecture review
-  checkpoints. The physical-coordinate key selector is now shared by keymap
-  and per-key color views; keep future selectors device-neutral and styled by
-  `UiStyle` tokens. On 2026-09-23 the user confirmed the rebuilt Iced Keys page
-  showed a TKL board and key selection worked after a physical USB replug.
-  General one- and two-modifier shortcuts now use an optional portable
-  descriptor capability and a staged Iced editor; memory-backend tests cover
-  selection, apply and readback, while Nia87 codec tests cover encoding.
-  Physical shortcut output remains unverified.
-  The user explicitly prioritized a persistent keyboard workspace and responsive
-  interaction on 2026-09-23. Keep the board visible while key, macro, lighting,
-  per-key color and settings controls change around it. Scalar settings are
-  presented together as toggles/sliders. Page navigation issues no reads.
-  Connection refresh loads scalar sections once; macro discovery is passive,
-  with a separate correlated ticket and foreground priority between slot reads
-  on the same serialized executor. Recording cancels the scan after the active
-  slot and remains local. The library shows configured/bound slots; Add chooses
-  the first unbound free slot. Selecting a macro reads its editable snapshot.
-  Explicit reads remain for failed or invalidated feature snapshots. The Windows
-  release containing this UX change has been opened for user validation. The
-  2026-09-25 camera capture shows the retained color-brush path painting F2
-  and F3 green in the reviewed release; this does not establish subsecond
-  batching. The official settings capture and current Iced session provide
-  reference/implementation evidence, not physical Iced settings write
-  acceptance.
-- Preserve existing protocol fixtures and research evidence. Reuse reviewed
-  codecs selectively; screen sampling is an OS effect separate from HID and
-  the root sampler module is a compatibility re-export.
-- Test invariants and failure boundaries: stale results, conflicts, rejected
-  edits, unchanged drafts on failure, exact encoding and verified readback.
-  Headless tests do not prove physical playback or Linux hardware behavior.
-- Use bounded GPT-6 Sol/Luna subagents for independent tasks with explicit ownership.
-  Review their changes. Avoid parallel edits to the same files.
+- Follow `docs/engineering-status.md` and feature acceptance notes for dated
+  evidence and open hardware gates. Preserve protocol fixtures, research and
+  captures. Headless tests do not prove physical output, playback or Linux
+  hardware behavior.
+- Reuse reviewed codecs selectively. Screen sampling is an OS effect separate
+  from HID.
+- Test stale results, conflicts, rejected edits, unchanged drafts on failure,
+  exact encoding and verified readback. Keep future physical-coordinate key
+  selectors device-neutral and styled by `UiStyle` tokens. Do not pursue
+  speculative UI polish or accessibility work before architecture checkpoints.
+- Use bounded GPT-6 Sol/Luna subagents for independent tasks with explicit
+  ownership. Review their changes; avoid parallel edits to the same files.
 - Commit after major completed steps. No PRs, issues, messages to others or
-  Firefox automation. Use Edge/Codex browser for research.
-  User-directed exception (2026-09-25): coordinate directly with the Windows
-  agent through `docs/linux-to-windows.md` and its remote replies. Commit and
-  push requests/status updates as documented there; preserve both checkouts'
-  work and never force-push. This communication authorization does not expand
-  authorization for hardware writes or fault experiments.
-- Coordinate physical interaction with the user when available. Keep hardware
-  writes backed up and bounded; retain the recorded recovery failure as an open
-  acceptance gate. Do not revive deferred work without authorization.
+  Firefox automation. Use Edge/Codex browser for research. User-directed
+  exception (2026-09-25): coordinate directly with the Windows agent through
+  `docs/linux-to-windows.md` and remote replies. Commit and push requests/status
+  as documented there; preserve both checkouts and never force-push. This does
+  not authorize hardware writes or fault experiments.
+- Coordinate physical interaction with the user. Keep hardware writes backed up
+  and bounded. The recorded recovery failure remains an open acceptance gate;
+  do not revive deferred work without authorization.
 
-## UX review boundary (2026-09-23)
+## Current work boundary (2026-09-26)
 
-The user has requested that work stop after the specifically flagged UX fixes.
-Do not resume parity work or further UX redesign without their next instruction.
-Lighting now sends user choices automatically through coalesced intent queues;
-normal use does not require Read/Apply. The native color picker replaces RGB
-sliders. Verified writes retain unrelated cached baselines. The discard prompt
-is modal.
-Macro creation can foreground-read an unbound candidate while discovery remains
-passive; unknown slots must never be assumed empty. Physical LED response and
-final rendered layout remain for the user's review when they return.
+The 2026-09-23 stop after flagged UX fixes remains the default boundary. The
+current request authorizes cleanup review and refactoring, documentation
+cleanup, a scoped macro fix on a separate branch, and regression verification.
+The current task also includes official-app macro write profiling, coordinated
+physical checks and restoration. This does not resume unrelated parity work or UX redesign.
+Keep the persistent keyboard workspace, automatic coalesced lighting
+choices, native color picker, modal discard prompt, passive macro discovery,
+and foreground read of an unbound candidate. Unknown macro slots must not be
+assumed empty. Physical LED response and final rendered layout remain for user
+review.

@@ -1,0 +1,56 @@
+files=146 functions=1609 parse_errors=0
+
+EXACT groups (minimum 80 tokens)
+
+NORMALIZED groups (minimum 120 tokens)
+tokens=151 members=2
+  crates/byakko-devices/src\nia87\device\apply_error.rs:164:lighting_recovery_distinguishes_verified_from_failed [test]
+  crates/byakko-devices/src\nia87\device\apply_error.rs:193:settings_recovery_is_typed_and_preserves_diagnostic [test]
+tokens=129 members=2
+  crates/byakko-core/src\session\lighting_ops.rs:112:session [test]
+  crates/byakko-core/src\session\settings_ops.rs:104:session [test]
+
+NEAR production normalized 5-token shingle Dice >= 0.70 (top 30)
+0.881 tokens=264/230 crates/byakko-devices/src\memory.rs:284:apply_macro [prod] <> crates/byakko-devices/src\memory.rs:329:apply_lighting [prod]
+0.829 tokens=264/247 crates/byakko-devices/src\memory.rs:284:apply_macro [prod] <> crates/byakko-devices/src\memory.rs:370:apply_picture [prod]
+0.817 tokens=249/273 crates/byakko-cli/src\picture.rs:11:plan_colors [prod] <> crates/byakko-cli/src\settings.rs:11:plan_settings [prod]
+0.806 tokens=141/148 crates/byakko-core/src\draft.rs:92:accept_apply [prod] <> crates/byakko-core/src\session.rs:865:accept_apply [prod]
+0.806 tokens=230/247 crates/byakko-devices/src\memory.rs:329:apply_lighting [prod] <> crates/byakko-devices/src\memory.rs:370:apply_picture [prod]
+0.787 tokens=137/130 crates/byakko-devices/src\nia87\configuration.rs:124:decode [prod] <> crates/byakko-devices/src\nia87\profiles.rs:65:decode [prod]
+0.773 tokens=150/130 crates/byakko-cli/src\macro_snapshot.rs:46:apply_macro [prod] <> crates/byakko-cli/src\picture.rs:46:apply_colors [prod]
+0.758 tokens=152/162 crates/byakko-core/src\draft.rs:64:accept_read [prod] <> crates/byakko-core/src\session.rs:840:accept_read [prod]
+0.751 tokens=130/121 crates/byakko-cli/src\picture.rs:46:apply_colors [prod] <> crates/byakko-cli/src\settings.rs:50:apply_settings [prod]
+0.723 tokens=132/153 crates/byakko-core/src\lighting.rs:173:validate_effect [prod] <> crates/byakko-core/src\picture.rs:85:validate_capabilities [prod]
+0.701 tokens=150/121 crates/byakko-cli/src\macro_snapshot.rs:46:apply_macro [prod] <> crates/byakko-cli/src\settings.rs:50:apply_settings [prod]
+
+NEAR test normalized 5-token shingle Dice >= 0.70 (top 30)
+0.990 tokens=155/143 crates/byakko-core/src\session\lighting_ops.rs:155:read_keymap [test] <> crates/byakko-core/src\session\settings_ops.rs:157:read_keymap [test]
+0.952 tokens=139/135 crates/byakko-devices/src\nia87\device\keymaps.rs:219:matrix_read_requests_each_page_once [test] <> crates/byakko-devices/src\nia87\device\picture.rs:183:picture_snapshot_reads_each_page_once_without_identity_queries [test]
+0.949 tokens=348/325 crates/byakko-devices/src\executor\tests.rs:76:foreground_read_runs_between_catalog_slots [test] <> crates/byakko-devices/src\executor\tests.rs:279:explicit_cancel_stops_catalog_after_current_slot [test]
+0.947 tokens=227/213 crates/byakko-desktop/src\tests\lighting_workflow.rs:284:failed_lighting_write_requires_manual_reconnect_and_keeps_diagnostic [test] <> crates/byakko-desktop/src\tests.rs:289:failed_write_does_not_restart_automatically_after_reappearance [test]
+0.946 tokens=142/133 crates/byakko-devices/src\nia87\device\tests.rs:6:reserved_slot_is_rejected_before_device_access [test] <> crates/byakko-devices/src\nia87\device\tests.rs:28:unmapped_keymap_slot_is_rejected_before_device_access [test]
+0.941 tokens=280/204 crates/byakko-desktop/src\tests\picture_workflow.rs:218:entering_colors_does_not_issue_reads_and_connection_preloads_once [test] <> crates/byakko-desktop/src\tests\settings_workflow.rs:115:settings_page_uses_explicit_read_and_keeps_verified_snapshot_across_navigation [test]
+0.921 tokens=168/145 crates/byakko-core/src\macros\recorder\tests.rs:123:initial_idle_is_omitted_and_fixed_terminal_is_stable [test] <> crates/byakko-core/src\macros\recorder\tests.rs:232:too_long_stop_clamps_held_interval [test]
+0.907 tokens=229/237 crates/byakko-core/src\session\lighting_ops.rs:178:successful_lighting_apply_preserves_last_observed_keymap [test] <> crates/byakko-core/src\session\settings_ops.rs:180:successful_setting_apply_preserves_last_observed_keymap [test]
+0.904 tokens=463/339 crates/byakko-devices/src\executor\tests.rs:138:keymap_read_and_apply_resume_unfinished_catalog [test] <> crates/byakko-devices/src\executor\tests.rs:221:failed_keymap_apply_stops_unfinished_catalog [test]
+0.898 tokens=269/204 crates/byakko-desktop/src\tests\lighting_workflow.rs:26:lighting_page_uses_explicit_read_and_keeps_cached_snapshot_on_revisit [test] <> crates/byakko-desktop/src\tests\settings_workflow.rs:115:settings_page_uses_explicit_read_and_keeps_verified_snapshot_across_navigation [test]
+0.889 tokens=267/329 crates/byakko-devices/src\nia87\archive_adapter.rs:172:fixture [test] <> crates/byakko-devices/src\nia87\configuration_plan.rs:192:fixture [test]
+0.888 tokens=414/371 crates/byakko-desktop/src\tests\lighting_workflow.rs:205:close_waits_for_lighting_and_failed_write_retains_draft_and_diagnostic [test] <> crates/byakko-desktop/src\tests\settings_workflow.rs:182:failed_setting_apply_retains_draft_and_blocks_close [test]
+0.884 tokens=348/463 crates/byakko-devices/src\executor\tests.rs:76:foreground_read_runs_between_catalog_slots [test] <> crates/byakko-devices/src\executor\tests.rs:138:keymap_read_and_apply_resume_unfinished_catalog [test]
+0.881 tokens=269/280 crates/byakko-desktop/src\tests\lighting_workflow.rs:26:lighting_page_uses_explicit_read_and_keeps_cached_snapshot_on_revisit [test] <> crates/byakko-desktop/src\tests\picture_workflow.rs:218:entering_colors_does_not_issue_reads_and_connection_preloads_once [test]
+0.877 tokens=182/145 crates/byakko-desktop/src\tests\lighting_workflow.rs:172:live_onboard_choices_apply_and_queue_during_the_first_write [test] <> crates/byakko-desktop/src\tests\lighting_workflow.rs:189:live_effect_click_survives_an_unrelated_read [test]
+0.872 tokens=225/170 crates/byakko-devices/src\executor\tests.rs:884:old_generation_macro_apply_is_rejected_before_device_access [test] <> crates/byakko-devices/src\executor\tests.rs:929:panicked_macro_write_returns_correlated_unverified_completion [test]
+0.860 tokens=198/224 crates/byakko-core/src\macros\recorder\tests.rs:94:duplicate_edges_do_not_change_draft_or_clock [test] <> crates/byakko-core/src\macros\recorder\tests.rs:203:capacity_rejection_is_atomic_and_stop_can_fill_exact_limit [test]
+0.850 tokens=339/325 crates/byakko-devices/src\executor\tests.rs:221:failed_keymap_apply_stops_unfinished_catalog [test] <> crates/byakko-devices/src\executor\tests.rs:279:explicit_cancel_stops_catalog_after_current_slot [test]
+0.849 tokens=297/413 crates/byakko-cli/src\lighting.rs:194:malformed_stale_and_opaque_files_do_not_stage [test] <> crates/byakko-cli/src\settings.rs:200:rejects_stale_multi_opaque_and_malformed_files_without_staging [test]
+0.847 tokens=157/149 crates/byakko-desktop/src\color_picker.rs:365:drag_publishes_only_on_finish_and_never_twice [test] <> crates/byakko-desktop/src\color_picker.rs:383:selecting_another_key_discards_an_active_drag [test]
+0.836 tokens=463/325 crates/byakko-devices/src\executor\tests.rs:138:keymap_read_and_apply_resume_unfinished_catalog [test] <> crates/byakko-devices/src\executor\tests.rs:279:explicit_cancel_stops_catalog_after_current_slot [test]
+0.834 tokens=179/151 crates/byakko-devices/src\nia87\device\apply_error.rs:135:macro_recovery_keeps_diagnostic_and_typed_outcome [test] <> crates/byakko-devices/src\nia87\device\apply_error.rs:164:lighting_recovery_distinguishes_verified_from_failed [test]
+0.834 tokens=179/151 crates/byakko-devices/src\nia87\device\apply_error.rs:135:macro_recovery_keeps_diagnostic_and_typed_outcome [test] <> crates/byakko-devices/src\nia87\device\apply_error.rs:193:settings_recovery_is_typed_and_preserves_diagnostic [test]
+0.832 tokens=159/179 crates/byakko-devices/src\research_fault.rs:103:before_delivery_is_single_shot_and_opcode_specific [test] <> crates/byakko-devices/src\research_fault.rs:127:after_delivery_only_fires_on_success [test]
+0.825 tokens=198/203 crates/byakko-desktop/src\tests\macro_workflow.rs:250:unchanged_slot_read_preserves_unsubmitted_event_fields [test] <> crates/byakko-desktop/src\tests\macro_workflow.rs:490:editing_repeat_count_preserves_an_unsubmitted_event_edit [test]
+0.824 tokens=213/235 crates/byakko-desktop/src\tests.rs:289:failed_write_does_not_restart_automatically_after_reappearance [test] <> crates/byakko-desktop/src\tests.rs:354:close_waits_for_apply_and_keeps_failure_and_draft_visible [test]
+0.824 tokens=220/173 crates/byakko-desktop/src\tests\picture_workflow.rs:92:live_color_edits_coalesce_while_a_write_is_in_flight [test] <> crates/byakko-desktop/src\tests\picture_workflow.rs:145:live_channel_edit_submits_immediately_and_replaces_only_its_channel [test]
+0.820 tokens=180/211 crates/byakko-devices/src\memory.rs:737:stale_macro_snapshot_and_invalid_program_leave_all_slots_unchanged [test] <> crates/byakko-devices/src\memory.rs:760:opaque_macro_is_read_only_and_other_slot_remains_unchanged [test]
+0.812 tokens=164/170 crates/byakko-devices/src\executor\tests.rs:483:panicked_write_returns_correlated_unverified_completion [test] <> crates/byakko-devices/src\executor\tests.rs:929:panicked_macro_write_returns_correlated_unverified_completion [test]
+0.810 tokens=224/247 crates/byakko-devices/src\executor\tests.rs:653:reconnect_rejects_queued_old_apply_without_writing [test] <> crates/byakko-devices/src\executor\tests.rs:696:full_queue_returns_correlated_rejection_to_core [test]

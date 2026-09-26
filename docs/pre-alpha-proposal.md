@@ -12,8 +12,9 @@ command/result contracts must remain independent of Iced, OS transport and
 in-process channels. A future frontend may run the core in WebAssembly or
 expose the native executor through a separately secured service adapter.
 No server, web UI or browser HID support is being implemented in this slice.
-This replaces incremental feature expansion as the immediate priority; it does
-not reduce the full configurator parity objective.
+This is the approved architecture, not a current work authorization. The
+current narrow work boundary is in [AGENTS.md](../AGENTS.md); implementation
+status and acceptance gates are in [engineering status](engineering-status.md).
 
 ## Current decisions
 
@@ -109,8 +110,11 @@ so replies from an old connection cannot change a new session. Long-lived model
 data is not cloned on every view pass; immutable requests clone only what must
 cross the worker boundary. Rust ownership is compatible with a functional core.
 
-The execution sequence is: validate/plan -> verify expected device state ->
-durable backup -> ordered writes -> readback -> typed completion. Failed writes
+The following was the initial execution sketch. The current one-pass read
+policy in [AGENTS.md](../AGENTS.md) supersedes its pre-write fresh-state check
+and defines feature-specific completion semantics: validate/plan -> cached
+before-image backup -> ordered writes -> required feature readback or transport
+acceptance -> typed completion. Failed writes
 report whether restoration was verified, failed or not attempted. No parsing
 display strings to decide success. Cancellation/disconnection cannot relabel an
 uncertain write as saved. The unresolved hardware recovery failure remains an
@@ -131,7 +135,8 @@ codecs, transport knowledge and invariant tests selectively. Do not port screen
 controllers wholesale or silently discard unknown device bytes. Keep the deferred
 accessibility patch aside.
 
-After human approval:
+The following migration sequence was approved and implemented; it is historical
+context, not an instruction to resume feature expansion:
 
 1. Establish core state/command/result types and the memory backend. Prove draft
    ownership, stale completion rejection, conflicts and failure outcomes without
