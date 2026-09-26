@@ -5,6 +5,16 @@ fn valid_choices(choices: &[Choice]) -> bool {
     ids.len() == choices.len() && !ids.contains("")
 }
 
+pub fn validate_document(document: &Document) -> Result<(), String> {
+    if document.format_version != 2
+        || document.backend_id.is_empty()
+        || document.source_slot.is_empty()
+    {
+        return Err("Unsupported macro document version or empty backend/slot".into());
+    }
+    Ok(())
+}
+
 pub fn validate_capabilities(capabilities: &Capabilities) -> Result<(), String> {
     if capabilities.backend_id.is_empty()
         || capabilities.slots.is_empty()

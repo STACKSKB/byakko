@@ -8,9 +8,10 @@ use crate::{
         Editor, Status, keymap::KeymapRules, lighting::LightingRules, macros::MacroRules,
         picture::PictureRules, settings::SettingsRules,
     },
+    library::archive::{Capture, CaptureProblem},
     library::macros::Library,
     model::keymap::{Change, Descriptor},
-    model::{lighting, picture, settings},
+    model::{archive::ArchiveCapabilities, lighting, picture, settings},
     recorder::macros::{DelayPolicy, Recorder, StopOutcome, Transition},
     workflow::Problem as WorkflowProblem,
     workflow::macro_assignment::{self, Assignment, Plan},
@@ -36,6 +37,8 @@ pub enum Outcome {
     PictureSaved,
     SettingsLoaded,
     SettingsSaved,
+    ArchiveCaptured,
+    ArchiveCaptureFailed(CaptureProblem),
     PicturePreparationFailed {
         lighting_applied: bool,
         problem: WorkflowProblem,
@@ -63,6 +66,7 @@ enum Feature {
     Lighting,
     Picture,
     Settings,
+    Archive,
 }
 struct Ticket {
     generation: u64,
@@ -77,6 +81,7 @@ pub struct Session {
     lighting: Option<Editor<LightingRules>>,
     picture: Option<Editor<PictureRules>>,
     settings: Option<Editor<SettingsRules>>,
+    archive: Option<Capture>,
     assignment: Option<Assignment>,
     picture_preparation: Option<Preparation>,
     connection: Connection,
@@ -94,6 +99,7 @@ impl Session {
             lighting: None,
             picture: None,
             settings: None,
+            archive: None,
             assignment: None,
             picture_preparation: None,
             connection: Connection::Disconnected,
@@ -126,6 +132,46 @@ impl Session {
     }
     pub fn descriptor(&self) -> &Descriptor {
         self.keymap.rules().descriptor()
+    }
+    pub fn with_archive(mut self, capabilities: ArchiveCapabilities) -> Result<Self, String> {
+        if capabilities.backend_id != self.descriptor().backend_id {
+            return Err("Archive capabilities belong to another backend".into());
+        }
+        if self.archive.is_some() {
+            return Err("Archive capture is already configured".into());
+        }
+        self.archive = Some(Capture::new(capabilities)?);
+        Ok(self)
+    }
+    pub fn archive(&self) -> Option<&Capture> {
+        self.archive.as_ref()
+    }
+    pub fn capture_archive(&mut self) -> Result<Command, String> {
+        self.archive
+            .as_ref()
+            .ok_or("Archive capture is not supported")?;
+        self.begin(
+            Feature::Archive,
+            Direction::Read,
+            CommandPayload::Archive(FeatureCommand::Read(())),
+        )
+    }
+    pub fn stage_macro_document(
+        &mut self,
+        document: &crate::model::macros::Document,
+    ) -> Result<crate::model::macros::DocumentMetadata, String> {
+        self.idle()?;
+        self.macro_feature()?.import_document(document)
+    }
+    pub fn export_macro_document(
+        &self,
+        name: String,
+        binding: Option<String>,
+    ) -> Result<crate::model::macros::Document, String> {
+        self.idle()?;
+        self.macros()
+            .ok_or("Macros are not supported")?
+            .export_document(name, binding)
     }
     pub fn keymap(&self) -> &Editor<KeymapRules> {
         &self.keymap
@@ -232,6 +278,7 @@ impl Session {
                 recovery: Recovery::Unverified,
             };
             match &ticket.feature {
+                Feature::Archive => {}
                 Feature::Keymap => self.keymap.accept_apply(Err(failure)),
                 Feature::Lighting => {
                     if let Some(editor) = &mut self.lighting {
@@ -256,6 +303,14 @@ impl Session {
             }
         }
         self.connection = Connection::Disconnected;
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|ticket| ticket.feature == Feature::Archive)
+            && let Some(capture) = &mut self.archive
+        {
+            let _ = capture.accept(Err("Connection lost during archive capture".into()));
+        }
         self.pending = None;
         self.assignment = None;
         self.picture_preparation = None;
@@ -701,6 +756,7 @@ impl Session {
             Err(reason) => {
                 if matches!(direction, Direction::Save) {
                     match &feature {
+                        Feature::Archive => {}
                         Feature::Keymap => self.keymap.cancel_apply(),
                         Feature::Lighting => {
                             if let Some(editor) = &mut self.lighting {
@@ -752,6 +808,16 @@ impl Session {
             return Outcome::Ignored;
         }
         let outcome = match (&ticket.feature, ticket.direction, completion.payload) {
+            (
+                Feature::Archive,
+                Direction::Read,
+                CompletionPayload::Archive(FeatureResult::Read(result)),
+            ) => self
+                .archive
+                .as_mut()
+                .expect("archive ticket owns capture")
+                .accept(result)
+                .map_or_else(Outcome::ArchiveCaptureFailed, |()| Outcome::ArchiveCaptured),
             (
                 Feature::Keymap,
                 Direction::Read,

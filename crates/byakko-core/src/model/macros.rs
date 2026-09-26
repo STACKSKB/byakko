@@ -22,6 +22,13 @@ pub struct Document {
     pub program: Program,
 }
 
+/// Informational labels from an imported document; never a write target or binding action.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DocumentMetadata {
+    pub name: String,
+    pub binding: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Event {
     pub action: Action,

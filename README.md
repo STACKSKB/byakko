@@ -11,7 +11,8 @@ Iced and an independent CLI. Macro discovery, selected-slot editing, save-and-as
 and CLI snapshot workflows also use the replacement core. Window-local macro
 recording appends to the shared draft and releases held inputs on stop, focus loss
 or close. Lighting, per-key painting and scalar settings use the same editors,
-with automatic coalesced saves and native color pickers. Other frontend workflows are being rebuilt; this is
+with automatic coalesced saves and native color pickers. Portable macro files,
+local names and diagnostic archive capture/export are restored. Other frontend workflows are being rebuilt; this is
 not a feature-complete release. See [plan.md](plan.md) for current scope and
 [rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 
@@ -33,8 +34,8 @@ The keymap view uses device-supplied physical geometry and action choices. Edits
 stay in the core editor until Save assignments. Save uses the cached before-image
 and the existing native backup/write/readback transaction. Closing waits for a
 pending save and asks before discarding edits. Automatic discovery/reconnect,
-the richer assignment catalog, custom shortcut form, host lighting and diagnostic
-capture are pending frontend milestones. Lighting/picture saves report transport
+the richer assignment catalog, custom shortcut form and host lighting
+are pending frontend milestones. Lighting/picture saves report transport
 acceptance after established pacing; settings saves include one readback.
 
 The independent CLI uses the same session/executor contract:
@@ -55,14 +56,18 @@ backend snapshot. Retain its revision when editing for `plan-macro FILE` or
 assignment workflow. `read-lighting`, `read-picture` and `read-settings` emit
 snapshots for their corresponding `plan-FEATURE FILE` / `apply-FEATURE FILE`
 commands. Retain the revision and selector context; a settings file changes one
-scalar field. Other previous CLI commands are not exposed on this checkpoint.
+scalar field. `capture-archive NEW_FILE` captures a diagnostic archive;
+`compare-archives BEFORE TARGET` compares CLI archives offline, before discovery.
+Other previous CLI commands are not exposed on this checkpoint.
 Start with the
 [read-only Linux sequence](docs/linux-handoff.md) before any Linux write test.
 Backups use the [normal-user data directory](docs/local-storage.md).
 
 Native device APIs, research tools, codecs and fixtures are retained. Public
-archive capture/export will return in its planned milestone; archive restore
-remains a developer operation. Existing recovery failures are not fixed by this
+archive capture/export is available; archive restore remains a developer
+operation. Desktop exports retain the native archive bytes; CLI exports retain
+their existing `NativeArchive` JSON envelope for offline CLI comparison.
+Existing recovery failures are not fixed by this
 rewrite. The [support and recovery notes](docs/pre-alpha-support.md) describe
 the previous executable and physical evidence, not acceptance of this rewrite.
 

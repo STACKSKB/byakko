@@ -5,5 +5,6 @@ pub fn session() -> Result<Session, String> {
         .with_macros(super::macro_adapter::capabilities())?
         .with_lighting(super::lighting_adapter::capabilities())?
         .with_picture(super::picture_adapter::capabilities())?
-        .with_settings(super::settings_adapter::capabilities())
+        .with_settings(super::settings_adapter::capabilities())?
+        .with_archive(super::archive_adapter::capabilities())
 }

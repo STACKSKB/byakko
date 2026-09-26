@@ -71,7 +71,7 @@ it is not evidence that new frontend paths work.
 | core/model | Owned feature values and serializable snapshots |
 | core/editor | Shared lifecycle and feature implementations |
 | core/validation | Feature constraints and snapshot validation |
-| core/library | Occupancy knowledge and discovery |
+| core/library | Occupancy knowledge, discovery and retained diagnostic captures |
 | core/recorder | Explicitly timed local recording |
 | core/projection | Pure capability-to-control projections |
 | core/workflow | Genuine multi-feature sequences such as save-and-assign |
@@ -79,7 +79,7 @@ it is not evidence that new frontend paths work.
 | devices/hid, rongyuan, nia87 | OS collections, family codecs, board mapping, transactions |
 | devices/storage and sampling | Durable files and OS samplers |
 | desktop/app | Iced lifecycle, routing and effect delivery |
-| desktop/controller | Local recording coordination and debounce deadlines |
+| desktop/controller | Local recording, file job coordination and debounce deadlines |
 | desktop/input | Window-local input translated into portable actions |
 | desktop/form | Unsubmitted input, parsing and user intents |
 | desktop/view | Feature rendering over forms and core state |
@@ -109,8 +109,9 @@ to match this table. Public APIs expose concepts, not every internal helper.
   constrain the session to routing/exclusivity and explicit workflows.
 - [x] Rebuild coalesced lighting, picture and scalar settings with owned intent
   and submission state, real selector dependencies and one-pass read policy.
-- [ ] Restore discovery, files, local labels and diagnostic capture through the
-  new architecture. Developer archive restore remains outside public UI.
+- [x] Restore files, local labels and diagnostic capture through the new
+  architecture. Developer archive restore remains outside public UI.
+- [ ] Restore automatic discovery and reconnect behavior.
 - [ ] Restore host lighting lifecycle, OS samplers and verified restoration.
 - [ ] Remove remaining obsolete native forwarding/error-erasure paths, retaining
   fixtures and useful research commands. Narrow APIs around demonstrated callers.
@@ -229,9 +230,28 @@ bytes and context after a transport-accepted save do not falsely conflict with a
 newer draft. The application renderer lives under `view/application.rs`; the app
 owns event/effect delivery and lends render inputs without another mutable model.
 
+The file and capture checkpoint restores portable macro import/export, local
+macro names and explicit diagnostic capture/export. Core stages imported
+programs through the selected shared editor and retains captures separately from
+editable caches. File storage lives in `devices/storage/`; the desktop file
+controller owns one background job and returns correlated completions to the app.
+Closing waits for those completions, and failures reopen the window. Successful
+exports remain successful if the device disconnects; imports still require the
+same connection and selected slot. Existing files are never overwritten.
+
+Archive capture performs one sweep without reloading feature editors or
+restarting discovery. CLI comparison stays offline. Existing file formats are
+preserved: desktop writes native archive bytes, CLI writes its JSON envelope.
+Public desktop restore remains absent. Macro names and document binding metadata
+are local presentation data; imports never select or assign a source slot.
+
+Workspace tests (78 core, 40 desktop, 215 devices plus external integration,
+seven CLI tests), strict all-target/all-feature Clippy, formatting and locked
+development builds pass. CLI demo capture, offline self-comparison and existing
+destination rejection also pass. No hardware writes or rendered acceptance.
+
 Temporary gaps: automatic discovery/reconnect, the full assignment catalog and
-custom shortcut form, macro interaction review, host streaming, desktop local
-labels/file workflows and diagnostic capture.
+custom shortcut form, macro interaction review and host streaming.
 The native APIs, codecs, OS samplers, direct transaction tests and research tools
 remain. Passive catalog priority is restored; host scheduling returns with its
 feature milestone.

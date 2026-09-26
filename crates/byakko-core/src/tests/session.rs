@@ -218,6 +218,8 @@ fn conflict_retains_edits_and_save_accepts_full_readback() {
     );
     assert!(!s.keymap().dirty());
 }
+#[path = "session_archive.rs"]
+mod archive;
 #[path = "session_features.rs"]
 mod features;
 #[path = "session_macros.rs"]

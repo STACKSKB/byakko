@@ -96,6 +96,115 @@ fn successful_macro_save(command: &Command) -> macros::Snapshot {
         ..expected.clone()
     }
 }
+
+fn document() -> macros::Document {
+    macros::Document {
+        format_version: 2,
+        backend_id: "another-backend".into(),
+        source_slot: "unrelated-source-slot".into(),
+        name: "Greeting".into(),
+        binding: Some("suggested-source-binding".into()),
+        program: macros::Program {
+            repeat_count: 2,
+            events: vec![macros::Event {
+                action: macros::Action::Key {
+                    usage: 5,
+                    pressed: true,
+                },
+                delay_ms: 10,
+            }],
+        },
+    }
+}
+#[test]
+fn portable_document_stages_selected_slot_without_using_source_metadata_as_targets() {
+    let mut s = loaded_macro();
+    let baseline = s.macros().unwrap().baseline().cloned();
+    let original_keymap = s.keymap().draft().cloned();
+    let imported = document();
+    let metadata = s.stage_macro_document(&imported).unwrap();
+    assert_eq!(
+        metadata,
+        macros::DocumentMetadata {
+            name: imported.name.clone(),
+            binding: imported.binding.clone()
+        }
+    );
+    assert_eq!(s.macros().unwrap().slot(), "one");
+    assert_eq!(s.macros().unwrap().baseline(), baseline.as_ref());
+    assert_eq!(s.macros().unwrap().draft(), Some(&imported.program));
+    assert_eq!(s.keymap().draft(), original_keymap.as_ref());
+    assert!(s.macros().unwrap().dirty());
+    assert!(!s.busy());
+    let exported = s
+        .export_macro_document(metadata.name, metadata.binding)
+        .unwrap();
+    assert_eq!(exported.format_version, 2);
+    assert_eq!(exported.backend_id, "test");
+    assert_eq!(exported.source_slot, "one");
+    assert_eq!(exported.program, imported.program);
+    let command = s.save_macro().unwrap();
+    assert!(s.stage_macro_document(&document()).is_err());
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            "one",
+            FeatureResult::Apply(Ok(successful_macro_save(&command)))
+        )),
+        Outcome::MacroSaved
+    );
+}
+#[test]
+fn portable_document_rejection_is_atomic_and_zero_is_exportable_but_not_staged() {
+    let mut s = loaded_macro();
+    let original = s.macros().unwrap().draft().cloned();
+    let mut invalid = document();
+    invalid.format_version = 1;
+    assert!(s.stage_macro_document(&invalid).is_err());
+    invalid = document();
+    invalid.backend_id.clear();
+    assert!(s.stage_macro_document(&invalid).is_err());
+    invalid = document();
+    invalid.source_slot.clear();
+    assert!(s.stage_macro_document(&invalid).is_err());
+    invalid = document();
+    invalid.program.repeat_count = 0;
+    assert!(s.stage_macro_document(&invalid).is_err());
+    invalid = document();
+    invalid.program.events[0].action = macros::Action::Backend {
+        backend_id: "another-backend".into(),
+        id: "unknown".into(),
+        pressed: true,
+    };
+    assert!(s.stage_macro_document(&invalid).is_err());
+    assert_eq!(s.macros().unwrap().draft(), original.as_ref());
+    s.revert_macro().unwrap();
+    let mut raw_zero = snapshot("one", false);
+    let macros::Content::Editable(program) = &mut raw_zero.content else {
+        unreachable!()
+    };
+    program.repeat_count = 0;
+    let read = s.read_macro().unwrap();
+    assert_eq!(
+        s.accept(completion(&read, "one", FeatureResult::Read(Ok(raw_zero)))),
+        Outcome::MacroLoaded
+    );
+    let exported = s.export_macro_document("Legacy".into(), None).unwrap();
+    assert_eq!(exported.program.repeat_count, 0);
+    assert!(s.stage_macro_document(&exported).is_err());
+    assert!(!s.macros().unwrap().dirty());
+    s.select_macro("opaque").unwrap();
+    let read = s.read_macro().unwrap();
+    let opaque = macros::Snapshot {
+        content: macros::Content::Opaque {
+            reason: "preserved".into(),
+        },
+        ..snapshot("opaque", false)
+    };
+    s.accept(completion(&read, "opaque", FeatureResult::Read(Ok(opaque))));
+    assert!(s.stage_macro_document(&document()).is_err());
+    assert!(s.export_macro_document("Opaque".into(), None).is_err());
+}
 fn successful_keymap_save(command: &Command) -> State {
     let CommandPayload::Keymap(FeatureCommand::Apply { expected, desired }) = &command.payload
     else {
@@ -584,6 +693,12 @@ fn recording_is_exclusive_local_activity_and_stale_results_do_not_edit_it() {
                 kind: crate::model::settings::Kind::Toggle,
             }],
         })
+        .unwrap()
+        .with_archive(crate::model::archive::ArchiveCapabilities {
+            backend_id: "test".into(),
+            format_id: "native".into(),
+            max_bytes: 4,
+        })
         .unwrap();
     let read = s.read_macro().unwrap();
     assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
@@ -606,6 +721,8 @@ fn recording_is_exclusive_local_activity_and_stale_results_do_not_edit_it() {
     assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
     assert!(s.read().is_err());
     assert!(s.read_macro().is_err());
+    assert!(s.capture_archive().is_err());
+    assert!(s.export_macro_document("Name".into(), None).is_err());
     assert!(s.read_lighting().is_err());
     assert!(s.read_picture().is_err());
     assert!(s.read_settings().is_err());
@@ -644,6 +761,7 @@ fn recording_is_exclusive_local_activity_and_stale_results_do_not_edit_it() {
     assert!(s.revert_macro().is_err());
     assert!(s.select_macro("two").is_err());
     assert!(s.stage_macro_snapshot(&snapshot("one", true)).is_err());
+    assert!(s.stage_macro_document(&document()).is_err());
     assert!(s.save_and_assign_macro("base", "a", "play").is_err());
     assert!(s.keymap().submitted().is_none());
     assert!(s.macros().unwrap().submitted().is_none());

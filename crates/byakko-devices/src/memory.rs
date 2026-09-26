@@ -148,6 +148,9 @@ impl MemoryDevice {
         if let Some(capabilities) = self.settings_capabilities() {
             session = session.with_settings(capabilities.clone())?;
         }
+        if let Some(storage) = &self.archive {
+            session = session.with_archive(storage.capabilities.clone())?;
+        }
         Ok(session)
     }
     pub fn with_lighting(
@@ -510,12 +513,29 @@ impl Device for MemoryDevice {
     }
 
     fn capture_archive(&mut self) -> Result<archive::NativeArchive, String> {
-        self.archive
+        let stored = self
+            .archive
             .as_ref()
-            .map(|stored| stored.snapshot.clone())
-            .ok_or_else(|| "Native archive operations are unsupported by this device".into())
+            .ok_or("Native archive operations are unsupported by this device")?;
+        if stored.capabilities.format_id == "memory-demo-v1" {
+            let bytes=serde_json::to_vec(&serde_json::json!({
+                "keymap": self.state,
+                "macros": self.macros.as_ref().map(|storage| storage.slots.iter().map(|(id,slot)| (id,&slot.snapshot)).collect::<BTreeMap<_,_>>()),
+                "lighting": self.lighting.as_ref().map(|storage| &storage.snapshot),
+                "picture": self.picture.as_ref().map(|storage| &storage.snapshot),
+                "settings": self.settings.as_ref().map(|storage| &storage.snapshot),
+            })).map_err(|error|error.to_string())?;
+            let capture = archive::NativeArchive {
+                bytes,
+                backend_id: stored.capabilities.backend_id.clone(),
+                format_id: stored.capabilities.format_id.clone(),
+            };
+            validation::archive::validate_archive(&stored.capabilities, &capture)?;
+            Ok(capture)
+        } else {
+            Ok(stored.snapshot.clone())
+        }
     }
-
     fn review_archive(
         &mut self,
         target: &archive::NativeArchive,
@@ -790,7 +810,19 @@ pub fn demo() -> Result<MemoryDevice, String> {
         .with_macros(capabilities, snapshots)?
         .with_lighting(lighting_capabilities, lighting_snapshot)?
         .with_picture(picture_capabilities, picture_snapshot)?
-        .with_settings(settings_capabilities, settings_snapshot)
+        .with_settings(settings_capabilities, settings_snapshot)?
+        .with_archive(
+            archive::ArchiveCapabilities {
+                backend_id: "memory".into(),
+                format_id: "memory-demo-v1".into(),
+                max_bytes: 1024 * 1024,
+            },
+            archive::NativeArchive {
+                backend_id: "memory".into(),
+                format_id: "memory-demo-v1".into(),
+                bytes: b"{}".to_vec(),
+            },
+        )
 }
 
 #[cfg(test)]

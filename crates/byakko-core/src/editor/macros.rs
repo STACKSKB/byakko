@@ -87,6 +87,42 @@ impl Feature for MacroRules {
     }
 }
 impl Editor<MacroRules> {
+    pub fn import_document(&mut self, document: &Document) -> Result<DocumentMetadata, String> {
+        self.ready()?;
+        crate::validation::macros::validate_document(document)?;
+        validate_program(self.capabilities(), &document.program)?;
+        if self.draft().is_none() {
+            return Err("Opaque macro slots cannot be converted".into());
+        }
+        if !self
+            .capabilities()
+            .editable_repeat_counts
+            .contains(&document.program.repeat_count)
+        {
+            return Err("Macro document count is outside editor limits".into());
+        }
+        self.draft = Some(document.program.clone());
+        Ok(DocumentMetadata {
+            name: document.name.clone(),
+            binding: document.binding.clone(),
+        })
+    }
+    pub fn export_document(
+        &self,
+        name: String,
+        binding: Option<String>,
+    ) -> Result<Document, String> {
+        let program = self.draft().ok_or("No editable macro to export")?;
+        validate_program(self.capabilities(), program)?;
+        Ok(Document {
+            format_version: 2,
+            backend_id: self.capabilities().backend_id.clone(),
+            source_slot: self.slot().into(),
+            name,
+            binding,
+            program: program.clone(),
+        })
+    }
     pub(crate) fn begin_recording(
         &self,
         policy: crate::recorder::macros::DelayPolicy,

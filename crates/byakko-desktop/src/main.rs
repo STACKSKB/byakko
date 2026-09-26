@@ -5,11 +5,13 @@ use byakko_devices::{
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = byakko_desktop::config::Config::from_environment()?;
+    let mut config = byakko_desktop::config::Config::from_environment()?;
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     match arguments.as_slice() {
         [] => {
-            let backups = byakko_devices::storage::user_data_dir()?.join("backups");
+            let data = byakko_devices::storage::user_data_dir()?;
+            let backups = data.join("backups");
+            config.data_directory = Some(data);
             byakko_desktop::run(nia87::application::session()?, config, move |expected| {
                 let candidate = match nia87::device::availability() {
                     nia87::device::Availability::Available(candidate) => candidate,
