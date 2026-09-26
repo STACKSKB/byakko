@@ -2,6 +2,8 @@
 use crate::{
     config::Config,
     controller::autosave::{Autosave, Feature as AutoFeature},
+    controller::connection::{Attach, Connection as Link, RefreshStep},
+    controller::discovery::Discovery,
     controller::files::{Accepted as FileAccepted, Files},
     controller::recording::Controller as Recording,
     form::{
@@ -17,14 +19,11 @@ use byakko_core::{
     session::{Connection, Outcome, Session},
     workflow::Problem as WorkflowProblem,
 };
-use byakko_devices::Executor;
 use iced::{Element, Subscription, Task, window};
 use std::{
     sync::mpsc::TryRecvError,
     time::{Duration, Instant},
 };
-
-type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
 
 struct App {
     session: Session,
@@ -39,9 +38,7 @@ struct App {
     assignment_binding: Option<(String, String)>,
     config: Config,
     page: Page,
-    worker: Option<Executor>,
-    selected_device: Option<String>,
-    attach: Box<Attach>,
+    link: Link,
     closing: Closing,
     notice: String,
     style: UiStyle,
@@ -50,9 +47,11 @@ struct App {
 pub fn run(
     session: Session,
     config: Config,
-    attach: impl Fn(Option<&str>) -> Result<(String, Executor), String> + 'static,
+    discovery: Discovery,
+    attach: impl Fn(Option<&str>) -> Result<(String, byakko_devices::Executor), String> + 'static,
 ) -> iced::Result {
     let mut app = App::new(session, Box::new(attach));
+    app.link.monitor(discovery);
     app.files = Files::new(&app.session, config.data_directory.clone());
     app.config = config;
     let initial = std::cell::RefCell::new(Some(app));
@@ -63,7 +62,7 @@ pub fn run(
                     .borrow_mut()
                     .take()
                     .expect("one window owns the session"),
-                Task::done(Message::Read),
+                Task::done(Message::Scan),
             )
         },
         App::update,
@@ -92,9 +91,7 @@ impl App {
             config: Config::default(),
             page: Page::Keys,
             session,
-            worker: None,
-            selected_device: None,
-            attach,
+            link: Link::new(attach),
             closing: Closing::Open,
             notice: String::new(),
             style: UiStyle::DEFAULT,
@@ -149,7 +146,7 @@ impl App {
                 let was_recording = self.session.recording();
                 let result =
                     self.recording
-                        .update(message, &mut self.session, self.worker.as_ref());
+                        .update(message, &mut self.session, self.link.executor());
                 self.recording_notice(result, was_recording);
             }
             Message::RecordingInput(event, at) => {
@@ -178,20 +175,10 @@ impl App {
                 }
             }
             Message::Read if !self.session.busy() => {
-                let connected = match self.connect() {
-                    Ok(connected) => connected,
-                    Err(reason) => {
-                        self.notice = reason;
-                        return Task::none();
-                    }
-                };
-                let request = self.session.read();
-                let read = self.submit(request);
-                if connected && self.session.macros().is_some() {
-                    let catalog = self.session.request_macro_catalog();
-                    return Task::batch([read, self.submit(catalog)]);
-                }
-                return read;
+                self.autosave.clear();
+                self.assignment_binding = None;
+                let request = self.link.read(&mut self.session);
+                return self.submit(request);
             }
             Message::Save => {
                 let request = self.session.save();
@@ -199,6 +186,7 @@ impl App {
             }
             Message::Revert => self.notice = self.session.revert().err().unwrap_or_default(),
             Message::Poll(_) => return self.poll(),
+            Message::Scan => return self.scan(),
             Message::Close => return self.close(),
             Message::Discard if self.closing == Closing::ConfirmDiscard => return iced::exit(),
             Message::KeepEditing => self.closing = Closing::Open,
@@ -213,6 +201,7 @@ impl App {
             Ok(None) => {}
         }
         if self.session.recording() || self.recording.pending() {
+            self.link.invalidate_discovery();
             self.page = Page::Macros;
         } else if was_recording {
             self.macros
@@ -323,6 +312,7 @@ impl App {
     fn begin_file(&mut self, operation: files::Operation) -> Task<Message> {
         match self.files.begin(operation, &self.session) {
             Ok(job) => {
+                self.link.invalidate_discovery();
                 self.notice.clear();
                 job.task().map(Message::FileComplete)
             }
@@ -523,16 +513,18 @@ impl App {
         self.submit(request)
     }
 
-    fn connect(&mut self) -> Result<bool, String> {
-        if self.worker.is_some() {
-            return Ok(false);
+    fn scan(&mut self) -> Task<Message> {
+        if self.session.busy() || self.session.catalog_scanning() || self.autosave.pending() {
+            return Task::none();
         }
-        let (id, worker) = (self.attach)(self.selected_device.as_deref())?;
-        let generation = self.session.connect()?;
-        worker.set_generation(generation);
-        self.selected_device = Some(id);
-        self.worker = Some(worker);
-        Ok(true)
+        match self.link.scan(&mut self.session) {
+            Ok(Some(command)) => self.submit(Ok(command)),
+            Ok(None) => Task::none(),
+            Err(reason) => {
+                self.notice = reason;
+                Task::none()
+            }
+        }
     }
 
     fn submit(&mut self, request: Result<Command, String>) -> Task<Message> {
@@ -544,7 +536,8 @@ impl App {
             }
         };
         self.notice.clear();
-        match &self.worker {
+        self.link.invalidate_discovery();
+        match self.link.executor() {
             Some(worker) => {
                 if let Err(completion) = worker.try_submit(command) {
                     return self.complete(*completion);
@@ -565,21 +558,19 @@ impl App {
         if self.session.recording() {
             return Task::none();
         }
-        let Some(worker) = &self.worker else {
+        let Some(worker) = self.link.executor() else {
             return Task::none();
         };
         match worker.try_receive() {
             Ok(completion) => self.complete(completion),
             Err(TryRecvError::Empty) => Task::none(),
             Err(TryRecvError::Disconnected) => {
-                worker.set_generation(0);
-                self.worker = None;
                 self.autosave.clear();
                 self.assignment_binding = None;
                 if self.recording.pending() {
                     let _ = self.recording.finish(&mut self.session, Instant::now());
                 }
-                let failure = self.session.disconnect().err();
+                let failure = self.link.lost(&mut self.session).err();
                 self.closing = Closing::Open;
                 self.notice = failure.unwrap_or_else(|| {
                     "Connection lost. Edits are retained; reconnect and read before saving.".into()
@@ -597,6 +588,7 @@ impl App {
             _ => None,
         };
         let outcome = self.session.accept(completion);
+        let refresh = self.link.advance(&mut self.session, &outcome);
         if matches!(outcome, Outcome::Failed(_) | Outcome::Conflict)
             && let Some(feature) = feature
         {
@@ -710,14 +702,19 @@ impl App {
                 return Task::none();
             }
         }
-        if self.closing == Closing::Waiting {
+        if let RefreshStep::Command(request) = refresh {
+            self.submit(request.map(|command| *command))
+        } else if self.closing == Closing::Waiting {
             self.close()
+        } else if matches!(refresh, RefreshStep::Finished) {
+            Task::none()
         } else {
             self.load_page()
         }
     }
 
     fn close(&mut self) -> Task<Message> {
+        self.link.invalidate_discovery();
         if self.session.recording() || self.recording.pending() {
             match self.recording.finish(&mut self.session, Instant::now()) {
                 Ok(notice) => {
@@ -764,12 +761,29 @@ impl App {
         {
             subscriptions.push(iced::time::every(Duration::from_millis(25)).map(Message::Poll));
         }
+        if self.closing == Closing::Open
+            && self.link.monitoring()
+            && !self.session.recording()
+            && !self.recording.pending()
+            && !self.session.busy()
+            && !self.session.catalog_scanning()
+            && !self.files.busy()
+            && !self.autosave.pending()
+        {
+            let cadence = if self.link.awaiting_discovery() {
+                Duration::from_millis(100)
+            } else {
+                Duration::from_secs(2)
+            };
+            subscriptions.push(iced::time::every(cadence).map(|_| Message::Scan));
+        }
         Subscription::batch(subscriptions)
     }
 
     fn view(&self) -> Element<'_, Message> {
         view::application::view(view::application::View {
             session: &self.session,
+            presence: self.link.presence(),
             keys: &self.keys,
             macros: &self.macros,
             lighting: &self.lighting,

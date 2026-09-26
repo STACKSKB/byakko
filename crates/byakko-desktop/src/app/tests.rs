@@ -1,11 +1,12 @@
 use super::*;
+use crate::controller::discovery::Availability;
 use crate::view::application::picture_is_displayed;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
     model::keymap::{Action, Change, State},
 };
 use byakko_devices::{
-    Device,
+    Device, Executor,
     memory::{self, MemoryDevice},
 };
 use iced::Event;
@@ -249,8 +250,8 @@ fn partial_assignment_failure_keeps_saved_macro_and_discard_prompt() {
 
 fn settle(app: &mut App) {
     let completion = app
-        .worker
-        .as_ref()
+        .link
+        .executor()
         .unwrap()
         .receive(Some(Duration::from_secs(2)))
         .unwrap();
@@ -318,8 +319,7 @@ fn manual_reconnection_retains_unsaved_assignments() {
     let _ = app.update(Message::Read);
     settle(&mut app);
     edit(&mut app);
-    app.worker = None;
-    app.session.disconnect().unwrap();
+    app.link.retire(&mut app.session).unwrap();
     let _ = app.update(Message::Read);
     settle(&mut app);
     assert_eq!(reads.load(Ordering::SeqCst), 2);
@@ -551,6 +551,11 @@ fn feature_app(fail_lighting: bool) -> (App, Arc<Mutex<Vec<&'static str>>>) {
     app.config.auto_save_delay = Duration::from_secs(60);
     let _ = app.update(Message::Read);
     drain(&mut app);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        ["read-lighting", "read-settings", "read-picture"]
+    );
+    calls.lock().unwrap().clear();
     (app, calls)
 }
 
@@ -667,7 +672,7 @@ fn lighting_coalesces_and_keeps_newer_intent_while_a_write_is_submitted() {
         )));
     }
     assert!(!app.session.busy());
-    assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
+    assert!(calls.lock().unwrap().is_empty());
     elapsed(&mut app);
     assert_eq!(
         app.session
@@ -694,10 +699,7 @@ fn lighting_coalesces_and_keeps_newer_intent_while_a_write_is_submitted() {
     );
     let _ = app.update(Message::Page(Page::Keys));
     let _ = app.update(Message::Page(Page::Lighting));
-    assert_eq!(
-        *calls.lock().unwrap(),
-        ["read-lighting", "apply-lighting", "apply-lighting"]
-    );
+    assert_eq!(*calls.lock().unwrap(), ["apply-lighting", "apply-lighting"]);
 }
 
 #[test]
@@ -706,10 +708,7 @@ fn picture_colors_batch_and_only_real_selector_changes_require_a_new_read() {
     let (mut app, calls) = feature_app(false);
     let _ = app.update(Message::Page(Page::Picture));
     drain(&mut app);
-    assert_eq!(
-        *calls.lock().unwrap(),
-        ["read-lighting", "apply-lighting", "read-picture"]
-    );
+    assert_eq!(*calls.lock().unwrap(), ["apply-lighting", "read-picture"]);
     let _ = app.update(Message::Picture(picture::Message::Select("Alpha".into())));
     let _ = app.update(Message::Picture(picture::Message::Color([4, 5, 6])));
     let _ = app.update(Message::Picture(picture::Message::Select("Beta".into())));
@@ -740,7 +739,6 @@ fn picture_colors_batch_and_only_real_selector_changes_require_a_new_read() {
     assert_eq!(
         *calls.lock().unwrap(),
         [
-            "read-lighting",
             "apply-lighting",
             "read-picture",
             "apply-picture",
@@ -773,7 +771,7 @@ fn close_flushes_queued_scalar_edits_and_failed_save_retains_draft_without_retry
         app.session.settings().unwrap().draft().unwrap()["sleep"],
         Value::Number(7)
     );
-    assert_eq!(*calls.lock().unwrap(), ["read-settings", "apply-settings"]);
+    assert_eq!(*calls.lock().unwrap(), ["apply-settings"]);
 
     let (mut app, calls) = feature_app(true);
     let _ = app.update(Message::Page(Page::Lighting));
@@ -787,7 +785,7 @@ fn close_flushes_queued_scalar_edits_and_failed_save_retains_draft_without_retry
     assert!(app.session.lighting().unwrap().dirty());
     elapsed(&mut app);
     assert!(!app.session.busy());
-    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "apply-lighting"]);
+    assert_eq!(*calls.lock().unwrap(), ["apply-lighting"]);
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::ConfirmDiscard);
 }
@@ -820,7 +818,6 @@ fn picture_navigation_finishes_queued_lighting_and_reuses_the_brush() {
     assert_eq!(
         *calls.lock().unwrap(),
         [
-            "read-lighting",
             "apply-lighting",
             "apply-lighting",
             "read-picture",
@@ -841,7 +838,303 @@ fn failed_picture_activation_does_not_read_or_retry_and_keeps_diagnostic() {
     assert!(!picture_is_displayed(&app.session));
     assert!(app.session.lighting().unwrap().dirty());
     elapsed(&mut app);
-    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "apply-lighting"]);
+    assert_eq!(*calls.lock().unwrap(), ["apply-lighting"]);
     assert!(!app.session.busy());
     assert_eq!(app.closing, Closing::Open);
+}
+
+struct DiscoveryApp {
+    app: App,
+    presence: Arc<Mutex<Availability>>,
+    attachments: Arc<Mutex<Vec<Option<String>>>>,
+    reads: Arc<AtomicUsize>,
+    reject_attach: Arc<std::sync::atomic::AtomicBool>,
+}
+impl DiscoveryApp {
+    fn new(fail_save: bool) -> Self {
+        let presence = Arc::new(Mutex::new(Availability::Missing));
+        let probe = presence.clone();
+        let attachments = Arc::new(Mutex::new(Vec::new()));
+        let calls = attachments.clone();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let count = reads.clone();
+        let reject_attach = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let rejected = reject_attach.clone();
+        let available = presence.clone();
+        let session = Session::new(memory::demo().unwrap().descriptor().clone()).unwrap();
+        let mut app = App::new(
+            session,
+            Box::new(move |expected| {
+                calls.lock().unwrap().push(expected.map(str::to_owned));
+                if rejected.load(Ordering::SeqCst) {
+                    return Err("Injected attach failure".into());
+                }
+                let Availability::Ready { id } = available.lock().unwrap().clone() else {
+                    return Err("No keyboard".into());
+                };
+                let worker = Executor::spawn(
+                    ObservedDevice {
+                        memory: memory::demo()?,
+                        reads: count.clone(),
+                        fail_save,
+                        macro_reads: Default::default(),
+                        feature_calls: Default::default(),
+                        fail_lighting: false,
+                    },
+                    Default::default(),
+                )
+                .map_err(|error| error.to_string())?;
+                Ok((id, worker))
+            }),
+        );
+        app.link
+            .monitor(Discovery::spawn(move || probe.lock().unwrap().clone()).unwrap());
+        Self {
+            app,
+            presence,
+            attachments,
+            reads,
+            reject_attach,
+        }
+    }
+    fn observe(&mut self, presence: Availability) {
+        *self.presence.lock().unwrap() = presence.clone();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let _ = self.app.update(Message::Scan);
+            drain(&mut self.app);
+            if self.app.link.presence() == &presence {
+                break;
+            }
+            assert!(Instant::now() < deadline, "discovery did not settle");
+            std::thread::yield_now();
+        }
+    }
+    fn wait_for(&mut self, ready: impl Fn(&App) -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !ready(&self.app) {
+            let _ = self.app.update(Message::Scan);
+            drain(&mut self.app);
+            assert!(Instant::now() < deadline, "connection did not settle");
+            std::thread::yield_now();
+        }
+    }
+}
+
+#[test]
+fn discovery_replaces_connections_but_never_reads_on_an_unchanged_scan() {
+    let mut h = DiscoveryApp::new(false);
+    h.observe(Availability::Missing);
+    assert!(h.attachments.lock().unwrap().is_empty());
+    h.observe(Availability::Ready { id: "first".into() });
+    assert_eq!(h.reads.load(Ordering::SeqCst), 1);
+    let first_generation = h.app.session.connection().clone();
+    edit(&mut h.app);
+    h.observe(Availability::Ready { id: "first".into() });
+    assert_eq!(h.reads.load(Ordering::SeqCst), 1);
+    h.observe(Availability::Missing);
+    assert!(h.app.link.executor().is_none());
+    assert_eq!(h.app.session.connection(), &Connection::Disconnected);
+    assert!(h.app.session.keymap().dirty());
+    h.observe(Availability::Ready {
+        id: "second".into(),
+    });
+    assert_ne!(h.app.session.connection(), &first_generation);
+    assert_eq!(h.reads.load(Ordering::SeqCst), 2);
+    assert!(h.app.session.keymap().dirty());
+    assert_eq!(
+        *h.attachments.lock().unwrap(),
+        [Some("first".into()), Some("second".into())]
+    );
+    assert_eq!(h.app.session.keymap().status(), &Status::Ready);
+}
+
+#[test]
+fn manual_refresh_replaces_worker_even_without_a_discovery_change_and_failure_retires_it() {
+    let mut h = DiscoveryApp::new(false);
+    h.observe(Availability::Ready { id: "first".into() });
+    let generation = h.app.session.connection().clone();
+    edit(&mut h.app);
+    // Unplug/replug occurred between scans; deliberate Read chooses the current collection.
+    *h.presence.lock().unwrap() = Availability::Ready {
+        id: "second".into(),
+    };
+    let _ = h.app.update(Message::Read);
+    drain(&mut h.app);
+    assert_ne!(h.app.session.connection(), &generation);
+    assert_eq!(*h.attachments.lock().unwrap(), [Some("first".into()), None]);
+    assert!(h.app.session.keymap().dirty());
+    h.reject_attach.store(true, Ordering::SeqCst);
+    let _ = h.app.update(Message::Read);
+    assert!(h.app.link.executor().is_none());
+    assert_eq!(h.app.session.connection(), &Connection::Disconnected);
+    assert!(h.app.session.keymap().dirty());
+    assert_eq!(h.app.notice, "Injected attach failure");
+}
+
+#[test]
+fn failed_write_holds_automatic_refresh_until_explicit_read() {
+    let mut h = DiscoveryApp::new(true);
+    h.observe(Availability::Ready { id: "first".into() });
+    edit(&mut h.app);
+    let _ = h.app.update(Message::Save);
+    drain(&mut h.app);
+    let diagnostic = h.app.session.keymap().status().clone();
+    assert!(h.app.session.requires_manual_read());
+    h.observe(Availability::Missing);
+    h.observe(Availability::Ready {
+        id: "second".into(),
+    });
+    assert_eq!(h.attachments.lock().unwrap().len(), 1);
+    assert!(h.app.link.executor().is_none());
+    assert_eq!(h.app.session.keymap().status(), &diagnostic);
+    assert!(h.app.session.keymap().dirty());
+    let _ = h.app.update(Message::Read);
+    drain(&mut h.app);
+    assert_eq!(h.app.session.keymap().status(), &Status::Ready);
+    assert!(!h.app.session.requires_manual_read());
+    assert!(h.app.session.keymap().dirty());
+    assert_eq!(h.attachments.lock().unwrap().last(), Some(&None));
+}
+
+#[test]
+fn ambiguous_and_failed_enumeration_never_attach_or_clear_drafts() {
+    let mut h = DiscoveryApp::new(false);
+    h.observe(Availability::Ready { id: "first".into() });
+    edit(&mut h.app);
+    h.observe(Availability::Ambiguous { count: 2 });
+    assert!(h.app.link.executor().is_none());
+    h.observe(Availability::Error("permission".into()));
+    assert!(h.app.session.keymap().dirty());
+    assert_eq!(h.attachments.lock().unwrap().len(), 1);
+    assert_eq!(h.reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn unchanged_inventory_retries_failed_attachment_without_fast_idle_scans() {
+    let mut h = DiscoveryApp::new(false);
+    h.reject_attach.store(true, Ordering::SeqCst);
+    h.observe(Availability::Ready { id: "first".into() });
+    assert!(h.app.link.executor().is_none());
+    assert!(!h.app.link.awaiting_discovery());
+    h.reject_attach.store(false, Ordering::SeqCst);
+    h.wait_for(|app| app.link.executor().is_some());
+    assert_eq!(h.reads.load(Ordering::SeqCst), 1);
+    let _ = h.app.update(Message::Scan);
+    assert!(
+        !h.app.link.awaiting_discovery(),
+        "a pending idle scan must not enable the startup cadence"
+    );
+}
+
+#[test]
+fn refreshing_a_picture_page_without_macros_never_activates_lighting() {
+    let device = memory::demo().unwrap();
+    let session = Session::new(device.descriptor().clone())
+        .unwrap()
+        .with_lighting(device.lighting_capabilities().unwrap().clone())
+        .unwrap()
+        .with_picture(device.picture_capabilities().unwrap().clone())
+        .unwrap();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    let mut app = App::new(
+        session,
+        Box::new(move |_| {
+            Ok((
+                "demo".into(),
+                Executor::spawn(
+                    ObservedDevice {
+                        memory: memory::demo()?,
+                        reads: Default::default(),
+                        macro_reads: Default::default(),
+                        fail_save: false,
+                        fail_lighting: false,
+                        feature_calls: observed.clone(),
+                    },
+                    Default::default(),
+                )
+                .map_err(|error| error.to_string())?,
+            ))
+        }),
+    );
+    let _ = app.update(Message::Page(Page::Picture));
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "read-picture"]);
+    assert!(!picture_is_displayed(&app.session));
+    assert!(!app.session.lighting().unwrap().dirty());
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [
+            "read-lighting",
+            "read-picture",
+            "read-lighting",
+            "read-picture"
+        ]
+    );
+}
+
+#[test]
+fn a_failed_connection_read_can_retry_on_the_same_inventory() {
+    struct FirstReadFails {
+        memory: MemoryDevice,
+        reads: Arc<AtomicUsize>,
+    }
+    impl Device for FirstReadFails {
+        fn read(&mut self) -> Result<State, String> {
+            if self.reads.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err("Temporary read failure".into())
+            } else {
+                self.memory.read()
+            }
+        }
+        fn apply(
+            &mut self,
+            expected: &State,
+            changes: &[Change],
+            backup: &Path,
+        ) -> Result<State, ApplyFailure> {
+            self.memory.apply(expected, changes, backup)
+        }
+    }
+    let reads = Arc::new(AtomicUsize::new(0));
+    let observed = reads.clone();
+    let mut app = App::new(
+        Session::new(memory::demo().unwrap().descriptor().clone()).unwrap(),
+        Box::new(move |_| {
+            Ok((
+                "demo".into(),
+                Executor::spawn(
+                    FirstReadFails {
+                        memory: memory::demo()?,
+                        reads: observed.clone(),
+                    },
+                    Default::default(),
+                )
+                .map_err(|error| error.to_string())?,
+            ))
+        }),
+    );
+    app.link
+        .monitor(Discovery::spawn(|| Availability::Ready { id: "demo".into() }).unwrap());
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    assert!(matches!(
+        app.session.keymap().status(),
+        Status::Unverified {
+            problem: Problem::Read(_)
+        }
+    ));
+    assert!(!app.session.requires_manual_read());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.session.keymap().status() != &Status::Ready {
+        let _ = app.update(Message::Scan);
+        drain(&mut app);
+        assert!(Instant::now() < deadline, "read did not retry");
+        std::thread::yield_now();
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
 }

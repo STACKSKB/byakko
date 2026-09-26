@@ -528,3 +528,246 @@ fn independent_picture_preparation_does_not_require_lighting() {
     assert!(s.prepare_picture().unwrap().is_none());
     assert_eq!(s.operation, command.operation);
 }
+
+fn refresh_session() -> Session {
+    configured()
+        .with_macros(crate::model::macros::Capabilities {
+            backend_id: "test".into(),
+            slots: vec![crate::model::macros::Choice {
+                id: "one".into(),
+                label: "One".into(),
+            }],
+            repeat_counts: 0..=10,
+            editable_repeat_counts: 1..=10,
+            delays_ms: 0..=100,
+            keys: Some(4..=10),
+            buttons: vec![],
+            movement: None,
+            backend_actions: vec![],
+            byte_budget: None,
+            bindings: vec![],
+        })
+        .unwrap()
+}
+fn settings_snapshot() -> settings::Snapshot {
+    settings::Snapshot {
+        backend_id: "test".into(),
+        revision: vec![1],
+        content: settings::Content::Editable(
+            [("enabled".into(), settings::Value::Toggle(false))].into(),
+        ),
+    }
+}
+fn macro_snapshot() -> crate::model::macros::Snapshot {
+    crate::model::macros::Snapshot {
+        backend_id: "test".into(),
+        slot: "one".into(),
+        revision: vec![1],
+        content: crate::model::macros::Content::Editable(crate::model::macros::Program {
+            repeat_count: 1,
+            events: vec![],
+        }),
+    }
+}
+fn accept_refresh(s: &mut Session, command: &Command) -> Outcome {
+    let payload = match &command.payload {
+        CommandPayload::Keymap(FeatureCommand::Read(())) => {
+            CompletionPayload::Keymap(FeatureResult::Read(Ok(state(Action::Key(4)))))
+        }
+        CommandPayload::Lighting(FeatureCommand::Read(())) => CompletionPayload::Lighting(
+            FeatureResult::Read(Ok(light(10, "one", SnapshotEvidence::Readback))),
+        ),
+        CommandPayload::Settings(FeatureCommand::Read(())) => {
+            CompletionPayload::Settings(FeatureResult::Read(Ok(settings_snapshot())))
+        }
+        CommandPayload::Picture(FeatureCommand::Read(())) => {
+            CompletionPayload::Picture(FeatureResult::Read(Ok(picture_snapshot())))
+        }
+        CommandPayload::Macro(FeatureCommand::Read(slot)) => CompletionPayload::Macro {
+            slot: slot.clone(),
+            result: FeatureResult::Read(Ok(macro_snapshot())),
+        },
+        _ => panic!("refresh must contain only a feature read"),
+    };
+    s.accept(completion(command, payload))
+}
+fn fully_loaded() -> Session {
+    let mut s = refresh_session();
+    s.connect().unwrap();
+    while let Some(command) = s.refresh_next().unwrap() {
+        accept_refresh(&mut s, &command);
+    }
+    let command = s.read_macro().unwrap();
+    accept_refresh(&mut s, &command);
+    s
+}
+#[test]
+fn refresh_reads_each_supported_feature_once_and_only_previously_loaded_selected_macro() {
+    let mut s = refresh_session();
+    assert!(s.refresh_next().is_err());
+    s.connect().unwrap();
+    assert!(!s.requires_manual_read());
+    for outcome in [
+        Outcome::Loaded,
+        Outcome::LightingLoaded,
+        Outcome::SettingsLoaded,
+        Outcome::PictureLoaded,
+    ] {
+        let command = s.refresh_next().unwrap().unwrap();
+        assert!(s.refresh_next().is_err());
+        assert_eq!(accept_refresh(&mut s, &command), outcome);
+    }
+    assert!(s.refresh_next().unwrap().is_none());
+    assert!(s.macros().unwrap().baseline().is_none());
+    let command = s.read_macro().unwrap();
+    accept_refresh(&mut s, &command);
+    s.disconnect().unwrap();
+    s.connect().unwrap();
+    for outcome in [
+        Outcome::Loaded,
+        Outcome::LightingLoaded,
+        Outcome::SettingsLoaded,
+        Outcome::PictureLoaded,
+        Outcome::MacroLoaded,
+    ] {
+        let command = s.refresh_next().unwrap().unwrap();
+        assert_eq!(accept_refresh(&mut s, &command), outcome);
+    }
+    let operation = s.operation;
+    assert!(s.refresh_next().unwrap().is_none());
+    assert!(s.refresh_next().unwrap().is_none());
+    assert_eq!(s.operation, operation);
+    assert!(!s.requires_manual_read());
+}
+#[test]
+fn refresh_retains_dirty_drafts_and_conflicts_when_cached_before_image_changes() {
+    let mut s = fully_loaded();
+    edit(&mut s);
+    s.edit_lighting(lighting::Edit::Brightness(20)).unwrap();
+    s.edit_picture(picture::Edit::Color {
+        key: "a".into(),
+        color: [9; 3],
+    })
+    .unwrap();
+    s.edit_settings(settings::Edit {
+        id: "enabled".into(),
+        value: settings::Value::Toggle(true),
+    })
+    .unwrap();
+    s.edit_macro(crate::model::macros::Edit::Repeat(2)).unwrap();
+    s.disconnect().unwrap();
+    s.connect().unwrap();
+    while let Some(command) = s.refresh_next().unwrap() {
+        assert!(!matches!(
+            accept_refresh(&mut s, &command),
+            Outcome::Conflict | Outcome::Failed(_)
+        ));
+    }
+    assert!(s.keymap().dirty());
+    assert_eq!(s.lighting().unwrap().draft().unwrap().brightness, Some(20));
+    assert_eq!(s.picture().unwrap().draft().unwrap()["a"], [9; 3]);
+    assert!(s.settings().unwrap().dirty());
+    assert_eq!(s.macros().unwrap().draft().unwrap().repeat_count, 2);
+    s.disconnect().unwrap();
+    s.connect().unwrap();
+    let command = s.refresh_next().unwrap().unwrap();
+    let mut changed = state(Action::Key(4));
+    changed.revision = vec![99];
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Keymap(FeatureResult::Read(Ok(changed)))
+        )),
+        Outcome::Conflict
+    );
+    assert!(s.requires_manual_read());
+    let status = s.keymap().status().clone();
+    s.disconnect().unwrap();
+    s.connect().unwrap();
+    assert_eq!(s.keymap().status(), &status);
+    assert!(s.requires_manual_read());
+}
+#[test]
+fn all_feature_failed_write_cautions_survive_disconnect_and_connect() {
+    for feature in 0..5 {
+        let mut s = fully_loaded();
+        let command = match feature {
+            0 => {
+                edit(&mut s);
+                s.save().unwrap()
+            }
+            1 => {
+                s.edit_macro(crate::model::macros::Edit::Repeat(2)).unwrap();
+                s.save_macro().unwrap()
+            }
+            2 => {
+                s.edit_lighting(lighting::Edit::Brightness(20)).unwrap();
+                s.save_lighting().unwrap()
+            }
+            3 => {
+                s.edit_picture(picture::Edit::Color {
+                    key: "a".into(),
+                    color: [9; 3],
+                })
+                .unwrap();
+                s.save_picture().unwrap()
+            }
+            _ => {
+                s.edit_settings(settings::Edit {
+                    id: "enabled".into(),
+                    value: settings::Value::Toggle(true),
+                })
+                .unwrap();
+                s.save_settings().unwrap()
+            }
+        };
+        let failure = ApplyFailure {
+            message: "write failed".into(),
+            recovery: Recovery::Verified,
+        };
+        let payload = match feature {
+            0 => CompletionPayload::Keymap(FeatureResult::Apply(Err(failure.clone()))),
+            1 => CompletionPayload::Macro {
+                slot: "one".into(),
+                result: FeatureResult::Apply(Err(failure.clone())),
+            },
+            2 => CompletionPayload::Lighting(FeatureResult::Apply(Err(failure.clone()))),
+            3 => CompletionPayload::Picture(FeatureResult::Apply(Err(failure.clone()))),
+            _ => CompletionPayload::Settings(FeatureResult::Apply(Err(failure.clone()))),
+        };
+        assert_eq!(
+            s.accept(completion(&command, payload)),
+            Outcome::Failed(Problem::Apply(failure.clone()))
+        );
+        assert!(s.requires_manual_read());
+        s.disconnect().unwrap();
+        s.connect().unwrap();
+        assert!(s.requires_manual_read());
+        let problem = match feature {
+            0 => s.keymap().problem(),
+            1 => s.macros().unwrap().problem(),
+            2 => s.lighting().unwrap().problem(),
+            3 => s.picture().unwrap().problem(),
+            _ => s.settings().unwrap().problem(),
+        };
+        assert_eq!(problem, Some(&Problem::Apply(failure)));
+    }
+}
+#[test]
+fn manual_read_caution_distinguishes_write_trust_from_read_failures() {
+    let mut s = loaded_features();
+    let command = s.read_lighting().unwrap();
+    s.accept(completion(
+        &command,
+        CompletionPayload::Lighting(FeatureResult::Read(Err("read failed".into()))),
+    ));
+    assert!(!s.requires_manual_read());
+    for problem in [
+        Problem::InvalidApplyResult("invalid".into()),
+        Problem::ApplyReadbackMismatch,
+    ] {
+        assert!(requires_manual_read::<State>(&Status::Unverified {
+            problem
+        }));
+    }
+}

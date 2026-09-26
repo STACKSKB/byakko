@@ -722,6 +722,7 @@ fn recording_is_exclusive_local_activity_and_stale_results_do_not_edit_it() {
     assert!(s.read().is_err());
     assert!(s.read_macro().is_err());
     assert!(s.capture_archive().is_err());
+    assert!(s.refresh_next().is_err());
     assert!(s.export_macro_document("Name".into(), None).is_err());
     assert!(s.read_lighting().is_err());
     assert!(s.read_picture().is_err());
