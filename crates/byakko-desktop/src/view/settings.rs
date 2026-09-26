@@ -119,5 +119,9 @@ pub fn view<'a>(
         };
         content = content.push(text(explanation));
     }
-    scrollable(content).height(Fill).into()
+    scrollable(content.width(Fill))
+        .spacing(f32::from(style.scrollbar_inset))
+        .width(Fill)
+        .height(Fill)
+        .into()
 }

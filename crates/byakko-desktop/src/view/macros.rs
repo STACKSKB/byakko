@@ -26,7 +26,11 @@ pub struct View<'a> {
     pub scanning: bool,
     pub style: &'a UiStyle,
 }
-pub fn view(input: View<'_>) -> Element<'_, Message> {
+pub fn view<'a, M: 'a>(
+    input: View<'a>,
+    files: Element<'a, M>,
+    on_message: fn(Message) -> M,
+) -> Element<'a, M> {
     let View {
         form,
         editor,
@@ -59,7 +63,7 @@ pub fn view(input: View<'_>) -> Element<'_, Message> {
             "Macro library"
         }),
         button("Add macro").on_press_maybe((idle && !editor.dirty()).then_some(Message::Add)),
-        scrollable(slots),
+        scrollable(slots).spacing(f32::from(style.scrollbar_inset)),
     ]
     .spacing(style.spacing.s);
     let mut detail = column![
@@ -110,7 +114,7 @@ pub fn view(input: View<'_>) -> Element<'_, Message> {
             .into()
         }))
         .spacing(style.spacing.xs);
-        detail = detail.push(scrollable(events).height(Fill));
+        detail = detail.push(events);
         let caps = editor.capabilities();
         detail = detail.push(
             row![
@@ -165,9 +169,15 @@ pub fn view(input: View<'_>) -> Element<'_, Message> {
     } else {
         detail = detail.push(text("Read this slot to edit it."));
     }
+    let library: Element<'a, Message> = library.into();
+    let detail: Element<'a, Message> = detail.into();
     row![
-        library.width(iced::Length::FillPortion(style.panes.sidebar)),
-        detail.width(iced::Length::FillPortion(style.panes.detail))
+        iced::widget::container(library.map(on_message))
+            .width(iced::Length::FillPortion(style.panes.sidebar)),
+        scrollable(column![detail.map(on_message), files].spacing(style.spacing.l))
+            .spacing(f32::from(style.scrollbar_inset))
+            .height(Fill)
+            .width(iced::Length::FillPortion(style.panes.detail))
     ]
     .spacing(style.spacing.l)
     .height(Fill)

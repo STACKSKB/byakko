@@ -103,6 +103,9 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [x] Restore exclusive local macro recording through the shared macro draft.
 - [x] Complete macro interaction corrections and regression checks.
 - [ ] Review rendered macro and assignment layouts with the user.
+  Offscreen inspection on 2026-09-27 found and fixed macro/host clipping and a
+  narrow settings viewport; rendered scroll/click checks pass at two sizes.
+  Native Windows capture remains unavailable. See the [acceptance record](docs/rewrite-acceptance-20260927.md).
 - [x] Before expanding features, consolidate the shared editor lifecycle and
   feature implementations under `editor/`. Put the other application roles in
   top-level folders as requested. Remove the macro lifecycle duplication and
@@ -169,6 +172,12 @@ exercise actual OS capture and physical host restoration; coordinate the
 documented playback/settings/recovery and Linux runtime checks. Existing
 physical failures remain open. This source checkpoint is not a hardware release
 acceptance or permission to run device writes.
+
+The 2026-09-27 [acceptance follow-up](docs/rewrite-acceptance-20260927.md) records
+actual Iced offscreen renders, layout fixes and widget intent checks, a usable
+keyboard webcam baseline and equal before/after read-only device archives.
+Native window capture failed; active hardware checks await explicit write
+approval after automatic approval review blocked the prepared lighting test.
 
 ## Implementation record
 
