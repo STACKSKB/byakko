@@ -79,6 +79,8 @@ it is not evidence that new frontend paths work.
 | devices/hid, rongyuan, nia87 | OS collections, family codecs, board mapping, transactions |
 | devices/storage and sampling | Durable files and OS samplers |
 | desktop/app | Iced lifecycle, routing and effect delivery |
+| desktop/controller | Local recording coordination and debounce deadlines |
+| desktop/input | Window-local input translated into portable actions |
 | desktop/form | Unsubmitted input, parsing and user intents |
 | desktop/view | Feature rendering over forms and core state |
 | desktop/widget | Reusable physical keyboard and semantic controls |
@@ -105,7 +107,7 @@ to match this table. Public APIs expose concepts, not every internal helper.
   feature implementations under `editor/`. Put the other application roles in
   top-level folders as requested. Remove the macro lifecycle duplication and
   constrain the session to routing/exclusivity and explicit workflows.
-- [ ] Rebuild coalesced lighting, picture and scalar settings with owned intent
+- [x] Rebuild coalesced lighting, picture and scalar settings with owned intent
   and submission state, real selector dependencies and one-pass read policy.
 - [ ] Restore discovery, files, local labels and diagnostic capture through the
   new architecture. Developer archive restore remains outside public UI.
@@ -199,9 +201,37 @@ held releases, close/discard, scan cancellation and unsubmitted form retention.
 Workspace tests (60 core, 21 desktop), strict Clippy, formatting and development
 builds pass. Recording playback and rendered UI still require user acceptance.
 
+The lighting/picture/settings checkpoint restores both clients through the shared
+editor. Desktop holds only debounce deadlines, forms and picker gestures; core
+retains submitted values and newer intent. Close flushes queued edits and failures
+retain drafts without automatic retry. Settings retains the submitted scalar's
+identity until completion, preventing a second field from entering that write.
+
+Lighting snapshots now expose backend-owned picture context, including opaque
+lighting observations. Actual context changes invalidate dependent pictures;
+ordinary brightness/color updates retain them. The picture preparation workflow
+loads lighting once when needed, activates the advertised display effect, and
+reads its picture once. It preserves partial failures and does not get lighting
+again after the accepted setter. Independent picture backends need no lighting.
+Painting reuses the accepted brush color across selected keys.
+
+CLI lighting/picture/settings snapshot commands validate revisions and contexts,
+read only their associated baseline once and reject unrelated staged edits.
+Workspace tests (73 core, 32 desktop, 213 devices plus external integration,
+six CLI tests), strict all-target/all-feature Clippy, formatting and locked native
+development builds pass. The built CLI passed memory-only read/plan/apply for all
+three features. Native report sequencing, pacing, backup and recovery code did
+not change. No hardware writes were performed; rendered layout and physical
+output remain separate acceptance gates.
+
+Readback matching ignores only snapshot provenance for lighting/picture; matching
+bytes and context after a transport-accepted save do not falsely conflict with a
+newer draft. The application renderer lives under `view/application.rs`; the app
+owns event/effect delivery and lends render inputs without another mutable model.
+
 Temporary gaps: automatic discovery/reconnect, the full assignment catalog and
-custom shortcut form, macro interaction review, coalesced lighting/picture/
-settings, host streaming, local labels/file workflows and diagnostic capture.
+custom shortcut form, macro interaction review, host streaming, desktop local
+labels/file workflows and diagnostic capture.
 The native APIs, codecs, OS samplers, direct transaction tests and research tools
 remain. Passive catalog priority is restored; host scheduling returns with its
 feature milestone.

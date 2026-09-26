@@ -52,7 +52,13 @@ impl Feature for MacroRules {
     fn validate(&self, snapshot: &Snapshot, _: Reception) -> Result<(), String> {
         self.validate_snapshot_for(snapshot, &self.slot)
     }
-    fn edit(&self, _: &Snapshot, draft: &mut Option<Program>, change: Edit) -> Result<(), String> {
+    fn edit(
+        &self,
+        _: &Snapshot,
+        draft: &mut Option<Program>,
+        _: Option<&Program>,
+        change: Edit,
+    ) -> Result<(), String> {
         let next = edit_program(
             &self.capabilities,
             draft.as_ref().ok_or("Macro is not editable")?,

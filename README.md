@@ -10,7 +10,8 @@ supports keymap read, staged assignment, save, revert and manual reconnect throu
 Iced and an independent CLI. Macro discovery, selected-slot editing, save-and-assign
 and CLI snapshot workflows also use the replacement core. Window-local macro
 recording appends to the shared draft and releases held inputs on stop, focus loss
-or close. Other frontend workflows are being rebuilt; this is
+or close. Lighting, per-key painting and scalar settings use the same editors,
+with automatic coalesced saves and native color pickers. Other frontend workflows are being rebuilt; this is
 not a feature-complete release. See [plan.md](plan.md) for current scope and
 [rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 
@@ -32,8 +33,9 @@ The keymap view uses device-supplied physical geometry and action choices. Edits
 stay in the core editor until Save assignments. Save uses the cached before-image
 and the existing native backup/write/readback transaction. Closing waits for a
 pending save and asks before discarding edits. Automatic discovery/reconnect,
-the richer assignment catalog, custom shortcut form, lighting, per-key
-colors, settings and diagnostic capture are pending frontend milestones.
+the richer assignment catalog, custom shortcut form, host lighting and diagnostic
+capture are pending frontend milestones. Lighting/picture saves report transport
+acceptance after established pacing; settings saves include one readback.
 
 The independent CLI uses the same session/executor contract:
 
@@ -50,7 +52,10 @@ keymap snapshot. `plan-keymap FILE` validates edits from a complete snapshot;
 memory only. `list-macros` reads the macro library; `read-macro SLOT` emits a
 backend snapshot. Retain its revision when editing for `plan-macro FILE` or
 `apply-macro FILE`. `assign-macro SLOT LAYER KEY BINDING` uses the shared core
-assignment workflow. Other previous CLI commands are not exposed on this checkpoint.
+assignment workflow. `read-lighting`, `read-picture` and `read-settings` emit
+snapshots for their corresponding `plan-FEATURE FILE` / `apply-FEATURE FILE`
+commands. Retain the revision and selector context; a settings file changes one
+scalar field. Other previous CLI commands are not exposed on this checkpoint.
 Start with the
 [read-only Linux sequence](docs/linux-handoff.md) before any Linux write test.
 Backups use the [normal-user data directory](docs/local-storage.md).

@@ -92,6 +92,9 @@ pub enum Content {
 pub struct Snapshot {
     pub backend_id: String,
     pub revision: Vec<u8>,
+    /// Backend-owned selector for picture storage; empty when independent or unknown.
+    #[serde(default)]
+    pub picture_context: Vec<u8>,
     #[serde(default)]
     pub evidence: Evidence,
     pub content: Content,

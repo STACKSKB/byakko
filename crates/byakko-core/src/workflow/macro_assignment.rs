@@ -1,15 +1,10 @@
 //! Save and assign is two ordered feature writes with an explicit partial result.
 use crate::{
-    contract::Problem,
     editor::{Editor, Status, keymap::KeymapRules, macros::MacroRules},
     model::keymap::{Change, Descriptor},
     session::Outcome,
+    workflow::Problem,
 };
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AssignmentProblem {
-    Validation(String),
-    Device(Problem),
-}
 pub(crate) enum Assignment {
     SavingMacro { change: Change },
     Assigning { macro_saved: bool },
@@ -28,13 +23,13 @@ impl Assignment {
             (Self::SavingMacro { .. }, Outcome::Failed(problem)) => {
                 Step::Finished(Outcome::AssignmentFailed {
                     macro_saved: false,
-                    problem: AssignmentProblem::Device(problem),
+                    problem: Problem::Device(problem),
                 })
             }
             (Self::Assigning { macro_saved }, Outcome::Failed(problem)) => {
                 Step::Finished(Outcome::AssignmentFailed {
                     macro_saved,
-                    problem: AssignmentProblem::Device(problem),
+                    problem: Problem::Device(problem),
                 })
             }
             (_, outcome) => Step::Finished(outcome),

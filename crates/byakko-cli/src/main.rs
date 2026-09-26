@@ -1,6 +1,6 @@
 use byakko_core::{
     model::{keymap::State, macros::Snapshot},
-    session::Session,
+    model::{lighting, picture, settings},
 };
 use byakko_devices::{
     Executor,
@@ -8,7 +8,14 @@ use byakko_devices::{
 };
 use std::{path::PathBuf, time::Duration};
 
-const USAGE: &str = "byakko-cli [--demo] <devices|describe|read|plan-keymap FILE|apply-keymap FILE|list-macros|read-macro SLOT|plan-macro FILE|apply-macro FILE|assign-macro SLOT LAYER KEY BINDING>";
+const USAGE: &str = "byakko-cli [--demo] <devices|describe|read|plan-keymap FILE|apply-keymap FILE|list-macros|read-macro SLOT|plan-macro FILE|apply-macro FILE|assign-macro SLOT LAYER KEY BINDING|read-lighting|read-picture|read-settings|plan-lighting FILE|apply-lighting FILE|plan-picture FILE|apply-picture FILE|plan-settings FILE|apply-settings FILE>";
+
+#[derive(Debug, PartialEq)]
+enum Feature {
+    Lighting,
+    Picture,
+    Settings,
+}
 
 #[derive(Debug, PartialEq)]
 enum Command {
@@ -17,6 +24,12 @@ enum Command {
     Describe,
     Read,
     Keymap {
+        apply: bool,
+        path: PathBuf,
+    },
+    ReadFeature(Feature),
+    FeatureFile {
+        feature: Feature,
         apply: bool,
         path: PathBuf,
     },
@@ -45,6 +58,28 @@ fn parse(arguments: &[String]) -> Result<(bool, Command), String> {
         [name] if name == "devices" => Command::Devices,
         [name] if name == "describe" => Command::Describe,
         [name] if name == "read" => Command::Read,
+        [name] if name == "read-lighting" => Command::ReadFeature(Feature::Lighting),
+        [name] if name == "read-picture" => Command::ReadFeature(Feature::Picture),
+        [name] if name == "read-settings" => Command::ReadFeature(Feature::Settings),
+        [name, path] if name == "plan-lighting" || name == "apply-lighting" => {
+            Command::FeatureFile {
+                feature: Feature::Lighting,
+                apply: name == "apply-lighting",
+                path: path.into(),
+            }
+        }
+        [name, path] if name == "plan-picture" || name == "apply-picture" => Command::FeatureFile {
+            feature: Feature::Picture,
+            apply: name == "apply-picture",
+            path: path.into(),
+        },
+        [name, path] if name == "plan-settings" || name == "apply-settings" => {
+            Command::FeatureFile {
+                feature: Feature::Settings,
+                apply: name == "apply-settings",
+                path: path.into(),
+            }
+        }
         [name] if name == "list-macros" => Command::ListMacros,
         [name, slot] if name == "read-macro" => Command::ReadMacro(slot.clone()),
         [name, path] if name == "plan-macro" || name == "apply-macro" => Command::Macro {
@@ -70,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (demo, command) = parse(&std::env::args().skip(1).collect::<Vec<_>>())?;
     if command == Command::Help {
         println!(
-            "Usage: {USAGE}\n\nRead returns JSON. Edit its bindings while retaining its revision, then plan-keymap and apply-keymap. Apply backs up and verifies the write. --demo never opens hardware. Other features are under reconstruction on this branch."
+            "Usage: {USAGE}\n\nRead returns JSON. Edit its bindings while retaining its revision, then plan-keymap and apply-keymap. Apply uses the cached before-image and native pacing. Keymap, macro and settings verify one readback; lighting and picture report transport acceptance. Settings files must change one scalar. --demo never opens hardware."
         );
         return Ok(());
     }
@@ -94,6 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     enum FileInput {
         Keymap(State),
         Macro(Snapshot),
+        Lighting(lighting::Snapshot),
+        Picture(picture::Snapshot),
+        Settings(settings::Snapshot),
     }
     let target = match &command {
         Command::Keymap { path, .. } => Some(FileInput::Keymap(byakko_cli::read_json(
@@ -104,15 +142,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             std::fs::File::open(path)?,
             1024 * 1024,
         )?)),
+        Command::FeatureFile { feature, path, .. } => {
+            let file = std::fs::File::open(path)?;
+            Some(match feature {
+                Feature::Lighting => FileInput::Lighting(byakko_cli::read_json(file, 1024 * 1024)?),
+                Feature::Picture => FileInput::Picture(byakko_cli::read_json(file, 1024 * 1024)?),
+                Feature::Settings => FileInput::Settings(byakko_cli::read_json(file, 1024 * 1024)?),
+            })
+        }
         _ => None,
     };
     let mut session = if let Some(device) = &memory {
-        Session::new(descriptor)?.with_macros(
-            device
-                .macro_capabilities()
-                .expect("demo supports macros")
-                .clone(),
-        )?
+        device.session()?
     } else {
         nia87::application::session()?
     };
@@ -157,6 +198,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     serde_json::to_string_pretty(&byakko_cli::plan_keymap(&session, &target)?)?
                 );
             }
+        }
+        Command::ReadFeature(feature) => {
+            let json = match feature {
+                Feature::Lighting => serde_json::to_string_pretty(&byakko_cli::read_lighting(
+                    &mut session,
+                    &executor,
+                    timeout,
+                )?)?,
+                Feature::Picture => serde_json::to_string_pretty(&byakko_cli::read_picture(
+                    &mut session,
+                    &executor,
+                    timeout,
+                )?)?,
+                Feature::Settings => serde_json::to_string_pretty(&byakko_cli::read_settings(
+                    &mut session,
+                    &executor,
+                    timeout,
+                )?)?,
+            };
+            println!("{json}");
+        }
+        Command::FeatureFile { feature, apply, .. } => {
+            let json = match (feature, target) {
+                (Feature::Lighting, Some(FileInput::Lighting(target))) => {
+                    byakko_cli::read_lighting(&mut session, &executor, timeout)?;
+                    if apply {
+                        serde_json::to_string_pretty(&byakko_cli::apply_lighting(
+                            &mut session,
+                            &executor,
+                            &target,
+                        )?)?
+                    } else {
+                        serde_json::to_string_pretty(&byakko_cli::plan_lighting(
+                            &session, &target,
+                        )?)?
+                    }
+                }
+                (Feature::Picture, Some(FileInput::Picture(target))) => {
+                    byakko_cli::read_picture(&mut session, &executor, timeout)?;
+                    if apply {
+                        serde_json::to_string_pretty(&byakko_cli::apply_picture(
+                            &mut session,
+                            &executor,
+                            &target,
+                        )?)?
+                    } else {
+                        serde_json::to_string_pretty(&byakko_cli::plan_picture(&session, &target)?)?
+                    }
+                }
+                (Feature::Settings, Some(FileInput::Settings(target))) => {
+                    byakko_cli::read_settings(&mut session, &executor, timeout)?;
+                    if apply {
+                        serde_json::to_string_pretty(&byakko_cli::apply_settings(
+                            &mut session,
+                            &executor,
+                            &target,
+                        )?)?
+                    } else {
+                        serde_json::to_string_pretty(&byakko_cli::plan_settings(
+                            &session, &target,
+                        )?)?
+                    }
+                }
+                _ => unreachable!("feature command loaded its own typed file"),
+            };
+            println!("{json}");
         }
         Command::ListMacros => {
             byakko_cli::list_macros(&mut session, &executor, timeout)?;

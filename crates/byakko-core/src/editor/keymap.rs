@@ -77,7 +77,13 @@ impl Feature for KeymapRules {
     fn validate(&self, snapshot: &State, _: Reception) -> Result<(), String> {
         validate_state(&self.descriptor, snapshot)
     }
-    fn edit(&self, _: &State, draft: &mut Option<Bindings>, change: Change) -> Result<(), String> {
+    fn edit(
+        &self,
+        _: &State,
+        draft: &mut Option<Bindings>,
+        _: Option<&Bindings>,
+        change: Change,
+    ) -> Result<(), String> {
         validate_edit(&self.descriptor, &change)?;
         stage(draft, change)
     }

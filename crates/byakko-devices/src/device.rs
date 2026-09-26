@@ -44,8 +44,9 @@ pub trait HostActivity: Send {
     fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure>;
 }
 
-/// Implementations must validate expected state, back up, write and verify.
-/// Success means verified device state, not merely successful transmission.
+/// Implementations validate the cached before-image, back it up, and use native pacing.
+/// Keymap, macro and setting writes return one verified readback. Ordinary lighting
+/// and picture writes return transport acceptance; their snapshots carry that evidence.
 pub trait Device: Send + 'static {
     fn read(&mut self) -> Result<State, String>;
     fn apply(
