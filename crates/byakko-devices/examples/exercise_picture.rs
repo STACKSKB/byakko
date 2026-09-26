@@ -1,5 +1,5 @@
 //! Opt-in physical acceptance probe: twelve consecutive F1 uploads, no intervening reads.
-use byakko_core::picture::Content;
+use byakko_core::model::picture::Content;
 use byakko_devices::{Device, nia87, research_trace};
 use std::{fs::OpenOptions, path::PathBuf, time::Instant};
 

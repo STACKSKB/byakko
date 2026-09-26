@@ -61,6 +61,12 @@ the previous executable and physical evidence, not acceptance of this rewrite.
 
 ## Status and development
 
+Application code is organized by responsibility. Core's `editor/` contains one
+shared lifecycle and feature implementations; `model/`, `validation/`,
+`library/`, `recorder/`, `projection/` and `workflow/` contain the corresponding
+feature files. Desktop separates input forms, views and shared widgets. Native
+board and protocol-family modules retain the hardware-specific implementation.
+
 - [Current rewrite architecture and sequence](plan.md)
 - [Engineering rules](AGENTS.md) and [constraint inventory](docs/rewrite-constraints.md)
 - [Previous implementation acceptance ledger](docs/parity-status.md) and [pre-alpha checklist](docs/public-pre-alpha-checklist.md)

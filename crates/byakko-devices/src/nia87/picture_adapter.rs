@@ -2,7 +2,7 @@
 use super::{adapter, board, device, layout};
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
-    picture,
+    model::picture,
 };
 use std::{collections::BTreeMap, path::Path};
 

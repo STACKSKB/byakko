@@ -1,4 +1,7 @@
-use byakko_core::{State, macros::Snapshot, session::Session};
+use byakko_core::{
+    model::{keymap::State, macros::Snapshot},
+    session::Session,
+};
 use byakko_devices::{
     Executor,
     nia87::{self, BoundNia87Adapter},

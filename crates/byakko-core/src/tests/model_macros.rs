@@ -1,0 +1,233 @@
+use super::*;
+use crate::{
+    editor::macros::edit_program as edit,
+    validation::macros::{validate_capabilities, validate_program},
+};
+
+fn capabilities() -> Capabilities {
+    Capabilities {
+        byte_budget: None,
+        backend_id: "test".into(),
+        slots: vec![Choice {
+            id: "scene-a".into(),
+            label: "Scene A".into(),
+        }],
+        repeat_counts: 1..=10,
+        editable_repeat_counts: 1..=10,
+        delays_ms: 0..=100_000,
+        keys: Some(4..=300),
+        buttons: vec![],
+        movement: None,
+        backend_actions: vec![],
+        bindings: vec![],
+    }
+}
+
+#[test]
+fn byte_budget_rejects_invalid_models_and_checked_overflow() {
+    let mut caps = capabilities();
+    caps.byte_budget = Some(ByteBudget {
+        limit: 6,
+        overhead: 2,
+        key: 2,
+        button: 0,
+        movement: 0,
+        backend: 0,
+        inline_delays: 1..=127,
+        extended_delay: 2,
+    });
+    let event = Event {
+        action: Action::Key {
+            usage: 4,
+            pressed: true,
+        },
+        delay_ms: 0,
+    };
+    let program = Program {
+        repeat_count: 1,
+        events: vec![event.clone()],
+    };
+    assert!(validate_program(&caps, &program).is_ok());
+    assert!(
+        validate_program(
+            &caps,
+            &Program {
+                events: vec![event.clone(), event],
+                ..program
+            }
+        )
+        .is_err()
+    );
+    let budget = caps.byte_budget.as_mut().unwrap();
+    budget.key = u32::MAX;
+    budget.limit = u32::MAX;
+    assert!(
+        validate_program(
+            &caps,
+            &Program {
+                repeat_count: 1,
+                events: vec![Event {
+                    action: Action::Key {
+                        usage: 4,
+                        pressed: true
+                    },
+                    delay_ms: 1
+                }]
+            }
+        )
+        .is_err()
+    );
+    caps.byte_budget.as_mut().unwrap().inline_delays = std::ops::RangeInclusive::new(2, 1);
+    assert!(validate_capabilities(&caps).is_err());
+}
+
+fn program() -> Program {
+    Program {
+        repeat_count: 2,
+        events: vec![
+            Event {
+                action: Action::Key {
+                    usage: 260,
+                    pressed: true,
+                },
+                delay_ms: 0,
+            },
+            Event {
+                action: Action::Key {
+                    usage: 260,
+                    pressed: false,
+                },
+                delay_ms: 90_000,
+            },
+        ],
+    }
+}
+
+#[test]
+fn edits_preserve_wait_after_and_use_backend_ranges_not_nia_widths() {
+    let caps = capabilities();
+    let original = program();
+    assert!(validate_program(&caps, &original).is_ok());
+    let moved = edit(&caps, &original, Edit::Move { from: 0, to: 1 }).unwrap();
+    assert_eq!(moved.events[1], original.events[0]);
+    assert_eq!(moved.events[0], original.events[1]);
+    let cleared = edit(&caps, &original, Edit::Clear).unwrap();
+    assert!(cleared.events.is_empty());
+    assert_eq!(cleared.repeat_count, 2);
+    assert_eq!(original, program());
+}
+
+#[test]
+fn malformed_or_unsupported_edits_do_not_replace_original() {
+    let caps = capabilities();
+    let original = program();
+    for change in [
+        Edit::Remove { at: 2 },
+        Edit::Move { from: 0, to: 2 },
+        Edit::Repeat(0),
+        Edit::Insert {
+            at: 0,
+            event: Event {
+                action: Action::Move { dx: 1, dy: 1 },
+                delay_ms: 1,
+            },
+        },
+        Edit::Replace {
+            at: 1,
+            event: Event {
+                action: Action::Backend {
+                    backend_id: "nia87".into(),
+                    id: "wheel-left".into(),
+                    pressed: true,
+                },
+                delay_ms: 0,
+            },
+        },
+    ] {
+        assert!(edit(&caps, &original, change).is_err());
+    }
+    assert_eq!(original, program());
+}
+
+#[test]
+fn opaque_snapshot_round_trips_without_a_decodable_program() {
+    let snapshot = Snapshot {
+        backend_id: "test".into(),
+        slot: "scene-a".into(),
+        revision: vec![0, 255, 7],
+        content: Content::Opaque {
+            reason: "Unknown firmware event".into(),
+        },
+    };
+    let bytes = serde_json::to_vec(&snapshot).unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Snapshot>(&bytes).unwrap(),
+        snapshot
+    );
+    let mut caps = capabilities();
+    caps.slots.push(caps.slots[0].clone());
+    assert!(validate_capabilities(&caps).is_err());
+}
+
+#[test]
+fn binding_catalog_checks_identity_slot_and_repeat_policy() {
+    let binding = Binding {
+        slot: "scene-a".into(),
+        id: "play".into(),
+        label: "Play".into(),
+        action: crate::model::keymap::Action::Macro { slot: 7, mode: 2 },
+        required_repeat_count: Some(1),
+    };
+    let mut caps = capabilities();
+    caps.bindings.push(binding.clone());
+    assert!(validate_capabilities(&caps).is_ok());
+    let json = serde_json::to_value(&caps).unwrap();
+    assert_eq!(serde_json::from_value::<Capabilities>(json).unwrap(), caps);
+    caps.bindings.push(binding.clone());
+    assert!(validate_capabilities(&caps).is_err());
+    caps.bindings.pop();
+    for invalid in [
+        Binding {
+            slot: "absent".into(),
+            ..binding.clone()
+        },
+        Binding {
+            id: "".into(),
+            ..binding.clone()
+        },
+        Binding {
+            label: "".into(),
+            ..binding.clone()
+        },
+        Binding {
+            required_repeat_count: Some(0),
+            ..binding
+        },
+    ] {
+        caps.bindings[0] = invalid;
+        assert!(validate_capabilities(&caps).is_err());
+    }
+    let mut old_json = serde_json::to_value(capabilities()).unwrap();
+    old_json.as_object_mut().unwrap().remove("bindings");
+    assert!(
+        serde_json::from_value::<Capabilities>(old_json)
+            .unwrap()
+            .bindings
+            .is_empty()
+    );
+
+    let mut caps = capabilities();
+    caps.repeat_counts = 0..=10;
+    caps.editable_repeat_counts = 1..=10;
+    caps.bindings.push(Binding {
+        slot: "scene-a".into(),
+        id: "legacy-zero".into(),
+        label: "Legacy zero".into(),
+        action: crate::model::keymap::Action::Macro { slot: 7, mode: 2 },
+        required_repeat_count: Some(0),
+    });
+    assert!(validate_capabilities(&caps).is_err());
+    caps.bindings.clear();
+    caps.editable_repeat_counts = 0..=11;
+    assert!(validate_capabilities(&caps).is_err());
+}

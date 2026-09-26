@@ -29,6 +29,12 @@ language at the expense of readable Rust.
   validation and write planning. Directory locality alone is not architecture.
   Keep genuine independent activities such as recording outside that lifecycle;
   do not add policy flags or extension hooks for hypothetical differences.
+- Organize application modules by responsibility at the crate's top level:
+  `model/`, `editor/`, `validation/`, `library/`, `recorder/`, `projection/`,
+  and `workflow/`, with feature-named Rust files inside. Desktop uses `form/`,
+  `view/` and `widget/` for those responsibilities. Do not preserve parallel
+  feature folders or compatibility facades. Create roles only when needed.
+  Native protocol families and board backends retain their hardware boundaries.
 - Separate decisions from effects. Prefer ordinary functions, algebraic data
   types, exhaustive matches and explicit inputs/outputs.
 - Use higher-order functions where they express real common operations: mapping

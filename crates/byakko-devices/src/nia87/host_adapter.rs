@@ -3,9 +3,10 @@ use crate::{
     HostActivity, HostFrame,
     nia87::{device, lighting as native, lighting_adapter},
 };
+use byakko_core::validation;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
-    lighting::{self, Color, Content, HostMode, HostSource, Setting, Snapshot},
+    model::lighting::{self, Color, Content, HostMode, HostSource, Setting, Snapshot},
 };
 use std::path::Path;
 
@@ -71,7 +72,7 @@ fn native_mode(
     match (&offered.parameters, parameters) {
         (None, None) => {}
         (Some(schema), Some(setting)) => {
-            lighting::validate_parameters(&schema.schema, setting).map_err(reject)?
+            validation::lighting::validate_parameters(&schema.schema, setting).map_err(reject)?
         }
         _ => {
             return Err(reject(

@@ -1,17 +1,14 @@
-//! Correlates feature effects without owning device I/O.
-mod macro_assignment;
-mod macros;
+//! Correlation and effect routing for independently owned editors.
 use crate::{
-    Action, Change, Descriptor, State,
     contract::{
         ApplyFailure, Command, CommandPayload, Completion, CompletionPayload, FeatureCommand,
         FeatureResult, Problem, Recovery,
     },
-    keymap::{Bindings, Editor},
-    validate_state,
+    editor::{Editor, Status, keymap::KeymapRules, macros::MacroRules},
+    library::macros::Library,
+    model::keymap::{Change, Descriptor},
+    workflow::macro_assignment::{self, Assignment, AssignmentProblem, Plan},
 };
-pub use macro_assignment::AssignmentProblem;
-use macro_assignment::{Assignment, Plan};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Connection {
     Disconnected,
@@ -54,9 +51,9 @@ struct Ticket {
     feature: Feature,
 }
 pub struct Session {
-    descriptor: Descriptor,
-    keymap: Editor,
-    macros: Option<macros::Macros>,
+    keymap: Editor<KeymapRules>,
+    macros: Option<Editor<MacroRules>>,
+    macro_library: Option<Library>,
     assignment: Option<Assignment>,
     connection: Connection,
     generation: u64,
@@ -65,31 +62,10 @@ pub struct Session {
 }
 impl Session {
     pub fn new(descriptor: Descriptor) -> Result<Self, String> {
-        let bindings: Bindings = descriptor
-            .layers
-            .iter()
-            .map(|layer| {
-                (
-                    layer.id.clone(),
-                    descriptor
-                        .keys
-                        .iter()
-                        .map(|key| (key.id.clone(), Action::Disabled))
-                        .collect(),
-                )
-            })
-            .collect();
-        validate_state(
-            &descriptor,
-            &State {
-                revision: Vec::new(),
-                bindings,
-            },
-        )?;
         Ok(Self {
-            descriptor,
-            keymap: Editor::new(),
+            keymap: Editor::new(KeymapRules::new(descriptor)?),
             macros: None,
+            macro_library: None,
             assignment: None,
             connection: Connection::Disconnected,
             generation: 0,
@@ -99,28 +75,36 @@ impl Session {
     }
     pub fn with_macros(
         mut self,
-        capabilities: crate::macros::Capabilities,
+        capabilities: crate::model::macros::Capabilities,
     ) -> Result<Self, String> {
-        if capabilities.backend_id != self.descriptor.backend_id {
+        if capabilities.backend_id != self.descriptor().backend_id {
             return Err("Macro capabilities belong to another backend".into());
         }
         if self.macros.is_some() {
             return Err("Macro feature is already configured".into());
         }
-        self.macros = Some(macros::Macros::new(capabilities)?);
+        let rules = MacroRules::new(capabilities)?;
+        self.macro_library = Some(Library::new(
+            rules
+                .capabilities()
+                .slots
+                .iter()
+                .map(|slot| slot.id.clone()),
+        ));
+        self.macros = Some(Editor::new(rules));
         Ok(self)
     }
     pub fn descriptor(&self) -> &Descriptor {
-        &self.descriptor
+        self.keymap.rules().descriptor()
     }
-    pub fn keymap(&self) -> &Editor {
+    pub fn keymap(&self) -> &Editor<KeymapRules> {
         &self.keymap
     }
-    pub fn macros(&self) -> Option<&crate::macros::editor::Editor> {
-        self.macros.as_ref().map(|feature| &feature.editor)
+    pub fn macros(&self) -> Option<&Editor<MacroRules>> {
+        self.macros.as_ref()
     }
-    pub fn macro_library(&self) -> Option<&crate::macros::library::Library> {
-        self.macros.as_ref().map(|feature| &feature.library)
+    pub fn macro_library(&self) -> Option<&Library> {
+        self.macro_library.as_ref()
     }
     pub fn connection(&self) -> &Connection {
         &self.connection
@@ -129,13 +113,11 @@ impl Session {
         self.pending.is_some()
     }
     pub fn catalog_scanning(&self) -> bool {
-        self.macros
-            .as_ref()
-            .is_some_and(|feature| feature.scan.is_some())
+        self.macro_library.as_ref().is_some_and(Library::scanning)
     }
     pub fn cancel_catalog(&mut self) {
-        if let Some(feature) = &mut self.macros {
-            feature.scan = None;
+        if let Some(library) = &mut self.macro_library {
+            library.cancel();
         }
     }
     pub fn connect(&mut self) -> Result<u64, String> {
@@ -151,6 +133,9 @@ impl Session {
         if let Some(feature) = &mut self.macros {
             feature.invalidate();
         }
+        if let Some(library) = &mut self.macro_library {
+            library.invalidate();
+        }
         Ok(self.generation)
     }
     pub fn disconnect(&mut self) {
@@ -162,10 +147,10 @@ impl Session {
                 recovery: Recovery::Unverified,
             };
             match &ticket.feature {
-                Feature::Keymap => self.keymap.applied(&self.descriptor, Err(failure)),
+                Feature::Keymap => self.keymap.accept_apply(Err(failure)),
                 Feature::Macro { .. } => {
                     if let Some(feature) = &mut self.macros {
-                        feature.editor.accept_apply(Err(failure));
+                        feature.accept_apply(Err(failure));
                     }
                 }
             }
@@ -177,6 +162,9 @@ impl Session {
         if let Some(feature) = &mut self.macros {
             feature.invalidate();
         }
+        if let Some(library) = &mut self.macro_library {
+            library.invalidate();
+        }
     }
     pub fn read(&mut self) -> Result<Command, String> {
         self.begin(
@@ -187,14 +175,14 @@ impl Session {
     }
     pub fn edit(&mut self, change: Change) -> Result<(), String> {
         self.idle()?;
-        self.keymap.edit(&self.descriptor, change)
+        self.keymap.edit(change)
     }
     pub fn revert(&mut self) -> Result<(), String> {
         self.idle()?;
         self.keymap.revert()
     }
     pub fn save(&mut self) -> Result<Command, String> {
-        let (expected, desired) = self.keymap.save(&self.descriptor)?;
+        let (expected, desired) = self.keymap.request_apply()?;
         self.begin(
             Feature::Keymap,
             Direction::Save,
@@ -203,7 +191,7 @@ impl Session {
     }
     pub fn select_macro(&mut self, slot: &str) -> Result<(), String> {
         self.idle()?;
-        self.macro_feature()?.editor.select(slot)
+        self.macro_feature()?.select(slot)
     }
     pub fn read_macro(&mut self) -> Result<Command, String> {
         let slot = self
@@ -217,17 +205,20 @@ impl Session {
             CommandPayload::Macro(FeatureCommand::Read(slot)),
         )
     }
-    pub fn edit_macro(&mut self, edit: crate::macros::Edit) -> Result<(), String> {
+    pub fn edit_macro(&mut self, edit: crate::model::macros::Edit) -> Result<(), String> {
         self.idle()?;
-        self.macro_feature()?.editor.edit(edit)
+        self.macro_feature()?.edit(edit)
     }
     pub fn revert_macro(&mut self) -> Result<(), String> {
         self.idle()?;
-        self.macro_feature()?.editor.revert()
+        self.macro_feature()?.revert()
     }
-    pub fn stage_macro_snapshot(&mut self, target: &crate::macros::Snapshot) -> Result<(), String> {
+    pub fn stage_macro_snapshot(
+        &mut self,
+        target: &crate::model::macros::Snapshot,
+    ) -> Result<(), String> {
         self.idle()?;
-        self.macro_feature()?.editor.import(target)
+        self.macro_feature()?.import(target)
     }
     /// Prefer a known empty, unbound slot; unknown candidates require a foreground read.
     pub fn macro_candidate(&self) -> Result<String, String> {
@@ -236,12 +227,13 @@ impl Session {
             .keymap
             .draft()
             .ok_or("Read the keymap before choosing a macro slot")?;
-        feature
-            .library
-            .candidate(feature.editor.capabilities(), bindings)
+        self.macro_library
+            .as_ref()
+            .ok_or("Macros are not supported")?
+            .candidate(feature.capabilities(), bindings)
     }
     pub fn save_macro(&mut self) -> Result<Command, String> {
-        let editor = self.macros().ok_or("Macros are not supported")?;
+        let editor = self.macro_feature()?;
         let slot = editor.slot().to_owned();
         let (expected, desired) = editor.request_apply()?;
         let command = self.begin(
@@ -266,7 +258,10 @@ impl Session {
             .map(|slot| slot.id.clone())
             .collect();
         let operation = self.next_operation()?;
-        self.macro_feature()?.begin_scan(generation, operation);
+        self.macro_library
+            .as_mut()
+            .ok_or("Macros are not supported")?
+            .begin_scan(generation, operation);
         Ok(Command {
             generation,
             operation,
@@ -286,7 +281,7 @@ impl Session {
             save_macro,
             already_assigned,
         } = macro_assignment::plan(
-            &self.descriptor,
+            self.descriptor(),
             &self.keymap,
             self.macros().ok_or("Macros are not supported")?,
             layer,
@@ -301,13 +296,13 @@ impl Session {
             if already_assigned {
                 return Err("Macro is already assigned to this key".into());
             }
-            self.keymap.bind_macro(&self.descriptor, change)?;
+            self.keymap.bind_macro(change)?;
             let command = self.save()?;
             self.assignment = Some(Assignment::Assigning { macro_saved: false });
             Ok(command)
         }
     }
-    fn macro_feature(&mut self) -> Result<&mut macros::Macros, String> {
+    fn macro_feature(&mut self) -> Result<&mut Editor<MacroRules>, String> {
         self.macros
             .as_mut()
             .ok_or_else(|| "Macros are not supported".into())
@@ -338,9 +333,29 @@ impl Session {
         direction: Direction,
         payload: CommandPayload,
     ) -> Result<Command, String> {
-        self.idle()?;
-        let generation = self.connected()?;
-        let operation = self.next_operation()?;
+        let correlation = self
+            .idle()
+            .and_then(|()| self.connected())
+            .and_then(|generation| {
+                self.next_operation()
+                    .map(|operation| (generation, operation))
+            });
+        let (generation, operation) = match correlation {
+            Ok(correlation) => correlation,
+            Err(reason) => {
+                if matches!(direction, Direction::Save) {
+                    match &feature {
+                        Feature::Keymap => self.keymap.cancel_apply(),
+                        Feature::Macro { .. } => {
+                            if let Some(editor) = &mut self.macros {
+                                editor.cancel_apply();
+                            }
+                        }
+                    }
+                }
+                return Err(reason);
+            }
+        };
         self.pending = Some(Ticket {
             generation,
             operation,
@@ -354,8 +369,8 @@ impl Session {
         })
     }
     pub fn accept(&mut self, completion: Completion) -> Outcome {
-        if let Some(feature) = &mut self.macros
-            && let Some(result) = feature.accept_scan(&completion)
+        if let (Some(library), Some(editor)) = (&mut self.macro_library, &self.macros)
+            && let Some(result) = library.accept_scan(&completion, editor.rules())
         {
             return result.map_or_else(Outcome::CatalogFailed, |()| Outcome::CatalogLoaded);
         }
@@ -371,7 +386,7 @@ impl Session {
                 Direction::Read,
                 CompletionPayload::Keymap(FeatureResult::Read(result)),
             ) => {
-                self.keymap.read(&self.descriptor, result);
+                self.keymap.accept_read(result);
                 self.keymap_outcome(Outcome::Loaded)
             }
             (
@@ -379,7 +394,7 @@ impl Session {
                 Direction::Save,
                 CompletionPayload::Keymap(FeatureResult::Apply(result)),
             ) => {
-                self.keymap.applied(&self.descriptor, result);
+                self.keymap.accept_apply(result);
                 self.keymap_outcome(Outcome::Saved)
             }
             (
@@ -393,19 +408,23 @@ impl Session {
                         | (Direction::Save, FeatureResult::Apply(_))
                 ) =>
             {
-                let feature = self.macros.as_mut().expect("macro ticket owns feature");
+                let editor = self.macros.as_mut().expect("macro ticket owns editor");
+                match result {
+                    FeatureResult::Read(result) => editor.accept_read(result),
+                    FeatureResult::Apply(result) => editor.accept_apply(result),
+                }
                 let success = match direction {
                     Direction::Read => Outcome::MacroLoaded,
                     Direction::Save => Outcome::MacroSaved,
                 };
-                match feature.accept(result) {
+                match self
+                    .macro_library
+                    .as_mut()
+                    .expect("macro editor owns library")
+                    .observe_editor(editor)
+                {
                     Err(problem) => Outcome::Failed(problem),
-                    Ok(())
-                        if matches!(
-                            feature.editor.status(),
-                            crate::macros::editor::Status::Conflict { .. }
-                        ) =>
-                    {
+                    Ok(()) if matches!(editor.status(), Status::Conflict { .. }) => {
                         Outcome::Conflict
                     }
                     Ok(()) => success,
@@ -420,10 +439,13 @@ impl Session {
         self.assignment_outcome(outcome)
     }
     fn keymap_outcome(&self, success: Outcome) -> Outcome {
-        if matches!(self.keymap.status(), crate::keymap::Status::Conflict { .. }) {
+        if matches!(self.keymap.status(), Status::Conflict { .. }) {
             Outcome::Conflict
         } else {
-            self.keymap.problem().map_or(success, Outcome::Failed)
+            self.keymap
+                .problem()
+                .cloned()
+                .map_or(success, Outcome::Failed)
         }
     }
     fn assignment_outcome(&mut self, outcome: Outcome) -> Outcome {
@@ -433,7 +455,7 @@ impl Session {
         match assignment.advance(outcome) {
             macro_assignment::Step::Finished(outcome) => outcome,
             macro_assignment::Step::Assign(change) => {
-                let request = macro_assignment::assign(&mut self.keymap, &self.descriptor, change);
+                let request = macro_assignment::assign(&mut self.keymap, change);
                 let command = match request {
                     Ok(None) => return Outcome::AssignmentSucceeded { macro_saved: true },
                     Ok(Some(request)) => self.begin(
@@ -458,4 +480,5 @@ impl Session {
     }
 }
 #[cfg(test)]
+#[path = "tests/session.rs"]
 mod tests;

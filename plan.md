@@ -5,8 +5,8 @@ Started 2026-09-26 on `codex/application-rewrite`, from `3db624f`.
 ## Objective and authority
 
 Replace the accumulated application with a human-readable, modular program.
-A feature should be understandable locally: data, legal edits, effects, accepted
-outcomes and presentation. Favor simple functional composition and explicit
+A feature should implement clear, established contracts for data, legal edits,
+effects, accepted outcomes and presentation. Favor simple functional composition and explicit
 ownership over guards, wrappers and synchronized controller state. The user's
 Elm/Xmonad examples express this clarity; Rust and Iced remain.
 
@@ -28,7 +28,8 @@ it is not evidence that new frontend paths work.
    separate from `session`. Native queues are adapters, not the contract.
 3. Connection, feature state and operation identity are separate. Keymaps have
    an editor; keymap readiness is not connection state.
-4. Feature owners handle validation and accepted observations. Session owns
+4. The shared editor lifecycle handles accepted observations; feature rules
+   supply validation and write planning. Session owns
    exclusivity/correlation and genuine cross-feature effects. Named workflows
    compose features. No giant controller hidden in multiple `impl` files.
 5. Core acceptance returns typed facts. Frontends must not reconstruct success
@@ -55,6 +56,11 @@ it is not evidence that new frontend paths work.
     failure transitions must not be reimplemented for every feature. Features
     supply their domain rules; genuine workflows such as recording and
     save-and-assign compose editors. Avoid an extensible hierarchy or policy flags.
+14. Organize all application roles this way, not just editors: `model/`,
+    `validation/`, `library/`, `recorder/`, `projection/` and `workflow/` contain
+    feature-named files. Desktop separates `form/`, `view/` and `widget/`.
+    No parallel feature hierarchy or legacy module aliases. Native board and
+    protocol-family organization retains the hardware boundary.
 
 ## Intended ownership
 
@@ -62,13 +68,20 @@ it is not evidence that new frontend paths work.
 | --- | --- |
 | core/contract | Commands, completions, IDs, evidence and failures |
 | core/session | Connection, exclusivity, correlation and routing |
-| core/keymap, macros, lighting, picture, settings | Models, edits, transitions, projections |
-| core/workflows | Genuine multi-feature sequences such as save-and-assign |
+| core/model | Owned feature values and serializable snapshots |
+| core/editor | Shared lifecycle and feature implementations |
+| core/validation | Feature constraints and snapshot validation |
+| core/library | Occupancy knowledge and discovery |
+| core/recorder | Explicitly timed local recording |
+| core/projection | Pure capability-to-control projections |
+| core/workflow | Genuine multi-feature sequences such as save-and-assign |
 | devices/executor | Serialized delivery and scheduling |
 | devices/hid, rongyuan, nia87 | OS collections, family codecs, board mapping, transactions |
 | devices/storage and sampling | Durable files and OS samplers |
-| desktop/app and workspace | Iced lifecycle, routing and persistent keyboard layout |
-| desktop/features and widgets | Local forms, feature messages/views and shared controls |
+| desktop/app | Iced lifecycle, routing and effect delivery |
+| desktop/form | Unsubmitted input, parsing and user intents |
+| desktop/view | Feature rendering over forms and core state |
+| desktop/widget | Reusable physical keyboard and semantic controls |
 | CLI | Typed parsing, file intent and output over shared core |
 
 Use subdirectories only where navigation benefits; do not manufacture files just
@@ -87,9 +100,10 @@ to match this table. Public APIs expose concepts, not every internal helper.
   Preserve unknown slots, candidate reads, count rules and partial outcomes.
 - [ ] Restore exclusive local macro recording and complete the macro interaction
   review, including user-facing event choices and rendered layout.
-- [ ] Before expanding features, consolidate the shared editor lifecycle and
-  feature implementations under `editor/`. Remove the macro lifecycle duplication
-  and constrain the session to routing/exclusivity and explicit workflows.
+- [x] Before expanding features, consolidate the shared editor lifecycle and
+  feature implementations under `editor/`. Put the other application roles in
+  top-level folders as requested. Remove the macro lifecycle duplication and
+  constrain the session to routing/exclusivity and explicit workflows.
 - [ ] Rebuild coalesced lighting, picture and scalar settings with owned intent
   and submission state, real selector dependencies and one-pass read policy.
 - [ ] Restore discovery, files, local labels and diagnostic capture through the
@@ -147,7 +161,7 @@ target/debug/byakko-cli --demo plan-keymap target/rewrite-smoke/keymap.json
 target/debug/byakko-cli --demo apply-keymap target/rewrite-smoke/keymap.json
 ```
 
-The next integrated checkpoint adds a macro occupancy library, selected editor,
+The macro checkpoint adds an occupancy library, selected editor,
 passive worker discovery and shared save-and-assign workflow. Desktop preserves
 the keyboard workspace while editing macros. CLI supports macro snapshots and
 assignment. Core reports partial assignment failure explicitly. Review fixed a
@@ -156,10 +170,24 @@ observations remain intact. Client tests cover actual messages and file workflow
 All workspace tests, strict Clippy and both locked development builds pass.
 No hardware writes or rendered-layout acceptance were performed.
 
-Architecture review with the user identified that directory locality does not
-constrain design growth. The current private Draft is shared by several editors,
-but macros duplicates the lifecycle. Consolidating that into an explicit shared
-editor model is the next prerequisite before adding more feature controllers.
+The role-based architecture checkpoint is complete. One `Editor<F>` owns the
+baseline, draft, submitted target, status and accepted outcomes for keymap,
+macros, lighting, picture and settings. Feature rules supply projection,
+validation, edits and write planning. The old Draft and feature editor wrappers
+are deleted. Models, validators, libraries, recording, projections, workflows
+and tests use top-level role folders; desktop uses form/view/widget folders.
+Session retains correlation and workflows without a duplicate descriptor or
+hidden macro aggregate. Native adapters and both clients use the new paths;
+there are no legacy module facades.
+
+All 56 core tests, 208 device tests, the external device integration test and
+desktop/CLI tests pass. New lifecycle tests cover newer intent during a submitted
+write, retained typed recovery, invalid results, evidence distinctions, scalar
+settings and rejected operation allocation. Audit also corrected raw-zero macro
+staging: reads/revert preserve it, but changed programs require an editable count.
+Strict workspace Clippy, formatting and locked development builds pass. The
+built CLI passed memory-only macro read/plan/apply, assignment and discovery.
+Hardware behavior and rendered layout remain separate acceptance work.
 
 Temporary gaps: automatic discovery/reconnect, the full assignment catalog and
 custom shortcut form, recording and macro interaction review, coalesced lighting/picture/

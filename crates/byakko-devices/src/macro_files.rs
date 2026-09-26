@@ -1,6 +1,6 @@
 //! Bounded portable macro documents and legacy Nia87 import.
 use crate::nia87::{macro_adapter, macro_file as legacy, macros as native};
-use byakko_core::macros::{Content, Document};
+use byakko_core::model::macros::{Content, Document};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -106,7 +106,7 @@ pub fn save_new(path: &Path, document: &Document) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use byakko_core::macros::{Action, Event, Program};
+    use byakko_core::model::macros::{Action, Event, Program};
 
     fn sample() -> Document {
         Document {

@@ -1,7 +1,7 @@
 use super::*;
 use byakko_core::{
-    Action, Change, State,
     contract::{ApplyFailure, Recovery},
+    model::keymap::{Action, Change, State},
 };
 use byakko_devices::{
     Device,
@@ -22,16 +22,16 @@ struct ObservedDevice {
     macro_reads: Arc<AtomicUsize>,
 }
 impl Device for ObservedDevice {
-    fn read_macro(&mut self, slot: &str) -> Result<byakko_core::macros::Snapshot, String> {
+    fn read_macro(&mut self, slot: &str) -> Result<byakko_core::model::macros::Snapshot, String> {
         self.macro_reads.fetch_add(1, Ordering::SeqCst);
         self.memory.read_macro(slot)
     }
     fn apply_macro(
         &mut self,
-        expected: &byakko_core::macros::Snapshot,
-        desired: &byakko_core::macros::Program,
+        expected: &byakko_core::model::macros::Snapshot,
+        desired: &byakko_core::model::macros::Program,
         backup: &Path,
-    ) -> Result<byakko_core::macros::Snapshot, ApplyFailure> {
+    ) -> Result<byakko_core::model::macros::Snapshot, ApplyFailure> {
         self.memory.apply_macro(expected, desired, backup)
     }
     fn read(&mut self) -> Result<State, String> {
