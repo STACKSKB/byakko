@@ -15,23 +15,19 @@ impl Selection<'_> {
     }
 }
 
-/// Immutable device-selection policy shared by adapters and feature reads.
-/// `Unique` preserves the legacy CLI discovery behavior; `Bound` never falls
-/// back from the selected HID collection.
+/// Immutable selected HID collection shared by adapters and feature reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Access {
-    Bound(Target),
+pub struct Access {
+    target: Target,
 }
 
 impl Access {
     pub fn bound(target: Target) -> Self {
-        Self::Bound(target)
+        Self { target }
     }
 
     fn selection(&self) -> Selection<'_> {
-        match self {
-            Self::Bound(target) => Selection::Expected(target),
-        }
+        Selection::Expected(&self.target)
     }
 
     pub fn snapshot(&self) -> Result<Snapshot> {
