@@ -123,6 +123,22 @@ pub struct HostStart {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostEvent {
+    pub ticket: HostTicket,
+    pub kind: HostEventKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum HostEventKind {
+    Started,
+    Finished {
+        restored: Result<crate::model::lighting::Snapshot, ApplyFailure>,
+        /// A frame or sampler failure remains visible even when restoration succeeds.
+        problem: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Problem {
     ReadRequired,
     Read(String),

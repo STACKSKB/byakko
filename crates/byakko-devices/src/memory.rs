@@ -24,6 +24,22 @@ struct MacroStorage {
     slots: BTreeMap<String, StoredMacro>,
 }
 
+struct MemoryHost {
+    source: lighting::HostSource,
+    saved: lighting::Snapshot,
+}
+impl crate::HostActivity for MemoryHost {
+    fn send_frame(&mut self, frame: crate::HostFrame) -> Result<(), String> {
+        frame.validate_for(self.source)
+    }
+    fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure> {
+        Ok(lighting::Snapshot {
+            evidence: lighting::Evidence::Readback,
+            ..self.saved
+        })
+    }
+}
+
 struct StoredMacro {
     initial_revision: Vec<u8>,
     revision_number: u64,
@@ -411,6 +427,49 @@ impl Device for MemoryDevice {
         Ok(next)
     }
 
+    fn start_host_lighting(
+        &mut self,
+        mode: lighting::HostMode,
+        setting: Option<lighting::Setting>,
+        expected: &lighting::Snapshot,
+        _backup_dir: &Path,
+    ) -> Result<Box<dyn crate::HostActivity>, ApplyFailure> {
+        let reject = |message: String| ApplyFailure {
+            message,
+            recovery: Recovery::NotAttempted,
+        };
+        let stored = self
+            .lighting
+            .as_ref()
+            .ok_or_else(|| reject("Lighting is unavailable".into()))?;
+        if !matches!(expected.content, lighting::Content::Editable(_))
+            || !<byakko_core::editor::lighting::LightingRules as byakko_core::editor::Feature>::same_baseline(&stored.snapshot, expected) {
+            return Err(reject("Host lighting requires the current editable baseline".into()));
+        }
+        let offered = stored
+            .capabilities
+            .host_modes
+            .iter()
+            .find(|offered| *offered == &mode)
+            .ok_or_else(|| reject("Host mode is not advertised".into()))?;
+        match (&offered.parameters, &setting) {
+            (None, None) => {}
+            (Some(parameters), Some(setting)) => {
+                validation::lighting::validate_parameters(&parameters.schema, setting)
+                    .map_err(reject)?
+            }
+            _ => {
+                return Err(reject(
+                    "Host parameters do not match the advertised mode".into(),
+                ));
+            }
+        }
+        Ok(Box::new(MemoryHost {
+            source: mode.source,
+            saved: stored.snapshot.clone(),
+        }))
+    }
+
     fn read_picture(&mut self) -> Result<picture::Snapshot, String> {
         self.picture
             .as_ref()
@@ -755,7 +814,38 @@ pub fn demo() -> Result<MemoryDevice, String> {
         .collect();
     let lighting_capabilities = lighting::Capabilities {
         backend_id: "memory".into(),
-        host_modes: vec![],
+        host_modes: vec![
+            lighting::HostMode {
+                requires_enabled_setting: None,
+                id: "screen-average".into(),
+                label: "Screen average".into(),
+                source: lighting::HostSource::ScreenAverage,
+                parameters: None,
+            },
+            lighting::HostMode {
+                requires_enabled_setting: None,
+                id: "playback-audio".into(),
+                label: "Playback audio".into(),
+                source: lighting::HostSource::PlaybackAudio { bands: 32 },
+                parameters: Some(lighting::HostParameters {
+                    schema: lighting::Effect {
+                        id: "audio".into(),
+                        label: "Audio parameters".into(),
+                        brightness: Some(1..=5),
+                        speed: None,
+                        options: vec![],
+                        color: Some(lighting::ColorCapability::Fixed),
+                    },
+                    default: lighting::Setting {
+                        effect: "audio".into(),
+                        brightness: Some(3),
+                        speed: None,
+                        option: None,
+                        color: Some(lighting::Color::Rgb([40, 100, 180])),
+                    },
+                }),
+            },
+        ],
         effects: vec![
             lighting::Effect {
                 id: "steady".into(),
@@ -853,6 +943,129 @@ pub fn demo() -> Result<MemoryDevice, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn demo_host_validates_parameters_and_frames_without_changing_other_features() {
+        use super::*;
+        let mut device = demo().unwrap();
+        let mut baseline = device.read_lighting().unwrap();
+        baseline.evidence = lighting::Evidence::TransportAccepted;
+        let keymap = device.state.clone();
+        let picture = device.read_picture().unwrap();
+        let settings = device.read_settings().unwrap();
+        let modes = device
+            .lighting
+            .as_ref()
+            .unwrap()
+            .capabilities
+            .host_modes
+            .clone();
+        let screen = modes
+            .iter()
+            .find(|mode| mode.id == "screen-average")
+            .unwrap()
+            .clone();
+        let audio = modes
+            .iter()
+            .find(|mode| mode.id == "playback-audio")
+            .unwrap()
+            .clone();
+        let mut activity = device
+            .start_host_lighting(screen, None, &baseline, Path::new("unused"))
+            .unwrap();
+        assert!(
+            activity
+                .send_frame(crate::HostFrame::Bands(vec![0; 32]))
+                .is_err()
+        );
+        activity
+            .send_frame(crate::HostFrame::Rgb([1, 2, 3]))
+            .unwrap();
+        let restored = activity.finish().unwrap();
+        assert_eq!(restored.evidence, lighting::Evidence::Readback);
+        assert!(
+            device
+                .start_host_lighting(audio.clone(), None, &baseline, Path::new("unused"))
+                .is_err()
+        );
+        let mut parameters = audio.parameters.as_ref().unwrap().default.clone();
+        parameters.brightness = Some(6);
+        assert!(
+            device
+                .start_host_lighting(
+                    audio.clone(),
+                    Some(parameters),
+                    &baseline,
+                    Path::new("unused")
+                )
+                .is_err()
+        );
+        let parameters = audio.parameters.as_ref().unwrap().default.clone();
+        let mut activity = device
+            .start_host_lighting(audio, Some(parameters), &baseline, Path::new("unused"))
+            .unwrap();
+        assert!(activity.send_frame(crate::HostFrame::Rgb([0; 3])).is_err());
+        assert!(
+            activity
+                .send_frame(crate::HostFrame::Bands(vec![0; 31]))
+                .is_err()
+        );
+        activity
+            .send_frame(crate::HostFrame::Bands(vec![0; 32]))
+            .unwrap();
+        assert_eq!(activity.finish().unwrap(), restored);
+        assert_eq!(device.state, keymap);
+        assert_eq!(device.read_picture().unwrap(), picture);
+        assert_eq!(device.read_settings().unwrap(), settings);
+        assert_eq!(device.read_lighting().unwrap(), restored);
+    }
+
+    #[test]
+    fn demo_host_roundtrip_through_executor_accepts_transport_evidence() {
+        use super::*;
+        use byakko_core::contract::{HostEventKind, HostStart, HostTicket};
+        use std::time::{Duration, Instant};
+        let mut device = demo().unwrap();
+        let mut baseline = device.read_lighting().unwrap();
+        baseline.evidence = lighting::Evidence::TransportAccepted;
+        let mode = device.lighting.as_ref().unwrap().capabilities.host_modes[0].clone();
+        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
+        worker.set_generation(1);
+        let ticket = HostTicket {
+            generation: 1,
+            operation: 1,
+        };
+        worker
+            .start_host(HostStart {
+                ticket,
+                mode,
+                setting: None,
+                expected: baseline.clone(),
+            })
+            .unwrap();
+        worker.stop_host(ticket, None);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut started = false;
+        loop {
+            assert!(Instant::now() < deadline, "host completion timed out");
+            if let Ok(event) = worker.try_receive_host() {
+                assert_eq!(event.ticket, ticket);
+                match event.kind {
+                    HostEventKind::Started => started = true,
+                    HostEventKind::Finished { restored, problem } => {
+                        assert!(started);
+                        let restored = restored.unwrap();
+                        assert_eq!(restored.revision, baseline.revision);
+                        assert_eq!(restored.content, baseline.content);
+                        assert_eq!(restored.evidence, lighting::Evidence::Readback);
+                        assert_eq!(problem, None);
+                        break;
+                    }
+                }
+            }
+            std::thread::yield_now();
+        }
+    }
+
     #[test]
     fn demo_shortcut_uses_cached_baseline_and_rejects_invalid_assignments() {
         use super::*;

@@ -242,6 +242,7 @@ mod tests {
             assert_eq!(native::write_report(&setting).unwrap()[1], effect);
         }
         let unsupported = HostMode {
+            requires_enabled_setting: None,
             id: "other-backend-mode".into(),
             label: "Other".into(),
             source: HostSource::PlaybackAudio { bands: 32 },

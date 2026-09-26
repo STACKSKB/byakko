@@ -2,7 +2,7 @@
 use crate::{
     contract::{
         ApplyFailure, Command, CommandPayload, Completion, CompletionPayload, FeatureCommand,
-        FeatureResult, Problem, Recovery,
+        FeatureResult, HostEvent, HostStart, HostTicket, Problem, Recovery,
     },
     editor::{
         Editor, Status, keymap::KeymapRules, lighting::LightingRules, macros::MacroRules,
@@ -14,6 +14,7 @@ use crate::{
     model::{archive::ArchiveCapabilities, lighting, picture, settings},
     recorder::macros::{DelayPolicy, Recorder, StopOutcome, Transition},
     workflow::Problem as WorkflowProblem,
+    workflow::host::{self, HostOutcome, State as HostState},
     workflow::macro_assignment::{self, Assignment, Plan},
     workflow::picture_preparation::{self, Action as PictureAction, Preparation},
 };
@@ -89,6 +90,7 @@ pub struct Session {
     operation: u64,
     pending: Option<Ticket>,
     recorder: Option<Recorder>,
+    host: HostState,
 }
 impl Session {
     pub fn new(descriptor: Descriptor) -> Result<Self, String> {
@@ -107,6 +109,7 @@ impl Session {
             operation: 0,
             pending: None,
             recorder: None,
+            host: HostState::Idle,
         })
     }
     pub fn with_macros(
@@ -239,6 +242,46 @@ impl Session {
     pub fn recording(&self) -> bool {
         self.recorder.is_some()
     }
+    pub fn host(&self) -> &HostState {
+        &self.host
+    }
+    pub fn start_host(
+        &mut self,
+        mode_id: &str,
+        setting: Option<lighting::Setting>,
+    ) -> Result<HostStart, String> {
+        self.idle()?;
+        let generation = self.connected()?;
+        if self.catalog_scanning() {
+            return Err("Finish macro discovery before host lighting".into());
+        }
+        let plan = host::plan(
+            self.lighting().ok_or("Lighting is not supported")?,
+            self.settings(),
+            mode_id,
+            setting,
+        )?;
+        let start = HostStart {
+            ticket: HostTicket {
+                generation,
+                operation: self.next_operation()?,
+            },
+            mode: plan.mode,
+            setting: plan.setting,
+            expected: plan.expected,
+        };
+        self.host.begin(&start);
+        Ok(start)
+    }
+    pub fn stop_host(&mut self) -> Option<HostTicket> {
+        self.host.stop()
+    }
+    pub fn accept_host(&mut self, event: HostEvent) -> HostOutcome {
+        match &mut self.lighting {
+            Some(editor) => self.host.accept(event, editor),
+            None => HostOutcome::Ignored,
+        }
+    }
     pub fn start_recording(&mut self, policy: DelayPolicy) -> Result<(), String> {
         self.idle()?;
         if self.catalog_scanning() {
@@ -314,6 +357,9 @@ impl Session {
         Ok(self.generation)
     }
     pub fn disconnect(&mut self) -> Result<Option<StopOutcome>, String> {
+        if let Some(editor) = &mut self.lighting {
+            self.host.disconnect(editor);
+        }
         let recording = match self.recorder.as_ref() {
             Some(recorder) => self.stop_recording(recorder.last_timestamp()).map(Some),
             None => Ok(None),
@@ -459,6 +505,9 @@ impl Session {
         Ok(command)
     }
     pub fn request_macro_catalog(&mut self) -> Result<Command, String> {
+        if !self.host.is_idle() {
+            return Err("Stop host lighting before macro discovery".into());
+        }
         if self.recording() {
             return Err("Stop recording before macro discovery".into());
         }
@@ -765,7 +814,9 @@ impl Session {
             .ok_or_else(|| "Macros are not supported".into())
     }
     fn idle(&self) -> Result<(), String> {
-        if self.recording() {
+        if !self.host.is_idle() {
+            Err("Stop host lighting before another session activity".into())
+        } else if self.recording() {
             Err("Stop recording before another session activity".into())
         } else if self.busy() {
             Err("Wait for the current operation".into())

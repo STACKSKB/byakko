@@ -79,6 +79,7 @@ fn effect_schema(id: String, effect: &native::Effect) -> Effect {
 fn music_mode(id: &str, label: &str, native_id: u8) -> HostMode {
     let effect = native::effect_by_id(native_id).expect("known Nia87 music effect");
     HostMode {
+        requires_enabled_setting: Some("backlight".into()),
         id: id.into(),
         label: label.into(),
         source: HostSource::PlaybackAudio { bands: 32 },
@@ -105,6 +106,7 @@ pub fn capabilities() -> Capabilities {
             .collect(),
         host_modes: vec![
             HostMode {
+                requires_enabled_setting: Some("backlight".into()),
                 id: SCREEN_AVERAGE.into(),
                 label: "Screen color".into(),
                 source: HostSource::ScreenAverage,

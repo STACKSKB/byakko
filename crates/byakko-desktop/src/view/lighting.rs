@@ -1,19 +1,16 @@
 //! Capability-driven onboard lighting controls over the sole core draft.
 use crate::{
     form::lighting::{Form, Message},
-    widget::{
-        color_picker,
-        panels::{self, UiStyle},
-    },
+    widget::panels::{self, UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Status, lighting::LightingRules},
-    model::lighting::{Color, Content, Edit},
-    projection::lighting::{self, Control},
+    model::lighting::Content,
+    projection::lighting,
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, row, scrollable, slider, text},
+    widget::{button, column, row, scrollable, text},
 };
 
 pub fn view<'a>(
@@ -59,53 +56,15 @@ pub fn view<'a>(
     if let Some(setting) = editor.draft() {
         match lighting::controls(editor.capabilities(), setting) {
             Ok(controls) => {
-                for control in controls.settings {
-                    let control: Element<'a, Message> = match control {
-                        Control::Choices { label, choices } => column![
-                            text(label),
-                            row(choices.into_iter().map(|choice| panels::selectable_button(
-                                style,
-                                choice.label,
-                                choice.selected,
-                                editable.then_some(Message::Edit(choice.edit)),
-                            )))
-                            .spacing(style.spacing.s)
-                            .wrap(),
-                        ]
-                        .spacing(style.spacing.s)
-                        .into(),
-                        Control::Level {
-                            label,
-                            range,
-                            value,
-                            edit,
-                        } => {
-                            let control: Element<'a, Message> = if editable {
-                                slider(range, value, move |value| {
-                                    Message::Edit(
-                                        edit.edit(value).expect("projected lighting range"),
-                                    )
-                                })
-                                .into()
-                            } else {
-                                text(value.to_string()).into()
-                            };
-                            column![text(format!("{label}: {value}")), control]
-                                .spacing(style.spacing.s)
-                                .into()
-                        }
-                    };
-                    content = content.push(control);
-                }
-                if let Some(Color::Rgb(rgb)) = setting.color {
-                    content = content.push(color_picker::view(
-                        style,
-                        rgb,
-                        format!("lighting:{}", setting.effect),
-                        Message::Picker,
-                        editable.then_some(|rgb| Message::Edit(Edit::Color(Color::Rgb(rgb)))),
-                    ));
-                }
+                content = content.push(crate::widget::lighting::parameters(
+                    setting,
+                    controls.settings,
+                    editable,
+                    style,
+                    format!("lighting:{}", setting.effect),
+                    Message::Edit,
+                    Message::Picker,
+                ));
             }
             Err(reason) => content = content.push(text(reason)),
         }

@@ -1,3 +1,4 @@
+pub mod host;
 pub mod macro_assignment;
 pub mod picture_preparation;
 

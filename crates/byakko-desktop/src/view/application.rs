@@ -3,7 +3,7 @@ use crate::{
     controller::discovery::Availability,
     form::{
         application::{Closing, Message, Page},
-        files, keymap, lighting, macros, picture, recording, settings,
+        files, host, keymap, lighting, macros, picture, recording, settings,
     },
     view,
     widget::panels::UiStyle,
@@ -24,6 +24,8 @@ pub struct View<'a> {
     pub keys: &'a keymap::Form,
     pub macros: &'a macros::Form,
     pub lighting: &'a lighting::Form,
+    pub host: &'a host::Form,
+    pub host_preparing: bool,
     pub picture: &'a picture::Form,
     pub settings: &'a settings::Form,
     pub files: &'a files::Form,
@@ -40,7 +42,9 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
     let idle = !input.session.busy()
         && !input.files_busy
         && !input.session.recording()
-        && !input.recording_pending;
+        && !input.recording_pending
+        && !input.host_preparing
+        && input.session.host().is_idle();
     let editable = idle
         && matches!(input.session.connection(), Connection::Connected { .. })
         && input.session.keymap().status() == &Status::Ready;
@@ -138,7 +142,10 @@ fn connection_status(presence: &Availability, manual_read: bool) -> String {
 }
 
 fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
-    let idle = !input.session.busy() && !input.files_busy;
+    let idle = !input.session.busy()
+        && !input.files_busy
+        && !input.host_preparing
+        && input.session.host().is_idle();
     if (input.session.recording() || input.recording_pending)
         && let Some(editor) = input.session.macros()
     {
@@ -247,11 +254,23 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                 view::lighting::view(
                     input.lighting,
                     editor,
-                    !input.files_busy && (!input.session.busy() || editor.submitted().is_some()),
+                    !input.host_preparing
+                        && input.session.host().is_idle()
+                        && !input.files_busy
+                        && (!input.session.busy() || editor.submitted().is_some()),
                     idle,
                     input.style
                 )
                 .map(Message::Lighting),
+                view::host::view(
+                    input.host,
+                    editor,
+                    idle,
+                    input.host_preparing,
+                    input.session.host().phase(),
+                    input.style
+                )
+                .map(Message::Host),
             ]
             .spacing(input.style.spacing.m)
             .height(Fill)

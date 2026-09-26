@@ -19,7 +19,6 @@ pub(super) fn read_lighting_with(
 /// restoration. Explicit finish reports restoration errors to the caller.
 pub struct HostLightingSession {
     session: Session,
-    target: Target,
     saved: crate::nia87::lighting::Lighting,
     active: crate::nia87::lighting::Lighting,
     backups: std::path::PathBuf,
@@ -43,17 +42,8 @@ impl HostLightingSession {
             return Err(not_attempted("Host lighting requires screen or music mode"));
         }
         let session = Session::open_for(selection).map_err(not_attempted)?;
-        let target = session.target().map_err(not_attempted)?;
-        if !read_settings_on_device(session.device())
-            .map_err(not_attempted)?
-            .backlight_enabled()
-        {
-            return Err(not_attempted(
-                "Enable the backlight in Settings before starting host lighting",
-            ));
-        }
-        let active = apply_lighting_unlocked(
-            Selection::Expected(&target),
+        let active = apply_lighting_on_device(
+            session.device(),
             expected,
             desired,
             backups,
@@ -61,7 +51,6 @@ impl HostLightingSession {
         )?;
         Ok(Self {
             session,
-            target,
             saved: expected.clone(),
             active,
             backups: backups.to_owned(),
@@ -94,8 +83,8 @@ impl HostLightingSession {
             .saved
             .recognized_setting()
             .ok_or_else(|| not_attempted("Unrecognized saved lighting"))?;
-        let restored = apply_lighting_unlocked(
-            Selection::Expected(&self.target),
+        let restored = apply_lighting_on_device(
+            self.session.device(),
             &self.active,
             &setting,
             &self.backups,
@@ -178,9 +167,9 @@ pub(super) fn apply_lighting_with(
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
 ) -> ApplyResult<crate::nia87::lighting::Lighting> {
-    let _lock = transaction_lock().map_err(not_attempted)?;
-    apply_lighting_unlocked(
-        selection,
+    let session = Session::open_for(selection).map_err(not_attempted)?;
+    apply_lighting_on_device(
+        session.device(),
         expected,
         setting,
         backup_dir,
@@ -188,8 +177,8 @@ pub(super) fn apply_lighting_with(
     )
 }
 
-fn apply_lighting_unlocked(
-    selection: Selection<'_>,
+fn apply_lighting_on_device(
+    device: &HidDevice,
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
@@ -203,7 +192,6 @@ fn apply_lighting_unlocked(
         ));
     }
     let target = crate::nia87::lighting::write_report(setting).map_err(not_attempted)?;
-    let (_, device) = selection.open().map_err(not_attempted)?;
     if lighting_matches_report(expected, &target, expected) {
         return Ok(expected.clone());
     }
@@ -226,7 +214,7 @@ fn apply_lighting_unlocked(
         // a getter. Keep transport acceptance distinct from verified reads.
         let submitted = submitted_lighting(expected, &target).map_err(not_attempted)?;
         submit_lighting_report(&target, backup.path(), |report| {
-            write_lighting_report(&device, report)
+            write_lighting_report(device, report)
         })?;
         return Ok(submitted);
     }
@@ -235,20 +223,20 @@ fn apply_lighting_unlocked(
     apply_roundtrip(
         &backup,
         VerifiedStep {
-            write: || write_lighting_report(&device, &target),
+            write: || write_lighting_report(device, &target),
             matches: |actual: &crate::nia87::lighting::Lighting| {
                 lighting_matches_report(actual, &target, expected)
             },
             mismatch: "Lighting readback differs in setting or reserved response bytes",
         },
         VerifiedStep {
-            write: || write_lighting_report(&device, &restore_report),
+            write: || write_lighting_report(device, &restore_report),
             matches: |actual: &crate::nia87::lighting::Lighting| {
                 lighting_matches_report(actual, &restore_report, expected)
             },
             mismatch: "Lighting restoration could not be verified",
         },
-        || read_lighting_on_device(&device),
+        || read_lighting_on_device(device),
         lighting_apply_error,
     )
 }

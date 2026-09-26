@@ -336,27 +336,21 @@ pub(super) fn read_payload(
 /// Fields drop in declaration order: close the device before releasing the lock.
 pub(super) struct Session {
     device: HidDevice,
-    candidate: Candidate,
     _lock: std::fs::File,
 }
 
 impl Session {
     pub(super) fn open_for(selection: super::Selection<'_>) -> Result<Self> {
         let lock = transaction_lock()?;
-        let (candidate, device) = selection.open()?;
+        let (_, device) = selection.open()?;
         Ok(Self {
             device,
-            candidate,
             _lock: lock,
         })
     }
 
     pub(super) fn device(&self) -> &HidDevice {
         &self.device
-    }
-
-    pub(super) fn target(&self) -> Result<Target> {
-        Ok(Target::from_candidate(&self.candidate)?)
     }
 }
 

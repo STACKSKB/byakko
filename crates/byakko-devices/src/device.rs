@@ -9,33 +9,7 @@ use byakko_core::{
 };
 use std::path::Path;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum HostFrame {
-    Rgb([u8; 3]),
-    Bands(Vec<u8>),
-}
-
-impl HostFrame {
-    pub fn validate_for(&self, source: lighting::HostSource) -> Result<(), String> {
-        match (source, self) {
-            (lighting::HostSource::ScreenAverage, Self::Rgb(_)) => Ok(()),
-            (lighting::HostSource::PlaybackAudio { bands }, Self::Bands(values))
-                if values.len() == usize::from(bands) =>
-            {
-                Ok(())
-            }
-            (lighting::HostSource::PlaybackAudio { bands }, Self::Bands(_)) => {
-                Err(format!("Audio frame must contain {bands} bands"))
-            }
-            (lighting::HostSource::ScreenAverage, Self::Bands(_)) => {
-                Err("Screen-average mode requires an RGB frame".into())
-            }
-            (lighting::HostSource::PlaybackAudio { .. }, Self::Rgb(_)) => {
-                Err("Playback-audio mode requires a band frame".into())
-            }
-        }
-    }
-}
+pub use byakko_core::model::lighting::HostFrame;
 
 /// A temporary effect owned by the device executor. `finish` restores and
 /// verifies the saved lighting; Drop must attempt restoration on unwinding.

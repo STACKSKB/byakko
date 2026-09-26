@@ -34,12 +34,42 @@ pub enum HostSource {
     ScreenAverage,
     PlaybackAudio { bands: u8 },
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum HostFrame {
+    Rgb([u8; 3]),
+    Bands(Vec<u8>),
+}
+
+impl HostFrame {
+    pub fn validate_for(&self, source: HostSource) -> Result<(), String> {
+        match (source, self) {
+            (HostSource::ScreenAverage, Self::Rgb(_)) => Ok(()),
+            (HostSource::PlaybackAudio { bands }, Self::Bands(values))
+                if values.len() == usize::from(bands) =>
+            {
+                Ok(())
+            }
+            (HostSource::PlaybackAudio { bands }, Self::Bands(_)) => {
+                Err(format!("Audio frame must contain {bands} bands"))
+            }
+            (HostSource::ScreenAverage, Self::Bands(_)) => {
+                Err("Screen-average mode requires an RGB frame".into())
+            }
+            (HostSource::PlaybackAudio { .. }, Self::Rgb(_)) => {
+                Err("Playback-audio mode requires a band frame".into())
+            }
+        }
+    }
+}
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostMode {
     pub id: String,
     pub label: String,
     pub source: HostSource,
     pub parameters: Option<HostParameters>,
+    #[serde(default)]
+    pub requires_enabled_setting: Option<String>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostParameters {

@@ -380,6 +380,7 @@ mod tests {
             id: "audio".into(),
             label: "Audio".into(),
             source: crate::model::lighting::HostSource::PlaybackAudio { bands: 32 },
+            requires_enabled_setting: None,
             parameters: Some(crate::model::lighting::HostParameters {
                 schema,
                 default: Setting {

@@ -12,8 +12,10 @@ and CLI snapshot workflows also use the replacement core. Window-local macro
 recording appends to the shared draft and releases held inputs on stop, focus loss
 or close. Lighting, per-key painting and scalar settings use the same editors,
 with automatic coalesced saves and native color pickers. Portable macro files,
-local names and diagnostic archive capture/export are restored. Other frontend workflows are being rebuilt; this is
-not a feature-complete release. See [plan.md](plan.md) for current scope and
+local names and diagnostic archive capture/export are restored. Host screen and
+playback lighting prepare their source before startup and restore onboard
+lighting on stop, focus loss or close. Rendered and hardware acceptance remain;
+this is not an accepted release. See [plan.md](plan.md) for current scope and
 [rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 
 Application source is grouped by responsibility. Core has `model/`, `editor/`,
@@ -46,7 +48,8 @@ replaces the worker even if discovery missed an unplug/replug.
 The assignment catalog supports category navigation, search aliases, physical-key
 capture and capability-described custom shortcuts. Macro repeat edits stage
 immediately; event choices use advertised names and rejected edits retain inputs.
-Host lighting and rendered interaction acceptance remain milestones.
+Host failures retain their diagnostic and keep a pending close open. Rendered
+interaction and physical host restoration still require acceptance.
 Lighting/picture saves report transport
 acceptance after established pacing; settings saves include one readback.
 

@@ -114,7 +114,7 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [x] Restore automatic discovery and reconnect behavior.
 - [x] Restore assignment catalog navigation/search, physical-key capture and
   capability-described custom shortcuts.
-- [ ] Restore host lighting lifecycle, OS samplers and verified restoration.
+- [x] Restore host lighting lifecycle, OS samplers and verified restoration.
 - [x] Remove remaining obsolete native forwarding/error-erasure paths, retaining
   fixtures and useful research commands. Narrow APIs around demonstrated callers.
   Make typed apply/recovery results authoritative inside native transactions;
@@ -323,11 +323,10 @@ and locked native development builds pass. Native transactions did not change;
 no hardware writes were performed. Rendered layouts and playback remain
 unaccepted by these headless checks.
 
-Temporary gaps: host streaming and rendered interaction acceptance.
-The native APIs, codecs, OS samplers, direct transaction tests and research tools
-remain. Passive catalog priority is restored; host scheduling returns with its
-feature milestone.
-The full rewrite remains incomplete; this checkpoint is not configurator parity.
+Remaining acceptance: rendered interaction review, final ownership/protocol
+review and the recorded physical gates. The native APIs, codecs, OS samplers,
+direct transaction tests and research tools remain. Headless checks do not
+establish configurator parity on hardware.
 
 The native transaction checkpoint makes `ApplyFailure` the direct result of
 feature writes, archive apply and host startup/restoration. The boxed apply-error
@@ -353,10 +352,29 @@ integration, seven CLI tests), strict all-target/all-feature Clippy, formatting
 and locked native builds pass. Existing research examples compile against the
 typed APIs. These were offline checks, with no hardware writes or fault tests.
 
-Next host milestone: one correlated core lifecycle under `workflow/host.rs`,
-using the existing lighting editor as baseline/draft owner; serialized executor
-startup and restoration with one replaceable pending frame and a stop signal;
-desktop sampler preparation before any device start. Stop during preparation,
-startup, streaming, focus loss or close must converge on the same terminal
-outcome. Frame/restore failure must remain visible and keep a waiting close open.
-Preserve unrelated drafts/caches and the normal one-pass feature-read policy.
+The host checkpoint adds one correlated lifecycle under `workflow/host.rs`, using
+the lighting editor as the baseline/draft owner. The serialized executor owns
+startup, one replaceable pending frame, stop and verified restoration. Sampler
+preparation occurs on its own thread before device startup; capture resources
+are created, used and dropped on that thread. Desktop owns source selection and
+effect delivery under `form/host.rs` and `controller/host.rs`. Shared parameter
+controls render both onboard and host settings without a second lighting draft.
+
+Stop during preparation cancels without device startup. Stop during startup,
+streaming, focus loss or close waits for restoration. Capture/frame errors remain
+visible even after successful restoration; failed or unknown restoration holds
+the editor for a deliberate read and reopens a pending close. Tests cover bounded
+frames, stop priority, generation changes, stale/duplicate events, sampler
+preparation/failure, focus loss, close and unrelated draft/cache preservation.
+
+Native host setup uses the advertised cached backlight-toggle prerequisite and
+holds one HID session through startup, frames and restoration. It no longer
+performs an additional settings read or opens a second HID handle. Existing
+backup, pacing and verified restoration remain. Ordinary setter behavior is
+unchanged. The memory device advertises screen and playback modes for local
+message tests, using synthetic capture rather than OS or keyboard effects.
+
+All-feature workspace tests (89 core, 76 desktop, 223 devices plus external
+integration, seven CLI tests), strict all-target/all-feature Clippy and formatting
+pass. No hardware writes or fault experiments were performed. Rendered controls,
+real OS capture and physical host output/restoration remain unaccepted.
