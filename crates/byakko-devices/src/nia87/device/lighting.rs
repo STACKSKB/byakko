@@ -273,7 +273,6 @@ fn apply_lighting_unlocked(
             mismatch: "Lighting restoration could not be verified",
         },
         || read_lighting_on_device(&device),
-        None,
         lighting_apply_error,
     )
 }

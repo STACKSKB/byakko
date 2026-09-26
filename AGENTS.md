@@ -10,6 +10,7 @@ read-only-first device acceptance sequence there.
 
 ## Read policy amendment (user-directed, 2026-09-24)
 
+Keep checks appropriate to a keyboard configurator (reaffirmed 2026-09-26).
 Treat the connected configurator session as the owner of device state. Do not
 assume hostile users, competing configurators or hot-swapping between commands.
 This supersedes older requirements below for repeated matching snapshots,
@@ -17,7 +18,8 @@ per-page identity barriers and pre-write fresh-state comparisons. Load each
 feature once, back up the cached before-image, and read the affected feature
 once after a write. Retry only a concrete failure where firmware evidence calls
 for it. Keep exact collection selection, report/schema validation, known setter
-settling delays, correlated completions, and verified recovery. Keymap,
+settling delays, correlated completions, and verified recovery. Use explicit
+settling time instead of incidental delays from extra identity reads. Keymap,
 settings, and macro writes use one post-write feature readback. Ordinary global-
 lighting and picture setters are exceptions: after known pacing, success means
 transport acceptance and does not trigger a post-write getter. Successful

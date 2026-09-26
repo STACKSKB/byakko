@@ -1,5 +1,11 @@
 # Nia87 macro boundary audit
 
+**2026-09-26 correction:** the [new pacing and boundary investigation](macro-write-pacing-20260926.md)
+supersedes this note's assumption that every native page should declare 56 bytes.
+The native final page now declares 26 (250 writable bytes total); patterned
+neighboring data exposed collateral damage that earlier empty baselines hid.
+The captured official short page below remains valid and never reached page 4.
+
 ## Live follow-up supersedes the header-length inference
 
 The attached Nia87 firmware0100/profile0 accepted exact 248-byte macros in empty,
@@ -19,7 +25,7 @@ no transport change was made based on the generic bundle inference below.
 The capture is retained locally at ignored
 `Research/captures/macro-official-headers-1.log`. The helper was stopped and the
 debugger detached. Both keymaps were restored and verified against the previous
-baseline; slot0 was backed up before the comparison, restored, exported again,
+baseline; slot 0 was backed up before the comparison, restored, exported again,
 and all 256 original bytes matched. No physical playback was triggered. The
 browser-local comparison macro remains saved, unassigned, for future reference.
 
@@ -66,7 +72,7 @@ complete 67-byte debugger dumps, ordered macro pages, header length and checksum
 The captured short macro contains one page: 56 logical bytes observed and 200
 unsent bytes unknown. With the explicit `--assume-zero-unobserved` comparison
 option, its observed data and opcode/slot/page/length fields match the native
-writer. The final marker differs (official page0; native page4). Unsent bytes
+writer. The final marker differs (official page 0; native page 4). Unsent bytes
 are not evidence of firmware clearing, and this comparison does not prove
 playback or interrupted-write semantics. No transport policy was changed.
 

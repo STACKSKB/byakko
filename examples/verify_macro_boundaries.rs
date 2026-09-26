@@ -6,15 +6,45 @@ use byakko_devices::nia87::{
 };
 
 fn main() -> device::Result<()> {
+    let directory = std::path::Path::new("Research/captures/backups");
+    std::fs::create_dir_all(directory)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let path = directory.join(format!("macro-boundaries-transport-{stamp}.json"));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    let (result, trace) = byakko_devices::research_trace::with_trace(run);
+    serde_json::to_writer_pretty(
+        &mut file,
+        &serde_json::json!({
+            "result": format!("{result:?}"), "trace": trace,
+            "scope": "Host feature-report attempts; not USB bus timing or playback evidence"
+        }),
+    )?;
+    file.sync_all()?;
+    println!("Transport trace: {}", path.display());
+    result.map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { error.into() })?
+}
+
+fn run() -> device::Result<()> {
     let access = support::access()?;
-    let maps = access.snapshot()?;
+    let original = access.capture_configuration(|_, _| {})?;
+    let maps = &original.keymaps;
     if maps.firmware != 0x100 || maps.profile != 0 {
         return Err("Unverified firmware/profile".into());
     }
-    // Slot0 already contains data on the attached board; leave it untouched.
-    let slots = [1, 24, 49];
-    let mut originals = Vec::new();
-    for slot in slots {
+    // Slots0/1 may contain the official-app playback fixture.
+    let slots = match std::env::args().nth(1) {
+        Some(slot) => vec![slot.parse::<u8>()?],
+        None => vec![2, 24, 49],
+    };
+    if slots.iter().any(|slot| *slot >= 50) {
+        return Err("Macro slot must be in 0..49".into());
+    }
+    for &slot in &slots {
         if maps
             .base
             .iter()
@@ -23,11 +53,10 @@ fn main() -> device::Result<()> {
         {
             return Err(format!("Slot {slot} is bound; no writes sent").into());
         }
-        let bytes = access.read_macro(slot)?;
+        let bytes = &original.macros[usize::from(slot)];
         if bytes.iter().any(|&byte| byte != 0) {
             return Err(format!("Slot {slot} is not empty; no writes sent").into());
         }
-        originals.push(bytes);
     }
     let mut events: Vec<_> = (0..120)
         .map(|i| MacroEvent::Key {
@@ -65,9 +94,10 @@ fn main() -> device::Result<()> {
         ],
     };
     let backups = std::path::Path::new("Research/captures/backups");
-    for (index, slot) in slots.into_iter().enumerate() {
+    for slot in slots {
+        let before = &original.macros[usize::from(slot)];
         let result = (|| -> device::Result<()> {
-            let written = access.apply_macro(slot, &originals[index], &boundary, backups)?;
+            let written = access.apply_macro(slot, before, &boundary, backups)?;
             if written != boundary_bytes || macros::decode(&written)? != boundary {
                 return Err("Boundary readback mismatch".into());
             }
@@ -78,24 +108,18 @@ fn main() -> device::Result<()> {
             Ok(())
         })();
         let current = access.read_macro(slot)?;
-        let restored =
-            access.apply_macro(slot, &current, &macros::decode(&originals[index])?, backups)?;
-        if restored != originals[index] {
+        let restored = access.apply_macro(slot, &current, &macros::decode(before)?, backups)?;
+        if &restored != before {
             return Err(format!("Slot {slot} restoration failed; original backup retained").into());
         }
         result?;
-        for (other, original) in slots.iter().zip(&originals) {
-            if access.read_macro(*other)? != *original {
-                return Err(format!("Slot {other} changed unexpectedly").into());
-            }
-        }
-        println!(
-            "Slot {slot}: full248-byte macro → short → empty; all three tested slots matched originals"
-        );
+        println!("Slot {slot}: full248-byte macro → short → empty; restored exactly");
     }
-    if access.snapshot()? != maps {
-        return Err("Keymaps changed unexpectedly".into());
+    if access.capture_configuration(|_, _| {})? != original {
+        return Err("Complete configuration changed unexpectedly".into());
     }
-    println!("All boundary/slot checks passed; no macros were bound or played; keymaps unchanged");
+    println!(
+        "All boundary/slot checks passed; no macros were bound or played; complete configuration unchanged"
+    );
     Ok(())
 }

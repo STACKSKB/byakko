@@ -1,6 +1,10 @@
 # Nia87 simple macro protocol
 
-This describes the native codec in `src/macros.rs`. It was checked by static inspection of the bundled configurator at `Research/extracted/nia-app/resources/app/dist/static/js/main_ccea61a6.js`. No device I/O was used. Nia87 constructs `Pft`, which extends `CHe`; the simple macro write override is near byte offset 9,986,612. The event reader and writer appear near offsets 7,590,495–7,593,400 in an ancestor, with a matching simple-format implementation near 13,736,034–13,745,177. The checksum enum at offset 1,420,518 is `BIT7=0`, `BIT8=1`, `NONE=2`, as also recorded in `Research/protocol-keymap-research.md`. These are protocol facts, not reused vendor source.
+The native codec is in `crates/byakko-devices/src/rongyuan/yc500/{macro_program,macro_reports,macro_io}.rs`; `nia87::macros` provides the board facade. The retired root `src/macros.rs` is no longer an implementation source.
+
+The initial audit used static inspection of the bundled configurator at `Research/extracted/nia-app/resources/app/dist/static/js/main_ccea61a6.js`, without device I/O. Nia87 constructs `Pft`, which extends `CHe`; the simple macro write override is near byte offset 9,986,612. The event reader and writer appear near offsets 7,590,495–7,593,400 in an ancestor, with a matching simple-format implementation near 13,736,034–13,745,177. The checksum enum at offset 1,420,518 is `BIT7=0`, `BIT8=1`, `NONE=2`, as also recorded in `Research/protocol-keymap-research.md`. These are protocol facts, not reused vendor source.
+
+Later Windows storage tests and official helper captures are recorded in the [boundary audit](../Research/macro-boundary-audit.md) and [2026-09-26 pacing investigation](../Research/macro-write-pacing-20260926.md). The latter reproduced the page-1 readback failure on Windows and verified a longer explicit settling delay, replacement/clearing, and user-observed keyboard playback. Verification on the separate [Linux unit](../Research/linux-macro-save-failure.md) is deferred at the user's request.
 
 The device has 50 advertised macro slots. The codec accepts slots 0–49, avoiding the bundled allocator's apparent inclusive index-50 error. The logical macro is 256 bytes. Bytes 0–1 are a little-endian `repeat_count`; events begin at byte 2. A zero action byte terminates the stream, and remaining bytes are zero padding. The conservative encoded end is byte 248, following the bundled length guard. The decoder requires exactly 256 bytes, rejects unknown or incomplete events and nonzero padding, and retains zero-delay events. The bundled UI reader drops zero-delay records, which would lose information on a round trip.
 
@@ -14,6 +18,28 @@ Zero delay uses the long form with a two-byte zero tail. Delay fields store the 
 
 Nia87 macro read requests are 64-byte payloads with command `0x8b`, slot, page `0..=3`, four zero bytes except for the BIT7 checksum at byte 7, then zeros. Each response supplies one raw 64-byte portion of the 256-byte logical buffer; the reader concatenates all four responses without stripping a header or validating a response opcode. `sD.getMacro` near offset 7,650,828 makes four calls to `commomFeature(request, 0)`, so the read checksum is BIT7. Its `FEA_CMD_GET_MACRO` constant is 139 (`0x8b`). This overrides ancestor `jC.getMacro` near offset 7,590,495, which requests `0x88` once and then reads four raw pages. No later `getMacro` override was found on the `Pft → CHe → PB → rB → UD → PD → sD` path. A separate shared simple reader near offset 13,736,034 uses `0x96`; it is not the traced Nia87 read path. For slot 0, pages 0–3 have checksum bytes `0x74`, `0x73`, `0x72`, `0x71` respectively.
 
-Simple-macro writes divide the logical buffer into 56-byte payload pages. Reports are 64 bytes: command `0x16`, slot, page number, length `56`, final-page flag, two zero reserved bytes, BIT7 checksum at byte 7, then 56 bytes of data. The checksum is `0xff` minus the wrapping sum of header bytes 0–6. The `CHe` override marks only the final sent page with flag `1`; earlier pages use `0`. It sends through `writeFeatureCmd(..., 0)`, selecting BIT7 rather than BIT8 or NONE. The final page is zero-padded. The bundled override sends only pages containing nonzero data; the native codec always sends all five pages, with the final flag only on page 4, to replace the complete 256-byte store and clear old trailing events. A live long-to-short test established that sending only the shorter stream leaves stale later pages. Host HID libraries may require a separate report-ID byte outside these 64-byte payloads.
+Simple-macro reports are 64 bytes: command `0x16`, slot, page number, declared
+data length, final-page flag, two reserved zero bytes, BIT7 checksum at byte 7,
+then up to 56 data bytes and zero padding. The checksum is `0xff` minus the
+wrapping sum of header bytes 0–6. Only the final sent page has flag 1. The selected
+official short capture declares56 bytes on page 0. Its bundled writer sends only
+pages containing nonzero data; Byakko sends all five pages to clear stale tails
+observed in long-to-short testing. Host HID libraries require a separate
+report-ID byte outside this payload.
 
 The macro binding itself is a separate four-byte key action `[9, play_mode, macro_index, 0]`. Play mode values are `0` for repeat count, `1` for toggle, and `2` for hold repeat. The macro codec stores the event stream and repeat count; it does not alter key bindings.
+
+The native writer declares four 56-byte pages and a final 26-byte page, totaling
+250 writable bytes. The remaining six bytes of a 256-byte getter are zero
+padding. A full 56-byte final page cleared the first 30 picture bytes when
+writing slot 49; a 32-byte final page also failed to preserve the picture. The
+26-byte final page passed the patterned-picture write/restore check. The earlier
+assumption that every native page should declare 56 bytes is superseded by this
+physical evidence; the short official capture above never reached page 4.
+
+The native writer spaces pages by 30 ms, then waits 2 s before one complete
+four-page readback. The previous 200 ms settle caused a Windows readback abort;
+1 s still returned a stale first page in a boundary test. The 2 s setting passed
+the bounded Windows checks. No repeated identity reads, pre-write rereads, or
+conditional duplicate verification remain. A failed write still attempts the
+cached before-image restoration and checks that restoration once.

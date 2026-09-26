@@ -1,5 +1,11 @@
 # Linux macro save failure audit (2026-09-25)
 
+Update (2026-09-26): the [Windows investigation](macro-write-pacing-20260926.md)
+reproduced the page-1 failure and verified explicit settling plus a corrected
+26-byte final write page. The separate Linux unit still needs validation;
+the user deferred that check until after the Windows work. The historical
+failure and recovery evidence below is retained.
+
 Follow-up: a later failure identifies slot 0 readback page 1, followed by
 recovery write page 0 failing. The subsequent
 [session/transaction audit](session-transaction-audit.md) records structural

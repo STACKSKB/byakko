@@ -21,9 +21,9 @@ pub(super) mod pacing {
     pub const KEYMAP_SETTER: Duration = Duration::from_secs(1);
     /// Five fixed macro pages, with a separate flash-settle period afterward.
     pub const MACRO_PAGE: Duration = Duration::from_millis(30);
-    pub const MACRO_SETTLE: Duration = Duration::from_millis(200);
-    /// Only retry a complete macro getter after a mismatched first readback.
-    pub const MACRO_READBACK_MISMATCH: Duration = Duration::from_millis(200);
+    /// A 1 s wait returned an old first page with new later pages; 2 s passed
+    /// all nine boundary write/readbacks on Windows (2026-09-26).
+    pub const MACRO_SETTLE: Duration = Duration::from_secs(2);
     /// The captured official picture upload schedules two 10 ms waits per page.
     pub const PICTURE_PAGE: Duration = Duration::from_millis(20);
     /// Developer archive restore uses individual per-key color reports.
@@ -109,8 +109,7 @@ pub(super) fn apply_with_recovery<T>(
 }
 
 /// For features with a direct before/after setter, keep the ordered write,
-/// complete readback, comparison, and verified restore in one place. Only a
-/// mismatched first read may be retried (the observed macro flash case).
+/// complete readback, comparison, and verified restore in one place.
 pub(super) struct VerifiedStep<W, M> {
     pub write: W,
     pub matches: M,
@@ -122,7 +121,6 @@ pub(super) fn apply_roundtrip<T, TW, TM, BW, BM>(
     target: VerifiedStep<TW, TM>,
     before: VerifiedStep<BW, BM>,
     read: impl Fn() -> Result<T>,
-    mismatch_retry: Option<Duration>,
     error: fn(&dyn fmt::Display, Result<()>, &Path) -> ApplyError,
 ) -> Result<T>
 where
@@ -135,11 +133,7 @@ where
         backup,
         || {
             (target.write)()?;
-            let mut actual = read()?;
-            if let (false, Some(delay)) = ((target.matches)(&actual), mismatch_retry) {
-                std::thread::sleep(delay);
-                actual = read()?;
-            }
+            let actual = read()?;
             if (target.matches)(&actual) {
                 Ok(actual)
             } else {
@@ -227,7 +221,7 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_retries_only_a_mismatch_and_restores_after_read_error() {
+    fn roundtrip_reads_once_and_verifies_recovery_after_mismatch_or_read_error() {
         let backup = DurableBackup {
             path: "before.json".into(),
             stamp: 1,
@@ -255,50 +249,58 @@ mod tests {
             || {
                 steps.borrow_mut().push("read");
                 reads.set(reads.get() + 1);
-                Ok(if reads.get() == 1 { 0 } else { 2 })
+                Ok(2)
             },
-            Some(Duration::ZERO),
             macro_apply_error,
         )
         .unwrap();
         assert_eq!(actual, 2);
-        assert_eq!(*steps.borrow(), ["write target", "read", "read"]);
+        assert_eq!(reads.get(), 1);
+        assert_eq!(*steps.borrow(), ["write target", "read"]);
 
-        steps.borrow_mut().clear();
-        reads.set(0);
-        let failure = super::super::apply_error::detailed::<i32>(apply_roundtrip(
-            &backup,
-            VerifiedStep {
-                write: || {
-                    steps.borrow_mut().push("write target");
-                    Ok(())
+        for read_error in [false, true] {
+            steps.borrow_mut().clear();
+            reads.set(0);
+            let failure = super::super::apply_error::detailed::<i32>(apply_roundtrip(
+                &backup,
+                VerifiedStep {
+                    write: || {
+                        steps.borrow_mut().push("write target");
+                        Ok(())
+                    },
+                    matches: |value: &i32| *value == 2,
+                    mismatch: "mismatch",
                 },
-                matches: |value: &i32| *value == 2,
-                mismatch: "mismatch",
-            },
-            VerifiedStep {
-                write: || {
-                    steps.borrow_mut().push("restore");
-                    Ok(())
+                VerifiedStep {
+                    write: || {
+                        steps.borrow_mut().push("restore");
+                        Ok(())
+                    },
+                    matches: |value: &i32| *value == 1,
+                    mismatch: "restore mismatch",
                 },
-                matches: |value: &i32| *value == 1,
-                mismatch: "restore mismatch",
-            },
-            || {
-                steps.borrow_mut().push("read");
-                reads.set(reads.get() + 1);
-                if reads.get() == 1 {
-                    Err("read failed".into())
-                } else {
-                    Ok(1)
-                }
-            },
-            Some(Duration::ZERO),
-            macro_apply_error,
-        ))
-        .unwrap_err();
-        assert_eq!(failure.recovery, Recovery::Verified);
-        assert!(failure.message.contains("read failed"));
-        assert_eq!(*steps.borrow(), ["write target", "read", "restore", "read"]);
+                || {
+                    steps.borrow_mut().push("read");
+                    reads.set(reads.get() + 1);
+                    if reads.get() == 1 && read_error {
+                        Err("read failed".into())
+                    } else if reads.get() == 1 {
+                        Ok(0)
+                    } else {
+                        Ok(1)
+                    }
+                },
+                macro_apply_error,
+            ))
+            .unwrap_err();
+            assert_eq!(failure.recovery, Recovery::Verified);
+            assert!(failure.message.contains(if read_error {
+                "read failed"
+            } else {
+                "mismatch"
+            }));
+            assert_eq!(reads.get(), 2);
+            assert_eq!(*steps.borrow(), ["write target", "read", "restore", "read"]);
+        }
     }
 }
