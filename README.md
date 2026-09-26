@@ -4,8 +4,8 @@ A native, USB-first Menel Nia87 configurator using Rust and Iced, direct HID
 access and stock firmware. No JavaScript, Electron, webview or vendor helper
 is needed by the product.
 
-This branch is an **application rewrite in progress**, starting from `3db624f`.
-The old application controllers have been removed. The replacement currently
+This branch contains the **application source rewrite**, starting from `3db624f`.
+The old application controllers have been removed. The replacement
 supports keymap read, staged assignment, save, revert and reconnect through
 Iced and an independent CLI. Macro discovery, selected-slot editing, save-and-assign
 and CLI snapshot workflows also use the replacement core. Window-local macro

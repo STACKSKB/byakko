@@ -122,7 +122,7 @@ to match this table. Public APIs expose concepts, not every internal helper.
   immutable-target `Access` boundary and actual research entrypoints, converting
   to their display errors only at the outer boundary. Portable snapshot adapters
   still own meaningful byte validation and projection.
-- [ ] Review ownership/docs, run workspace checks, compare protocol sequences
+- [x] Review ownership/docs, run workspace checks, compare protocol sequences
   and record outstanding physical gates.
 
 ## Validation
@@ -139,6 +139,38 @@ rendered layout and Linux/hardware acceptance require their own coordinated work
 Do not claim a rewrite fixes the recorded recovery failures.
 
 ## Current status
+
+The source replacement is implemented on `codex/application-rewrite`. Core now
+uses the requested top-level role folders and one shared editor lifecycle.
+Desktop separates forms, views, widgets, input and local effect controllers;
+devices retains its board/protocol boundary and serialized executor. The old
+application is available through Git at `3db624f`, not a parallel source tree.
+
+Keymap, macros/library/assignment/recording, lighting, picture, settings,
+file workflows, archive capture, discovery/reconnect and host lighting are
+implemented. Both clients build. The final ownership review found no material
+duplicate ownership or feature-specific editor lifecycle to remove.
+
+Current validation: 89 core, 76 desktop, 223 device unit tests, one external-device
+integration test, seven CLI tests and two root helper tests pass. Workspace
+doc-tests, all-target/all-feature strict Clippy, formatting, locked development
+builds and a built CLI memory lighting read pass. These checks used no hardware
+writes and no live screen/audio capture.
+
+Protocol comparison against `3db624f` found unchanged Rongyuan/Nia87 codecs,
+setter order, backup durability, pacing and finite-write recovery. Host startup
+now omits the four scalar-settings getters in favor of the cached advertised
+prerequisite and retains one HID handle through restoration. Exact picture
+selector metadata is carried by portable lighting snapshots; baseline matching
+ignores evidence provenance only. No unexpected wire changes were found.
+
+Acceptance remains separate: review rendered assignment/macro/host controls;
+exercise actual OS capture and physical host restoration; coordinate the
+documented playback/settings/recovery and Linux runtime checks. Existing
+physical failures remain open. This source checkpoint is not a hardware release
+acceptance or permission to run device writes.
+
+## Implementation record
 
 The user explicitly confirmed source replacement on 2026-09-26, superseding the
 audit-only restriction. The old core session workflows, desktop controllers, CLI
