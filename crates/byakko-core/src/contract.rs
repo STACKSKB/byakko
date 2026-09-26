@@ -100,6 +100,14 @@ pub struct ApplyFailure {
     pub recovery: Recovery,
 }
 
+impl std::fmt::Display for ApplyFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ApplyFailure {}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostTicket {
     pub generation: u64,

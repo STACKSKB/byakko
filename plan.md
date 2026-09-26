@@ -115,7 +115,7 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [x] Restore assignment catalog navigation/search, physical-key capture and
   capability-described custom shortcuts.
 - [ ] Restore host lighting lifecycle, OS samplers and verified restoration.
-- [ ] Remove remaining obsolete native forwarding/error-erasure paths, retaining
+- [x] Remove remaining obsolete native forwarding/error-erasure paths, retaining
   fixtures and useful research commands. Narrow APIs around demonstrated callers.
   Make typed apply/recovery results authoritative inside native transactions;
   remove `ApplyError`, `RestoreMismatch` and archive error downcasts. Keep the
@@ -328,3 +328,35 @@ The native APIs, codecs, OS samplers, direct transaction tests and research tool
 remain. Passive catalog priority is restored; host scheduling returns with its
 feature milestone.
 The full rewrite remains incomplete; this checkpoint is not configurator parity.
+
+The native transaction checkpoint makes `ApplyFailure` the direct result of
+feature writes, archive apply and host startup/restoration. The boxed apply-error
+markers, downcasts and duplicate `_detailed` entrypoints are removed. Selected
+`Access` methods and research callers use the same typed path. Ordinary read and
+transport errors can still carry their source diagnostics; they do not determine
+recovery state through downcasting.
+
+Pre-write failures explicitly report NotAttempted. Restoration uses an explicit
+mismatch/unverified error, preserving the distinction between a completed wrong
+readback and an unreadable result. Setter/read/recovery ordering and firmware
+pacing are unchanged. Lighting's pure submitted projection is computed before
+sending, so a post-send failure cannot become a pre-write rejection.
+
+Host adapter comparisons now use the shared lighting baseline equivalence rule:
+transport-accepted evidence can upgrade to readback without rejecting identical
+raw bytes, content and selector context. A failed host stop still reports
+unverified restoration of the saved onboard state; recovery to an active host
+mode is not a successful stop.
+
+All-feature workspace tests (82 core, 68 desktop, 216 devices plus external
+integration, seven CLI tests), strict all-target/all-feature Clippy, formatting
+and locked native builds pass. Existing research examples compile against the
+typed APIs. These were offline checks, with no hardware writes or fault tests.
+
+Next host milestone: one correlated core lifecycle under `workflow/host.rs`,
+using the existing lighting editor as baseline/draft owner; serialized executor
+startup and restoration with one replaceable pending frame and a stop signal;
+desktop sampler preparation before any device start. Stop during preparation,
+startup, streaming, focus loss or close must converge on the same terminal
+outcome. Frame/restore failure must remain visible and keep a waiting close open.
+Preserve unrelated drafts/caches and the normal one-pass feature-read policy.

@@ -106,7 +106,7 @@ pub(super) fn apply_with(
         };
         target[slot] = *color;
     }
-    let actual = access.apply_picture_detailed(&original, &target, context, backup)?;
+    let actual = access.apply_picture(&original, &target, context, backup)?;
     project(&actual, context)
         .map(|mut snapshot| {
             snapshot.evidence = if target == original {

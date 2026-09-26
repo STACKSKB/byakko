@@ -55,7 +55,7 @@ mod lighting_tests {
         let expected = vec![[0; 3]; 128];
         let mut desired = expected.clone();
         desired[126] = [1, 2, 3];
-        let failure = super::apply_picture_detailed(
+        let failure = super::apply_picture(
             &expected,
             &desired,
             std::path::Path::new("unused-backup-path"),
@@ -76,7 +76,7 @@ mod lighting_tests {
             function: vec![[0; 4]; 128],
         };
         let short = vec![[0; 4]; 127];
-        let failure = super::apply_keymaps_detailed(
+        let failure = super::apply_keymaps(
             &expected,
             &short,
             &expected.function,
@@ -87,7 +87,7 @@ mod lighting_tests {
         assert!(failure.message.contains("Invalid keymap shape"));
         let mut reserved = expected.base.clone();
         reserved[127] = [1; 4];
-        let failure = super::apply_keymaps_detailed(
+        let failure = super::apply_keymaps(
             &expected,
             &reserved,
             &expected.function,
@@ -103,17 +103,19 @@ mod lighting_tests {
         use byakko_core::contract::Recovery;
         let backup = std::path::Path::new("backup.json");
         let verified = super::keymap_apply_error(&"write failed", Ok(()), backup);
-        assert_eq!(verified.0.recovery, Recovery::Verified);
+        assert_eq!(verified.recovery, Recovery::Verified);
         assert_eq!(
             verified.to_string(),
             "Apply failed: write failed. Restore result: original keymaps verified. Backup: backup.json"
         );
         let failed = super::keymap_apply_error(
             &"readback mismatch",
-            Err(super::super::apply_error::RestoreMismatch("restore failed").into()),
+            Err(super::super::apply_error::RestoreFailure::Mismatch(
+                "restore failed",
+            )),
             backup,
         );
-        assert_eq!(failed.0.recovery, Recovery::Failed);
+        assert_eq!(failed.recovery, Recovery::Failed);
         assert_eq!(
             failed.to_string(),
             "Apply failed: readback mismatch. Restore result: FAILED: restore failed. Backup: backup.json"

@@ -1,4 +1,5 @@
 //! Whole-configuration capture, apply, and recovery on one locked HID session.
+use super::apply_error::{ApplyResult, not_attempted};
 use super::transaction::{pacing, save_encoded_backup};
 use super::{
     FeatureSetter, HidDevice, Result, Selection, Session, lighting_restore_report,
@@ -6,17 +7,6 @@ use super::{
     snapshot_on_device, write_binding, write_lighting_report, write_macro_bytes,
 };
 use byakko_core::contract::{ApplyFailure, Recovery};
-use std::fmt;
-
-#[derive(Debug)]
-struct ConfigurationApplyError(ApplyFailure);
-
-impl fmt::Display for ConfigurationApplyError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0.message)
-    }
-}
-impl std::error::Error for ConfigurationApplyError {}
 
 #[derive(Debug)]
 enum RecoveryResult {
@@ -76,27 +66,29 @@ pub fn apply_configuration(
     target: &crate::nia87::configuration::Configuration,
     backup_dir: &std::path::Path,
     progress: impl FnMut(&str),
-) -> Result<crate::nia87::configuration::Configuration> {
+) -> ApplyResult<crate::nia87::configuration::Configuration> {
     apply_configuration_selected(Selection::Unique, expected, target, backup_dir, progress)
 }
 
-fn apply_configuration_selected(
+pub(super) fn apply_configuration_selected(
     selection: Selection<'_>,
     expected: &crate::nia87::configuration::Configuration,
     target: &crate::nia87::configuration::Configuration,
     backup_dir: &std::path::Path,
     mut progress: impl FnMut(&str),
-) -> Result<crate::nia87::configuration::Configuration> {
-    let plan = crate::nia87::configuration_plan::plan(expected, target)?;
+) -> ApplyResult<crate::nia87::configuration::Configuration> {
+    let plan = crate::nia87::configuration_plan::plan(expected, target).map_err(not_attempted)?;
     // Recovery must be representable before the first setter is sent.
-    let reverse = crate::nia87::configuration_plan::plan(target, expected)?;
+    let reverse =
+        crate::nia87::configuration_plan::plan(target, expected).map_err(not_attempted)?;
     if expected == target {
         return Ok(expected.clone());
     }
-    let session = Session::open_for(selection)?;
+    let session = Session::open_for(selection).map_err(not_attempted)?;
     let device = session.device();
-    let encoded = crate::nia87::configuration::encode(expected)?;
-    let backup = save_encoded_backup(backup_dir, "configuration-before", &encoded)?;
+    let encoded = crate::nia87::configuration::encode(expected).map_err(not_attempted)?;
+    let backup =
+        save_encoded_backup(backup_dir, "configuration-before", &encoded).map_err(not_attempted)?;
     let stamp = backup.stamp();
     let path = backup.path();
     let mut setter_started = false;
@@ -116,7 +108,7 @@ fn apply_configuration_selected(
         Ok(actual) => Ok(actual),
         Err(error) => {
             if !setter_started {
-                return Err(error);
+                return Err(not_attempted(error));
             }
             progress("Restoring original configuration after failure");
             let restore = recover_configuration(selection, device, target, expected, &reverse);
@@ -142,7 +134,7 @@ fn apply_configuration_selected(
                     &actual,
                 )
             });
-            Err(ConfigurationApplyError(ApplyFailure {
+            Err(ApplyFailure {
                 message: format!(
                     "Configuration apply failed: {error}; recovery: {detail}; backup {}{}",
                     path.display(),
@@ -150,40 +142,8 @@ fn apply_configuration_selected(
                 ),
                 recovery,
             })
-            .into())
         }
     }
-}
-
-/// Apply the native archive while preserving whether recovery verified,
-/// definitely failed, or could not establish the original state.
-pub fn apply_configuration_detailed(
-    expected: &crate::nia87::configuration::Configuration,
-    target: &crate::nia87::configuration::Configuration,
-    backup_dir: &std::path::Path,
-    progress: impl FnMut(&str),
-) -> std::result::Result<crate::nia87::configuration::Configuration, ApplyFailure> {
-    apply_detailed_selected(Selection::Unique, expected, target, backup_dir, progress)
-}
-
-pub(super) fn apply_detailed_selected(
-    selection: Selection<'_>,
-    expected: &crate::nia87::configuration::Configuration,
-    target: &crate::nia87::configuration::Configuration,
-    backup_dir: &std::path::Path,
-    progress: impl FnMut(&str),
-) -> std::result::Result<crate::nia87::configuration::Configuration, ApplyFailure> {
-    apply_configuration_selected(selection, expected, target, backup_dir, progress).map_err(
-        |error| {
-            error.downcast_ref::<ConfigurationApplyError>().map_or_else(
-                || ApplyFailure {
-                    message: error.to_string(),
-                    recovery: Recovery::NotAttempted,
-                },
-                |typed| typed.0.clone(),
-            )
-        },
-    )
 }
 
 fn recover_configuration(
@@ -408,8 +368,42 @@ fn write_configuration_changes(
 
 #[cfg(test)]
 mod evidence_tests {
-    use super::retain_readback;
+    use super::{apply_configuration, retain_readback};
     use crate::nia87::configuration;
+    use byakko_core::contract::Recovery;
+
+    #[test]
+    fn invalid_configuration_is_a_typed_prewrite_failure_without_device_or_backup_work() {
+        let expected = configuration::tests::example();
+        let mut invalid = expected.clone();
+        invalid.macros.pop();
+        let mut progress = Vec::new();
+        let failure = apply_configuration(
+            &expected,
+            &invalid,
+            std::path::Path::new("unused-configuration-backups"),
+            |message| progress.push(message.to_owned()),
+        )
+        .unwrap_err();
+        assert_eq!(failure.recovery, Recovery::NotAttempted);
+        assert!(!failure.message.is_empty());
+        assert!(progress.is_empty());
+    }
+
+    #[test]
+    fn unchanged_configuration_returns_cached_value_before_any_device_or_backup_work() {
+        let expected = configuration::tests::example();
+        let mut progress = Vec::new();
+        let actual = apply_configuration(
+            &expected,
+            &expected,
+            std::path::Path::new("unused-configuration-backups"),
+            |message| progress.push(message.to_owned()),
+        )
+        .unwrap();
+        assert_eq!(actual, expected);
+        assert!(progress.is_empty());
+    }
 
     #[test]
     fn retains_complete_readback_without_overwriting_existing_evidence() {

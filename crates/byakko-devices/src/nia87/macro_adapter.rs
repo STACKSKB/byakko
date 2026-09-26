@@ -296,7 +296,7 @@ pub(super) fn apply_with(
         message,
         recovery: Recovery::NotAttempted,
     })?;
-    let raw = access.apply_macro_validated_detailed(number, &before, &value, backup)?;
+    let raw = access.apply_macro_validated(number, &before, &value, backup)?;
     from_bytes(&expected.slot, &raw).map_err(|message| ApplyFailure {
         message,
         recovery: Recovery::Unverified,

@@ -6,6 +6,7 @@ use crate::{
 use byakko_core::validation;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
+    editor::{Feature, lighting::LightingRules},
     model::lighting::{self, Color, Content, HostMode, HostSource, Setting, Snapshot},
 };
 use std::path::Path;
@@ -30,7 +31,7 @@ fn baseline(expected: &Snapshot) -> Result<native::Lighting, ApplyFailure> {
         ));
     }
     let raw = native::Lighting::decode(&expected.revision).map_err(reject)?;
-    if lighting_adapter::from_native(&raw) != *expected {
+    if !LightingRules::same_baseline(&lighting_adapter::from_native(&raw), expected) {
         return Err(reject("Lighting baseline differs from its revision".into()));
     }
     Ok(raw)
@@ -45,7 +46,7 @@ pub(super) fn start(
 ) -> Result<Box<dyn HostActivity>, ApplyFailure> {
     let original = baseline(expected)?;
     let native_setting = native_mode(&mode, setting.as_ref())?;
-    let session = access.start_host_lighting_detailed(&original, &native_setting, backup_dir)?;
+    let session = access.start_host_lighting(&original, &native_setting, backup_dir)?;
     Ok(Box::new(NiaHostActivity {
         session,
         source: mode.source,
@@ -154,7 +155,7 @@ impl HostActivity for NiaHostActivity {
             recovery: Recovery::Unverified,
         })?;
         let snapshot = lighting_adapter::from_native(&restored);
-        if snapshot != expected {
+        if !LightingRules::same_baseline(&snapshot, &expected) {
             return Err(ApplyFailure {
                 message: format!(
                     "Host lighting readback differs from the saved baseline. Backups: {}",
@@ -192,6 +193,32 @@ mod tests {
         });
         assert_eq!(
             baseline(&forged).unwrap_err().recovery,
+            Recovery::NotAttempted
+        );
+    }
+
+    #[test]
+    fn accepted_setter_evidence_does_not_change_the_cached_host_before_image() {
+        let mut raw = [0u8; 64];
+        raw[..8].copy_from_slice(&[native::LED_READ_COMMAND, 1, 4, 4, 7, 9, 8, 7]);
+        let original = native::Lighting::decode(&raw).unwrap();
+        let readback = lighting_adapter::from_native(&original);
+        let mut accepted = readback.clone();
+        accepted.evidence = lighting::Evidence::TransportAccepted;
+        assert_eq!(baseline(&accepted).unwrap(), original);
+        assert!(LightingRules::same_baseline(&readback, &accepted));
+
+        accepted.picture_context.push(1);
+        assert_eq!(
+            baseline(&accepted).unwrap_err().recovery,
+            Recovery::NotAttempted
+        );
+        accepted = readback;
+        if let Content::Editable(setting) = &mut accepted.content {
+            setting.brightness = Some(3);
+        }
+        assert_eq!(
+            baseline(&accepted).unwrap_err().recovery,
             Recovery::NotAttempted
         );
     }

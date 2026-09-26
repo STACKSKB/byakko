@@ -60,18 +60,8 @@ impl Access {
         base: &[[u8; 4]],
         function: &[[u8; 4]],
         backup_dir: &std::path::Path,
-    ) -> Result<Snapshot> {
+    ) -> ApplyResult<Snapshot> {
         keymaps::apply_keymaps_with(self.selection(), expected, base, function, backup_dir)
-    }
-
-    pub fn apply_keymaps_detailed(
-        &self,
-        expected: &Snapshot,
-        base: &[[u8; 4]],
-        function: &[[u8; 4]],
-        backup_dir: &std::path::Path,
-    ) -> std::result::Result<Snapshot, byakko_core::contract::ApplyFailure> {
-        detailed(self.apply_keymaps(expected, base, function, backup_dir))
     }
 
     pub fn apply_macro(
@@ -80,51 +70,35 @@ impl Access {
         expected: &[u8],
         new_macro: &crate::nia87::macros::Macro,
         backup_dir: &std::path::Path,
-    ) -> Result<Vec<u8>> {
+    ) -> ApplyResult<Vec<u8>> {
         macros::apply_macro_with(self.selection(), slot, expected, new_macro, backup_dir)
     }
 
-    pub fn apply_macro_detailed(
-        &self,
-        slot: u8,
-        expected: &[u8],
-        new_macro: &crate::nia87::macros::Macro,
-        backup_dir: &std::path::Path,
-    ) -> std::result::Result<Vec<u8>, byakko_core::contract::ApplyFailure> {
-        detailed(self.apply_macro(slot, expected, new_macro, backup_dir))
-    }
-
     /// Use a before-image already validated by the portable macro adapter.
-    pub fn apply_macro_validated_detailed(
+    pub fn apply_macro_validated(
         &self,
         slot: u8,
         expected: &crate::nia87::macros::ValidatedBeforeImage,
         new_macro: &crate::nia87::macros::Macro,
         backup_dir: &std::path::Path,
-    ) -> std::result::Result<Vec<u8>, byakko_core::contract::ApplyFailure> {
-        detailed(macros::apply_macro_validated_with(
-            self.selection(),
-            slot,
-            expected,
-            new_macro,
-            backup_dir,
-        ))
+    ) -> ApplyResult<Vec<u8>> {
+        macros::apply_macro_validated_with(self.selection(), slot, expected, new_macro, backup_dir)
     }
 
-    pub fn apply_picture_detailed(
+    pub fn apply_picture(
         &self,
         expected: &[[u8; 3]],
         desired: &[[u8; 3]],
         expected_context: [u8; 2],
         backup_dir: &std::path::Path,
-    ) -> std::result::Result<Vec<[u8; 3]>, byakko_core::contract::ApplyFailure> {
-        detailed(picture::apply_picture_with(
+    ) -> ApplyResult<Vec<[u8; 3]>> {
+        picture::apply_picture_with(
             self.selection(),
             expected,
             desired,
             Some(expected_context),
             backup_dir,
-        ))
+        )
     }
 
     pub fn apply_lighting(
@@ -132,18 +106,8 @@ impl Access {
         expected: &crate::nia87::lighting::Lighting,
         setting: &crate::nia87::lighting::LightingSetting,
         backup_dir: &std::path::Path,
-    ) -> Result<crate::nia87::lighting::Lighting> {
+    ) -> ApplyResult<crate::nia87::lighting::Lighting> {
         lighting::apply_lighting_with(self.selection(), expected, setting, backup_dir)
-    }
-
-    pub fn apply_lighting_detailed(
-        &self,
-        expected: &crate::nia87::lighting::Lighting,
-        setting: &crate::nia87::lighting::LightingSetting,
-        backup_dir: &std::path::Path,
-    ) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::contract::ApplyFailure>
-    {
-        detailed(self.apply_lighting(expected, setting, backup_dir))
     }
 
     pub fn start_host_lighting(
@@ -151,7 +115,7 @@ impl Access {
         expected: &crate::nia87::lighting::Lighting,
         setting: &crate::nia87::lighting::LightingSetting,
         backup_dir: &std::path::Path,
-    ) -> Result<lighting::HostLightingSession> {
+    ) -> ApplyResult<lighting::HostLightingSession> {
         lighting::HostLightingSession::start_mode_with(
             self.selection(),
             expected,
@@ -160,33 +124,13 @@ impl Access {
         )
     }
 
-    pub fn start_host_lighting_detailed(
-        &self,
-        expected: &crate::nia87::lighting::Lighting,
-        setting: &crate::nia87::lighting::LightingSetting,
-        backup_dir: &std::path::Path,
-    ) -> std::result::Result<lighting::HostLightingSession, byakko_core::contract::ApplyFailure>
-    {
-        detailed(self.start_host_lighting(expected, setting, backup_dir))
-    }
-
     pub fn apply_setting(
         &self,
         expected: &crate::nia87::settings::Settings,
         setting: crate::nia87::settings::Setting,
         backup_dir: &std::path::Path,
-    ) -> Result<crate::nia87::settings::Settings> {
+    ) -> ApplyResult<crate::nia87::settings::Settings> {
         settings::apply_setting_with(self.selection(), expected, setting, backup_dir)
-    }
-
-    pub fn apply_setting_detailed(
-        &self,
-        expected: &crate::nia87::settings::Settings,
-        setting: crate::nia87::settings::Setting,
-        backup_dir: &std::path::Path,
-    ) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::contract::ApplyFailure>
-    {
-        detailed(self.apply_setting(expected, setting, backup_dir))
     }
 
     pub fn capture_configuration(
@@ -196,17 +140,14 @@ impl Access {
         configuration::capture_selected(self.selection(), progress)
     }
 
-    pub fn apply_configuration_detailed(
+    pub fn apply_configuration(
         &self,
         expected: &crate::nia87::configuration::Configuration,
         target: &crate::nia87::configuration::Configuration,
         backup_dir: &std::path::Path,
         progress: impl FnMut(&str),
-    ) -> std::result::Result<
-        crate::nia87::configuration::Configuration,
-        byakko_core::contract::ApplyFailure,
-    > {
-        configuration::apply_detailed_selected(
+    ) -> ApplyResult<crate::nia87::configuration::Configuration> {
+        configuration::apply_configuration_selected(
             self.selection(),
             expected,
             target,
