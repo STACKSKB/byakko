@@ -188,6 +188,54 @@ impl Session {
     pub fn busy(&self) -> bool {
         self.pending.is_some()
     }
+    pub fn requires_manual_read(&self) -> bool {
+        requires_manual_read(self.keymap.status())
+            || self
+                .macros()
+                .is_some_and(|editor| requires_manual_read(editor.status()))
+            || self
+                .lighting()
+                .is_some_and(|editor| requires_manual_read(editor.status()))
+            || self
+                .picture()
+                .is_some_and(|editor| requires_manual_read(editor.status()))
+            || self
+                .settings()
+                .is_some_and(|editor| requires_manual_read(editor.status()))
+    }
+    /// Produce the next read from cache readiness; the client stops on conflict or failure.
+    pub fn refresh_next(&mut self) -> Result<Option<Command>, String> {
+        self.idle()?;
+        self.connected()?;
+        if self.keymap.status() != &Status::Ready {
+            return self.read().map(Some);
+        }
+        if self
+            .lighting()
+            .is_some_and(|editor| editor.status() != &Status::Ready)
+        {
+            return self.read_lighting().map(Some);
+        }
+        if self
+            .settings()
+            .is_some_and(|editor| editor.status() != &Status::Ready)
+        {
+            return self.read_settings().map(Some);
+        }
+        if self
+            .picture()
+            .is_some_and(|editor| editor.status() != &Status::Ready)
+        {
+            return self.read_picture().map(Some);
+        }
+        if self
+            .macros()
+            .is_some_and(|editor| editor.baseline().is_some() && editor.status() != &Status::Ready)
+        {
+            return self.read_macro().map(Some);
+        }
+        Ok(None)
+    }
     pub fn recording(&self) -> bool {
         self.recorder.is_some()
     }
@@ -1009,5 +1057,18 @@ fn accept_feature<F: crate::editor::Feature>(
         Outcome::Conflict
     } else {
         editor.problem().cloned().map_or(success, Outcome::Failed)
+    }
+}
+
+fn requires_manual_read<S>(status: &Status<S>) -> bool {
+    match status {
+        Status::Conflict { .. } => true,
+        Status::Unverified { problem } => match problem {
+            Problem::Apply(_) | Problem::InvalidApplyResult(_) | Problem::ApplyReadbackMismatch => {
+                true
+            }
+            Problem::ReadRequired | Problem::Read(_) => false,
+        },
+        Status::Unloaded | Status::Ready => false,
     }
 }

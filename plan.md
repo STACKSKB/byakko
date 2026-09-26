@@ -79,7 +79,7 @@ it is not evidence that new frontend paths work.
 | devices/hid, rongyuan, nia87 | OS collections, family codecs, board mapping, transactions |
 | devices/storage and sampling | Durable files and OS samplers |
 | desktop/app | Iced lifecycle, routing and effect delivery |
-| desktop/controller | Local recording, file job coordination and debounce deadlines |
+| desktop/controller | Connection/discovery, local recording, file jobs and debounce deadlines |
 | desktop/input | Window-local input translated into portable actions |
 | desktop/form | Unsubmitted input, parsing and user intents |
 | desktop/view | Feature rendering over forms and core state |
@@ -111,7 +111,7 @@ to match this table. Public APIs expose concepts, not every internal helper.
   and submission state, real selector dependencies and one-pass read policy.
 - [x] Restore files, local labels and diagnostic capture through the new
   architecture. Developer archive restore remains outside public UI.
-- [ ] Restore automatic discovery and reconnect behavior.
+- [x] Restore automatic discovery and reconnect behavior.
 - [ ] Restore host lighting lifecycle, OS samplers and verified restoration.
 - [ ] Remove remaining obsolete native forwarding/error-erasure paths, retaining
   fixtures and useful research commands. Narrow APIs around demonstrated callers.
@@ -250,8 +250,35 @@ seven CLI tests), strict all-target/all-feature Clippy, formatting and locked
 development builds pass. CLI demo capture, offline self-comparison and existing
 destination rejection also pass. No hardware writes or rendered acceptance.
 
-Temporary gaps: automatic discovery/reconnect, the full assignment catalog and
-custom shortcut form, macro interaction review and host streaming.
+The discovery checkpoint restores background enumeration and automatic
+attachment through `controller/discovery.rs` and `controller/connection.rs`.
+Enumeration has one outstanding correlated request. Commands, file work,
+recording and close invalidate earlier results; those results are drained without
+changing the active connection. Idle discovery runs at two seconds after the
+initial 100 ms discovery cadence. Native enumeration remains read-only.
+
+Every attached executor stays bound to its exact collection. Manual Read retires
+the old worker and deliberately selects the current unique collection, even if
+the cable transition occurred between scans. Automatic attachment binds the
+observed identity. Core derives reconnect cautions from editor states, retaining
+feature conflicts and failed-write diagnostics until deliberate reads. Ordinary
+attachment/connection-read failures can retry after a later inventory result.
+
+Connection refresh reads keymap, lighting, settings and picture once, followed
+by the previously loaded macro slot when applicable, then passive macro discovery.
+It never activates a display effect. The next read is derived from editor
+readiness; there is no duplicate refresh queue or baseline. Navigation and
+successful feature writes do not refresh unrelated caches.
+
+Workspace tests (82 core, 50 desktop, 215 devices plus external integration,
+seven CLI tests), strict all-target/all-feature Clippy, formatting and locked
+development builds pass. Tests exercise manual worker replacement, failed
+attachment, changed identity, ordinary read retry, held failed-write diagnostics,
+bounded/stale discovery and read-only refresh on a backend without macros.
+No hardware writes or physical reconnect acceptance were performed.
+
+Temporary gaps: the full assignment catalog and custom shortcut form, macro
+interaction review and host streaming.
 The native APIs, codecs, OS samplers, direct transaction tests and research tools
 remain. Passive catalog priority is restored; host scheduling returns with its
 feature milestone.

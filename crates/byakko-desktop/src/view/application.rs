@@ -1,5 +1,6 @@
 //! Application presentation borrows the core read model and local forms.
 use crate::{
+    controller::discovery::Availability,
     form::{
         application::{Closing, Message, Page},
         files, keymap, lighting, macros, picture, recording, settings,
@@ -19,6 +20,7 @@ use iced::{
 /// Borrowed render inputs, assembled for a frame; no effects or owned state.
 pub struct View<'a> {
     pub session: &'a Session,
+    pub presence: &'a Availability,
     pub keys: &'a keymap::Form,
     pub macros: &'a macros::Form,
     pub lighting: &'a lighting::Form,
@@ -77,6 +79,10 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         column![
             text(&input.session.descriptor().device_name).size(input.style.type_scale.page_title),
             toolbar,
+            text(connection_status(
+                input.presence,
+                input.session.requires_manual_read()
+            )),
             text(status),
             feature_view(&input, editable),
         ]
@@ -110,6 +116,25 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
             .center_y(Fill)
     ]
     .into()
+}
+
+fn connection_status(presence: &Availability, manual_read: bool) -> String {
+    let status = match presence {
+        Availability::Unknown => "Looking for a keyboard…".into(),
+        Availability::Missing => "No supported keyboard connected.".into(),
+        Availability::Ready { .. } => "Keyboard detected.".into(),
+        Availability::Ambiguous { count } => {
+            format!("Found {count} supported keyboards. Connect one at a time.")
+        }
+        Availability::Error(reason) => format!("Device discovery failed: {reason}"),
+    };
+    if manual_read {
+        format!(
+            "{status} A feature needs attention; choose Read / reconnect to refresh. Edits and diagnostics are retained."
+        )
+    } else {
+        status
+    }
 }
 
 fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {

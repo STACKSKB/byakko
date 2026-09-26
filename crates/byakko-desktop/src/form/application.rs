@@ -18,6 +18,7 @@ pub enum Message {
     Save,
     Revert,
     Poll(Instant),
+    Scan,
     Close,
     Discard,
     KeepEditing,

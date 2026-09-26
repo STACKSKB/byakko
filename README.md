@@ -6,7 +6,7 @@ is needed by the product.
 
 This branch is an **application rewrite in progress**, starting from `3db624f`.
 The old application controllers have been removed. The replacement currently
-supports keymap read, staged assignment, save, revert and manual reconnect through
+supports keymap read, staged assignment, save, revert and reconnect through
 Iced and an independent CLI. Macro discovery, selected-slot editing, save-and-assign
 and CLI snapshot workflows also use the replacement core. Window-local macro
 recording appends to the shared draft and releases held inputs on stop, focus loss
@@ -33,8 +33,11 @@ in-memory keyboard. Linux hardware access needs the narrow permission setup in
 The keymap view uses device-supplied physical geometry and action choices. Edits
 stay in the core editor until Save assignments. Save uses the cached before-image
 and the existing native backup/write/readback transaction. Closing waits for a
-pending save and asks before discarding edits. Automatic discovery/reconnect,
-the richer assignment catalog, custom shortcut form and host lighting
+pending save and asks before discarding edits. Discovery runs in the background;
+new connections load each feature once and retain drafts. Conflicts and failed
+writes hold automatic refresh until an explicit Read / reconnect. That action
+replaces the worker even if discovery missed an unplug/replug.
+The richer assignment catalog, custom shortcut form and host lighting
 are pending frontend milestones. Lighting/picture saves report transport
 acceptance after established pacing; settings saves include one readback.
 
