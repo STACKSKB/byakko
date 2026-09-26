@@ -1,11 +1,11 @@
 //! Conservative projection of Nia87 global lighting into shared values.
 use crate::nia87::{device, lighting as native};
 use byakko_core::{
+    contract::{ApplyFailure, Recovery},
     lighting::{
         self, Capabilities, Choice, Color, ColorCapability, Content, Effect, HostMode,
         HostParameters, HostSource, Setting, Snapshot,
     },
-    session::{ApplyFailure, Recovery},
 };
 use std::path::Path;
 

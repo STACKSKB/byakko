@@ -343,8 +343,8 @@ fn apply_detailed_with(
     expected: &State,
     changes: &[Change],
     backup_dir: &Path,
-) -> Result<State, byakko_core::session::ApplyFailure> {
-    use byakko_core::session::{ApplyFailure, Recovery};
+) -> Result<State, byakko_core::contract::ApplyFailure> {
+    use byakko_core::contract::{ApplyFailure, Recovery};
     let prepare = || -> Result<_, String> {
         Ok((
             revision_snapshot(expected)?,
@@ -376,7 +376,7 @@ impl crate::Device for BoundNia87Adapter {
         expected: &State,
         changes: &[Change],
         backup_dir: &Path,
-    ) -> Result<State, byakko_core::session::ApplyFailure> {
+    ) -> Result<State, byakko_core::contract::ApplyFailure> {
         apply_detailed_with(&self.access, expected, changes, backup_dir)
     }
 
@@ -393,7 +393,7 @@ impl crate::Device for BoundNia87Adapter {
         expected: &macros::Snapshot,
         desired: &macros::Program,
         backup_dir: &Path,
-    ) -> Result<macros::Snapshot, byakko_core::session::ApplyFailure> {
+    ) -> Result<macros::Snapshot, byakko_core::contract::ApplyFailure> {
         macro_adapter::apply_with(&self.access, expected, desired, backup_dir)
     }
 
@@ -406,7 +406,7 @@ impl crate::Device for BoundNia87Adapter {
         expected: &byakko_core::lighting::Snapshot,
         desired: &byakko_core::lighting::Setting,
         backup_dir: &Path,
-    ) -> Result<byakko_core::lighting::Snapshot, byakko_core::session::ApplyFailure> {
+    ) -> Result<byakko_core::lighting::Snapshot, byakko_core::contract::ApplyFailure> {
         crate::nia87::lighting_adapter::apply_with(&self.access, expected, desired, backup_dir)
     }
 
@@ -416,7 +416,7 @@ impl crate::Device for BoundNia87Adapter {
         setting: Option<byakko_core::lighting::Setting>,
         expected: &byakko_core::lighting::Snapshot,
         backup_dir: &Path,
-    ) -> Result<Box<dyn crate::HostActivity>, byakko_core::session::ApplyFailure> {
+    ) -> Result<Box<dyn crate::HostActivity>, byakko_core::contract::ApplyFailure> {
         crate::nia87::host_adapter::start(&self.access, mode, setting, expected, backup_dir)
     }
 
@@ -429,7 +429,7 @@ impl crate::Device for BoundNia87Adapter {
         expected: &byakko_core::picture::Snapshot,
         desired: &BTreeMap<String, [u8; 3]>,
         backup_dir: &Path,
-    ) -> Result<byakko_core::picture::Snapshot, byakko_core::session::ApplyFailure> {
+    ) -> Result<byakko_core::picture::Snapshot, byakko_core::contract::ApplyFailure> {
         crate::nia87::picture_adapter::apply_with(&self.access, expected, desired, backup_dir)
     }
 
@@ -442,7 +442,7 @@ impl crate::Device for BoundNia87Adapter {
         expected: &byakko_core::settings::Snapshot,
         edit: &byakko_core::settings::Edit,
         backup_dir: &Path,
-    ) -> Result<byakko_core::settings::Snapshot, byakko_core::session::ApplyFailure> {
+    ) -> Result<byakko_core::settings::Snapshot, byakko_core::contract::ApplyFailure> {
         crate::nia87::settings_adapter::apply_with(&self.access, expected, edit, backup_dir)
     }
 
@@ -466,7 +466,7 @@ impl crate::Device for BoundNia87Adapter {
         expected: &byakko_core::archive::NativeArchive,
         target: &byakko_core::archive::NativeArchive,
         backup_dir: &Path,
-    ) -> Result<byakko_core::archive::NativeArchive, byakko_core::session::ApplyFailure> {
+    ) -> Result<byakko_core::archive::NativeArchive, byakko_core::contract::ApplyFailure> {
         crate::nia87::archive_adapter::apply_with(&self.access, expected, target, backup_dir)
     }
 }

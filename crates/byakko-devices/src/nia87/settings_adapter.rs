@@ -1,7 +1,7 @@
 //! Device-neutral projection and one-field apply for Nia87 scalar settings.
 use super::{adapter, device, settings as native};
 use byakko_core::{
-    session::{ApplyFailure, Recovery},
+    contract::{ApplyFailure, Recovery},
     settings::{self, Capabilities, Content, Edit, Field, Kind, Snapshot, Value},
 };
 use std::path::Path;

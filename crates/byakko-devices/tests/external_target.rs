@@ -1,13 +1,11 @@
 //! A tablet-shaped descriptor exercises the portable binding contract without
 //! claiming support for Wacom reports or continuous ring values.
-use byakko_core::session::{CommandPayload, CompletionPayload};
-use byakko_core::session::{FeatureCommand, FeatureResult};
 use byakko_core::{
     Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State,
-    session::{Acceptance, Command, Completion, Session, Status},
+    session::{Outcome, Session},
 };
-use byakko_devices::{Device, memory::MemoryDevice};
-use std::{collections::BTreeMap, path::Path};
+use byakko_devices::{Executor, memory::MemoryDevice};
+use std::{collections::BTreeMap, time::Duration};
 
 #[test]
 fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
@@ -59,27 +57,17 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
                 .collect(),
         )]),
     };
-    let mut device = MemoryDevice::new(descriptor.clone(), state.clone()).unwrap();
+    let device = MemoryDevice::new(descriptor.clone(), state.clone()).unwrap();
     let mut session = Session::new(descriptor).unwrap();
     let generation = session.connect().unwrap();
-    let Command {
-        operation,
-        payload: CommandPayload::Keymap(FeatureCommand::Read(())),
-        ..
-    } = session.request_read().unwrap()
-    else {
-        unreachable!()
-    };
+    let executor = Executor::spawn(device, Default::default()).unwrap();
+    executor.set_generation(generation);
+    executor.try_submit(session.read().unwrap()).unwrap();
     assert_eq!(
-        session.accept(Completion {
-            generation,
-            operation,
-            payload: CompletionPayload::Keymap(FeatureResult::Read(device.read()))
-        }),
-        Acceptance::Accepted
+        session.accept(executor.receive(Some(Duration::from_secs(2))).unwrap()),
+        Outcome::Loaded
     );
-    assert_eq!(session.status(), &Status::Ready);
-
+    assert!(session.keymap().baseline().is_some());
     for (control, action) in [
         ("express-1", Action::Key(4)),
         (
@@ -90,44 +78,27 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
         ),
     ] {
         session
-            .stage(Change {
+            .edit(Change {
                 layer: "default".into(),
                 key: control.into(),
                 action,
             })
             .unwrap();
     }
-    let Command {
-        operation,
-        payload:
-            CommandPayload::Keymap(FeatureCommand::Apply {
-                expected,
-                desired: changes,
-                ..
-            }),
-        ..
-    } = session.request_apply().unwrap()
-    else {
-        unreachable!()
-    };
-    let result = device.apply(&expected, &changes, Path::new("unused"));
+    executor.try_submit(session.save().unwrap()).unwrap();
     assert_eq!(
-        session.accept(Completion {
-            generation,
-            operation,
-            payload: CompletionPayload::Keymap(FeatureResult::Apply(result))
-        }),
-        Acceptance::Accepted
+        session.accept(executor.receive(Some(Duration::from_secs(2))).unwrap()),
+        Outcome::Saved
     );
-    assert!(!session.dirty());
+    assert!(!session.keymap().dirty());
     assert_eq!(
-        device.read().unwrap().bindings["default"]["ring-clockwise"],
+        session.keymap().baseline().unwrap().bindings["default"]["ring-clockwise"],
         Action::Named {
             id: "scroll-up".into()
         }
     );
     assert_eq!(
-        device.read().unwrap().bindings["default"]["ring-counterclockwise"],
+        session.keymap().baseline().unwrap().bindings["default"]["ring-counterclockwise"],
         Action::Disabled
     );
 }

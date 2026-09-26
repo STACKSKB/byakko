@@ -103,7 +103,7 @@ fn malformed_outcomes_and_failed_apply_preserve_draft() {
     );
     let failure = ApplyFailure {
         message: "write failed".into(),
-        recovery: crate::session::Recovery::Failed,
+        recovery: crate::contract::Recovery::Failed,
     };
     editor.accept_apply(Err(failure.clone()));
     assert_eq!(

@@ -1,8 +1,8 @@
 //! Portable device contract; firmware and OS effects live in implementations.
 use byakko_core::{
-    Change, State, archive, lighting, macros, picture,
-    session::{ApplyFailure, Recovery},
-    settings,
+    Change, State, archive,
+    contract::{ApplyFailure, Recovery},
+    lighting, macros, picture, settings,
 };
 use std::path::Path;
 

@@ -1,5 +1,5 @@
 //! Opaque, backend-owned native configuration archives.
-use crate::session::ApplyFailure;
+use crate::contract::ApplyFailure;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 

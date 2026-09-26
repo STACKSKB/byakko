@@ -49,7 +49,7 @@ pub fn apply_macro_detailed(
     expected: &[u8],
     new_macro: &crate::nia87::macros::Macro,
     backup_dir: &std::path::Path,
-) -> std::result::Result<Vec<u8>, byakko_core::session::ApplyFailure> {
+) -> std::result::Result<Vec<u8>, byakko_core::contract::ApplyFailure> {
     detailed(apply_macro(slot, expected, new_macro, backup_dir))
 }
 

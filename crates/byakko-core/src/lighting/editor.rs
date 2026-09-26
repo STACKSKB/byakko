@@ -3,8 +3,8 @@ use super::{
     Capabilities, Content, Edit, Evidence, Setting, Snapshot, default_setting, edit,
     validate_capabilities, validate_setting, validate_snapshot,
 };
+use crate::contract::ApplyFailure;
 use crate::draft::Draft;
-use crate::session::ApplyFailure;
 
 pub type Status = crate::draft::Status<Snapshot>;
 

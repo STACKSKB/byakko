@@ -4,8 +4,8 @@ use crate::{
     nia87::{device, lighting as native, lighting_adapter},
 };
 use byakko_core::{
+    contract::{ApplyFailure, Recovery},
     lighting::{self, Color, Content, HostMode, HostSource, Setting, Snapshot},
-    session::{ApplyFailure, Recovery},
 };
 use std::path::Path;
 

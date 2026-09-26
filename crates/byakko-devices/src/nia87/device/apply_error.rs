@@ -1,6 +1,6 @@
 //! Typed recovery outcomes at the native transaction boundary.
 use super::Result;
-use byakko_core::session::{ApplyFailure, Recovery};
+use byakko_core::contract::{ApplyFailure, Recovery};
 use std::{fmt, path::Path};
 
 #[derive(Debug)]

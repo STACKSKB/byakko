@@ -1,10 +1,7 @@
 //! Read-only probe of the picture command path used by the desktop.
-use byakko_core::session::CompletionPayload;
-use byakko_core::session::FeatureResult;
-use byakko_core::{
-    picture::{Content, editor::Status},
-    session::{Completion, Session},
-};
+use byakko_core::contract::CompletionPayload;
+use byakko_core::contract::FeatureResult;
+use byakko_core::contract::{Command, CommandPayload, Completion, FeatureCommand};
 use byakko_devices::{Executor, nia87};
 use std::{
     fs::OpenOptions,
@@ -27,12 +24,14 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Err(format!("Expected one Nia87 collection; found {}", candidates.len()).into());
     };
     let target = nia87::device::Target::from_candidate(candidate)?;
-    let mut session =
-        Session::new(nia87::descriptor())?.with_picture(nia87::picture_adapter::capabilities())?;
     let executor = Executor::spawn(nia87::BoundNia87Adapter::new(target), Default::default())?;
-    executor.set_generation(session.connect()?);
+    executor.set_generation(1);
     executor
-        .try_submit(session.request_picture_read()?)
+        .try_submit(Command {
+            generation: 1,
+            operation: 1,
+            payload: CommandPayload::Picture(FeatureCommand::Read(())),
+        })
         .map_err(|_| "Read submission failed")?;
     let deadline = Instant::now() + Duration::from_secs(30);
     let completion = loop {
@@ -55,21 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             ..
         }
     );
-    session.accept(completion);
-    let editor = session.picture().expect("configured picture");
-    if !read_ok || *editor.status() != Status::Ready {
-        return Err(format!("Read failed; completion preserved: {:?}", editor.status()).into());
+    if !read_ok {
+        return Err("Read failed; completion preserved".into());
     }
-    match &editor.baseline().expect("verified baseline").content {
-        Content::Editable(colors) => {
-            println!(
-                "Verified {} physical key colors. No setters sent.",
-                colors.len()
-            )
-        }
-        Content::Opaque { reason } => {
-            println!("Read preserved as opaque: {reason}. No setters sent.")
-        }
-    }
+    println!("Captured read completion. No setters sent.");
     Ok(())
 }

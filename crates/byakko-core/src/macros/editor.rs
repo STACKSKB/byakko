@@ -3,7 +3,7 @@
 use super::{
     Capabilities, Content, Edit, Program, Snapshot, edit, validate_capabilities, validate_program,
 };
-use crate::session::{ApplyFailure, Problem};
+use crate::contract::{ApplyFailure, Problem};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -26,55 +26,6 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub(crate) fn replace(&mut self, program: Program) -> Result<(), String> {
-        if self.status != Status::Ready || self.draft.is_none() {
-            return Err("Read an editable macro before importing".into());
-        }
-        validate_program(&self.capabilities, &program)?;
-        self.draft = Some(program);
-        Ok(())
-    }
-
-    pub(crate) fn recorder(
-        &self,
-        policy: super::recorder::DelayPolicy,
-    ) -> Result<super::recorder::Recorder, String> {
-        if self.status != Status::Ready {
-            return Err("Read and verify the macro before recording".into());
-        }
-        super::recorder::Recorder::new(
-            &self.capabilities,
-            self.draft.as_ref().ok_or("Macro is not editable")?,
-            policy,
-        )
-    }
-
-    pub(crate) fn record(
-        &mut self,
-        recorder: &mut super::recorder::Recorder,
-        action: super::Action,
-        at: u64,
-    ) -> Result<super::recorder::Transition, String> {
-        recorder.transition(
-            &self.capabilities,
-            self.draft.as_mut().ok_or("Macro is not editable")?,
-            action,
-            at,
-        )
-    }
-
-    pub(crate) fn stop_recording(
-        &mut self,
-        recorder: &super::recorder::Recorder,
-        at: u64,
-    ) -> Result<super::recorder::StopOutcome, String> {
-        recorder.stop(
-            &self.capabilities,
-            self.draft.as_mut().ok_or("Macro is not editable")?,
-            at,
-        )
-    }
-
     pub fn new(capabilities: Capabilities) -> Result<Self, String> {
         validate_capabilities(&capabilities)?;
         let slot = capabilities.slots[0].id.clone();
@@ -128,33 +79,6 @@ impl Editor {
                 .collect(),
         )
     }
-    pub(crate) fn accept_catalog(&mut self, result: Result<Vec<Snapshot>, String>) {
-        let validated = result.and_then(|snapshots| {
-            let mut catalog = BTreeMap::new();
-            for snapshot in snapshots {
-                let slot = snapshot.slot.clone();
-                self.validate_snapshot_for(&snapshot, &slot)?;
-                if catalog.insert(slot, snapshot).is_some() {
-                    return Err("Macro catalog contains a duplicate slot".into());
-                }
-            }
-            if catalog.len() != self.capabilities.slots.len() {
-                return Err("Macro catalog is missing declared slots".into());
-            }
-            Ok(catalog)
-        });
-        match validated {
-            Ok(catalog) => {
-                self.catalog = Some(catalog);
-                self.catalog_error = None;
-            }
-            Err(error) => {
-                self.catalog = None;
-                self.catalog_error = Some(error);
-            }
-        }
-    }
-
     pub fn dirty(&self) -> bool {
         match (&self.baseline, &self.draft) {
             (Some(snapshot), Some(draft)) => match &snapshot.content {
@@ -223,12 +147,6 @@ impl Editor {
         self.status = Status::Unverified {
             problem: Problem::ReadRequired,
         };
-    }
-
-    /// A failed write elsewhere can make the library image uncertain even when
-    /// this editor already has a more useful failure or conflict diagnostic.
-    pub(crate) fn clear_catalog(&mut self) {
-        self.catalog = None;
     }
 
     pub fn edit(&mut self, change: Edit) -> Result<(), String> {

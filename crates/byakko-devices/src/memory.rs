@@ -2,9 +2,9 @@
 
 use crate::Device;
 use byakko_core::{
-    Change, Descriptor, State, archive, lighting, macros, picture,
-    session::{ApplyFailure, Recovery},
-    settings, validate_changes, validate_state,
+    Action, ActionCategory, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State, archive,
+    contract::{ApplyFailure, Recovery},
+    lighting, macros, picture, settings, validate_changes, validate_state,
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -509,6 +509,70 @@ impl Device for MemoryDevice {
     }
 }
 
+/// A small keyboard with deliberately different geometry and layers from Nia87.
+fn demo_descriptor() -> Descriptor {
+    Descriptor {
+        backend_id: "memory".into(),
+        device_name: "Demo keyboard".into(),
+        keys: ["Alpha", "Beta", "Fixed"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, id)| PhysicalKey {
+                id: id.into(),
+                label: id.into(),
+                x: index as f32,
+                y: 0.0,
+                width: 1.0,
+                height: 1.0,
+                visible: true,
+                writable: index != 2,
+            })
+            .collect(),
+        layers: ["Typing", "Navigation", "Studio"]
+            .into_iter()
+            .map(|id| Layer {
+                id: id.into(),
+                label: id.into(),
+            })
+            .collect(),
+        actions: [
+            ("A", Action::Key(4)),
+            ("B", Action::Key(5)),
+            ("Disabled", Action::Disabled),
+        ]
+        .into_iter()
+        .map(|(label, action)| ActionChoice {
+            label: label.into(),
+            action,
+            category: ActionCategory::Alphanumeric,
+        })
+        .collect(),
+        shortcuts: None,
+    }
+}
+
+pub fn demo() -> Result<MemoryDevice, String> {
+    let descriptor = demo_descriptor();
+    let state = State {
+        revision: vec![1],
+        bindings: descriptor
+            .layers
+            .iter()
+            .map(|layer| {
+                (
+                    layer.id.clone(),
+                    descriptor
+                        .keys
+                        .iter()
+                        .map(|key| (key.id.clone(), Action::Key(4)))
+                        .collect(),
+                )
+            })
+            .collect(),
+    };
+    MemoryDevice::new(descriptor, state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -682,55 +746,6 @@ mod tests {
                 ],
             )
             .unwrap()
-    }
-
-    #[test]
-    fn session_and_single_executor_apply_then_reread_memory_macro() {
-        use byakko_core::session::{Acceptance, Command, Session, Status};
-        use std::time::Duration;
-        fn run(session: &mut Session, worker: &crate::Executor, command: Command) {
-            worker.try_submit(command).unwrap();
-            let completion = worker
-                .completions
-                .recv_timeout(Duration::from_secs(2))
-                .unwrap();
-            assert_eq!(session.accept(completion), Acceptance::Accepted);
-            assert!(!session.busy());
-        }
-        let second = macros::Content::Opaque {
-            reason: "Unknown firmware extension".into(),
-        };
-        let device = macro_device(second.clone());
-        let mut session = Session::new(device.descriptor().clone())
-            .unwrap()
-            .with_macros(macro_capabilities())
-            .unwrap();
-        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
-        worker.set_generation(session.connect().unwrap());
-        let read = session.request_read().unwrap();
-        run(&mut session, &worker, read);
-        let read = session.request_macro_read().unwrap();
-        run(&mut session, &worker, read);
-        session.edit_macro(macros::Edit::Repeat(3)).unwrap();
-        let apply = session.request_macro_apply().unwrap();
-        run(&mut session, &worker, apply);
-        assert_eq!(session.macros().unwrap().draft(), Some(&program(3)));
-        assert!(!session.dirty());
-        assert_eq!(session.status(), &Status::Ready);
-        let read = session.request_read().unwrap();
-        run(&mut session, &worker, read);
-        assert_eq!(session.status(), &Status::Ready);
-        let read = session.request_macro_read().unwrap();
-        run(&mut session, &worker, read);
-        assert_eq!(session.macros().unwrap().draft(), Some(&program(3)));
-        session.select_macro("second").unwrap();
-        let read = session.request_macro_read().unwrap();
-        run(&mut session, &worker, read);
-        assert_eq!(
-            session.macros().unwrap().baseline().unwrap().content,
-            second
-        );
-        assert!(session.macros().unwrap().draft().is_none());
     }
 
     #[test]
@@ -982,59 +997,6 @@ mod tests {
         assert_eq!(opaque_device.read_picture().unwrap(), opaque);
     }
 
-    #[test]
-    fn picture_commands_run_through_the_serial_executor() {
-        use byakko_core::session::{Acceptance, Session};
-        use std::time::Duration;
-        let (descriptor, state) = fixture();
-        let caps = picture::Capabilities {
-            backend_id: "memory".into(),
-            keys: vec!["editable".into()],
-            lighting_effect: None,
-        };
-        let snapshot = picture::Snapshot {
-            evidence: byakko_core::SnapshotEvidence::Readback,
-            backend_id: "memory".into(),
-            revision: vec![8],
-            context_revision: Vec::new(),
-            content: picture::Content::Editable(BTreeMap::from([("editable".into(), [1, 2, 3])])),
-        };
-        let device = MemoryDevice::new(descriptor.clone(), state)
-            .unwrap()
-            .with_picture(caps.clone(), snapshot)
-            .unwrap();
-        let mut session = Session::new(descriptor)
-            .unwrap()
-            .with_picture(caps)
-            .unwrap();
-        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
-        worker.set_generation(session.connect().unwrap());
-        let read = session.request_picture_read().unwrap();
-        worker.try_submit(read).unwrap();
-        let completion = worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(session.accept(completion), Acceptance::Accepted);
-        session
-            .edit_picture(picture::Edit::Color {
-                key: "editable".into(),
-                color: [4, 5, 6],
-            })
-            .unwrap();
-        let apply = session.request_picture_apply().unwrap();
-        worker.try_submit(apply).unwrap();
-        let completion = worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(session.accept(completion), Acceptance::Accepted);
-        assert_eq!(
-            session.picture().unwrap().draft().unwrap()["editable"],
-            [4, 5, 6]
-        );
-    }
-
     fn settings_fixture() -> (
         Descriptor,
         State,
@@ -1117,125 +1079,6 @@ mod tests {
             device
                 .apply_setting(&initial, &edit, Path::new("ignored"))
                 .is_err()
-        );
-    }
-
-    #[test]
-    fn settings_read_and_apply_use_the_serial_executor() {
-        use byakko_core::session::{Acceptance, Session};
-        use std::time::Duration;
-        let (descriptor, state, capabilities, snapshot) = settings_fixture();
-        let device = MemoryDevice::new(descriptor.clone(), state)
-            .unwrap()
-            .with_settings(capabilities.clone(), snapshot)
-            .unwrap();
-        let mut session = Session::new(descriptor)
-            .unwrap()
-            .with_settings(capabilities)
-            .unwrap();
-        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
-        worker.set_generation(session.connect().unwrap());
-        worker
-            .try_submit(session.request_settings_read().unwrap())
-            .unwrap();
-        let result = worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(session.accept(result), Acceptance::Accepted);
-        session
-            .edit_setting(settings::Edit {
-                id: "enabled".into(),
-                value: settings::Value::Toggle(true),
-            })
-            .unwrap();
-        worker
-            .try_submit(session.request_setting_apply().unwrap())
-            .unwrap();
-        let result = worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(session.accept(result), Acceptance::Accepted);
-        assert_eq!(
-            session.settings().unwrap().draft().unwrap()["enabled"],
-            settings::Value::Toggle(true)
-        );
-    }
-
-    #[test]
-    fn archive_capture_and_review_use_the_serial_executor() {
-        use byakko_core::session::{Acceptance, Session};
-        use std::time::Duration;
-        let (descriptor, state) = fixture();
-        let caps = archive::ArchiveCapabilities {
-            backend_id: "memory".into(),
-            format_id: "memory-archive-v1".into(),
-            max_bytes: 128,
-        };
-        let before = archive::NativeArchive {
-            backend_id: "memory".into(),
-            format_id: "memory-archive-v1".into(),
-            bytes: vec![1, 2, 3],
-        };
-        let target = archive::NativeArchive {
-            bytes: vec![4, 5, 6],
-            ..before.clone()
-        };
-        let device = MemoryDevice::new(descriptor.clone(), state)
-            .unwrap()
-            .with_archive(caps.clone(), before.clone())
-            .unwrap();
-        assert_eq!(Device::archive_capabilities(&device), Some(caps.clone()));
-        let mut session = Session::new(descriptor)
-            .unwrap()
-            .with_archive(caps)
-            .unwrap();
-        let worker = crate::Executor::spawn(device, Default::default()).unwrap();
-        worker.set_generation(session.connect().unwrap());
-        worker
-            .try_submit(session.request_archive_capture().unwrap())
-            .unwrap();
-        let completion = worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(session.accept(completion), Acceptance::Accepted);
-        assert_eq!(
-            session.archive(),
-            Some(&archive::ArchiveState::Captured(before.clone()))
-        );
-        worker
-            .try_submit(session.request_archive_review(target.clone()).unwrap())
-            .unwrap();
-        let completion = worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(session.accept(completion), Acceptance::Accepted);
-        assert_eq!(
-            session.archive(),
-            Some(&archive::ArchiveState::Ready(archive::Review {
-                before,
-                target: target.clone(),
-                changes: vec![archive::SectionChange {
-                    id: "archive".into(),
-                    label: "Native archive".into(),
-                    count: None
-                }],
-            }))
-        );
-        worker
-            .try_submit(session.request_archive_apply().unwrap())
-            .unwrap();
-        let completion = worker
-            .completions
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
-        assert_eq!(session.accept(completion), Acceptance::Accepted);
-        assert_eq!(
-            session.archive(),
-            Some(&archive::ArchiveState::Captured(target))
         );
     }
 }

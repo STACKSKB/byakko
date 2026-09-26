@@ -1,6 +1,6 @@
 //! Device-neutral projection of physical-key coordinates into an Iced board.
 use crate::panels::{self, UiStyle};
-use byakko_core::{Action, Descriptor, PhysicalKey, session::Bindings};
+use byakko_core::{Action, Descriptor, PhysicalKey, keymap::Bindings};
 use iced::{
     Element, Fill, Length, Size,
     widget::{container, pin, responsive, scrollable, space, stack, text, tooltip},

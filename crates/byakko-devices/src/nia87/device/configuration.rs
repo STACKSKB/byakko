@@ -5,7 +5,7 @@ use super::{
     read_lighting_on_device, read_macro_on_device, read_picture_on_device, read_settings_on_device,
     snapshot_on_device, write_binding, write_lighting_report, write_macro_bytes,
 };
-use byakko_core::session::{ApplyFailure, Recovery};
+use byakko_core::contract::{ApplyFailure, Recovery};
 use std::fmt;
 
 #[derive(Debug)]

@@ -1,8 +1,8 @@
 //! Per-key RGB projection for the Nia87's matrix-indexed native picture.
 use super::{adapter, board, device, layout};
 use byakko_core::{
+    contract::{ApplyFailure, Recovery},
     picture,
-    session::{ApplyFailure, Recovery},
 };
 use std::{collections::BTreeMap, path::Path};
 
