@@ -38,9 +38,9 @@ fn fixture() -> Macro {
 
 fn main() -> device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 1 {
+    if !(1..=2).contains(&args.len()) {
         return Err(
-            "Usage: verify_macro_events BASELINE.json; writes unbound slot49, then restores it"
+            "Usage: verify_macro_events BASELINE.json [SLOT]; writes an empty unbound slot (default49), then restores it"
                 .into(),
         );
     }
@@ -54,7 +54,11 @@ fn main() -> device::Result<()> {
         .write(true)
         .create_new(true)
         .open(&trace_path)?;
-    let (result, trace) = byakko_devices::research_trace::with_trace(|| run(&args[0]));
+    let slot = args.get(1).map_or(Ok(49), |value| value.parse::<u8>())?;
+    if slot >= 50 {
+        return Err("Macro slot must be in 0..49".into());
+    }
+    let (result, trace) = byakko_devices::research_trace::with_trace(|| run(&args[0], slot));
     serde_json::to_writer_pretty(
         &mut trace_file,
         &serde_json::json!({
@@ -68,9 +72,9 @@ fn main() -> device::Result<()> {
     result.map_err(|error| -> Box<dyn std::error::Error + Send + Sync> { error.into() })?
 }
 
-fn run(baseline: &str) -> device::Result<()> {
+fn run(baseline: &str, slot: u8) -> device::Result<()> {
     let original = byakko_devices::nia87::configuration::load(std::path::Path::new(baseline))?;
-    let slot = 49;
+    let slot = usize::from(slot);
     if original.keymaps.firmware != 0x100
         || original.keymaps.profile != 0
         || original.macros[slot].iter().any(|&byte| byte != 0)
@@ -82,7 +86,7 @@ fn run(baseline: &str) -> device::Result<()> {
             .any(|binding| binding[0] == 9 && usize::from(binding[2]) == slot)
     {
         return Err(
-            "Expected firmware0100/profile0 with empty unbound slot49; no writes sent".into(),
+            "Expected firmware0100/profile0 with an empty unbound slot; no writes sent".into(),
         );
     }
     let desired = fixture();

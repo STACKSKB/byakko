@@ -188,7 +188,8 @@ mod tests {
         assert_eq!(decode(&encode(&full).unwrap()).unwrap(), full); // 248
         let reports = write_reports(0, &encode(&full).unwrap()).unwrap();
         assert_eq!(reports.len(), 5);
-        assert_eq!(&reports[4][..8], &[0x16, 0, 4, 56, 1, 0, 0, 0xac]);
+        assert_eq!(&reports[4][..8], &[0x16, 0, 4, 26, 1, 0, 0, 0xca]);
+        assert!(encode(&full).unwrap()[248..].iter().all(|byte| *byte == 0));
         let too_long = Macro {
             repeat_count: 1,
             events: vec![one; 62],
@@ -214,7 +215,16 @@ mod tests {
         assert_eq!(reports.len(), 5);
         assert_eq!(&reports[0][..8], &[0x16, 49, 0, 56, 0, 0, 0, 0x80]);
         assert_eq!(&reports[1][..8], &[0x16, 49, 1, 56, 0, 0, 0, 0x7f]);
-        assert_eq!(&reports[4][..8], &[0x16, 49, 4, 56, 1, 0, 0, 0x7b]);
+        assert_eq!(&reports[4][..8], &[0x16, 49, 4, 26, 1, 0, 0, 0x99]);
+        assert_eq!(
+            reports
+                .iter()
+                .map(|report| usize::from(report[3]))
+                .sum::<usize>(),
+            250
+        );
+        assert!(reports[..4].iter().all(|report| report[3] == 56));
+        assert!(reports[4][34..].iter().all(|byte| *byte == 0));
         assert_eq!(&reports[0][8..64], &data[..56]);
         assert_eq!(&reports[1][8..10], &data[56..58]);
         assert!(reports[1][10..].iter().all(|byte| *byte == 0));
@@ -242,7 +252,7 @@ mod tests {
                 .all(|report| report[8..].iter().all(|byte| *byte == 0))
         );
         assert!(clear[..4].iter().all(|report| report[4] == 0));
-        assert_eq!(&clear[4][..8], &[0x16, 0, 4, 56, 1, 0, 0, 0xac]);
+        assert_eq!(&clear[4][..8], &[0x16, 0, 4, 26, 1, 0, 0, 0xca]);
         assert!(read_request(50, 0).is_err());
         assert!(read_request(0, 4).is_err());
         assert!(write_reports(0, &empty[..255]).is_err());
@@ -324,16 +334,23 @@ mod tests {
             }],
         })
         .unwrap();
-        let mut storage = [0u8; BUFFER_LEN];
+        use crate::rongyuan::yc500::macro_reports::WRITE_LEN;
+        // Declared writes must leave the neighboring 30-byte picture region intact.
+        let mut storage = [0xa5u8; WRITE_LEN + 30];
         for data in [&long, &short] {
             let reports = write_reports(49, data).unwrap();
             assert_eq!(reports.len(), WRITE_PAGES);
             for (page, report) in reports.iter().enumerate() {
                 let start = page * PAGE_DATA_LEN;
-                let len = (BUFFER_LEN - start).min(PAGE_DATA_LEN);
+                let len = usize::from(report[3]);
                 storage[start..start + len].copy_from_slice(&report[8..8 + len]);
             }
+            assert_eq!(&storage[..WRITE_LEN], &data[..WRITE_LEN]);
+            assert!(storage[WRITE_LEN..].iter().all(|byte| *byte == 0xa5));
+            let mut readback = [0u8; BUFFER_LEN];
+            readback[..WRITE_LEN].copy_from_slice(&storage[..WRITE_LEN]);
+            assert_eq!(readback.as_slice(), data.as_slice());
         }
-        assert_eq!(storage.as_slice(), short.as_slice());
+        assert_eq!(&storage[..WRITE_LEN], &short[..WRITE_LEN]);
     }
 }

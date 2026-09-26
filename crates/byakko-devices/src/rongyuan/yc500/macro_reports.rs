@@ -1,8 +1,11 @@
 //! Page-report construction for the observed yc500-shaped simple-macro store.
-use super::macro_program::{BUFFER_LEN, decode};
+use super::macro_program::decode;
 use crate::rongyuan::report::{REPORT_LEN, set_bit7_checksum};
 
 const PAGE_DATA_LEN: usize = 56;
+/// Observed writable extent: a 26-byte final page preserved neighboring picture
+/// data in the 2026-09-26 Nia87 slot-49 test. Getters still return 256 bytes.
+pub(crate) const WRITE_LEN: usize = 250;
 const WRITE_PAGES: usize = 5;
 const MAX_SLOT: u8 = 49;
 
@@ -27,24 +30,25 @@ pub fn read_request(slot: u8, page: u8) -> Result<[u8; REPORT_LEN], String> {
     Ok(report)
 }
 
-/// Replace the complete logical buffer with five zero-padded write pages.
+/// Replace all 250 writable bytes with four full pages and one 26-byte final page.
+/// The logical read buffer is 256 bytes; its final six bytes are zero padding.
 pub fn write_reports(slot: u8, data: &[u8]) -> Result<Vec<[u8; REPORT_LEN]>, String> {
     check_slot(slot)?;
     decode(data)?;
 
     // The device retains untouched pages from an earlier longer macro. Send
-    // every page, including zero-filled trailing pages, to replace all 256 bytes.
+    // every page, including zero-filled trailing pages, to clear the whole store.
     let mut reports = Vec::with_capacity(WRITE_PAGES);
     for page in 0..WRITE_PAGES {
+        let start = page * PAGE_DATA_LEN;
+        let end = (start + PAGE_DATA_LEN).min(WRITE_LEN);
         let mut report = [0u8; REPORT_LEN];
         report[0] = 0x16;
         report[1] = slot;
         report[2] = page as u8;
-        report[3] = PAGE_DATA_LEN as u8;
+        report[3] = (end - start) as u8;
         report[4] = u8::from(page + 1 == WRITE_PAGES);
         set_bit7_checksum(&mut report);
-        let start = page * PAGE_DATA_LEN;
-        let end = (start + PAGE_DATA_LEN).min(BUFFER_LEN);
         report[8..8 + end - start].copy_from_slice(&data[start..end]);
         reports.push(report);
     }

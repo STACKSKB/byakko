@@ -78,7 +78,6 @@ pub(super) fn apply_setting_with(
             mismatch: "Settings restoration mismatch",
         },
         || read_settings_on_device(&device),
-        None,
         settings_apply_error,
     )
 }

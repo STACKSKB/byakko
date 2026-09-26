@@ -105,8 +105,6 @@ pub(super) fn apply_macro_validated_with(
             mismatch: "macro restoration mismatch",
         },
         || read_macro_on_device(&device, slot),
-        // The first copy after the setter can straddle a flash transition.
-        Some(pacing::MACRO_READBACK_MISMATCH),
         macro_apply_error,
     )
 }

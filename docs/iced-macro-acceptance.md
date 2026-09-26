@@ -142,3 +142,15 @@ changed. Native screenshot capture failed twice with `SetIsBorderRequired failed
 No such interface supported (0x80004002)`, so rendered layout, physical recording,
 and save/assign/playback still require user review. No hardware writes were sent
 as part of this revision. Stop after this requested UX revision pending feedback.
+
+## Windows write correction (2026-09-26)
+
+The authorized cleanup/macro task reproduced the Linux-style page 1 readback
+failure on Windows, profiled an official `ab` assignment, and verified native
+storage, key assignment and user-observed keyboard playback. The shared writer
+now waits 2 s before its single readback and declares 26 bytes on its last page,
+preserving neighboring picture data at slot 49 while retaining full tail clearing.
+The conditional mismatch reread was removed. See the [physical investigation](../Research/macro-write-pacing-20260926.md)
+for failed candidates, packet evidence and restoration checks. This exercises
+the shared CLI/session executor, not every Iced editor gesture. Linux validation
+is deferred at the user's request; unrelated recovery gates remain open.
