@@ -43,9 +43,18 @@ impl Feature for SettingsRules {
         &self,
         baseline: &Snapshot,
         draft: &mut Option<Values>,
+        submitted: Option<&Values>,
         edit: Edit,
     ) -> Result<(), String> {
         validate_value(&self.capabilities, &edit)?;
+        let original = Self::value(baseline).ok_or("Settings are not editable")?;
+        if submitted.is_some_and(|values| {
+            changes(original, values)
+                .first()
+                .is_some_and(|change| change.id != edit.id)
+        }) {
+            return Err("Wait for the submitted setting before editing another field".into());
+        }
         let draft = draft.as_mut().ok_or("Settings are not editable")?;
         if changes(
             Self::value(baseline).ok_or("Settings are not editable")?,

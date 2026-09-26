@@ -243,7 +243,7 @@ fn save_and_assignment_are_ordered_with_explicit_partial_failure() {
         s.accept(result(&assign, FeatureResult::Apply(Err(failure.clone())))),
         Outcome::AssignmentFailed {
             macro_saved: true,
-            problem: AssignmentProblem::Device(Problem::Apply(failure))
+            problem: WorkflowProblem::Device(Problem::Apply(failure))
         }
     );
     assert!(s.keymap().dirty());
@@ -360,7 +360,7 @@ fn failed_macro_save_never_stages_assignment() {
         )),
         Outcome::AssignmentFailed {
             macro_saved: false,
-            problem: AssignmentProblem::Device(Problem::Apply(failure))
+            problem: WorkflowProblem::Device(Problem::Apply(failure))
         }
     );
     assert!(!s.keymap().dirty());
@@ -556,7 +556,35 @@ fn exhausted_operation_identity_leaves_no_phantom_submission() {
 #[test]
 fn recording_is_exclusive_local_activity_and_stale_results_do_not_edit_it() {
     use crate::recorder::macros::{DelayPolicy, StopOutcome, Transition};
-    let mut s = loaded_macro();
+    let mut s = loaded_macro()
+        .with_lighting(crate::model::lighting::Capabilities {
+            backend_id: "test".into(),
+            effects: vec![crate::model::lighting::Effect {
+                id: "steady".into(),
+                label: "Steady".into(),
+                brightness: Some(0..=100),
+                speed: None,
+                options: vec![],
+                color: None,
+            }],
+            host_modes: vec![],
+        })
+        .unwrap()
+        .with_picture(crate::model::picture::Capabilities {
+            backend_id: "test".into(),
+            keys: vec!["a".into()],
+            lighting_effect: None,
+        })
+        .unwrap()
+        .with_settings(crate::model::settings::Capabilities {
+            backend_id: "test".into(),
+            fields: vec![crate::model::settings::Field {
+                id: "a".into(),
+                label: "A".into(),
+                kind: crate::model::settings::Kind::Toggle,
+            }],
+        })
+        .unwrap();
     let read = s.read_macro().unwrap();
     assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
     assert_eq!(
@@ -578,6 +606,27 @@ fn recording_is_exclusive_local_activity_and_stale_results_do_not_edit_it() {
     assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
     assert!(s.read().is_err());
     assert!(s.read_macro().is_err());
+    assert!(s.read_lighting().is_err());
+    assert!(s.read_picture().is_err());
+    assert!(s.read_settings().is_err());
+    assert!(
+        s.edit_lighting(crate::model::lighting::Edit::Brightness(1))
+            .is_err()
+    );
+    assert!(
+        s.edit_picture(crate::model::picture::Edit::Color {
+            key: "a".into(),
+            color: [1; 3]
+        })
+        .is_err()
+    );
+    assert!(
+        s.edit_settings(crate::model::settings::Edit {
+            id: "a".into(),
+            value: crate::model::settings::Value::Toggle(true)
+        })
+        .is_err()
+    );
     assert!(s.save().is_err());
     assert!(s.save_macro().is_err());
     assert!(s.connect().is_err());

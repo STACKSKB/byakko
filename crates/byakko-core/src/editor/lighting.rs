@@ -20,6 +20,12 @@ impl Feature for LightingRules {
     type Value = Setting;
     type Edit = Edit;
     type Write = Setting;
+    fn same_baseline(left: &Snapshot, right: &Snapshot) -> bool {
+        left.backend_id == right.backend_id
+            && left.revision == right.revision
+            && left.picture_context == right.picture_context
+            && left.content == right.content
+    }
     fn value(snapshot: &Snapshot) -> Option<&Setting> {
         match &snapshot.content {
             Content::Editable(setting) => Some(setting),
@@ -37,6 +43,7 @@ impl Feature for LightingRules {
         &self,
         baseline: &Snapshot,
         draft: &mut Option<Setting>,
+        _: Option<&Setting>,
         change: Edit,
     ) -> Result<(), String> {
         let next = match (draft.as_ref(), change) {
@@ -173,6 +180,7 @@ mod tests {
         let baseline = Snapshot {
             backend_id: "synthetic".into(),
             revision: vec![21],
+            picture_context: vec![],
             evidence: Evidence::Readback,
             content: Content::HostActive {
                 mode_id: "screen".into(),

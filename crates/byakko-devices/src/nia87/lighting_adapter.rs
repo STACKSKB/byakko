@@ -189,6 +189,7 @@ pub fn from_native(value: &native::Lighting) -> Snapshot {
     Snapshot {
         backend_id: BACKEND_ID.into(),
         revision: value.raw().into(),
+        picture_context: value.picture_context().to_vec(),
         evidence: lighting::Evidence::Readback,
         content,
     }
@@ -273,6 +274,18 @@ mod tests {
     use byakko_core::editor::lighting::default_setting;
 
     #[test]
+    fn opaque_parameters_keep_exact_selector_metadata() {
+        let mut raw = [0u8; 64];
+        raw[0] = native::LED_READ_COMMAND;
+        raw[1] = 4;
+        raw[2] = 255;
+        raw[4] = 0x20;
+        let snapshot = from_bytes(&raw).unwrap();
+        assert!(matches!(snapshot.content, Content::Opaque { .. }));
+        assert_eq!(snapshot.picture_context, vec![4, 2]);
+        assert_eq!(snapshot.revision, raw);
+    }
+    #[test]
     fn every_native_effect_has_a_plain_english_capability_label() {
         let caps = capabilities();
         assert_eq!(caps.effects.len(), 20);
@@ -325,6 +338,10 @@ mod tests {
         let snapshot = from_bytes(&response).unwrap();
         assert_eq!(snapshot.content, Content::Editable(setting));
         assert_eq!(snapshot.revision, response);
+        assert_eq!(
+            snapshot.picture_context,
+            vec![response[1], response[4] >> 4]
+        );
     }
 
     #[test]

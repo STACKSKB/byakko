@@ -25,12 +25,16 @@ pub trait Feature {
     type Edit;
     type Write;
     fn value(snapshot: &Self::Snapshot) -> Option<&Self::Value>;
+    fn same_baseline(left: &Self::Snapshot, right: &Self::Snapshot) -> bool {
+        left == right
+    }
     fn validate(&self, snapshot: &Self::Snapshot, reception: Reception) -> Result<(), String>;
     /// Implementations validate before mutating, so rejected edits are atomic.
     fn edit(
         &self,
         baseline: &Self::Snapshot,
         draft: &mut Option<Self::Value>,
+        submitted: Option<&Self::Value>,
         edit: Self::Edit,
     ) -> Result<(), String>;
     fn plan(&self, baseline: &Self::Snapshot, value: &Self::Value) -> Result<Self::Write, String>;
@@ -82,6 +86,7 @@ impl<F: Feature> Editor<F> {
         self.rules.edit(
             self.baseline.as_ref().ok_or("No baseline")?,
             &mut self.draft,
+            self.submitted.as_ref(),
             edit,
         )
     }
@@ -123,7 +128,12 @@ impl<F: Feature> Editor<F> {
                 return;
             }
         };
-        if self.dirty() && self.baseline.as_ref() != Some(&snapshot) {
+        if self.dirty()
+            && !self
+                .baseline
+                .as_ref()
+                .is_some_and(|baseline| F::same_baseline(baseline, &snapshot))
+        {
             self.status = Status::Conflict { device: snapshot };
             return;
         }

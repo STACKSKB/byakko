@@ -4,11 +4,17 @@ use crate::{
         ApplyFailure, Command, CommandPayload, Completion, CompletionPayload, FeatureCommand,
         FeatureResult, Problem, Recovery,
     },
-    editor::{Editor, Status, keymap::KeymapRules, macros::MacroRules},
+    editor::{
+        Editor, Status, keymap::KeymapRules, lighting::LightingRules, macros::MacroRules,
+        picture::PictureRules, settings::SettingsRules,
+    },
     library::macros::Library,
     model::keymap::{Change, Descriptor},
+    model::{lighting, picture, settings},
     recorder::macros::{DelayPolicy, Recorder, StopOutcome, Transition},
-    workflow::macro_assignment::{self, Assignment, AssignmentProblem, Plan},
+    workflow::Problem as WorkflowProblem,
+    workflow::macro_assignment::{self, Assignment, Plan},
+    workflow::picture_preparation::{self, Action as PictureAction, Preparation},
 };
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Connection {
@@ -24,6 +30,16 @@ pub enum Outcome {
     Failed(Problem),
     MacroLoaded,
     MacroSaved,
+    LightingLoaded,
+    LightingSaved,
+    PictureLoaded,
+    PictureSaved,
+    SettingsLoaded,
+    SettingsSaved,
+    PicturePreparationFailed {
+        lighting_applied: bool,
+        problem: WorkflowProblem,
+    },
     CatalogLoaded,
     CatalogFailed(String),
     Continue(Command),
@@ -32,7 +48,7 @@ pub enum Outcome {
     },
     AssignmentFailed {
         macro_saved: bool,
-        problem: AssignmentProblem,
+        problem: WorkflowProblem,
     },
 }
 #[derive(Clone, Copy)]
@@ -40,10 +56,13 @@ enum Direction {
     Read,
     Save,
 }
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 enum Feature {
     Keymap,
     Macro { slot: String },
+    Lighting,
+    Picture,
+    Settings,
 }
 struct Ticket {
     generation: u64,
@@ -55,7 +74,11 @@ pub struct Session {
     keymap: Editor<KeymapRules>,
     macros: Option<Editor<MacroRules>>,
     macro_library: Option<Library>,
+    lighting: Option<Editor<LightingRules>>,
+    picture: Option<Editor<PictureRules>>,
+    settings: Option<Editor<SettingsRules>>,
     assignment: Option<Assignment>,
+    picture_preparation: Option<Preparation>,
     connection: Connection,
     generation: u64,
     operation: u64,
@@ -68,7 +91,11 @@ impl Session {
             keymap: Editor::new(KeymapRules::new(descriptor)?),
             macros: None,
             macro_library: None,
+            lighting: None,
+            picture: None,
+            settings: None,
             assignment: None,
+            picture_preparation: None,
             connection: Connection::Disconnected,
             generation: 0,
             operation: 0,
@@ -178,6 +205,15 @@ impl Session {
         if let Some(feature) = &mut self.macros {
             feature.invalidate();
         }
+        if let Some(editor) = &mut self.lighting {
+            editor.invalidate();
+        }
+        if let Some(editor) = &mut self.picture {
+            editor.invalidate();
+        }
+        if let Some(editor) = &mut self.settings {
+            editor.invalidate();
+        }
         if let Some(library) = &mut self.macro_library {
             library.invalidate();
         }
@@ -197,6 +233,21 @@ impl Session {
             };
             match &ticket.feature {
                 Feature::Keymap => self.keymap.accept_apply(Err(failure)),
+                Feature::Lighting => {
+                    if let Some(editor) = &mut self.lighting {
+                        editor.accept_apply(Err(failure));
+                    }
+                }
+                Feature::Picture => {
+                    if let Some(editor) = &mut self.picture {
+                        editor.accept_apply(Err(failure));
+                    }
+                }
+                Feature::Settings => {
+                    if let Some(editor) = &mut self.settings {
+                        editor.accept_apply(Err(failure));
+                    }
+                }
                 Feature::Macro { .. } => {
                     if let Some(feature) = &mut self.macros {
                         feature.accept_apply(Err(failure));
@@ -207,9 +258,19 @@ impl Session {
         self.connection = Connection::Disconnected;
         self.pending = None;
         self.assignment = None;
+        self.picture_preparation = None;
         self.keymap.invalidate();
         if let Some(feature) = &mut self.macros {
             feature.invalidate();
+        }
+        if let Some(editor) = &mut self.lighting {
+            editor.invalidate();
+        }
+        if let Some(editor) = &mut self.picture {
+            editor.invalidate();
+        }
+        if let Some(editor) = &mut self.settings {
+            editor.invalidate();
         }
         if let Some(library) = &mut self.macro_library {
             library.invalidate();
@@ -355,6 +416,246 @@ impl Session {
             Ok(command)
         }
     }
+
+    pub fn with_lighting(mut self, capabilities: lighting::Capabilities) -> Result<Self, String> {
+        if capabilities.backend_id != self.descriptor().backend_id {
+            return Err("Lighting capabilities belong to another backend".into());
+        }
+        if self.lighting.is_some() {
+            return Err("Lighting feature is already configured".into());
+        }
+
+        self.lighting = Some(Editor::new(LightingRules::new(capabilities)?));
+        Ok(self)
+    }
+    pub fn lighting(&self) -> Option<&Editor<LightingRules>> {
+        self.lighting.as_ref()
+    }
+    pub fn read_lighting(&mut self) -> Result<Command, String> {
+        self.lighting.as_ref().ok_or("Lighting is not supported")?;
+        self.begin(
+            Feature::Lighting,
+            Direction::Read,
+            CommandPayload::Lighting(FeatureCommand::Read(())),
+        )
+    }
+    pub fn edit_lighting(&mut self, edit: lighting::Edit) -> Result<(), String> {
+        self.editable_activity(&Feature::Lighting)?;
+        self.lighting
+            .as_mut()
+            .ok_or("Lighting is not supported")?
+            .edit(edit)
+    }
+    pub fn revert_lighting(&mut self) -> Result<(), String> {
+        self.idle()?;
+        self.lighting
+            .as_mut()
+            .ok_or("Lighting is not supported")?
+            .revert()
+    }
+    pub fn save_lighting(&mut self) -> Result<Command, String> {
+        let (expected, desired) = self
+            .lighting
+            .as_mut()
+            .ok_or("Lighting is not supported")?
+            .request_apply()?;
+        self.begin(
+            Feature::Lighting,
+            Direction::Save,
+            CommandPayload::Lighting(FeatureCommand::Apply { expected, desired }),
+        )
+    }
+
+    pub fn with_picture(mut self, capabilities: picture::Capabilities) -> Result<Self, String> {
+        if capabilities.backend_id != self.descriptor().backend_id {
+            return Err("Picture capabilities belong to another backend".into());
+        }
+        if self.picture.is_some() {
+            return Err("Picture feature is already configured".into());
+        }
+        crate::validation::picture::validate_capabilities(&capabilities, self.descriptor())?;
+        self.picture = Some(Editor::new(PictureRules::new(capabilities)));
+        Ok(self)
+    }
+    pub fn picture(&self) -> Option<&Editor<PictureRules>> {
+        self.picture.as_ref()
+    }
+    pub fn read_picture(&mut self) -> Result<Command, String> {
+        self.picture.as_ref().ok_or("Picture is not supported")?;
+        self.begin(
+            Feature::Picture,
+            Direction::Read,
+            CommandPayload::Picture(FeatureCommand::Read(())),
+        )
+    }
+    pub fn edit_picture(&mut self, edit: picture::Edit) -> Result<(), String> {
+        self.editable_activity(&Feature::Picture)?;
+        self.picture
+            .as_mut()
+            .ok_or("Picture is not supported")?
+            .edit(edit)
+    }
+    pub fn revert_picture(&mut self) -> Result<(), String> {
+        self.idle()?;
+        self.picture
+            .as_mut()
+            .ok_or("Picture is not supported")?
+            .revert()
+    }
+    pub fn save_picture(&mut self) -> Result<Command, String> {
+        let (expected, desired) = self
+            .picture
+            .as_mut()
+            .ok_or("Picture is not supported")?
+            .request_apply()?;
+        self.begin(
+            Feature::Picture,
+            Direction::Save,
+            CommandPayload::Picture(FeatureCommand::Apply { expected, desired }),
+        )
+    }
+
+    pub fn with_settings(mut self, capabilities: settings::Capabilities) -> Result<Self, String> {
+        if capabilities.backend_id != self.descriptor().backend_id {
+            return Err("Settings capabilities belong to another backend".into());
+        }
+        if self.settings.is_some() {
+            return Err("Settings feature is already configured".into());
+        }
+
+        self.settings = Some(Editor::new(SettingsRules::new(capabilities)?));
+        Ok(self)
+    }
+    pub fn settings(&self) -> Option<&Editor<SettingsRules>> {
+        self.settings.as_ref()
+    }
+    pub fn read_settings(&mut self) -> Result<Command, String> {
+        self.settings.as_ref().ok_or("Settings is not supported")?;
+        self.begin(
+            Feature::Settings,
+            Direction::Read,
+            CommandPayload::Settings(FeatureCommand::Read(())),
+        )
+    }
+    pub fn edit_settings(&mut self, edit: settings::Edit) -> Result<(), String> {
+        self.editable_activity(&Feature::Settings)?;
+        self.settings
+            .as_mut()
+            .ok_or("Settings is not supported")?
+            .edit(edit)
+    }
+    pub fn revert_settings(&mut self) -> Result<(), String> {
+        self.idle()?;
+        self.settings
+            .as_mut()
+            .ok_or("Settings is not supported")?
+            .revert()
+    }
+    pub fn save_settings(&mut self) -> Result<Command, String> {
+        let (expected, desired) = self
+            .settings
+            .as_mut()
+            .ok_or("Settings is not supported")?
+            .request_apply()?;
+        self.begin(
+            Feature::Settings,
+            Direction::Save,
+            CommandPayload::Settings(FeatureCommand::Apply { expected, desired }),
+        )
+    }
+
+    pub fn stage_lighting(&mut self, setting: lighting::Setting) -> Result<(), String> {
+        self.editable_activity(&Feature::Lighting)?;
+        self.lighting
+            .as_mut()
+            .ok_or("Lighting is not supported")?
+            .stage(setting)
+    }
+    pub fn stage_picture_snapshot(&mut self, target: &picture::Snapshot) -> Result<(), String> {
+        self.editable_activity(&Feature::Picture)?;
+        self.picture
+            .as_mut()
+            .ok_or("Picture is not supported")?
+            .import(target)
+    }
+    pub fn prepare_picture(&mut self) -> Result<Option<Command>, String> {
+        self.idle()?;
+        self.connected()?;
+        let picture = self.picture().ok_or("Picture is not supported")?;
+        if picture.capabilities().lighting_effect.is_none() {
+            return match picture.status() {
+                Status::Ready => Ok(None),
+                Status::Unloaded
+                | Status::Unverified {
+                    problem: Problem::ReadRequired,
+                } if !picture.dirty() => self.read_picture().map(Some),
+                _ => Err("Read and resolve the picture problem before preparing it".into()),
+            };
+        }
+        let action = picture_preparation::plan(
+            self.lighting().ok_or("Lighting is not supported")?,
+            self.picture().ok_or("Picture is not supported")?,
+        )?;
+        self.begin_picture_preparation(action, false)
+    }
+    fn begin_picture_preparation(
+        &mut self,
+        action: PictureAction,
+        lighting_applied: bool,
+    ) -> Result<Option<Command>, String> {
+        let (state, command) = match action {
+            PictureAction::Ready => return Ok(None),
+            PictureAction::ReadLighting => (Preparation::ReadingLighting, self.read_lighting()?),
+            PictureAction::SaveLighting(setting) => {
+                self.stage_lighting(setting)?;
+                (Preparation::SavingLighting, self.save_lighting()?)
+            }
+            PictureAction::ReadPicture => (
+                Preparation::ReadingPicture { lighting_applied },
+                self.read_picture()?,
+            ),
+        };
+        self.picture_preparation = Some(state);
+        Ok(Some(command))
+    }
+    fn picture_preparation_outcome(&mut self, outcome: Outcome) -> Outcome {
+        let Some(state) = self.picture_preparation.take() else {
+            return outcome;
+        };
+        let step = state.advance(
+            outcome,
+            self.lighting().expect("preparation owns lighting"),
+            self.picture().expect("preparation owns picture"),
+        );
+        match step {
+            picture_preparation::Step::Finished(outcome) => outcome,
+            picture_preparation::Step::Next {
+                action,
+                lighting_applied,
+            } => match self.begin_picture_preparation(action, lighting_applied) {
+                Ok(Some(command)) => Outcome::Continue(command),
+                Ok(None) => Outcome::PictureLoaded,
+                Err(reason) => picture_preparation::failed(
+                    lighting_applied,
+                    WorkflowProblem::Validation(reason),
+                ),
+            },
+        }
+    }
+    fn editable_activity(&self, feature: &Feature) -> Result<(), String> {
+        if self.picture_preparation.is_some() {
+            return Err("Wait for picture preparation before editing".into());
+        }
+        if !self.recording()
+            && self.pending.as_ref().is_some_and(|ticket| {
+                ticket.feature == *feature && matches!(ticket.direction, Direction::Save)
+            })
+        {
+            Ok(())
+        } else {
+            self.idle()
+        }
+    }
     fn macro_feature(&mut self) -> Result<&mut Editor<MacroRules>, String> {
         self.macros
             .as_mut()
@@ -401,6 +702,21 @@ impl Session {
                 if matches!(direction, Direction::Save) {
                     match &feature {
                         Feature::Keymap => self.keymap.cancel_apply(),
+                        Feature::Lighting => {
+                            if let Some(editor) = &mut self.lighting {
+                                editor.cancel_apply();
+                            }
+                        }
+                        Feature::Picture => {
+                            if let Some(editor) = &mut self.picture {
+                                editor.cancel_apply();
+                            }
+                        }
+                        Feature::Settings => {
+                            if let Some(editor) = &mut self.settings {
+                                editor.cancel_apply();
+                            }
+                        }
                         Feature::Macro { .. } => {
                             if let Some(editor) = &mut self.macros {
                                 editor.cancel_apply();
@@ -452,6 +768,81 @@ impl Session {
                 self.keymap.accept_apply(result);
                 self.keymap_outcome(Outcome::Saved)
             }
+
+            (Feature::Lighting, direction, CompletionPayload::Lighting(result))
+                if matches!(
+                    (direction, &result),
+                    (Direction::Read, FeatureResult::Read(_))
+                        | (Direction::Save, FeatureResult::Apply(_))
+                ) =>
+            {
+                let editor = self.lighting.as_mut().expect("lighting ticket owns editor");
+                let outcome = accept_feature(
+                    editor,
+                    result,
+                    match direction {
+                        Direction::Read => Outcome::LightingLoaded,
+                        Direction::Save => Outcome::LightingSaved,
+                    },
+                );
+
+                if matches!(
+                    outcome,
+                    Outcome::LightingLoaded | Outcome::LightingSaved | Outcome::Conflict
+                ) {
+                    let observation = match editor.status() {
+                        Status::Conflict { device } => Some(device),
+                        _ => editor.baseline(),
+                    };
+                    if let Some(observation) = observation
+                        && !observation.picture_context.is_empty()
+                        && let Some(picture) = &mut self.picture
+                        && picture.baseline().is_some_and(|snapshot| {
+                            !snapshot.context_revision.is_empty()
+                                && snapshot.context_revision != observation.picture_context
+                        })
+                    {
+                        picture.invalidate();
+                    }
+                }
+                outcome
+            }
+
+            (Feature::Picture, direction, CompletionPayload::Picture(result))
+                if matches!(
+                    (direction, &result),
+                    (Direction::Read, FeatureResult::Read(_))
+                        | (Direction::Save, FeatureResult::Apply(_))
+                ) =>
+            {
+                let editor = self.picture.as_mut().expect("picture ticket owns editor");
+                accept_feature(
+                    editor,
+                    result,
+                    match direction {
+                        Direction::Read => Outcome::PictureLoaded,
+                        Direction::Save => Outcome::PictureSaved,
+                    },
+                )
+            }
+
+            (Feature::Settings, direction, CompletionPayload::Settings(result))
+                if matches!(
+                    (direction, &result),
+                    (Direction::Read, FeatureResult::Read(_))
+                        | (Direction::Save, FeatureResult::Apply(_))
+                ) =>
+            {
+                let editor = self.settings.as_mut().expect("settings ticket owns editor");
+                accept_feature(
+                    editor,
+                    result,
+                    match direction {
+                        Direction::Read => Outcome::SettingsLoaded,
+                        Direction::Save => Outcome::SettingsSaved,
+                    },
+                )
+            }
             (
                 Feature::Macro { slot: expected },
                 direction,
@@ -491,7 +882,8 @@ impl Session {
             self.cancel_catalog();
         }
         self.pending = None;
-        self.assignment_outcome(outcome)
+        let outcome = self.assignment_outcome(outcome);
+        self.picture_preparation_outcome(outcome)
     }
     fn keymap_outcome(&self, success: Outcome) -> Outcome {
         if matches!(self.keymap.status(), Status::Conflict { .. }) {
@@ -527,7 +919,7 @@ impl Session {
                     }
                     Err(reason) => Outcome::AssignmentFailed {
                         macro_saved: true,
-                        problem: AssignmentProblem::Validation(reason),
+                        problem: WorkflowProblem::Validation(reason),
                     },
                 }
             }
@@ -537,3 +929,19 @@ impl Session {
 #[cfg(test)]
 #[path = "tests/session.rs"]
 mod tests;
+
+fn accept_feature<F: crate::editor::Feature>(
+    editor: &mut Editor<F>,
+    result: FeatureResult<F::Snapshot>,
+    success: Outcome,
+) -> Outcome {
+    match result {
+        FeatureResult::Read(result) => editor.accept_read(result),
+        FeatureResult::Apply(result) => editor.accept_apply(result),
+    }
+    if matches!(editor.status(), Status::Conflict { .. }) {
+        Outcome::Conflict
+    } else {
+        editor.problem().cloned().map_or(success, Outcome::Failed)
+    }
+}

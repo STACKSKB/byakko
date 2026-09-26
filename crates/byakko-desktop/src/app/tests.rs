@@ -1,4 +1,5 @@
 use super::*;
+use crate::view::application::picture_is_displayed;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
     model::keymap::{Action, Change, State},
@@ -7,10 +8,11 @@ use byakko_devices::{
     Device,
     memory::{self, MemoryDevice},
 };
+use iced::Event;
 use std::{
     path::Path,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -20,8 +22,55 @@ struct ObservedDevice {
     reads: Arc<AtomicUsize>,
     fail_save: bool,
     macro_reads: Arc<AtomicUsize>,
+    feature_calls: Arc<Mutex<Vec<&'static str>>>,
+    fail_lighting: bool,
 }
 impl Device for ObservedDevice {
+    fn read_lighting(&mut self) -> Result<byakko_core::model::lighting::Snapshot, String> {
+        self.feature_calls.lock().unwrap().push("read-lighting");
+        self.memory.read_lighting()
+    }
+    fn apply_lighting(
+        &mut self,
+        expected: &byakko_core::model::lighting::Snapshot,
+        desired: &byakko_core::model::lighting::Setting,
+        backup: &Path,
+    ) -> Result<byakko_core::model::lighting::Snapshot, ApplyFailure> {
+        self.feature_calls.lock().unwrap().push("apply-lighting");
+        if self.fail_lighting {
+            return Err(ApplyFailure {
+                message: "Injected lighting failure".into(),
+                recovery: Recovery::Verified,
+            });
+        }
+        self.memory.apply_lighting(expected, desired, backup)
+    }
+    fn read_picture(&mut self) -> Result<byakko_core::model::picture::Snapshot, String> {
+        self.feature_calls.lock().unwrap().push("read-picture");
+        self.memory.read_picture()
+    }
+    fn apply_picture(
+        &mut self,
+        expected: &byakko_core::model::picture::Snapshot,
+        desired: &std::collections::BTreeMap<String, [u8; 3]>,
+        backup: &Path,
+    ) -> Result<byakko_core::model::picture::Snapshot, ApplyFailure> {
+        self.feature_calls.lock().unwrap().push("apply-picture");
+        self.memory.apply_picture(expected, desired, backup)
+    }
+    fn read_settings(&mut self) -> Result<byakko_core::model::settings::Snapshot, String> {
+        self.feature_calls.lock().unwrap().push("read-settings");
+        self.memory.read_settings()
+    }
+    fn apply_setting(
+        &mut self,
+        expected: &byakko_core::model::settings::Snapshot,
+        edit: &byakko_core::model::settings::Edit,
+        backup: &Path,
+    ) -> Result<byakko_core::model::settings::Snapshot, ApplyFailure> {
+        self.feature_calls.lock().unwrap().push("apply-settings");
+        self.memory.apply_setting(expected, edit, backup)
+    }
     fn read_macro(&mut self, slot: &str) -> Result<byakko_core::model::macros::Snapshot, String> {
         self.macro_reads.fetch_add(1, Ordering::SeqCst);
         self.memory.read_macro(slot)
@@ -68,6 +117,8 @@ fn app(fail_save: bool) -> (App, Arc<AtomicUsize>) {
                     reads: count.clone(),
                     fail_save,
                     macro_reads: Default::default(),
+                    feature_calls: Default::default(),
+                    fail_lighting: false,
                 },
                 Default::default(),
             )
@@ -95,6 +146,8 @@ fn macro_app(fail_assignment: bool) -> (App, Arc<AtomicUsize>) {
                     reads: Default::default(),
                     macro_reads: count.clone(),
                     fail_save: fail_assignment,
+                    feature_calls: Default::default(),
+                    fail_lighting: false,
                 };
                 Ok((
                     "demo".into(),
@@ -324,7 +377,7 @@ fn recording_is_exclusive_and_focus_loss_stages_held_releases() {
         Message::Read,
         Message::Save,
         Message::Macros(macros::Message::Clear),
-        Message::Poll,
+        Message::Poll(Instant::now()),
     ] {
         let _ = app.update(message);
     }
@@ -457,4 +510,231 @@ fn recording_preferences_preserve_unsubmitted_macro_fields() {
             },
         ));
     assert_eq!(app.macros.repeat, "23");
+}
+
+fn feature_app(fail_lighting: bool) -> (App, Arc<Mutex<Vec<&'static str>>>) {
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let count = calls.clone();
+    let session = memory::demo().unwrap().session().unwrap();
+    let mut app = App::new(
+        session,
+        Box::new(move |_| {
+            Ok((
+                "demo".into(),
+                Executor::spawn(
+                    ObservedDevice {
+                        memory: memory::demo()?,
+                        reads: Default::default(),
+                        macro_reads: Default::default(),
+                        fail_save: false,
+                        feature_calls: count.clone(),
+                        fail_lighting,
+                    },
+                    Default::default(),
+                )
+                .map_err(|error| error.to_string())?,
+            ))
+        }),
+    );
+    // Drive elapsed time explicitly through Poll, avoiding wall-clock-dependent tests.
+    app.config.short_edit_delay = Duration::from_secs(60);
+    app.config.auto_save_delay = Duration::from_secs(60);
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    (app, calls)
+}
+
+fn elapsed(app: &mut App) {
+    let _ = app.update(Message::Poll(Instant::now() + Duration::from_secs(61)));
+}
+
+#[test]
+fn lighting_coalesces_and_keeps_newer_intent_while_a_write_is_submitted() {
+    use byakko_core::model::lighting::{Edit, Evidence};
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Page(Page::Lighting));
+    drain(&mut app);
+    for brightness in [2, 4] {
+        let _ = app.update(Message::Lighting(lighting::Message::Edit(
+            Edit::Brightness(brightness),
+        )));
+    }
+    assert!(!app.session.busy());
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
+    elapsed(&mut app);
+    assert_eq!(
+        app.session
+            .lighting()
+            .unwrap()
+            .submitted()
+            .unwrap()
+            .brightness,
+        Some(4)
+    );
+    let _ = app.update(Message::Lighting(lighting::Message::Edit(
+        Edit::Brightness(5),
+    )));
+    drain(&mut app);
+    assert!(app.session.lighting().unwrap().dirty());
+    elapsed(&mut app);
+    drain(&mut app);
+    let editor = app.session.lighting().unwrap();
+    assert!(!editor.dirty());
+    assert_eq!(editor.draft().unwrap().brightness, Some(5));
+    assert_eq!(
+        editor.baseline().unwrap().evidence,
+        Evidence::TransportAccepted
+    );
+    let _ = app.update(Message::Page(Page::Keys));
+    let _ = app.update(Message::Page(Page::Lighting));
+    assert_eq!(
+        *calls.lock().unwrap(),
+        ["read-lighting", "apply-lighting", "apply-lighting"]
+    );
+}
+
+#[test]
+fn picture_colors_batch_and_only_real_selector_changes_require_a_new_read() {
+    use byakko_core::model::lighting::Edit;
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Page(Page::Picture));
+    drain(&mut app);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        ["read-lighting", "apply-lighting", "read-picture"]
+    );
+    let _ = app.update(Message::Picture(picture::Message::Select("Alpha".into())));
+    let _ = app.update(Message::Picture(picture::Message::Color([4, 5, 6])));
+    let _ = app.update(Message::Picture(picture::Message::Select("Beta".into())));
+    let _ = app.update(Message::Picture(picture::Message::Color([7, 8, 9])));
+    elapsed(&mut app);
+    drain(&mut app);
+    assert!(!app.session.picture().unwrap().dirty());
+    let _ = app.update(Message::Page(Page::Lighting));
+    let _ = app.update(Message::Lighting(lighting::Message::Edit(
+        Edit::Brightness(2),
+    )));
+    elapsed(&mut app);
+    drain(&mut app);
+    assert_eq!(app.session.picture().unwrap().status(), &Status::Ready);
+    let _ = app.update(Message::Lighting(lighting::Message::Edit(Edit::Effect(
+        "steady".into(),
+    ))));
+    elapsed(&mut app);
+    drain(&mut app);
+    assert!(matches!(
+        app.session.picture().unwrap().status(),
+        Status::Unverified {
+            problem: Problem::ReadRequired
+        }
+    ));
+    let _ = app.update(Message::Page(Page::Picture));
+    drain(&mut app);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [
+            "read-lighting",
+            "apply-lighting",
+            "read-picture",
+            "apply-picture",
+            "apply-lighting",
+            "apply-lighting",
+            "apply-lighting",
+            "read-picture"
+        ]
+    );
+}
+
+#[test]
+fn close_flushes_queued_scalar_edits_and_failed_save_retains_draft_without_retry() {
+    use byakko_core::model::{lighting::Edit, settings::Value};
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Page(Page::Settings));
+    drain(&mut app);
+    let _ = app.update(Message::Settings(settings::Message::Number(
+        "sleep".into(),
+        "7".into(),
+    )));
+    let _ = app.update(Message::Settings(settings::Message::ApplyNumber(
+        "sleep".into(),
+    )));
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+    drain(&mut app);
+    assert!(!app.session.settings().unwrap().dirty());
+    assert_eq!(
+        app.session.settings().unwrap().draft().unwrap()["sleep"],
+        Value::Number(7)
+    );
+    assert_eq!(*calls.lock().unwrap(), ["read-settings", "apply-settings"]);
+
+    let (mut app, calls) = feature_app(true);
+    let _ = app.update(Message::Page(Page::Lighting));
+    drain(&mut app);
+    let _ = app.update(Message::Lighting(lighting::Message::Edit(
+        Edit::Brightness(2),
+    )));
+    let _ = app.update(Message::Close);
+    drain(&mut app);
+    assert_eq!(app.closing, Closing::Open);
+    assert!(app.session.lighting().unwrap().dirty());
+    elapsed(&mut app);
+    assert!(!app.session.busy());
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "apply-lighting"]);
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
+}
+
+#[test]
+fn picture_navigation_finishes_queued_lighting_and_reuses_the_brush() {
+    use byakko_core::model::lighting::Edit;
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Page(Page::Lighting));
+    drain(&mut app);
+    let _ = app.update(Message::Lighting(lighting::Message::Edit(
+        Edit::Brightness(2),
+    )));
+    let _ = app.update(Message::Page(Page::Picture));
+    assert!(!picture_is_displayed(&app.session));
+    drain(&mut app);
+    assert!(picture_is_displayed(&app.session));
+    let _ = app.update(Message::Picture(picture::Message::Select("Alpha".into())));
+    let _ = app.update(Message::Picture(picture::Message::Color([12, 34, 56])));
+    let _ = app.update(Message::Picture(picture::Message::Select("Beta".into())));
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Beta"],
+        [12, 34, 56]
+    );
+    elapsed(&mut app);
+    drain(&mut app);
+    let _ = app.update(Message::Page(Page::Keys));
+    let _ = app.update(Message::Page(Page::Picture));
+    assert!(!app.session.busy());
+    assert_eq!(
+        *calls.lock().unwrap(),
+        [
+            "read-lighting",
+            "apply-lighting",
+            "apply-lighting",
+            "read-picture",
+            "apply-picture"
+        ]
+    );
+}
+
+#[test]
+fn failed_picture_activation_does_not_read_or_retry_and_keeps_diagnostic() {
+    let (mut app, calls) = feature_app(true);
+    let _ = app.update(Message::Page(Page::Picture));
+    drain(&mut app);
+    assert!(
+        app.notice
+            .starts_with("Could not prepare per-key lighting.")
+    );
+    assert!(!picture_is_displayed(&app.session));
+    assert!(app.session.lighting().unwrap().dirty());
+    elapsed(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "apply-lighting"]);
+    assert!(!app.session.busy());
+    assert_eq!(app.closing, Closing::Open);
 }

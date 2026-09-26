@@ -1,22 +1,23 @@
 //! Window lifecycle and effect delivery. Feature policy stays in core.
 use crate::{
+    config::Config,
+    controller::autosave::{Autosave, Feature as AutoFeature},
     controller::recording::Controller as Recording,
-    form::{keymap, macros, recording},
+    form::{
+        application::{Closing, Message, Page},
+        keymap, lighting, macros, picture, recording, settings,
+    },
     input, view,
     widget::panels::UiStyle,
 };
 use byakko_core::{
-    contract::{Command, Completion, Problem},
+    contract::{Command, Completion, CompletionPayload, Problem},
     editor::Status,
     session::{Connection, Outcome, Session},
-    workflow::macro_assignment::AssignmentProblem,
+    workflow::Problem as WorkflowProblem,
 };
 use byakko_devices::Executor;
-use iced::{
-    Element, Event, Fill, Subscription, Task,
-    widget::{button, column, container, row, text},
-    window,
-};
+use iced::{Element, Subscription, Task, window};
 use std::{
     sync::mpsc::TryRecvError,
     time::{Duration, Instant},
@@ -24,40 +25,16 @@ use std::{
 
 type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
 
-#[derive(Clone, Debug)]
-enum Message {
-    Keys(keymap::Message),
-    Macros(macros::Message),
-    Record(recording::Message),
-    RecordingInput(Event, Instant),
-    Page(Page),
-    Read,
-    Save,
-    Revert,
-    Poll,
-    Close,
-    Discard,
-    KeepEditing,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Page {
-    Keys,
-    Macros,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Closing {
-    Open,
-    Waiting,
-    ConfirmDiscard,
-}
-
 struct App {
     session: Session,
     keys: keymap::Form,
     macros: macros::Form,
     recording: Recording,
+    lighting: lighting::Form,
+    picture: picture::Form,
+    settings: settings::Form,
+    autosave: Autosave,
+    config: Config,
     page: Page,
     worker: Option<Executor>,
     selected_device: Option<String>,
@@ -69,9 +46,12 @@ struct App {
 
 pub fn run(
     session: Session,
+    config: Config,
     attach: impl Fn(Option<&str>) -> Result<(String, Executor), String> + 'static,
 ) -> iced::Result {
-    let initial = std::cell::RefCell::new(Some(App::new(session, Box::new(attach))));
+    let mut app = App::new(session, Box::new(attach));
+    app.config = config;
+    let initial = std::cell::RefCell::new(Some(app));
     iced::application(
         move || {
             (
@@ -99,6 +79,11 @@ impl App {
             keys: keymap::Form::new(session.descriptor()),
             macros: macros::Form::default(),
             recording: Recording::default(),
+            lighting: lighting::Form::default(),
+            picture: picture::Form::default(),
+            settings: settings::Form::default(),
+            autosave: Autosave::default(),
+            config: Config::default(),
             page: Page::Keys,
             session,
             worker: None,
@@ -111,10 +96,19 @@ impl App {
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
+        let now = match &message {
+            Message::Poll(at) => *at,
+            _ => Instant::now(),
+        };
+        let task = self.reduce(message);
+        Task::batch([task, self.flush_saves(now, false)])
+    }
+
+    fn reduce(&mut self, message: Message) -> Task<Message> {
         if self.closing != Closing::Open
             && !matches!(
                 message,
-                Message::Poll | Message::Close | Message::Discard | Message::KeepEditing
+                Message::Poll(_) | Message::Close | Message::Discard | Message::KeepEditing
             )
         {
             return Task::none();
@@ -125,7 +119,7 @@ impl App {
                 Message::Record(recording::Message::Stop)
                     | Message::RecordingInput(..)
                     | Message::Close
-                    | Message::Poll
+                    | Message::Poll(_)
             )
         {
             return Task::none();
@@ -143,7 +137,20 @@ impl App {
                 let result = self.recording.input(&event, at, &mut self.session);
                 self.recording_notice(result, was_recording);
             }
-            Message::Page(page) => self.page = page,
+            Message::Page(page) => {
+                self.page = page;
+                if page == Page::Picture
+                    && self.session.lighting().is_some_and(|editor| editor.dirty())
+                {
+                    self.autosave.cancel(AutoFeature::Lighting);
+                    let request = self.session.save_lighting();
+                    return self.submit(request);
+                }
+                return self.load_page();
+            }
+            Message::Lighting(message) => return self.update_lighting(message),
+            Message::Picture(message) => return self.update_picture(message),
+            Message::Settings(message) => return self.update_settings(message),
             Message::Macros(message) => return self.update_macro(message),
             Message::Keys(message) => {
                 if let Some(change) = self.keys.update(message, self.session.descriptor()) {
@@ -171,7 +178,7 @@ impl App {
                 return self.submit(request);
             }
             Message::Revert => self.notice = self.session.revert().err().unwrap_or_default(),
-            Message::Poll => return self.poll(),
+            Message::Poll(_) => return self.poll(),
             Message::Close => return self.close(),
             Message::Discard if self.closing == Closing::ConfirmDiscard => return iced::exit(),
             Message::KeepEditing => self.closing = Closing::Open,
@@ -191,6 +198,192 @@ impl App {
             self.macros
                 .sync(self.session.macros().and_then(|editor| editor.draft()));
         }
+    }
+
+    fn load_page(&mut self) -> Task<Message> {
+        if self.session.busy() || !matches!(self.session.connection(), Connection::Connected { .. })
+        {
+            return Task::none();
+        }
+        let request = match self.page {
+            Page::Lighting if self.session.lighting().is_some_and(needs_read) => {
+                Some(self.session.read_lighting())
+            }
+            Page::Picture => match self.session.prepare_picture() {
+                Ok(Some(command)) => Some(Ok(command)),
+                Ok(None) => None,
+                Err(reason) => Some(Err(reason)),
+            },
+            Page::Settings if self.session.settings().is_some_and(needs_read) => {
+                Some(self.session.read_settings())
+            }
+            _ => None,
+        };
+        request.map_or_else(Task::none, |request| self.submit(request))
+    }
+
+    fn flush_saves(&mut self, now: Instant, flush: bool) -> Task<Message> {
+        if self.session.busy()
+            || self.session.recording()
+            || self.recording.pending()
+            || self.closing == Closing::ConfirmDiscard
+        {
+            return Task::none();
+        }
+        if !flush && (self.lighting.dragging() || self.picture.dragging()) {
+            return Task::none();
+        }
+        while let Some(feature) = self.autosave.take_due(now, flush) {
+            let dirty = match feature {
+                AutoFeature::Lighting => {
+                    self.session.lighting().is_some_and(|editor| editor.dirty())
+                }
+                AutoFeature::Picture => self.session.picture().is_some_and(|editor| editor.dirty()),
+                AutoFeature::Settings => {
+                    self.session.settings().is_some_and(|editor| editor.dirty())
+                }
+            };
+            if !dirty {
+                continue;
+            }
+            let request = match feature {
+                AutoFeature::Lighting => self.session.save_lighting(),
+                AutoFeature::Picture => self.session.save_picture(),
+                AutoFeature::Settings => self.session.save_settings(),
+            };
+            if request.is_err() {
+                self.closing = Closing::Open;
+            }
+            return self.submit(request);
+        }
+        if self.closing == Closing::Waiting && !self.autosave.pending() {
+            self.close()
+        } else {
+            Task::none()
+        }
+    }
+
+    fn edited(&mut self, feature: AutoFeature, result: Result<(), String>) {
+        match result {
+            Ok(()) => {
+                self.autosave.edited(feature, Instant::now(), &self.config);
+                self.notice = "Changes queued for automatic apply.".into();
+            }
+            Err(reason) => self.notice = reason,
+        }
+    }
+
+    fn update_lighting(&mut self, message: lighting::Message) -> Task<Message> {
+        let request = match message {
+            lighting::Message::Read => {
+                self.autosave.cancel(AutoFeature::Lighting);
+                self.session.read_lighting()
+            }
+            lighting::Message::Save => {
+                self.autosave.cancel(AutoFeature::Lighting);
+                self.session.save_lighting()
+            }
+            lighting::Message::Revert => {
+                if let Err(reason) = self.session.revert_lighting() {
+                    self.notice = reason;
+                } else {
+                    self.autosave.cancel(AutoFeature::Lighting);
+                }
+                return Task::none();
+            }
+            message => {
+                if let Some(edit) = self.lighting.update(message) {
+                    let result = self.session.edit_lighting(edit);
+                    self.edited(AutoFeature::Lighting, result);
+                }
+                return Task::none();
+            }
+        };
+        self.submit(request)
+    }
+
+    fn update_picture(&mut self, message: picture::Message) -> Task<Message> {
+        let request = match message {
+            picture::Message::Read => {
+                self.autosave.cancel(AutoFeature::Picture);
+                self.session.read_picture()
+            }
+            picture::Message::Save => {
+                self.autosave.cancel(AutoFeature::Picture);
+                self.session.save_picture()
+            }
+            picture::Message::Revert => {
+                if let Err(reason) = self.session.revert_picture() {
+                    self.notice = reason;
+                } else {
+                    self.autosave.cancel(AutoFeature::Picture);
+                }
+                return Task::none();
+            }
+            message => {
+                if let Some(edit) = self
+                    .session
+                    .picture()
+                    .and_then(|editor| self.picture.update(message, editor))
+                {
+                    let key = match &edit {
+                        byakko_core::model::picture::Edit::Color { key, .. }
+                        | byakko_core::model::picture::Edit::Channel { key, .. } => key.clone(),
+                    };
+                    let result = self.session.edit_picture(edit);
+                    if result.is_ok() {
+                        self.picture
+                            .accepted(&key, self.session.picture().expect("accepted picture edit"));
+                    }
+                    self.edited(AutoFeature::Picture, result);
+                }
+                return Task::none();
+            }
+        };
+        self.submit(request)
+    }
+
+    fn update_settings(&mut self, message: settings::Message) -> Task<Message> {
+        let request = match message {
+            settings::Message::Read => {
+                self.autosave.cancel(AutoFeature::Settings);
+                self.session.read_settings()
+            }
+            settings::Message::Save => {
+                self.autosave.cancel(AutoFeature::Settings);
+                self.session.save_settings()
+            }
+            settings::Message::Revert => {
+                if let Err(reason) = self.session.revert_settings() {
+                    self.notice = reason;
+                } else {
+                    self.autosave.cancel(AutoFeature::Settings);
+                    self.settings.clear();
+                }
+                return Task::none();
+            }
+            message => {
+                let edit = self
+                    .session
+                    .settings()
+                    .ok_or_else(|| "Settings are unavailable".to_owned())
+                    .and_then(|editor| self.settings.update(message, editor));
+                match edit {
+                    Ok(Some(edit)) => {
+                        let id = edit.id.clone();
+                        let result = self.session.edit_settings(edit);
+                        if result.is_ok() {
+                            self.settings.accepted(&id);
+                        }
+                        self.edited(AutoFeature::Settings, result);
+                    }
+                    Err(reason) => self.notice = reason,
+                    Ok(None) => {}
+                }
+                return Task::none();
+            }
+        };
+        self.submit(request)
     }
 
     fn update_macro(&mut self, message: macros::Message) -> Task<Message> {
@@ -291,6 +484,7 @@ impl App {
             Err(TryRecvError::Disconnected) => {
                 worker.set_generation(0);
                 self.worker = None;
+                self.autosave.clear();
                 if self.recording.pending() {
                     let _ = self.recording.finish(&mut self.session, Instant::now());
                 }
@@ -305,12 +499,30 @@ impl App {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
-        match self.session.accept(completion) {
+        let feature = match &completion.payload {
+            CompletionPayload::Lighting(_) => Some(AutoFeature::Lighting),
+            CompletionPayload::Picture(_) => Some(AutoFeature::Picture),
+            CompletionPayload::Settings(_) => Some(AutoFeature::Settings),
+            _ => None,
+        };
+        let outcome = self.session.accept(completion);
+        if matches!(outcome, Outcome::Failed(_) | Outcome::Conflict)
+            && let Some(feature) = feature
+        {
+            self.autosave.cancel(feature);
+        }
+        match outcome {
             Outcome::Ignored => return Task::none(),
             Outcome::Loaded => {
                 self.notice = "Keymap loaded.".into();
             }
             Outcome::Saved => self.notice = "Assignments saved and read back.".into(),
+            Outcome::LightingLoaded => self.notice = "Lighting loaded.".into(),
+            Outcome::LightingSaved => self.notice = "Lighting applied.".into(),
+            Outcome::PictureLoaded => self.notice = "Key colors loaded.".into(),
+            Outcome::PictureSaved => self.notice = "Key colors applied.".into(),
+            Outcome::SettingsLoaded => self.notice = "Settings loaded.".into(),
+            Outcome::SettingsSaved => self.notice = "Setting saved and read back.".into(),
             Outcome::Continue(command) => return self.submit(Ok(command)),
             Outcome::MacroLoaded => {
                 self.macros
@@ -345,8 +557,8 @@ impl App {
             } => {
                 self.closing = Closing::Open;
                 let reason = match problem {
-                    AssignmentProblem::Device(problem) => problem_text(&problem),
-                    AssignmentProblem::Validation(reason) => reason,
+                    WorkflowProblem::Device(problem) => problem_text(&problem),
+                    WorkflowProblem::Validation(reason) => reason,
                 };
                 self.notice = format!(
                     "{} {reason}",
@@ -354,6 +566,25 @@ impl App {
                         "Macro saved; assignment failed."
                     } else {
                         "Macro assignment failed."
+                    }
+                );
+                return Task::none();
+            }
+            Outcome::PicturePreparationFailed {
+                lighting_applied,
+                problem,
+            } => {
+                self.closing = Closing::Open;
+                let reason = match problem {
+                    WorkflowProblem::Device(problem) => problem_text(&problem),
+                    WorkflowProblem::Validation(reason) => reason,
+                };
+                self.notice = format!(
+                    "{} {reason}",
+                    if lighting_applied {
+                        "Per-key lighting applied; loading its colors failed."
+                    } else {
+                        "Could not prepare per-key lighting."
                     }
                 );
                 return Task::none();
@@ -374,7 +605,7 @@ impl App {
         if self.closing == Closing::Waiting {
             self.close()
         } else {
-            Task::none()
+            self.load_page()
         }
     }
 
@@ -394,8 +625,15 @@ impl App {
         }
         if self.session.busy() {
             self.closing = Closing::Waiting;
+        } else if self.autosave.pending() {
+            self.closing = Closing::Waiting;
+            return self.flush_saves(Instant::now(), true);
         } else if self.session.keymap().dirty()
             || self.session.macros().is_some_and(|editor| editor.dirty())
+            || self.session.lighting().is_some_and(|editor| editor.dirty())
+            || self.session.picture().is_some_and(|editor| editor.dirty())
+            || self.session.settings().is_some_and(|editor| editor.dirty())
+            || self.settings.has_input()
         {
             self.closing = Closing::ConfirmDiscard;
         } else {
@@ -413,156 +651,29 @@ impl App {
                     .then(|| Message::RecordingInput(event, Instant::now()))
             }));
         }
-        if !self.session.recording() && (self.session.busy() || self.session.catalog_scanning()) {
-            subscriptions.push(iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll));
+        if !self.session.recording()
+            && (self.session.busy() || self.session.catalog_scanning() || self.autosave.pending())
+        {
+            subscriptions.push(iced::time::every(Duration::from_millis(25)).map(Message::Poll));
         }
         Subscription::batch(subscriptions)
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let idle = !self.session.busy() && !self.session.recording() && !self.recording.pending();
-        let editable = idle
-            && matches!(self.session.connection(), Connection::Connected { .. })
-            && self.session.keymap().status() == &Status::Ready;
-        let toolbar = row![
-            button("Assignments").on_press_maybe(idle.then_some(Message::Page(Page::Keys))),
-            button("Macros").on_press_maybe(
-                (idle && self.session.macros().is_some()).then_some(Message::Page(Page::Macros))
-            ),
-            button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)),
-            button("Save assignments").on_press_maybe(
-                (editable && self.session.keymap().dirty()).then_some(Message::Save)
-            ),
-            button("Revert")
-                .on_press_maybe((idle && self.session.keymap().dirty()).then_some(Message::Revert)),
-        ]
-        .spacing(self.style.spacing.s);
-        let status = if self.closing == Closing::Waiting {
-            "Waiting for the device operation before closing…"
-        } else if self.session.busy() {
-            "Working…"
-        } else {
-            &self.notice
-        };
-        let base: Element<'_, Message> = container(
-            column![
-                text(&self.session.descriptor().device_name).size(self.style.type_scale.page_title),
-                toolbar,
-                text(status),
-                self.feature_view(editable),
-            ]
-            .spacing(self.style.spacing.m),
-        )
-        .padding(self.style.spacing.page_padding)
-        .max_width(self.style.workspace_width)
-        .center_x(Fill)
-        .height(Fill)
-        .into();
-        if self.closing != Closing::ConfirmDiscard {
-            return base;
-        }
-        let dialog = container(
-            column![
-                text("Discard unsaved changes?").size(self.style.type_scale.section_title),
-                row![
-                    button("Keep editing").on_press(Message::KeepEditing),
-                    button("Discard & close").on_press(Message::Discard)
-                ]
-                .spacing(self.style.spacing.m),
-            ]
-            .spacing(self.style.spacing.l),
-        )
-        .padding(self.style.spacing.panel_padding)
-        .style(container::bordered_box);
-        iced::widget::stack![
-            base,
-            container(iced::widget::opaque(dialog))
-                .center_x(Fill)
-                .center_y(Fill)
-        ]
-        .into()
-    }
-
-    fn feature_view(&self, editable: bool) -> Element<'_, Message> {
-        if (self.session.recording() || self.recording.pending())
-            && let Some(editor) = self.session.macros()
-        {
-            let program = editor.draft();
-            let phase = if self.recording.pending() {
-                view::recording::Phase::Waiting
-            } else {
-                view::recording::Phase::Recording {
-                    events: program.map_or(0, |program| program.events.len()),
-                }
-            };
-            let mut content = column![
-                view::keymap::workspace(
-                    &self.keys,
-                    self.session.descriptor(),
-                    self.session.keymap(),
-                    false,
-                    &self.style
-                )
-                .map(Message::Keys),
-                view::recording::controls(self.recording.options(), phase, &self.style)
-                    .map(Message::Record),
-            ]
-            .spacing(self.style.spacing.m);
-            if let Some(program) = program {
-                content = content
-                    .push(view::recording::preview(program, &self.style).map(Message::Record));
-            }
-            return content.height(Fill).into();
-        }
-        match self.page {
-            Page::Keys => view::keymap::view(
-                &self.keys,
-                self.session.descriptor(),
-                self.session.keymap(),
-                editable,
-                &self.style,
-            )
-            .map(Message::Keys),
-            Page::Macros => match (self.session.macros(), self.session.macro_library()) {
-                (Some(editor), Some(library)) => column![
-                    view::keymap::workspace(
-                        &self.keys,
-                        self.session.descriptor(),
-                        self.session.keymap(),
-                        true,
-                        &self.style
-                    )
-                    .map(Message::Keys),
-                    view::recording::controls(
-                        self.recording.options(),
-                        view::recording::Phase::Idle {
-                            editable: !self.session.busy()
-                                && editor.status() == &Status::Ready
-                                && editor.draft().is_some_and(|program| editor
-                                    .capabilities()
-                                    .editable_repeat_counts
-                                    .contains(&program.repeat_count)),
-                        },
-                        &self.style
-                    )
-                    .map(Message::Record),
-                    view::macros::view(
-                        &self.macros,
-                        editor,
-                        library,
-                        !self.session.busy(),
-                        self.keys.target(),
-                        self.session.catalog_scanning(),
-                        &self.style
-                    )
-                    .map(Message::Macros),
-                ]
-                .spacing(self.style.spacing.m)
-                .height(Fill)
-                .into(),
-                _ => text("Macros are unavailable for this keyboard.").into(),
-            },
-        }
+        view::application::view(view::application::View {
+            session: &self.session,
+            keys: &self.keys,
+            macros: &self.macros,
+            lighting: &self.lighting,
+            picture: &self.picture,
+            settings: &self.settings,
+            recording_options: self.recording.options(),
+            recording_pending: self.recording.pending(),
+            page: self.page,
+            closing: self.closing,
+            notice: &self.notice,
+            style: &self.style,
+        })
     }
 }
 
@@ -576,9 +687,20 @@ fn problem_text(problem: &Problem) -> String {
         ),
         Problem::InvalidApplyResult(reason) => format!("Save result was invalid: {reason}"),
         Problem::ApplyReadbackMismatch => {
-            "Readback did not match the submitted assignments.".into()
+            "The save result did not match the submitted changes.".into()
         }
     }
+}
+
+fn needs_read<F: byakko_core::editor::Feature>(editor: &byakko_core::editor::Editor<F>) -> bool {
+    editor.status() == &Status::Unloaded
+        || (!editor.dirty()
+            && matches!(
+                editor.status(),
+                Status::Unverified {
+                    problem: Problem::ReadRequired
+                }
+            ))
 }
 
 #[cfg(test)]

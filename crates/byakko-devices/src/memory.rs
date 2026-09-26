@@ -133,6 +133,23 @@ impl MemoryDevice {
         &self.descriptor
     }
 
+    /// Build a client session from this simulator's advertised features.
+    pub fn session(&self) -> Result<byakko_core::session::Session, String> {
+        let mut session = byakko_core::session::Session::new(self.descriptor.clone())?;
+        if let Some(capabilities) = self.macro_capabilities() {
+            session = session.with_macros(capabilities.clone())?;
+        }
+        if let Some(capabilities) = self.lighting_capabilities() {
+            session = session.with_lighting(capabilities.clone())?;
+        }
+        if let Some(capabilities) = self.picture_capabilities() {
+            session = session.with_picture(capabilities.clone())?;
+        }
+        if let Some(capabilities) = self.settings_capabilities() {
+            session = session.with_settings(capabilities.clone())?;
+        }
+        Ok(session)
+    }
     pub fn with_lighting(
         mut self,
         capabilities: lighting::Capabilities,
@@ -336,7 +353,10 @@ impl Device for MemoryDevice {
     fn read_lighting(&mut self) -> Result<lighting::Snapshot, String> {
         self.lighting
             .as_ref()
-            .map(|stored| stored.snapshot.clone())
+            .map(|stored| lighting::Snapshot {
+                evidence: lighting::Evidence::Readback,
+                ..stored.snapshot.clone()
+            })
             .ok_or_else(|| "Lighting operations are unsupported by this device".into())
     }
 
@@ -354,7 +374,11 @@ impl Device for MemoryDevice {
             .lighting
             .as_mut()
             .ok_or_else(|| reject("Lighting operations are unsupported by this device".into()))?;
-        if &stored.snapshot != expected {
+        let current = lighting::Snapshot {
+            evidence: expected.evidence,
+            ..stored.snapshot.clone()
+        };
+        if &current != expected {
             return Err(reject("Stale expected lighting snapshot".into()));
         }
         if matches!(stored.snapshot.content, lighting::Content::Opaque { .. }) {
@@ -369,6 +393,15 @@ impl Device for MemoryDevice {
         next.revision = stored.initial_revision.clone();
         next.revision.extend_from_slice(&next_number.to_be_bytes());
         next.content = lighting::Content::Editable(desired.clone());
+        next.evidence = lighting::Evidence::TransportAccepted;
+        if !next.picture_context.is_empty() {
+            next.picture_context = desired.effect.as_bytes().to_vec();
+        }
+        if let Some(picture) = &mut self.picture
+            && !picture.snapshot.context_revision.is_empty()
+        {
+            picture.snapshot.context_revision = desired.effect.as_bytes().to_vec();
+        }
         stored.snapshot = next.clone();
         stored.revision_number = next_number;
         Ok(next)
@@ -377,7 +410,10 @@ impl Device for MemoryDevice {
     fn read_picture(&mut self) -> Result<picture::Snapshot, String> {
         self.picture
             .as_ref()
-            .map(|stored| stored.snapshot.clone())
+            .map(|stored| picture::Snapshot {
+                evidence: picture::Evidence::Readback,
+                ..stored.snapshot.clone()
+            })
             .ok_or_else(|| "Picture operations are unsupported by this device".into())
     }
 
@@ -395,7 +431,11 @@ impl Device for MemoryDevice {
             .picture
             .as_mut()
             .ok_or_else(|| reject("Picture operations are unsupported by this device".into()))?;
-        if &stored.snapshot != expected {
+        let current = picture::Snapshot {
+            evidence: expected.evidence,
+            ..stored.snapshot.clone()
+        };
+        if &current != expected {
             return Err(reject("Stale expected picture snapshot".into()));
         }
         if !matches!(stored.snapshot.content, picture::Content::Editable(_)) {
@@ -412,6 +452,7 @@ impl Device for MemoryDevice {
             .checked_add(1)
             .ok_or_else(|| reject("Memory picture revision exhausted".into()))?;
         let mut next = candidate;
+        next.evidence = picture::Evidence::TransportAccepted;
         next.revision = stored.initial_revision.clone();
         next.revision.extend_from_slice(&next_number.to_be_bytes());
         stored.snapshot = next.clone();
@@ -666,7 +707,90 @@ pub fn demo() -> Result<MemoryDevice, String> {
             },
         })
         .collect();
-    MemoryDevice::new(descriptor, state)?.with_macros(capabilities, snapshots)
+    let lighting_capabilities = lighting::Capabilities {
+        backend_id: "memory".into(),
+        host_modes: vec![],
+        effects: vec![
+            lighting::Effect {
+                id: "steady".into(),
+                label: "Steady".into(),
+                brightness: Some(1..=5),
+                speed: None,
+                options: vec![],
+                color: Some(lighting::ColorCapability::Fixed),
+            },
+            lighting::Effect {
+                id: "picture".into(),
+                label: "Per-key colors".into(),
+                brightness: Some(1..=5),
+                speed: None,
+                options: vec![],
+                color: None,
+            },
+        ],
+    };
+    let lighting_snapshot = lighting::Snapshot {
+        picture_context: b"steady".to_vec(),
+        backend_id: "memory".into(),
+        revision: vec![10, 0xaa],
+        evidence: lighting::Evidence::Readback,
+        content: lighting::Content::Editable(lighting::Setting {
+            effect: "steady".into(),
+            brightness: Some(3),
+            speed: None,
+            option: None,
+            color: Some(lighting::Color::Rgb([40, 100, 180])),
+        }),
+    };
+    let picture_capabilities = picture::Capabilities {
+        backend_id: "memory".into(),
+        keys: vec!["Alpha".into(), "Beta".into()],
+        lighting_effect: Some("picture".into()),
+    };
+    let picture_snapshot = picture::Snapshot {
+        backend_id: "memory".into(),
+        revision: vec![20, 0xbb],
+        context_revision: b"steady".to_vec(),
+        evidence: picture::Evidence::Readback,
+        content: picture::Content::Editable(BTreeMap::from([
+            ("Alpha".into(), [20, 30, 40]),
+            ("Beta".into(), [60, 70, 80]),
+        ])),
+    };
+    let settings_capabilities = settings::Capabilities {
+        backend_id: "memory".into(),
+        fields: vec![
+            settings::Field {
+                id: "indicator".into(),
+                label: "Indicator".into(),
+                kind: settings::Kind::Toggle,
+            },
+            settings::Field {
+                id: "sleep".into(),
+                label: "Sleep after".into(),
+                kind: settings::Kind::Number {
+                    min: 1,
+                    max: 10,
+                    step: 1,
+                    unit: "minutes".into(),
+                    disabled_zero: true,
+                },
+            },
+        ],
+    };
+    let settings_snapshot = settings::Snapshot {
+        backend_id: "memory".into(),
+        revision: vec![30, 0xcc],
+        content: settings::Content::Editable(BTreeMap::from([
+            ("indicator".into(), settings::Value::Toggle(true)),
+            ("sleep".into(), settings::Value::Number(5)),
+        ])),
+    };
+    MemoryDevice::new(descriptor, state)?
+        .with_macros(capabilities, snapshots)?
+        .with_lighting(lighting_capabilities, lighting_snapshot)?
+        .with_picture(picture_capabilities, picture_snapshot)?
+        .with_settings(settings_capabilities, settings_snapshot)
 }
 
 #[cfg(test)]
@@ -770,6 +894,134 @@ mod tests {
         assert_eq!(
             session.keymap().baseline().unwrap().bindings["Typing"]["Alpha"],
             caps.bindings[0].action
+        );
+    }
+    #[test]
+    fn demo_setters_distinguish_transport_acceptance_and_preserve_selector_on_parameters() {
+        let mut device = demo().unwrap();
+        let lighting = device.read_lighting().unwrap();
+        let picture = device.read_picture().unwrap();
+        let lighting::Content::Editable(mut setting) = lighting.content.clone() else {
+            panic!("demo lighting is editable")
+        };
+        setting.brightness = Some(4);
+        let accepted = device
+            .apply_lighting(&lighting, &setting, Path::new("unused"))
+            .unwrap();
+        assert_eq!(accepted.evidence, lighting::Evidence::TransportAccepted);
+        assert_eq!(accepted.picture_context, picture.context_revision);
+        assert_eq!(
+            device.read_lighting().unwrap().evidence,
+            lighting::Evidence::Readback
+        );
+        assert_eq!(
+            device.read_picture().unwrap().context_revision,
+            picture.context_revision
+        );
+        // The accepted before-image can be used directly for the next setter.
+        setting.brightness = Some(5);
+        device
+            .apply_lighting(&accepted, &setting, Path::new("unused"))
+            .unwrap();
+        let picture::Content::Editable(mut colors) = picture.content.clone() else {
+            panic!("demo picture is editable")
+        };
+        colors.insert("Alpha".into(), [1, 2, 3]);
+        let accepted = device
+            .apply_picture(&picture, &colors, Path::new("unused"))
+            .unwrap();
+        assert_eq!(accepted.evidence, picture::Evidence::TransportAccepted);
+        assert_eq!(
+            device.read_picture().unwrap().evidence,
+            picture::Evidence::Readback
+        );
+        colors.insert("Beta".into(), [4, 5, 6]);
+        device
+            .apply_picture(&accepted, &colors, Path::new("unused"))
+            .unwrap();
+    }
+
+    #[test]
+    fn demo_real_selector_change_rejects_old_picture_context_without_changing_colors() {
+        let mut device = demo().unwrap();
+        let lighting = device.read_lighting().unwrap();
+        let picture = device.read_picture().unwrap();
+        let colors = match &picture.content {
+            picture::Content::Editable(colors) => colors.clone(),
+            _ => panic!("editable picture"),
+        };
+        let setting = lighting::Setting {
+            effect: "picture".into(),
+            brightness: Some(3),
+            speed: None,
+            option: None,
+            color: None,
+        };
+        device
+            .apply_lighting(&lighting, &setting, Path::new("unused"))
+            .unwrap();
+        assert_eq!(device.read_picture().unwrap().context_revision, b"picture");
+        assert!(
+            device
+                .apply_picture(&picture, &colors, Path::new("unused"))
+                .is_err()
+        );
+        assert_eq!(device.read_picture().unwrap().content, picture.content);
+    }
+
+    #[test]
+    fn demo_scalar_apply_changes_one_field_and_retains_cached_reserved_bytes() {
+        let mut device = demo().unwrap();
+        let before = device.read_settings().unwrap();
+        let after = device
+            .apply_setting(
+                &before,
+                &settings::Edit {
+                    id: "sleep".into(),
+                    value: settings::Value::Number(0),
+                },
+                Path::new("unused"),
+            )
+            .unwrap();
+        let settings::Content::Editable(values) = &after.content else {
+            panic!("editable settings")
+        };
+        assert_eq!(values["sleep"], settings::Value::Number(0));
+        assert_eq!(values["indicator"], settings::Value::Toggle(true));
+        assert!(after.revision.starts_with(&before.revision));
+        assert!(
+            device
+                .apply_setting(
+                    &after,
+                    &settings::Edit {
+                        id: "sleep".into(),
+                        value: settings::Value::Number(11)
+                    },
+                    Path::new("unused")
+                )
+                .is_err()
+        );
+        assert_eq!(device.read_settings().unwrap(), after);
+    }
+    #[test]
+    fn demo_session_exposes_each_advertised_feature() {
+        let device = demo().unwrap();
+        let session = device.session().unwrap();
+        assert_eq!(
+            session.macros().unwrap().capabilities(),
+            device.macro_capabilities().unwrap()
+        );
+        assert_eq!(
+            session.lighting().unwrap().capabilities(),
+            device.lighting_capabilities().unwrap()
+        );
+        assert_eq!(
+            session.picture().unwrap().capabilities(),
+            device.picture_capabilities().unwrap()
+        );
+        assert_eq!(
+            session.settings().unwrap().capabilities(),
+            device.settings_capabilities().unwrap()
         );
     }
     fn fixture() -> (Descriptor, State) {
@@ -1068,6 +1320,7 @@ mod tests {
             color: Some(lighting::Color::Rgb([1, 2, 3])),
         };
         let initial = lighting::Snapshot {
+            picture_context: vec![],
             evidence: byakko_core::model::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![9],

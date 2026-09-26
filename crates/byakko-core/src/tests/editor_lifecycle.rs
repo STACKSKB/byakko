@@ -25,6 +25,7 @@ fn lighting_snapshot(level: u16, evidence: SnapshotEvidence) -> lighting::Snapsh
     lighting::Snapshot {
         backend_id: "test".into(),
         revision: vec![level as u8],
+        picture_context: vec![],
         evidence,
         content: lighting::Content::Editable(lighting::Setting {
             effect: "steady".into(),
@@ -54,6 +55,91 @@ fn completed_submission_advances_baseline_and_retains_newer_intent() {
     assert!(editor.dirty());
     assert!(editor.submitted().is_none());
     assert_eq!(editor.request_apply().unwrap().1.brightness, Some(30));
+}
+
+#[test]
+fn lighting_readback_provenance_does_not_conflict_with_newer_intent() {
+    let mut editor = lighting_editor();
+    editor.accept_read(Ok(lighting_snapshot(10, SnapshotEvidence::Readback)));
+    editor.edit(lighting::Edit::Brightness(20)).unwrap();
+    editor.request_apply().unwrap();
+    editor.edit(lighting::Edit::Brightness(30)).unwrap();
+    editor.accept_apply(Ok(lighting_snapshot(
+        20,
+        SnapshotEvidence::TransportAccepted,
+    )));
+    let observed = lighting_snapshot(20, SnapshotEvidence::Readback);
+    editor.accept_read(Ok(observed.clone()));
+    assert_eq!(editor.status(), &Status::Ready);
+    assert_eq!(editor.baseline(), Some(&observed));
+    assert_eq!(editor.draft().unwrap().brightness, Some(30));
+    assert!(editor.dirty());
+    let mut changed = observed.clone();
+    changed.revision.push(99);
+    editor.accept_read(Ok(changed));
+    assert!(matches!(editor.status(), Status::Conflict { .. }));
+    editor.accept_read(Ok(observed.clone()));
+    let mut changed = observed;
+    changed.picture_context = vec![9];
+    editor.accept_read(Ok(changed));
+    assert!(matches!(editor.status(), Status::Conflict { .. }));
+    assert_eq!(editor.draft().unwrap().brightness, Some(30));
+}
+
+#[test]
+fn picture_readback_provenance_does_not_conflict_with_newer_intent() {
+    let mut editor = Editor::new(PictureRules::new(picture::Capabilities {
+        backend_id: "test".into(),
+        keys: vec!["a".into()],
+        lighting_effect: None,
+    }));
+    let original = picture::Snapshot {
+        backend_id: "test".into(),
+        revision: vec![1],
+        context_revision: vec![9],
+        evidence: SnapshotEvidence::Readback,
+        content: picture::Content::Editable([("a".into(), [1; 3])].into()),
+    };
+    editor.accept_read(Ok(original.clone()));
+    editor
+        .edit(picture::Edit::Color {
+            key: "a".into(),
+            color: [2; 3],
+        })
+        .unwrap();
+    let (_, colors) = editor.request_apply().unwrap();
+    editor
+        .edit(picture::Edit::Color {
+            key: "a".into(),
+            color: [3; 3],
+        })
+        .unwrap();
+    let accepted = picture::Snapshot {
+        revision: vec![2],
+        evidence: SnapshotEvidence::TransportAccepted,
+        content: picture::Content::Editable(colors),
+        ..original
+    };
+    editor.accept_apply(Ok(accepted.clone()));
+    let observed = picture::Snapshot {
+        evidence: SnapshotEvidence::Readback,
+        ..accepted
+    };
+    editor.accept_read(Ok(observed.clone()));
+    assert_eq!(editor.status(), &Status::Ready);
+    assert_eq!(editor.baseline(), Some(&observed));
+    assert_eq!(editor.draft().unwrap()["a"], [3; 3]);
+    assert!(editor.dirty());
+    let mut changed = observed.clone();
+    changed.revision.push(99);
+    editor.accept_read(Ok(changed));
+    assert!(matches!(editor.status(), Status::Conflict { .. }));
+    editor.accept_read(Ok(observed.clone()));
+    let mut changed = observed;
+    changed.context_revision.push(10);
+    editor.accept_read(Ok(changed));
+    assert!(matches!(editor.status(), Status::Conflict { .. }));
+    assert_eq!(editor.draft().unwrap()["a"], [3; 3]);
 }
 #[test]
 fn failure_and_invalid_result_retain_newest_draft_baseline_and_typed_recovery() {
@@ -208,6 +294,23 @@ fn settings_share_lifecycle_while_planning_exactly_one_scalar() {
     let (expected, write) = editor.request_apply().unwrap();
     assert_eq!(expected, baseline);
     assert_eq!(write, edit);
+    editor
+        .edit(settings::Edit {
+            id: "a".into(),
+            value: settings::Value::Toggle(false),
+        })
+        .unwrap();
+    let newest = editor.draft().cloned();
+    assert!(
+        editor
+            .edit(settings::Edit {
+                id: "b".into(),
+                value: settings::Value::Toggle(true)
+            })
+            .is_err()
+    );
+    assert_eq!(editor.draft(), newest.as_ref());
+    editor.edit(edit).unwrap();
     let observed = settings::Snapshot {
         revision: vec![2, 255],
         content: settings::Content::Editable(staged.unwrap()),

@@ -1,4 +1,5 @@
 //! Synchronous client of the same pure session used by Iced.
+mod features;
 use byakko_core::{
     contract::Command,
     editor::Status,
@@ -7,6 +8,10 @@ use byakko_core::{
     validation::keymap::{validate_edit, validate_state},
 };
 use byakko_devices::Executor;
+pub use features::{
+    apply_lighting, apply_picture, apply_settings, plan_lighting, plan_picture, plan_settings,
+    read_lighting, read_picture, read_settings,
+};
 use std::time::{Duration, Instant};
 
 /// Shared file boundary for snapshot commands; no metadata/read double pass.
