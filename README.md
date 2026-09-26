@@ -7,7 +7,8 @@ is needed by the product.
 This branch is an **application rewrite in progress**, starting from `3db624f`.
 The old application controllers have been removed. The replacement currently
 supports keymap read, staged assignment, save, revert and manual reconnect through
-Iced and an independent CLI. Other frontend workflows are being rebuilt; this is
+Iced and an independent CLI. Macro discovery, selected-slot editing, save-and-assign
+and CLI snapshot workflows also use the replacement core. Other frontend workflows are being rebuilt; this is
 not a feature-complete release. See [plan.md](plan.md) for current scope and
 [rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 
@@ -29,7 +30,7 @@ The keymap view uses device-supplied physical geometry and action choices. Edits
 stay in the core editor until Save assignments. Save uses the cached before-image
 and the existing native backup/write/readback transaction. Closing waits for a
 pending save and asks before discarding edits. Automatic discovery/reconnect,
-the richer assignment catalog, custom shortcut form, macros, lighting, per-key
+the richer assignment catalog, custom shortcut form, macro recording, lighting, per-key
 colors, settings and diagnostic capture are pending frontend milestones.
 
 The independent CLI uses the same session/executor contract:
@@ -44,7 +45,10 @@ cargo run --release --locked -p byakko-cli -- --demo read
 The first two commands are discovery/help; `read` sends getters and prints a
 keymap snapshot. `plan-keymap FILE` validates edits from a complete snapshot;
 `apply-keymap FILE` writes with a backup and verifies the result. `--demo` uses
-memory only. Other previous CLI commands are not exposed on this checkpoint.
+memory only. `list-macros` reads the macro library; `read-macro SLOT` emits a
+backend snapshot. Retain its revision when editing for `plan-macro FILE` or
+`apply-macro FILE`. `assign-macro SLOT LAYER KEY BINDING` uses the shared core
+assignment workflow. Other previous CLI commands are not exposed on this checkpoint.
 Start with the
 [read-only Linux sequence](docs/linux-handoff.md) before any Linux write test.
 Backups use the [normal-user data directory](docs/local-storage.md).

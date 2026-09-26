@@ -22,6 +22,13 @@ language at the expense of readable Rust.
 
 - One clear owner per concept. Modules represent responsibilities, not line-count
   limits. Keep a feature's state, edits and completion rules discoverable together.
+- Constrain editors through one shared lifecycle and explicit implementations
+  under `editor/`, rather than letting each feature invent a controller hierarchy.
+  The common model owns baseline/draft, dirty state, load/revert/apply acceptance
+  and failure retention. Feature implementations provide values, edits,
+  validation and write planning. Directory locality alone is not architecture.
+  Keep genuine independent activities such as recording outside that lifecycle;
+  do not add policy flags or extension hooks for hypothetical differences.
 - Separate decisions from effects. Prefer ordinary functions, algebraic data
   types, exhaustive matches and explicit inputs/outputs.
 - Use higher-order functions where they express real common operations: mapping
@@ -40,8 +47,8 @@ language at the expense of readable Rust.
 - Validate external boundaries and real invariants. No hypothetical hostile
   users, competing configurators, repeated preflights or redundant guards.
 - Optimize for understandable behavior, not line counts, tiny functions or
-  synthetic complexity scores. Do not force different features into one generic
-  draft abstraction merely because their code looks similar.
+  synthetic complexity scores. Model real differences explicitly within the
+  shared editor contract; preserve readback versus transport-acceptance evidence.
 
 ## Architecture
 

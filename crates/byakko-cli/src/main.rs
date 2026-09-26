@@ -1,12 +1,11 @@
-use byakko_core::{State, session::Session};
+use byakko_core::{State, macros::Snapshot, session::Session};
 use byakko_devices::{
     Executor,
     nia87::{self, BoundNia87Adapter},
 };
 use std::{path::PathBuf, time::Duration};
 
-const USAGE: &str =
-    "byakko-cli [--demo] <devices|describe|read|plan-keymap FILE|apply-keymap FILE>";
+const USAGE: &str = "byakko-cli [--demo] <devices|describe|read|plan-keymap FILE|apply-keymap FILE|list-macros|read-macro SLOT|plan-macro FILE|apply-macro FILE|assign-macro SLOT LAYER KEY BINDING>";
 
 #[derive(Debug, PartialEq)]
 enum Command {
@@ -14,7 +13,22 @@ enum Command {
     Devices,
     Describe,
     Read,
-    Keymap { apply: bool, path: PathBuf },
+    Keymap {
+        apply: bool,
+        path: PathBuf,
+    },
+    ListMacros,
+    ReadMacro(String),
+    Macro {
+        apply: bool,
+        path: PathBuf,
+    },
+    AssignMacro {
+        slot: String,
+        layer: String,
+        key: String,
+        binding: String,
+    },
 }
 
 fn parse(arguments: &[String]) -> Result<(bool, Command), String> {
@@ -28,6 +42,18 @@ fn parse(arguments: &[String]) -> Result<(bool, Command), String> {
         [name] if name == "devices" => Command::Devices,
         [name] if name == "describe" => Command::Describe,
         [name] if name == "read" => Command::Read,
+        [name] if name == "list-macros" => Command::ListMacros,
+        [name, slot] if name == "read-macro" => Command::ReadMacro(slot.clone()),
+        [name, path] if name == "plan-macro" || name == "apply-macro" => Command::Macro {
+            apply: name == "apply-macro",
+            path: path.into(),
+        },
+        [name, slot, layer, key, binding] if name == "assign-macro" => Command::AssignMacro {
+            slot: slot.clone(),
+            layer: layer.clone(),
+            key: key.clone(),
+            binding: binding.clone(),
+        },
         [name, path] if name == "plan-keymap" || name == "apply-keymap" => Command::Keymap {
             apply: name == "apply-keymap",
             path: path.into(),
@@ -62,12 +88,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     // Load only the associated file, before opening a device.
-    let target: Option<State> = match &command {
-        Command::Keymap { path, .. } => Some(byakko_cli::read_json(
+    enum FileInput {
+        Keymap(State),
+        Macro(Snapshot),
+    }
+    let target = match &command {
+        Command::Keymap { path, .. } => Some(FileInput::Keymap(byakko_cli::read_json(
             std::fs::File::open(path)?,
             1024 * 1024,
-        )?),
+        )?)),
+        Command::Macro { path, .. } => Some(FileInput::Macro(byakko_cli::read_json(
+            std::fs::File::open(path)?,
+            1024 * 1024,
+        )?)),
         _ => None,
+    };
+    let mut session = if let Some(device) = &memory {
+        Session::new(descriptor)?.with_macros(
+            device
+                .macro_capabilities()
+                .expect("demo supports macros")
+                .clone(),
+        )?
+    } else {
+        nia87::application::session()?
     };
     let executor = if let Some(device) = memory {
         Executor::spawn(device, PathBuf::new())?
@@ -86,12 +130,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             byakko_devices::storage::user_data_dir()?.join("backups"),
         )?
     };
-    let mut session = Session::new(descriptor)?;
-    let current = byakko_cli::read_keymap(&mut session, &executor, Duration::from_secs(30))?;
+    let timeout = Duration::from_secs(30);
     match command {
-        Command::Read => println!("{}", serde_json::to_string_pretty(&current)?),
+        Command::Read => println!(
+            "{}",
+            serde_json::to_string_pretty(&byakko_cli::read_keymap(
+                &mut session,
+                &executor,
+                timeout
+            )?)?
+        ),
         Command::Keymap { apply, .. } => {
-            let target = target.expect("keymap command loaded its file");
+            let Some(FileInput::Keymap(target)) = target else {
+                unreachable!("keymap command loaded its file")
+            };
+            byakko_cli::read_keymap(&mut session, &executor, timeout)?;
             if apply {
                 let actual = byakko_cli::apply_keymap(&mut session, &executor, &target)?;
                 println!("{}", serde_json::to_string_pretty(&actual)?);
@@ -101,6 +154,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     serde_json::to_string_pretty(&byakko_cli::plan_keymap(&session, &target)?)?
                 );
             }
+        }
+        Command::ListMacros => {
+            byakko_cli::list_macros(&mut session, &executor, timeout)?;
+            for (slot, occupancy) in session
+                .macro_library()
+                .expect("configured macro feature")
+                .slots()
+            {
+                println!("{slot}: {occupancy:?}");
+            }
+        }
+        Command::ReadMacro(slot) => println!(
+            "{}",
+            serde_json::to_string_pretty(&byakko_cli::read_macro(
+                &mut session,
+                &executor,
+                &slot,
+                timeout
+            )?)?
+        ),
+        Command::Macro { apply, .. } => {
+            let Some(FileInput::Macro(target)) = target else {
+                unreachable!("macro command loaded its file")
+            };
+            byakko_cli::read_macro(&mut session, &executor, &target.slot, timeout)?;
+            if apply {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&byakko_cli::apply_macro(
+                        &mut session,
+                        &executor,
+                        &target
+                    )?)?
+                );
+            } else {
+                session.stage_macro_snapshot(&target)?;
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &session.macros().expect("configured macro feature").draft()
+                    )?
+                );
+            }
+        }
+        Command::AssignMacro {
+            slot,
+            layer,
+            key,
+            binding,
+        } => {
+            byakko_cli::read_keymap(&mut session, &executor, timeout)?;
+            byakko_cli::read_macro(&mut session, &executor, &slot, timeout)?;
+            byakko_cli::assign_macro(&mut session, &executor, &layer, &key, &binding)?;
+            println!("Macro assigned.");
         }
         _ => unreachable!("offline commands return before device access"),
     }

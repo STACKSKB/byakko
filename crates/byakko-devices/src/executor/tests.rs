@@ -130,8 +130,9 @@ fn bounded_queue_rejects_overflow_and_rechecks_generation_before_io() {
     worker.try_submit(command(1, 1)).unwrap();
     waiting.recv_timeout(Duration::from_secs(2)).unwrap();
     worker.try_submit(command(1, 2)).unwrap();
-    let overflow = worker.try_submit(command(1, 3)).unwrap_err();
-    assert_eq!((overflow.generation, overflow.operation), (1, 3));
+    worker.try_submit(command(1, 3)).unwrap();
+    let overflow = worker.try_submit(command(1, 4)).unwrap_err();
+    assert_eq!((overflow.generation, overflow.operation), (1, 4));
     assert!(matches!(
         overflow.payload,
         CompletionPayload::Keymap(FeatureResult::Read(Err(_)))
@@ -142,6 +143,12 @@ fn bounded_queue_rejects_overflow_and_rechecks_generation_before_io() {
     assert_eq!(first.operation, 1);
     let queued = worker.receive(Some(Duration::from_secs(2))).unwrap();
     assert_eq!(queued.operation, 2);
+    assert!(matches!(
+        queued.payload,
+        CompletionPayload::Keymap(FeatureResult::Read(Err(_)))
+    ));
+    let queued = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(queued.operation, 3);
     assert!(matches!(
         queued.payload,
         CompletionPayload::Keymap(FeatureResult::Read(Err(_)))
@@ -209,4 +216,234 @@ fn public_session_save_delivers_one_apply_without_an_extra_read_command() {
     assert!(!session.keymap().dirty());
     assert_eq!(reads.load(Ordering::SeqCst), 1);
     assert_eq!(applies.load(Ordering::SeqCst), 1);
+}
+
+struct CatalogProbe {
+    entered: mpsc::SyncSender<String>,
+    release: mpsc::Receiver<()>,
+    reads: Arc<AtomicUsize>,
+    fail_apply: bool,
+}
+impl Device for CatalogProbe {
+    fn read(&mut self) -> Result<State, String> {
+        self.entered.send("foreground".into()).unwrap();
+        Ok(State {
+            revision: vec![1],
+            bindings: BTreeMap::new(),
+        })
+    }
+    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+        if self.fail_apply {
+            return Err(ApplyFailure {
+                message: "Write failed".into(),
+                recovery: Recovery::Failed,
+            });
+        }
+        self.read().map_err(|message| ApplyFailure {
+            message,
+            recovery: Recovery::Unverified,
+        })
+    }
+    fn read_macro(&mut self, slot: &str) -> Result<byakko_core::macros::Snapshot, String> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.entered.send(slot.into()).unwrap();
+        self.release.recv().unwrap();
+        Ok(byakko_core::macros::Snapshot {
+            backend_id: "probe".into(),
+            slot: slot.into(),
+            revision: vec![1],
+            content: byakko_core::macros::Content::Editable(byakko_core::macros::Program {
+                repeat_count: 1,
+                events: vec![],
+            }),
+        })
+    }
+}
+fn catalog_probe(
+    fail_apply: bool,
+) -> (
+    Executor,
+    mpsc::Receiver<String>,
+    mpsc::SyncSender<()>,
+    Arc<AtomicUsize>,
+) {
+    let (entered, events) = mpsc::sync_channel(4);
+    let (release, resumed) = mpsc::sync_channel(1);
+    let reads = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        CatalogProbe {
+            entered,
+            release: resumed,
+            reads: Arc::clone(&reads),
+            fail_apply,
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 1,
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: vec!["first".into(), "second".into()],
+            },
+        })
+        .unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        "first"
+    );
+    (worker, events, release, reads)
+}
+#[test]
+fn foreground_runs_between_catalog_slots_without_restarting_scan() {
+    let (worker, events, release, reads) = catalog_probe(false);
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 2,
+            payload: CommandPayload::Keymap(FeatureCommand::Apply {
+                expected: State {
+                    revision: vec![1],
+                    bindings: BTreeMap::new(),
+                },
+                desired: Vec::new(),
+            }),
+        })
+        .unwrap();
+    release.send(()).unwrap();
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        "foreground"
+    );
+    assert_eq!(
+        worker
+            .receive(Some(Duration::from_secs(2)))
+            .unwrap()
+            .operation,
+        2
+    );
+    assert_eq!(
+        events.recv_timeout(Duration::from_secs(2)).unwrap(),
+        "second"
+    );
+    release.send(()).unwrap();
+    let completed = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(completed.operation, 1);
+    assert!(
+        matches!(completed.payload, CompletionPayload::ReadMacroCatalog { result: Ok(snapshots) } if snapshots.len() == 2)
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+}
+#[test]
+fn cancelling_catalog_finishes_current_slot_and_releases_correlation() {
+    let (worker, _events, release, reads) = catalog_probe(false);
+    worker.cancel_catalog();
+    release.send(()).unwrap();
+    let completed = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(completed.operation, 1);
+    assert!(matches!(
+        completed.payload,
+        CompletionPayload::ReadMacroCatalog { result: Err(_) }
+    ));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+#[test]
+fn generation_change_stops_catalog_before_next_slot() {
+    let (worker, _events, release, reads) = catalog_probe(false);
+    worker.set_generation(2);
+    release.send(()).unwrap();
+    assert!(matches!(
+        worker
+            .receive(Some(Duration::from_secs(2)))
+            .unwrap()
+            .payload,
+        CompletionPayload::ReadMacroCatalog { result: Err(_) }
+    ));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn failed_foreground_write_stops_catalog_without_reading_next_slot() {
+    let (worker, _events, release, reads) = catalog_probe(true);
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 2,
+            payload: CommandPayload::Keymap(FeatureCommand::Apply {
+                expected: State {
+                    revision: vec![1],
+                    bindings: BTreeMap::new(),
+                },
+                desired: Vec::new(),
+            }),
+        })
+        .unwrap();
+    release.send(()).unwrap();
+    let write = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(write.operation, 2);
+    assert!(matches!(
+        write.payload,
+        CompletionPayload::Keymap(FeatureResult::Apply(Err(_)))
+    ));
+    let cancelled = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(cancelled.operation, 1);
+    assert!(matches!(
+        cancelled.payload,
+        CompletionPayload::ReadMacroCatalog { result: Err(_) }
+    ));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn queued_catalog_and_foreground_fit_before_worker_receives_them() {
+    let (entered, waiting) = mpsc::sync_channel(1);
+    let (release, resumed) = mpsc::sync_channel(1);
+    let worker = Executor::spawn(
+        GatedProbe {
+            entered,
+            release: resumed,
+            calls: Arc::new(AtomicUsize::new(0)),
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    worker.try_submit(command(1, 1)).unwrap();
+    waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+    // The first device read holds the worker, so neither queued command can be received yet.
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 2,
+            payload: CommandPayload::ReadMacroCatalog {
+                slots: vec!["one".into()],
+            },
+        })
+        .unwrap();
+    worker.try_submit(command(1, 3)).unwrap();
+    release.send(()).unwrap();
+    assert_eq!(
+        worker
+            .receive(Some(Duration::from_secs(2)))
+            .unwrap()
+            .operation,
+        1
+    );
+    waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+    release.send(()).unwrap();
+    assert_eq!(
+        worker
+            .receive(Some(Duration::from_secs(2)))
+            .unwrap()
+            .operation,
+        3
+    );
+    let catalog = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(catalog.operation, 2);
+    assert!(matches!(
+        catalog.payload,
+        CompletionPayload::ReadMacroCatalog { result: Err(_) }
+    ));
 }

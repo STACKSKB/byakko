@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match arguments.as_slice() {
         [] => {
             let backups = byakko_devices::storage::user_data_dir()?.join("backups");
-            byakko_desktop::run(Session::new(nia87::descriptor())?, move |expected| {
+            byakko_desktop::run(nia87::application::session()?, move |expected| {
                 let candidate = match nia87::device::availability() {
                     nia87::device::Availability::Available(candidate) => candidate,
                     nia87::device::Availability::Unavailable => {
@@ -35,8 +35,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             })?;
         }
         [flag] if flag == "--demo" => {
+            let device = byakko_devices::memory::demo()?;
             byakko_desktop::run(
-                Session::new(byakko_devices::memory::demo()?.descriptor().clone())?,
+                Session::new(device.descriptor().clone())?.with_macros(
+                    device
+                        .macro_capabilities()
+                        .expect("demo supports macros")
+                        .clone(),
+                )?,
                 |_| {
                     let worker =
                         Executor::spawn(byakko_devices::memory::demo()?, Default::default())

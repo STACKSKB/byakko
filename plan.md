@@ -49,6 +49,12 @@ it is not evidence that new frontend paths work.
     bytes. Shared UI/core do not assume Nia87 slots, layers or report widths.
 12. Preserve interaction behavior. Temporary feature gaps are recorded below;
     they do not authorize a reduced final product or deletion of firmware evidence.
+13. User clarification: constrain growth through a unified editor model with
+    explicit implementations under `editor/`. Grouping by technical role is
+    appropriate when it exposes that contract. Common load/edit/revert/save and
+    failure transitions must not be reimplemented for every feature. Features
+    supply their domain rules; genuine workflows such as recording and
+    save-and-assign compose editors. Avoid an extensible hierarchy or policy flags.
 
 ## Intended ownership
 
@@ -77,8 +83,13 @@ to match this table. Public APIs expose concepts, not every internal helper.
 - [x] Replace old session, desktop/CLI controllers and worker with working keymap
   read/edit/save/revert/reconnect slice. Include retained drafts, close behavior,
   typed completion and deliberately different memory device. No live writes.
-- [ ] Rebuild macro library/editor/recording and pure save-and-assign workflow.
+- [x] Rebuild macro library/editor and pure save-and-assign workflow.
   Preserve unknown slots, candidate reads, count rules and partial outcomes.
+- [ ] Restore exclusive local macro recording and complete the macro interaction
+  review, including user-facing event choices and rendered layout.
+- [ ] Before expanding features, consolidate the shared editor lifecycle and
+  feature implementations under `editor/`. Remove the macro lifecycle duplication
+  and constrain the session to routing/exclusivity and explicit workflows.
 - [ ] Rebuild coalesced lighting, picture and scalar settings with owned intent
   and submission state, real selector dependencies and one-pass read policy.
 - [ ] Restore discovery, files, local labels and diagnostic capture through the
@@ -136,10 +147,24 @@ target/debug/byakko-cli --demo plan-keymap target/rewrite-smoke/keymap.json
 target/debug/byakko-cli --demo apply-keymap target/rewrite-smoke/keymap.json
 ```
 
+The next integrated checkpoint adds a macro occupancy library, selected editor,
+passive worker discovery and shared save-and-assign workflow. Desktop preserves
+the keyboard workspace while editing macros. CLI supports macro snapshots and
+assignment. Core reports partial assignment failure explicitly. Review fixed a
+queued-scan/foreground race and stale occupancy after uncertain writes; unrelated
+observations remain intact. Client tests cover actual messages and file workflows.
+All workspace tests, strict Clippy and both locked development builds pass.
+No hardware writes or rendered-layout acceptance were performed.
+
+Architecture review with the user identified that directory locality does not
+constrain design growth. The current private Draft is shared by several editors,
+but macros duplicates the lifecycle. Consolidating that into an explicit shared
+editor model is the next prerequisite before adding more feature controllers.
+
 Temporary gaps: automatic discovery/reconnect, the full assignment catalog and
-custom shortcut form, macros/recording/save-and-assign, coalesced lighting/picture/
+custom shortcut form, recording and macro interaction review, coalesced lighting/picture/
 settings, host streaming, local labels/file workflows and diagnostic capture.
 The native APIs, codecs, OS samplers, direct transaction tests and research tools
-remain. Passive catalog priority and host worker scheduling return with their
-feature milestones; a finite catalog command is not passive background discovery.
+remain. Passive catalog priority is restored; host scheduling returns with its
+feature milestone.
 The full rewrite remains incomplete; this checkpoint is not configurator parity.

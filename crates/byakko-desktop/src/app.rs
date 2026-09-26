@@ -1,9 +1,9 @@
 //! Window lifecycle and effect delivery. Feature policy stays in core.
-use crate::{keymap, panels::UiStyle};
+use crate::{keymap, macros, panels::UiStyle};
 use byakko_core::{
     contract::{Command, Completion, Problem},
     keymap::Status,
-    session::{Connection, Outcome, Session},
+    session::{AssignmentProblem, Connection, Outcome, Session},
 };
 use byakko_devices::Executor;
 use iced::{
@@ -18,6 +18,8 @@ type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
 #[derive(Clone, Debug)]
 enum Message {
     Keys(keymap::Message),
+    Macros(macros::Message),
+    Page(Page),
     Read,
     Save,
     Revert,
@@ -25,6 +27,12 @@ enum Message {
     Close,
     Discard,
     KeepEditing,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Page {
+    Keys,
+    Macros,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,6 +45,8 @@ enum Closing {
 struct App {
     session: Session,
     keys: keymap::Form,
+    macros: macros::Form,
+    page: Page,
     worker: Option<Executor>,
     selected_device: Option<String>,
     attach: Box<Attach>,
@@ -75,6 +85,8 @@ impl App {
     fn new(session: Session, attach: Box<Attach>) -> Self {
         Self {
             keys: keymap::Form::new(session.descriptor()),
+            macros: macros::Form::default(),
+            page: Page::Keys,
             session,
             worker: None,
             selected_device: None,
@@ -95,14 +107,28 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::Page(page) => self.page = page,
+            Message::Macros(message) => return self.update_macro(message),
             Message::Keys(message) => {
                 if let Some(change) = self.keys.update(message, self.session.descriptor()) {
                     self.notice = self.session.edit(change).err().unwrap_or_default();
                 }
             }
             Message::Read if !self.session.busy() => {
-                let request = self.connect().and_then(|()| self.session.read());
-                return self.submit(request);
+                let connected = match self.connect() {
+                    Ok(connected) => connected,
+                    Err(reason) => {
+                        self.notice = reason;
+                        return Task::none();
+                    }
+                };
+                let request = self.session.read();
+                let read = self.submit(request);
+                if connected && self.session.macros().is_some() {
+                    let catalog = self.session.request_macro_catalog();
+                    return Task::batch([read, self.submit(catalog)]);
+                }
+                return read;
             }
             Message::Save => {
                 let request = self.session.save();
@@ -118,16 +144,64 @@ impl App {
         Task::none()
     }
 
-    fn connect(&mut self) -> Result<(), String> {
+    fn update_macro(&mut self, message: macros::Message) -> Task<Message> {
+        use macros::Message;
+        let request = match message {
+            Message::Select(slot)
+                if self.session.macros().is_some_and(|editor| {
+                    editor.slot() == slot
+                        && editor.status() == &byakko_core::macros::editor::Status::Ready
+                }) =>
+            {
+                return Task::none();
+            }
+            Message::Select(slot) => self
+                .session
+                .select_macro(&slot)
+                .and_then(|()| self.session.read_macro()),
+            Message::Add => self
+                .session
+                .macro_candidate()
+                .and_then(|slot| self.session.select_macro(&slot))
+                .and_then(|()| self.session.read_macro()),
+            Message::Read => self.session.read_macro(),
+            Message::Save => self.session.save_macro(),
+            Message::Assign(binding) => match self.keys.target() {
+                Some((layer, key)) => self.session.save_and_assign_macro(layer, key, &binding),
+                None => Err("Select a key before assigning a macro".into()),
+            },
+            Message::Revert => {
+                self.notice = self.session.revert_macro().err().unwrap_or_default();
+                self.macros
+                    .sync(self.session.macros().and_then(|editor| editor.draft()));
+                return Task::none();
+            }
+            message => {
+                let edit = self
+                    .session
+                    .macros()
+                    .ok_or_else(|| "Macros are not available".to_owned())
+                    .and_then(|editor| self.macros.update(message, editor));
+                self.notice = edit
+                    .and_then(|edit| edit.map_or(Ok(()), |edit| self.session.edit_macro(edit)))
+                    .err()
+                    .unwrap_or_default();
+                return Task::none();
+            }
+        };
+        self.submit(request)
+    }
+
+    fn connect(&mut self) -> Result<bool, String> {
         if self.worker.is_some() {
-            return Ok(());
+            return Ok(false);
         }
         let (id, worker) = (self.attach)(self.selected_device.as_deref())?;
         let generation = self.session.connect()?;
         worker.set_generation(generation);
         self.selected_device = Some(id);
         self.worker = Some(worker);
-        Ok(())
+        Ok(true)
     }
 
     fn submit(&mut self, request: Result<Command, String>) -> Task<Message> {
@@ -175,12 +249,53 @@ impl App {
     fn complete(&mut self, completion: Completion) -> Task<Message> {
         match self.session.accept(completion) {
             Outcome::Ignored => return Task::none(),
-            Outcome::Loaded => self.notice = "Keymap loaded.".into(),
+            Outcome::Loaded => {
+                self.notice = "Keymap loaded.".into();
+            }
             Outcome::Saved => self.notice = "Assignments saved and read back.".into(),
+            Outcome::Continue(command) => return self.submit(Ok(command)),
+            Outcome::MacroLoaded => {
+                self.macros
+                    .sync(self.session.macros().and_then(|editor| editor.draft()));
+                self.notice = "Macro loaded.".into();
+            }
+            Outcome::MacroSaved => self.notice = "Macro saved and read back.".into(),
+            Outcome::CatalogLoaded => return Task::none(),
+            Outcome::CatalogFailed(reason) => {
+                self.notice = format!("Macro discovery stopped: {reason}");
+                return Task::none();
+            }
+            Outcome::AssignmentSucceeded { macro_saved } => {
+                self.notice = if macro_saved {
+                    "Macro saved and assigned."
+                } else {
+                    "Macro assigned."
+                }
+                .into()
+            }
+            Outcome::AssignmentFailed {
+                macro_saved,
+                problem,
+            } => {
+                self.closing = Closing::Open;
+                let reason = match problem {
+                    AssignmentProblem::Device(problem) => problem_text(&problem),
+                    AssignmentProblem::Validation(reason) => reason,
+                };
+                self.notice = format!(
+                    "{} {reason}",
+                    if macro_saved {
+                        "Macro saved; assignment failed."
+                    } else {
+                        "Macro assignment failed."
+                    }
+                );
+                return Task::none();
+            }
             Outcome::Conflict => {
                 self.closing = Closing::Open;
                 self.notice =
-                    "The observed keymap differs from your edit baseline. Edits are retained."
+                    "The observed feature differs from your edit baseline. Edits are retained."
                         .into();
                 return Task::none();
             }
@@ -200,7 +315,9 @@ impl App {
     fn close(&mut self) -> Task<Message> {
         if self.session.busy() {
             self.closing = Closing::Waiting;
-        } else if self.session.keymap().dirty() {
+        } else if self.session.keymap().dirty()
+            || self.session.macros().is_some_and(|editor| editor.dirty())
+        {
             self.closing = Closing::ConfirmDiscard;
         } else {
             return iced::exit();
@@ -210,7 +327,7 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
-        if self.session.busy() {
+        if self.session.busy() || self.session.catalog_scanning() {
             Subscription::batch([
                 close,
                 iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll),
@@ -226,6 +343,13 @@ impl App {
             && matches!(self.session.connection(), Connection::Connected { .. })
             && self.session.keymap().status() == &Status::Ready;
         let toolbar = row![
+            button("Assignments").on_press(Message::Page(Page::Keys)),
+            button("Macros").on_press_maybe(
+                self.session
+                    .macros()
+                    .is_some()
+                    .then_some(Message::Page(Page::Macros))
+            ),
             button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)),
             button("Save assignments").on_press_maybe(
                 (editable && self.session.keymap().dirty()).then_some(Message::Save)
@@ -246,14 +370,7 @@ impl App {
                 text(&self.session.descriptor().device_name).size(self.style.type_scale.page_title),
                 toolbar,
                 text(status),
-                self.keys
-                    .view(
-                        self.session.descriptor(),
-                        self.session.keymap(),
-                        editable,
-                        &self.style
-                    )
-                    .map(Message::Keys),
+                self.feature_view(editable),
             ]
             .spacing(self.style.spacing.m),
         )
@@ -285,6 +402,45 @@ impl App {
                 .center_y(Fill)
         ]
         .into()
+    }
+
+    fn feature_view(&self, editable: bool) -> Element<'_, Message> {
+        match self.page {
+            Page::Keys => self
+                .keys
+                .view(
+                    self.session.descriptor(),
+                    self.session.keymap(),
+                    editable,
+                    &self.style,
+                )
+                .map(Message::Keys),
+            Page::Macros => match (self.session.macros(), self.session.macro_library()) {
+                (Some(editor), Some(library)) => column![
+                    self.keys
+                        .workspace(
+                            self.session.descriptor(),
+                            self.session.keymap(),
+                            &self.style
+                        )
+                        .map(Message::Keys),
+                    self.macros
+                        .view(
+                            editor,
+                            library,
+                            !self.session.busy(),
+                            self.keys.target(),
+                            self.session.catalog_scanning(),
+                            &self.style
+                        )
+                        .map(Message::Macros),
+                ]
+                .spacing(self.style.spacing.m)
+                .height(Fill)
+                .into(),
+                _ => text("Macros are unavailable for this keyboard.").into(),
+            },
+        }
     }
 }
 
