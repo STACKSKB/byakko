@@ -256,7 +256,7 @@ fn manual_reconnection_retains_unsaved_assignments() {
     settle(&mut app);
     edit(&mut app);
     app.worker = None;
-    app.session.disconnect();
+    app.session.disconnect().unwrap();
     let _ = app.update(Message::Read);
     settle(&mut app);
     assert_eq!(reads.load(Ordering::SeqCst), 2);
@@ -265,4 +265,196 @@ fn manual_reconnection_retains_unsaved_assignments() {
         app.session.keymap().draft().unwrap()["Typing"]["Alpha"],
         Action::Key(5)
     );
+}
+
+fn ready_to_record() -> (App, Arc<AtomicUsize>) {
+    let (mut app, reads) = macro_app(false);
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    let _ = app.update(Message::Macros(macros::Message::Select("Greeting".into())));
+    drain(&mut app);
+    (app, reads)
+}
+
+fn key_event(code: iced::keyboard::key::Code, pressed: bool) -> Event {
+    use iced::keyboard::{Event as KeyEvent, Key, Location, Modifiers, key::Physical};
+    Event::Keyboard(if pressed {
+        KeyEvent::KeyPressed {
+            key: Key::Unidentified,
+            modified_key: Key::Unidentified,
+            physical_key: Physical::Code(code),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: None,
+            repeat: false,
+        }
+    } else {
+        KeyEvent::KeyReleased {
+            key: Key::Unidentified,
+            modified_key: Key::Unidentified,
+            physical_key: Physical::Code(code),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+        }
+    })
+}
+
+#[test]
+fn recording_is_exclusive_and_focus_loss_stages_held_releases() {
+    use byakko_core::model::macros::{Action as MacroAction, Event as MacroEvent};
+    use iced::keyboard::key::Code;
+    let (mut app, reads) = ready_to_record();
+    let before = app.session.macros().unwrap().draft().unwrap().clone();
+    let read_count = reads.load(Ordering::SeqCst);
+    let _ = app.update(Message::Record(recording::Message::Start));
+    assert!(app.session.recording());
+    let at = Instant::now();
+    for (ms, code, pressed) in [
+        (0, Code::KeyA, true),
+        (30, Code::KeyB, true),
+        (90, Code::KeyB, false),
+    ] {
+        let _ = app.update(Message::RecordingInput(
+            key_event(code, pressed),
+            at + Duration::from_millis(ms),
+        ));
+    }
+    for message in [
+        Message::Page(Page::Keys),
+        Message::Read,
+        Message::Save,
+        Message::Macros(macros::Message::Clear),
+        Message::Poll,
+    ] {
+        let _ = app.update(message);
+    }
+    assert_eq!(app.page, Page::Macros);
+    assert!(!app.session.busy());
+    let _ = app.update(Message::RecordingInput(
+        Event::Window(window::Event::Unfocused),
+        at + Duration::from_millis(150),
+    ));
+    assert!(!app.session.recording());
+    let editor = app.session.macros().unwrap();
+    assert!(editor.dirty());
+    let events = &editor.draft().unwrap().events;
+    assert_eq!(&events[..before.events.len()], &before.events);
+    let expected: Vec<_> = [(4, true, 30), (5, true, 60), (5, false, 60), (4, false, 50)]
+        .into_iter()
+        .map(|(usage, pressed, delay_ms)| MacroEvent {
+            action: MacroAction::Key { usage, pressed },
+            delay_ms,
+        })
+        .collect();
+    assert_eq!(&events[before.events.len()..], expected);
+    assert_eq!(reads.load(Ordering::SeqCst), read_count);
+}
+
+#[test]
+fn closing_recording_releases_keys_before_discard_confirmation() {
+    use byakko_core::model::macros::Action as MacroAction;
+    use iced::keyboard::key::Code;
+    let (mut app, _) = ready_to_record();
+    let _ = app.update(Message::Record(recording::Message::Fixed(true)));
+    let _ = app.update(Message::Record(recording::Message::Delay("17".into())));
+    let _ = app.update(Message::Record(recording::Message::Start));
+    let _ = app.update(Message::RecordingInput(
+        key_event(Code::ShiftRight, true),
+        Instant::now(),
+    ));
+    let _ = app.update(Message::Close);
+    assert!(!app.session.recording());
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
+    let draft = app.session.macros().unwrap().draft().unwrap().clone();
+    let last = draft.events.last().unwrap();
+    assert_eq!(
+        last.action,
+        MacroAction::Key {
+            usage: 0xe5,
+            pressed: false
+        }
+    );
+    assert_eq!(last.delay_ms, 17);
+    let _ = app.update(Message::RecordingInput(
+        key_event(Code::KeyB, true),
+        Instant::now(),
+    ));
+    assert_eq!(app.session.macros().unwrap().draft(), Some(&draft));
+}
+
+#[test]
+fn unsupported_recorded_input_stops_and_preserves_accepted_events() {
+    use byakko_core::model::macros::Action as MacroAction;
+    let (mut app, _) = ready_to_record();
+    let _ = app.update(Message::Record(recording::Message::Start));
+    let _ = app.update(Message::RecordingInput(
+        key_event(iced::keyboard::key::Code::KeyA, true),
+        Instant::now(),
+    ));
+    let _ = app.update(Message::RecordingInput(
+        Event::Mouse(iced::mouse::Event::ButtonPressed(
+            iced::mouse::Button::Right,
+        )),
+        Instant::now(),
+    ));
+    assert!(!app.session.recording());
+    assert!(app.notice.starts_with("Recording stopped:"));
+    assert_eq!(
+        app.session
+            .macros()
+            .unwrap()
+            .draft()
+            .unwrap()
+            .events
+            .last()
+            .unwrap()
+            .action,
+        MacroAction::Key {
+            usage: 4,
+            pressed: false
+        }
+    );
+}
+
+#[test]
+fn recording_waits_for_catalog_completion_and_focus_can_cancel_the_request() {
+    use byakko_core::contract::CompletionPayload;
+    for lose_focus in [false, true] {
+        let (mut app, _) = ready_to_record();
+        // Hold a correlated catalog request so its completion timing is deterministic.
+        let catalog = app.session.request_macro_catalog().unwrap();
+        let _ = app.update(Message::Record(recording::Message::Start));
+        assert!(app.recording.pending());
+        assert!(!app.session.recording());
+        if lose_focus {
+            let _ = app.update(Message::RecordingInput(
+                Event::Window(window::Event::Unfocused),
+                Instant::now(),
+            ));
+            assert!(!app.recording.pending());
+        }
+        let _ = app.complete(catalog.map(|_| CompletionPayload::ReadMacroCatalog {
+            result: Err("Cancelled".into()),
+        }));
+        assert!(!app.recording.pending());
+        assert!(!app.session.catalog_scanning());
+        assert_eq!(app.session.recording(), !lose_focus);
+    }
+}
+
+#[test]
+fn recording_preferences_preserve_unsubmitted_macro_fields() {
+    let (mut app, _) = ready_to_record();
+    let _ = app.update(Message::Macros(macros::Message::Repeat("23".into())));
+    let _ = app.update(Message::Record(recording::Message::Fixed(true)));
+    let _ = app.update(Message::Record(recording::Message::Delay("17".into())));
+    assert_eq!(app.macros.repeat, "23");
+    let catalog = app.session.request_macro_catalog().unwrap();
+    let _ =
+        app.complete(catalog.map(
+            |_| byakko_core::contract::CompletionPayload::ReadMacroCatalog {
+                result: Err("Cancelled".into()),
+            },
+        ));
+    assert_eq!(app.macros.repeat, "23");
 }
