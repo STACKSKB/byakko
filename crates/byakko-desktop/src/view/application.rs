@@ -164,8 +164,15 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
         ]
         .spacing(input.style.spacing.m);
         if let Some(program) = program {
-            content =
-                content.push(view::recording::preview(program, input.style).map(Message::Record));
+            content = content.push(
+                view::recording::preview(
+                    program,
+                    input.session.descriptor(),
+                    editor.capabilities(),
+                    input.style,
+                )
+                .map(Message::Record),
+            );
         }
         return content.height(Fill).into();
     }
@@ -212,6 +219,7 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                 view::macros::view(view::macros::View {
                     form: input.macros,
                     editor,
+                    descriptor: input.session.descriptor(),
                     library,
                     names: input.files,
                     idle,

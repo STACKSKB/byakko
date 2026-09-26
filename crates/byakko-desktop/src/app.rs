@@ -500,10 +500,20 @@ impl App {
                 .and_then(|slot| self.session.select_macro(&slot))
                 .and_then(|()| self.session.read_macro()),
             Message::Read => self.session.read_macro(),
-            Message::Save => self.session.save_macro(),
+            Message::Save => self
+                .session
+                .macros()
+                .ok_or_else(|| "Macros are not available".to_owned())
+                .and_then(|editor| self.macros.validate_repeat(editor))
+                .and_then(|()| self.session.save_macro()),
             Message::Assign(binding) => match self.keys.target() {
                 Some((layer, key)) => {
-                    let request = self.session.save_and_assign_macro(layer, key, &binding);
+                    let request = self
+                        .session
+                        .macros()
+                        .ok_or_else(|| "Macros are not available".to_owned())
+                        .and_then(|editor| self.macros.validate_repeat(editor))
+                        .and_then(|()| self.session.save_and_assign_macro(layer, key, &binding));
                     if request.is_ok()
                         && let Some(editor) = self.session.macros()
                     {
@@ -514,21 +524,36 @@ impl App {
                 None => Err("Select a key before assigning a macro".into()),
             },
             Message::Revert => {
-                self.notice = self.session.revert_macro().err().unwrap_or_default();
-                self.macros
-                    .sync(self.session.macros().and_then(|editor| editor.draft()));
+                match self.session.revert_macro() {
+                    Ok(()) => {
+                        self.macros
+                            .sync(self.session.macros().and_then(|editor| editor.draft()));
+                        self.notice.clear();
+                    }
+                    Err(reason) => self.notice = reason,
+                }
                 return Task::none();
             }
             message => {
+                if self.session.busy() {
+                    return Task::none();
+                }
                 let edit = self
                     .session
                     .macros()
                     .ok_or_else(|| "Macros are not available".to_owned())
                     .and_then(|editor| self.macros.update(message, editor));
-                self.notice = edit
-                    .and_then(|edit| edit.map_or(Ok(()), |edit| self.session.edit_macro(edit)))
-                    .err()
-                    .unwrap_or_default();
+                match edit {
+                    Ok(Some(edit)) => {
+                        let result = self.session.edit_macro(edit.clone());
+                        if result.is_ok() {
+                            self.macros.accepted(&edit);
+                        }
+                        self.notice = result.err().unwrap_or_default();
+                    }
+                    Ok(None) => self.notice.clear(),
+                    Err(reason) => self.notice = reason,
+                }
                 return Task::none();
             }
         };
@@ -609,6 +634,18 @@ impl App {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        // Compare only around an explicit read; the editor remains the program owner.
+        let macro_before = match &completion.payload {
+            CompletionPayload::Macro {
+                result: byakko_core::contract::FeatureResult::Read(_),
+                ..
+            } => self
+                .session
+                .macros()
+                .and_then(|editor| editor.draft())
+                .cloned(),
+            _ => None,
+        };
         let feature = match &completion.payload {
             CompletionPayload::Lighting(_) => Some(AutoFeature::Lighting),
             CompletionPayload::Picture(_) => Some(AutoFeature::Picture),
@@ -651,8 +688,10 @@ impl App {
             }
             Outcome::Continue(command) => return self.submit(Ok(command)),
             Outcome::MacroLoaded => {
-                self.macros
-                    .sync(self.session.macros().and_then(|editor| editor.draft()));
+                let draft = self.session.macros().and_then(|editor| editor.draft());
+                if macro_before.as_ref() != draft {
+                    self.macros.sync(draft);
+                }
                 self.notice = "Macro loaded.".into();
             }
             Outcome::MacroSaved => self.notice = "Macro saved and read back.".into(),
