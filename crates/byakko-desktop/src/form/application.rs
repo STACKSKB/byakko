@@ -1,5 +1,5 @@
 //! Window-level intents, navigation and close presentation state.
-use super::{files, keymap, lighting, macros, picture, recording, settings};
+use super::{files, host, keymap, lighting, macros, picture, recording, settings};
 use iced::Event;
 use std::time::Instant;
 #[derive(Clone, Debug)]
@@ -9,6 +9,8 @@ pub enum Message {
     Keys(keymap::Message),
     Macros(macros::Message),
     Lighting(lighting::Message),
+    Host(host::Message),
+    HostFocusLost,
     Picture(picture::Message),
     Settings(settings::Message),
     Record(recording::Message),

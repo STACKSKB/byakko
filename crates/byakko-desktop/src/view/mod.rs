@@ -2,6 +2,7 @@ pub mod application;
 pub mod archive;
 pub mod catalog;
 pub mod files;
+pub mod host;
 pub mod keymap;
 pub mod lighting;
 pub mod macros;

@@ -1,9 +1,11 @@
 //! A bounded finite-command worker owns one immutable selected device.
 use crate::Device;
+mod host;
 use byakko_core::contract::{
     ApplyFailure, Command, CommandPayload, Completion, CompletionPayload, FeatureCommand,
-    FeatureResult, Recovery,
+    FeatureResult, HostEvent, HostStart, HostTicket, Recovery,
 };
+use host::Host;
 use std::{
     panic::{AssertUnwindSafe, catch_unwind},
     path::{Path, PathBuf},
@@ -34,29 +36,37 @@ impl Catalog {
     }
 }
 pub struct Executor {
-    commands: SyncSender<Command>,
+    commands: SyncSender<Request>,
     completions: Receiver<Completion>,
     generation: Arc<AtomicU64>,
     catalog_submitted: AtomicU64,
     catalog_cancelled: Arc<AtomicU64>,
+    host: Arc<Host>,
+}
+
+enum Request {
+    Finite(Box<Command>),
+    Host(Box<HostStart>),
 }
 
 impl Executor {
     pub fn spawn(mut device: impl Device, backup_dir: PathBuf) -> std::io::Result<Self> {
         // One passive scan and one foreground ticket may be queued together.
-        let (commands, requests) = mpsc::sync_channel::<Command>(2);
+        let (commands, requests) = mpsc::sync_channel::<Request>(2);
         let (responses, completions) = mpsc::sync_channel(1);
         let generation = Arc::new(AtomicU64::new(0));
         let active_generation = Arc::clone(&generation);
         let catalog_cancelled = Arc::new(AtomicU64::new(0));
         let worker_cancelled = Arc::clone(&catalog_cancelled);
+        let host = Arc::new(Host::default());
+        let worker_host = Arc::clone(&host);
         std::thread::Builder::new()
             .name("byakko-device".into())
             .spawn(move || {
                 let mut latest = None;
                 let mut catalog: Option<Catalog> = None;
                 loop {
-                    let command = if catalog.is_some() {
+                    let request = if catalog.is_some() {
                         match requests.try_recv() {
                             Ok(command) => Some(command),
                             Err(TryRecvError::Empty) => None,
@@ -68,7 +78,43 @@ impl Executor {
                             Err(_) => break,
                         }
                     };
-                    if let Some(command) = command {
+                    if let Some(Request::Host(start)) = request {
+                        if let Some(scan) = catalog.take() {
+                            let _ =
+                                responses.send(scan.finish(Err(
+                                    "Macro catalog cancelled for host lighting".into(),
+                                )));
+                        }
+                        let token = (start.ticket.generation, start.ticket.operation);
+                        if token.0 == 0
+                            || token.0 != active_generation.load(Ordering::Acquire)
+                            || latest.is_some_and(|previous| token <= previous)
+                        {
+                            worker_host.reject(
+                                start.ticket,
+                                "Stale or duplicate host command",
+                                Recovery::NotAttempted,
+                            );
+                        } else {
+                            latest = Some(token);
+                            worker_host.run(&mut device, *start, &backup_dir, &active_generation);
+                        }
+                        continue;
+                    }
+                    if let Some(Request::Finite(command)) = request {
+                        if worker_host.pending() {
+                            if responses
+                                .send(failure(
+                                    &command,
+                                    "Host lighting owns the device".into(),
+                                    Recovery::NotAttempted,
+                                ))
+                                .is_err()
+                            {
+                                break;
+                            }
+                            continue;
+                        }
                         let token = (command.generation, command.operation);
                         if token.0 == 0
                             || token.0 != active_generation.load(Ordering::Acquire)
@@ -159,26 +205,80 @@ impl Executor {
             generation,
             catalog_submitted: AtomicU64::new(0),
             catalog_cancelled,
+            host,
         })
     }
 
     /// Does not interrupt a transaction already in progress.
     pub fn set_generation(&self, generation: u64) {
         self.generation.store(generation, Ordering::Release);
+        self.host.generation_changed();
     }
 
     pub fn try_submit(&self, command: Command) -> Result<(), Box<Completion>> {
+        if self.host.pending() {
+            return Err(Box::new(failure(
+                &command,
+                "Host lighting owns the device".into(),
+                Recovery::NotAttempted,
+            )));
+        }
         if matches!(command.payload, CommandPayload::ReadMacroCatalog { .. }) {
             self.catalog_submitted
                 .fetch_max(command.operation, Ordering::AcqRel);
         }
-        self.commands.try_send(command).map_err(|error| {
-            let (command, message) = match error {
-                TrySendError::Full(command) => (command, "Device command queue is full"),
-                TrySendError::Disconnected(command) => (command, "Device executor is closed"),
-            };
-            Box::new(failure(&command, message.into(), Recovery::NotAttempted))
-        })
+        self.commands
+            .try_send(Request::Finite(Box::new(command)))
+            .map_err(|error| {
+                let (command, message) = match error {
+                    TrySendError::Full(Request::Finite(command)) => {
+                        (command, "Device command queue is full")
+                    }
+                    TrySendError::Disconnected(Request::Finite(command)) => {
+                        (command, "Device executor is closed")
+                    }
+                    _ => unreachable!("submitted finite request"),
+                };
+                Box::new(failure(&command, message.into(), Recovery::NotAttempted))
+            })
+    }
+
+    // Return the correlated terminal event directly, matching the host completion API.
+    #[allow(clippy::result_large_err)]
+    pub fn start_host(&self, start: HostStart) -> Result<(), HostEvent> {
+        self.host
+            .reserve(start.ticket, self.generation.load(Ordering::Acquire))?;
+        self.cancel_catalog();
+        let ticket = start.ticket;
+        if self
+            .commands
+            .try_send(Request::Host(Box::new(start)))
+            .is_err()
+        {
+            self.host.unreserve();
+            return Err(host::rejected(
+                ticket,
+                "Device executor queue unavailable",
+                Recovery::NotAttempted,
+            ));
+        }
+        Ok(())
+    }
+    pub fn send_host_frame(
+        &self,
+        ticket: HostTicket,
+        frame: crate::HostFrame,
+    ) -> Result<(), String> {
+        if ticket.generation != self.generation.load(Ordering::Acquire) {
+            return Err("Stale host lighting generation".into());
+        }
+        self.host.frame(ticket, frame)
+    }
+    pub fn stop_host(&self, ticket: HostTicket, problem: Option<String>) {
+        self.host.stop(ticket, problem);
+    }
+    pub fn try_receive_host(&self) -> Result<HostEvent, TryRecvError> {
+        self.host.receive()
     }
 
     /// Stop a submitted scan after its current slot and emit a correlated error.
@@ -206,6 +306,7 @@ impl Executor {
 impl Drop for Executor {
     fn drop(&mut self) {
         self.generation.store(0, Ordering::Release);
+        self.host.close();
     }
 }
 /// One dispatcher handles execution, preflight rejection, and panic completion.

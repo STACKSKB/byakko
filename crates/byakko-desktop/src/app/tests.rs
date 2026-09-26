@@ -27,6 +27,22 @@ struct ObservedDevice {
     fail_lighting: bool,
 }
 impl Device for ObservedDevice {
+    fn start_host_lighting(
+        &mut self,
+        mode: byakko_core::model::lighting::HostMode,
+        setting: Option<byakko_core::model::lighting::Setting>,
+        expected: &byakko_core::model::lighting::Snapshot,
+        backup: &Path,
+    ) -> Result<Box<dyn byakko_devices::HostActivity>, ApplyFailure> {
+        self.feature_calls.lock().unwrap().push("host-start");
+        Ok(Box::new(ObservedHost {
+            activity: self
+                .memory
+                .start_host_lighting(mode, setting, expected, backup)?,
+            calls: self.feature_calls.clone(),
+            fail_restore: self.fail_lighting,
+        }))
+    }
     fn capture_archive(&mut self) -> Result<byakko_core::model::archive::NativeArchive, String> {
         self.feature_calls.lock().unwrap().push("capture-archive");
         self.memory.capture_archive()
@@ -105,6 +121,190 @@ impl Device for ObservedDevice {
             });
         }
         self.memory.apply(expected, changes, backup)
+    }
+}
+
+struct ObservedHost {
+    activity: Box<dyn byakko_devices::HostActivity>,
+    calls: Arc<Mutex<Vec<&'static str>>>,
+    fail_restore: bool,
+}
+impl byakko_devices::HostActivity for ObservedHost {
+    fn send_frame(&mut self, frame: byakko_devices::HostFrame) -> Result<(), String> {
+        self.calls.lock().unwrap().push("host-frame");
+        self.activity.send_frame(frame)
+    }
+    fn finish(self: Box<Self>) -> Result<byakko_core::model::lighting::Snapshot, ApplyFailure> {
+        self.calls.lock().unwrap().push("host-finish");
+        let restored = self.activity.finish()?;
+        if self.fail_restore {
+            Err(ApplyFailure {
+                message: "Injected restoration read failure".into(),
+                recovery: Recovery::Unverified,
+            })
+        } else {
+            Ok(restored)
+        }
+    }
+}
+
+fn synthetic_sampler(
+    source: byakko_core::model::lighting::HostSource,
+    _: byakko_devices::screen_sample::ScreenCapture,
+) -> Result<crate::controller::sampler::Sampler, String> {
+    crate::controller::sampler::Sampler::spawn(Duration::from_millis(10), move || {
+        Ok(move || {
+            Ok(match source {
+                byakko_core::model::lighting::HostSource::ScreenAverage => {
+                    byakko_devices::HostFrame::Rgb([12, 34, 56])
+                }
+                byakko_core::model::lighting::HostSource::PlaybackAudio { bands } => {
+                    byakko_devices::HostFrame::Bands(vec![0; usize::from(bands)])
+                }
+            })
+        })
+    })
+}
+
+fn poll_host_until(app: &mut App, predicate: impl Fn(&App) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !predicate(app) {
+        assert!(Instant::now() < deadline, "host timeout: {}", app.notice);
+        let _ = app.update(Message::Poll(Instant::now()));
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn host_messages_prepare_stream_restore_on_focus_loss_and_preserve_other_drafts() {
+    let (mut app, calls) = feature_app(false);
+    app.host = Host::new(synthetic_sampler);
+    edit(&mut app);
+    let keymap = app.session.keymap().draft().cloned();
+    let lighting = app.session.lighting().unwrap().baseline().cloned();
+    let picture = app.session.picture().unwrap().baseline().cloned();
+    let _ = app.update(Message::Host(host::Message::Mode("screen-average".into())));
+    let _ = app.update(Message::Host(host::Message::Start));
+    assert!(app.host.preparing());
+    poll_host_until(&mut app, |app| app.session.host().active());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !calls.lock().unwrap().contains(&"host-frame") {
+        assert!(Instant::now() < deadline);
+        let _ = app.update(Message::Poll(Instant::now()));
+        std::thread::yield_now();
+    }
+    let _ = app.update(Message::Read);
+    let _ = app.update(Message::Macros(macros::Message::Clear));
+    assert!(app.session.host().active());
+    let _ = app.update(Message::HostFocusLost);
+    poll_host_until(&mut app, |app| !app.host.busy());
+    assert!(app.session.host().is_idle());
+    assert_eq!(app.session.keymap().draft(), keymap.as_ref());
+    assert_eq!(
+        app.session.lighting().unwrap().baseline(),
+        lighting.as_ref()
+    );
+    assert_eq!(app.session.picture().unwrap().baseline(), picture.as_ref());
+    let calls = calls.lock().unwrap();
+    assert_eq!(
+        calls.iter().filter(|call| **call == "host-start").count(),
+        1
+    );
+    assert_eq!(
+        calls.iter().filter(|call| **call == "host-finish").count(),
+        1
+    );
+    assert!(
+        calls
+            .iter()
+            .all(|call| matches!(*call, "host-start" | "host-frame" | "host-finish"))
+    );
+}
+
+#[test]
+fn host_preparation_failure_and_cancellation_never_start_the_device() {
+    for fail in [false, true] {
+        let (mut app, calls) = feature_app(false);
+        app.host = if fail {
+            Host::new(|_, _| {
+                crate::controller::sampler::Sampler::spawn(Duration::from_secs(1), || {
+                    Err::<fn() -> Result<byakko_devices::HostFrame, String>, _>(
+                        "Injected sampler preparation failure".into(),
+                    )
+                })
+            })
+        } else {
+            Host::new(synthetic_sampler)
+        };
+        let _ = app.update(Message::Host(host::Message::Mode("screen-average".into())));
+        let _ = app.update(Message::Host(host::Message::Start));
+        if fail {
+            poll_host_until(&mut app, |app| !app.host.busy());
+            assert!(app.notice.contains("preparation failure"));
+        } else {
+            let _ = app.update(Message::Host(host::Message::Stop));
+            for _ in 0..5 {
+                let _ = app.update(Message::Poll(Instant::now()));
+            }
+        }
+        assert!(!app.host.busy());
+        assert!(app.session.host().is_idle());
+        assert!(calls.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn host_sampler_failure_restores_lighting_and_retains_the_error() {
+    let (mut app, calls) = feature_app(false);
+    app.host = Host::new(|_, _| {
+        crate::controller::sampler::Sampler::spawn(Duration::from_millis(1), || {
+            Ok(|| Err("Injected capture failure".into()))
+        })
+    });
+    let lighting = app.session.lighting().unwrap().baseline().cloned();
+    let _ = app.update(Message::Host(host::Message::Mode("screen-average".into())));
+    let _ = app.update(Message::Host(host::Message::Start));
+    poll_host_until(&mut app, |app| !app.host.busy());
+    assert!(app.notice.contains("Injected capture failure"));
+    assert!(app.notice.contains("Verified"));
+    assert_eq!(app.closing, Closing::Open);
+    assert_eq!(app.session.lighting().unwrap().status(), &Status::Ready);
+    assert_eq!(
+        app.session.lighting().unwrap().baseline(),
+        lighting.as_ref()
+    );
+    assert_eq!(*calls.lock().unwrap(), ["host-start", "host-finish"]);
+}
+
+#[test]
+fn host_close_waits_for_restoration_and_reopens_on_unknown_restore() {
+    for fail_restore in [false, true] {
+        let (mut app, calls) = feature_app(fail_restore);
+        app.host = Host::new(synthetic_sampler);
+        edit(&mut app);
+        let _ = app.update(Message::Host(host::Message::Mode("screen-average".into())));
+        let _ = app.update(Message::Host(host::Message::Start));
+        poll_host_until(&mut app, |app| !app.session.host().is_idle());
+        let _ = app.update(Message::Close);
+        assert_eq!(app.closing, Closing::Waiting);
+        poll_host_until(&mut app, |app| !app.host.busy());
+        assert_eq!(
+            calls
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|call| **call == "host-finish")
+                .count(),
+            1
+        );
+        assert!(app.session.keymap().dirty());
+        if fail_restore {
+            assert_eq!(app.closing, Closing::Open);
+            assert!(app.session.requires_manual_read());
+            assert!(app.notice.contains("restoration read failure"));
+        } else {
+            assert_eq!(app.closing, Closing::ConfirmDiscard);
+        }
     }
 }
 

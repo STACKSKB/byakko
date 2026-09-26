@@ -5,10 +5,11 @@ use crate::{
     controller::connection::{Attach, Connection as Link, RefreshStep},
     controller::discovery::Discovery,
     controller::files::{Accepted as FileAccepted, Files},
+    controller::host::{Controller as Host, Outcome as HostOutcome},
     controller::recording::Controller as Recording,
     form::{
         application::{Closing, Message, Page},
-        catalog, files, keymap, lighting, macros, picture, recording, settings,
+        catalog, files, host, keymap, lighting, macros, picture, recording, settings,
     },
     input, view,
     widget::panels::UiStyle,
@@ -31,6 +32,8 @@ struct App {
     macros: macros::Form,
     recording: Recording,
     lighting: lighting::Form,
+    host: Host,
+    host_form: host::Form,
     picture: picture::Form,
     settings: settings::Form,
     autosave: Autosave,
@@ -85,6 +88,8 @@ impl App {
             macros: macros::Form::default(),
             recording: Recording::default(),
             lighting: lighting::Form::default(),
+            host: Host::default(),
+            host_form: host::Form::default(),
             picture: picture::Form::default(),
             settings: settings::Form::default(),
             autosave: Autosave::default(),
@@ -139,7 +144,25 @@ impl App {
         {
             return Task::none();
         }
+        if (self.host.busy() || !self.session.host().is_idle())
+            && !matches!(
+                message,
+                Message::Host(host::Message::Stop | host::Message::Displays(_))
+                    | Message::HostFocusLost
+                    | Message::Poll(_)
+                    | Message::Close
+            )
+        {
+            return Task::none();
+        }
         match message {
+            Message::Host(message) => return self.update_host(message),
+            Message::HostFocusLost => {
+                let outcome = self
+                    .host
+                    .stop(&mut self.session, self.link.executor(), None);
+                self.host_notice(outcome);
+            }
             Message::Files(message) => return self.update_files(message),
             Message::FileComplete(completion) => return self.complete_file(completion),
             Message::Record(message) => {
@@ -232,6 +255,7 @@ impl App {
 
     fn load_page(&mut self) -> Task<Message> {
         if self.session.busy()
+            || self.host.busy()
             || self.files.busy()
             || !matches!(self.session.connection(), Connection::Connected { .. })
         {
@@ -259,6 +283,7 @@ impl App {
 
     fn flush_saves(&mut self, now: Instant, flush: bool) -> Task<Message> {
         if self.session.busy()
+            || self.host.busy()
             || self.files.busy()
             || self.session.recording()
             || self.recording.pending()
@@ -480,6 +505,85 @@ impl App {
         self.submit(request)
     }
 
+    fn host_notice(&mut self, outcome: HostOutcome) {
+        match outcome {
+            HostOutcome::None => {}
+            HostOutcome::Notice(notice) => self.notice = notice,
+            HostOutcome::Finished => {
+                self.notice = "Onboard lighting restored and read back.".into()
+            }
+            HostOutcome::Failed(reason) => {
+                self.notice = reason;
+                self.closing = Closing::Open;
+            }
+        }
+    }
+
+    fn update_host(&mut self, message: host::Message) -> Task<Message> {
+        match message {
+            host::Message::Start => {
+                if self.autosave.pending() || self.recording.pending() {
+                    self.notice = "Finish the current edits before starting host lighting.".into();
+                    return Task::none();
+                }
+                let result = self
+                    .link
+                    .executor()
+                    .ok_or("Read the keyboard before starting host lighting".to_owned())
+                    .and_then(|worker| self.host.start(&self.host_form, &mut self.session, worker));
+                match result {
+                    Ok(()) => {
+                        self.keys.catalog.input = catalog::InputMode::Browse;
+                        self.link.invalidate_discovery();
+                        self.page = Page::Lighting;
+                        self.notice = "Preparing host source…".into();
+                    }
+                    Err(reason) => self.notice = reason,
+                }
+            }
+            host::Message::Stop => {
+                let outcome = self
+                    .host
+                    .stop(&mut self.session, self.link.executor(), None);
+                self.host_notice(outcome);
+            }
+            host::Message::RefreshDisplays => {
+                if matches!(self.host_form.displays, host::Displays::Loading) {
+                    return Task::none();
+                }
+                self.host_form.displays = host::Displays::Loading;
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                if let Err(error) = std::thread::Builder::new()
+                    .name("byakko-displays".into())
+                    .spawn(move || {
+                        let _ = sender.send(byakko_devices::screen_sample::displays());
+                    })
+                {
+                    self.host_form.displays = host::Displays::Failed(error.to_string());
+                    return Task::none();
+                }
+                return Task::perform(
+                    async move {
+                        receiver
+                            .await
+                            .unwrap_or_else(|_| Err("Display discovery stopped".into()))
+                    },
+                    |result| Message::Host(host::Message::Displays(result)),
+                );
+            }
+            message => {
+                if let Some(editor) = self.session.lighting() {
+                    self.notice = self
+                        .host_form
+                        .update(message, editor.capabilities())
+                        .err()
+                        .unwrap_or_default();
+                }
+            }
+        }
+        Task::none()
+    }
+
     fn update_macro(&mut self, message: macros::Message) -> Task<Message> {
         use macros::Message;
         let request = match message {
@@ -561,7 +665,11 @@ impl App {
     }
 
     fn scan(&mut self) -> Task<Message> {
-        if self.session.busy() || self.session.catalog_scanning() || self.autosave.pending() {
+        if self.host.busy()
+            || self.session.busy()
+            || self.session.catalog_scanning()
+            || self.autosave.pending()
+        {
             return Task::none();
         }
         let request = self.link.scan(&mut self.session);
@@ -609,6 +717,12 @@ impl App {
     fn poll(&mut self) -> Task<Message> {
         if self.session.recording() {
             return Task::none();
+        }
+        let outcome = self.host.poll(&mut self.session, self.link.executor());
+        let finished = matches!(outcome, HostOutcome::Finished);
+        self.host_notice(outcome);
+        if finished && self.closing == Closing::Waiting {
+            return self.close();
         }
         let Some(worker) = self.link.executor() else {
             return Task::none();
@@ -787,6 +901,16 @@ impl App {
     fn close(&mut self) -> Task<Message> {
         self.keys.catalog.input = catalog::InputMode::Browse;
         self.link.invalidate_discovery();
+        if self.host.busy() || !self.session.host().is_idle() {
+            let outcome = self
+                .host
+                .stop(&mut self.session, self.link.executor(), None);
+            self.host_notice(outcome);
+            if self.host.busy() || !self.session.host().is_idle() {
+                self.closing = Closing::Waiting;
+                return Task::none();
+            }
+        }
         if self.session.recording() || self.recording.pending() {
             match self.recording.finish(&mut self.session, Instant::now()) {
                 Ok(notice) => {
@@ -822,12 +946,19 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         let mut subscriptions = vec![close];
+        if self.host.busy() {
+            subscriptions.push(iced::event::listen_with(|event, _, _| {
+                matches!(event, iced::Event::Window(window::Event::Unfocused))
+                    .then_some(Message::HostFocusLost)
+            }));
+        }
         if self.page == Page::Keys
             && self.keys.catalog.input == catalog::InputMode::Capture
             && !self.session.busy()
             && !self.files.busy()
             && !self.session.recording()
             && !self.recording.pending()
+            && !self.host.busy()
         {
             subscriptions.push(iced::event::listen_with(|event, _, _| {
                 input::catalog::capture(event)
@@ -841,7 +972,10 @@ impl App {
             }));
         }
         if !self.session.recording()
-            && (self.session.busy() || self.session.catalog_scanning() || self.autosave.pending())
+            && (self.host.busy()
+                || self.session.busy()
+                || self.session.catalog_scanning()
+                || self.autosave.pending())
         {
             subscriptions.push(iced::time::every(Duration::from_millis(25)).map(Message::Poll));
         }
@@ -853,6 +987,7 @@ impl App {
             && !self.session.catalog_scanning()
             && !self.files.busy()
             && !self.autosave.pending()
+            && !self.host.busy()
         {
             let cadence = if self.link.awaiting_discovery() {
                 Duration::from_millis(100)
@@ -871,6 +1006,8 @@ impl App {
             keys: &self.keys,
             macros: &self.macros,
             lighting: &self.lighting,
+            host: &self.host_form,
+            host_preparing: self.host.preparing(),
             picture: &self.picture,
             settings: &self.settings,
             files: &self.files.form,

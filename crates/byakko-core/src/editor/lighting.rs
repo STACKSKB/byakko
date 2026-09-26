@@ -62,6 +62,29 @@ impl Feature for LightingRules {
     }
 }
 impl Editor<LightingRules> {
+    pub(crate) fn accept_host_restoration(
+        &mut self,
+        snapshot: Snapshot,
+    ) -> Result<(), crate::contract::ApplyFailure> {
+        use crate::contract::{ApplyFailure, Recovery};
+        self.rules
+            .validate(&snapshot, Reception::Read)
+            .map_err(|message| ApplyFailure {
+                message,
+                recovery: Recovery::Unverified,
+            })?;
+        if self
+            .baseline()
+            .is_none_or(|baseline| !LightingRules::same_baseline(baseline, &snapshot))
+        {
+            return Err(ApplyFailure {
+                message: "Host lighting restoration differs from its original baseline".into(),
+                recovery: Recovery::Failed,
+            });
+        }
+        self.accept_read(Ok(snapshot));
+        Ok(())
+    }
     pub fn capabilities(&self) -> &Capabilities {
         &self.rules.capabilities
     }
@@ -174,6 +197,7 @@ mod tests {
                 id: "screen".into(),
                 label: "Screen".into(),
                 source: HostSource::ScreenAverage,
+                requires_enabled_setting: None,
                 parameters: None,
             }],
         };
