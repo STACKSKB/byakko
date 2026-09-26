@@ -7,7 +7,8 @@ use byakko_core::{
     model::{
         archive,
         keymap::{
-            Action, ActionCategory, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State,
+            Action, ActionCategory, ActionChoice, Change, Descriptor, Layer, PhysicalKey,
+            ShortcutCapabilities, State, UsageChoice,
         },
         lighting, macros, picture, settings,
     },
@@ -611,18 +612,43 @@ fn demo_descriptor() -> Descriptor {
             })
             .collect(),
         actions: [
-            ("A", Action::Key(4)),
-            ("B", Action::Key(5)),
-            ("Disabled", Action::Disabled),
+            ("A", Action::Key(4), ActionCategory::Alphanumeric),
+            ("B", Action::Key(5), ActionCategory::Alphanumeric),
+            ("Disabled", Action::Disabled, ActionCategory::Other),
+            ("Numpad 9", Action::Key(0x61), ActionCategory::Numpad),
+            (
+                "Calculator",
+                Action::Named {
+                    id: "calculator".into(),
+                },
+                ActionCategory::System,
+            ),
         ]
         .into_iter()
-        .map(|(label, action)| ActionChoice {
+        .map(|(label, action, category)| ActionChoice {
             label: label.into(),
             action,
-            category: ActionCategory::Alphanumeric,
+            category,
         })
         .collect(),
-        shortcuts: None,
+        shortcuts: Some(ShortcutCapabilities {
+            modifiers: [("Left Ctrl", 224), ("Left Shift", 225), ("Right Ctrl", 228)]
+                .into_iter()
+                .map(|(label, usage)| UsageChoice {
+                    label: label.into(),
+                    usage,
+                })
+                .collect(),
+            keys: [("A", 4), ("B", 5)]
+                .into_iter()
+                .map(|(label, usage)| UsageChoice {
+                    label: label.into(),
+                    usage,
+                })
+                .collect(),
+            min_modifiers: 1,
+            max_modifiers: 2,
+        }),
     }
 }
 
@@ -827,6 +853,57 @@ pub fn demo() -> Result<MemoryDevice, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn demo_shortcut_uses_cached_baseline_and_rejects_invalid_assignments() {
+        use super::*;
+        let mut device = demo().unwrap();
+        let caps = device.descriptor.shortcuts.as_ref().unwrap();
+        let shortcut = caps.compose(&[224, 225], 4).unwrap();
+        assert!(caps.compose(&[226], 4).is_err());
+        let baseline = device.read().unwrap();
+        for (key, action) in [
+            (
+                "Alpha",
+                Action::Shortcut {
+                    modifiers: vec![226],
+                    key: 4,
+                },
+            ),
+            ("Fixed", shortcut.clone()),
+        ] {
+            let change = Change {
+                layer: "Typing".into(),
+                key: key.into(),
+                action,
+            };
+            assert!(validation::keymap::validate_edit(&device.descriptor, &change).is_err());
+            if key != "Fixed" {
+                continue;
+            }
+            assert!(matches!(
+                device.apply(&baseline, &[change], Path::new("ignored")),
+                Err(ApplyFailure {
+                    recovery: Recovery::NotAttempted,
+                    ..
+                })
+            ));
+        }
+        let saved = device
+            .apply(
+                &baseline,
+                &[Change {
+                    layer: "Typing".into(),
+                    key: "Alpha".into(),
+                    action: shortcut.clone(),
+                }],
+                Path::new("ignored"),
+            )
+            .unwrap();
+        assert_eq!(saved.bindings["Typing"]["Alpha"], shortcut);
+        assert_eq!(device.state, saved);
+        assert_ne!(saved.revision, baseline.revision);
+    }
+
     use super::*;
     use byakko_core::model::keymap::{Action, Layer, PhysicalKey};
     use std::collections::BTreeMap;
