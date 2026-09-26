@@ -1,10 +1,10 @@
-pub mod archive;
+//! Portable feature values, shared editing, and correlated effects.
 pub mod contract;
-mod draft;
-pub mod keymap;
-pub mod lighting;
-pub mod macros;
-pub mod picture;
+pub mod editor;
+pub mod library;
+pub mod model;
+pub mod projection;
+pub mod recorder;
 pub mod session;
-pub mod settings;
-pub use keymap::*;
+pub mod validation;
+pub mod workflow;

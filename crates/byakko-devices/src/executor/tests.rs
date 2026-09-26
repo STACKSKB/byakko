@@ -1,5 +1,5 @@
 use super::*;
-use byakko_core::{Change, State};
+use byakko_core::model::keymap::{Change, State};
 use std::{collections::BTreeMap, sync::atomic::AtomicUsize};
 
 struct Probe {
@@ -179,7 +179,7 @@ impl Device for CountedMemory {
 #[test]
 fn public_session_save_delivers_one_apply_without_an_extra_read_command() {
     use byakko_core::{
-        Action,
+        model::keymap::Action,
         session::{Outcome, Session},
     };
     let device = crate::memory::demo().unwrap();
@@ -244,18 +244,20 @@ impl Device for CatalogProbe {
             recovery: Recovery::Unverified,
         })
     }
-    fn read_macro(&mut self, slot: &str) -> Result<byakko_core::macros::Snapshot, String> {
+    fn read_macro(&mut self, slot: &str) -> Result<byakko_core::model::macros::Snapshot, String> {
         self.reads.fetch_add(1, Ordering::SeqCst);
         self.entered.send(slot.into()).unwrap();
         self.release.recv().unwrap();
-        Ok(byakko_core::macros::Snapshot {
+        Ok(byakko_core::model::macros::Snapshot {
             backend_id: "probe".into(),
             slot: slot.into(),
             revision: vec![1],
-            content: byakko_core::macros::Content::Editable(byakko_core::macros::Program {
-                repeat_count: 1,
-                events: vec![],
-            }),
+            content: byakko_core::model::macros::Content::Editable(
+                byakko_core::model::macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            ),
         })
     }
 }

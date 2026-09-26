@@ -1,10 +1,10 @@
 //! Synchronous client of the same pure session used by Iced.
 use byakko_core::{
-    Change, State,
     contract::Command,
-    keymap::{Status, validate_edit},
+    editor::Status,
+    model::keymap::{Change, State},
     session::{Connection, Outcome, Session},
-    validate_state,
+    validation::keymap::{validate_edit, validate_state},
 };
 use byakko_devices::Executor;
 use std::time::{Duration, Instant};
@@ -64,7 +64,7 @@ pub fn read_macro(
     executor: &Executor,
     slot: &str,
     timeout: Duration,
-) -> Result<byakko_core::macros::Snapshot, String> {
+) -> Result<byakko_core::model::macros::Snapshot, String> {
     if matches!(session.connection(), Connection::Disconnected) {
         executor.set_generation(session.connect()?);
     }
@@ -118,8 +118,8 @@ pub fn list_macros(
 pub fn apply_macro(
     session: &mut Session,
     executor: &Executor,
-    target: &byakko_core::macros::Snapshot,
-) -> Result<byakko_core::macros::Snapshot, String> {
+    target: &byakko_core::model::macros::Snapshot,
+) -> Result<byakko_core::model::macros::Snapshot, String> {
     if session.macros().is_some_and(|editor| editor.dirty()) {
         return Err("Save or revert staged macro edits before applying a macro file".into());
     }
@@ -231,11 +231,11 @@ pub fn apply_keymap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use byakko_core::Action;
+    use byakko_core::model::keymap::Action;
 
     #[test]
     fn macro_file_and_assignment_share_session_transitions() {
-        use byakko_core::macros::{Content, Edit};
+        use byakko_core::model::macros::{Content, Edit};
         let device = byakko_devices::memory::demo().unwrap();
         let mut session = Session::new(device.descriptor().clone())
             .unwrap()

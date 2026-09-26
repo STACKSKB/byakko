@@ -1,10 +1,17 @@
 //! Deterministic device for exercising the same executor without hardware.
 
 use crate::Device;
+use byakko_core::validation;
 use byakko_core::{
-    Action, ActionCategory, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State, archive,
     contract::{ApplyFailure, Recovery},
-    lighting, macros, picture, settings, validate_changes, validate_state,
+    model::{
+        archive,
+        keymap::{
+            Action, ActionCategory, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State,
+        },
+        lighting, macros, picture, settings,
+    },
+    validation::keymap::{validate_changes, validate_state},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -84,7 +91,7 @@ impl MemoryDevice {
         if self.macros.is_some() {
             return Err("Memory device macros are already configured".into());
         }
-        macros::validate_capabilities(&capabilities)?;
+        validation::macros::validate_capabilities(&capabilities)?;
         if capabilities.backend_id != self.descriptor.backend_id {
             return Err("Macro capabilities belong to another backend".into());
         }
@@ -101,7 +108,7 @@ impl MemoryDevice {
                 return Err("Macro snapshot backend or slot is unsupported".into());
             }
             if let macros::Content::Editable(program) = &snapshot.content {
-                macros::validate_program(&capabilities, program)?;
+                validation::macros::validate_program(&capabilities, program)?;
             }
             let slot = StoredMacro {
                 initial_revision: snapshot.revision.clone(),
@@ -134,7 +141,7 @@ impl MemoryDevice {
         if self.lighting.is_some() {
             return Err("Memory device lighting is already configured".into());
         }
-        lighting::validate_snapshot(&capabilities, &snapshot)?;
+        validation::lighting::validate_snapshot(&capabilities, &snapshot)?;
         if capabilities.backend_id != self.descriptor.backend_id {
             return Err("Lighting capabilities belong to another backend".into());
         }
@@ -163,8 +170,8 @@ impl MemoryDevice {
         if self.picture.is_some() {
             return Err("Memory device picture is already configured".into());
         }
-        picture::validate_capabilities(&capabilities, &self.descriptor)?;
-        picture::validate_snapshot(&capabilities, &snapshot)?;
+        validation::picture::validate_capabilities(&capabilities, &self.descriptor)?;
+        validation::picture::validate_snapshot(&capabilities, &snapshot)?;
         self.picture = Some(StoredPicture {
             capabilities,
             initial_revision: snapshot.revision.clone(),
@@ -186,13 +193,13 @@ impl MemoryDevice {
         if self.settings.is_some() {
             return Err("Memory device settings are already configured".into());
         }
-        settings::validate_capabilities(&capabilities)?;
+        validation::settings::validate_capabilities(&capabilities)?;
         if capabilities.backend_id != self.descriptor.backend_id
             || snapshot.backend_id != capabilities.backend_id
         {
             return Err("Settings capabilities or snapshot belong to another backend".into());
         }
-        settings::validate_snapshot(&capabilities, &snapshot)?;
+        validation::settings::validate_snapshot(&capabilities, &snapshot)?;
         self.settings = Some(StoredSettings {
             capabilities,
             initial_revision: snapshot.revision.clone(),
@@ -214,11 +221,11 @@ impl MemoryDevice {
         if self.archive.is_some() {
             return Err("Memory device archive is already configured".into());
         }
-        archive::validate_capabilities(&capabilities)?;
+        validation::archive::validate_capabilities(&capabilities)?;
         if capabilities.backend_id != self.descriptor.backend_id {
             return Err("Archive capabilities belong to another backend".into());
         }
-        archive::validate_archive(&capabilities, &snapshot)?;
+        validation::archive::validate_archive(&capabilities, &snapshot)?;
         self.archive = Some(StoredArchive {
             capabilities,
             snapshot,
@@ -305,7 +312,7 @@ impl Device for MemoryDevice {
         if !matches!(stored.snapshot.content, macros::Content::Editable(_)) {
             return Err(reject("Opaque macro cannot be edited".into()));
         }
-        macros::validate_program(&storage.capabilities, desired).map_err(reject)?;
+        validation::macros::validate_program(&storage.capabilities, desired).map_err(reject)?;
         if !storage
             .capabilities
             .editable_repeat_counts
@@ -353,7 +360,7 @@ impl Device for MemoryDevice {
         if matches!(stored.snapshot.content, lighting::Content::Opaque { .. }) {
             return Err(reject("Opaque lighting cannot be edited".into()));
         }
-        lighting::validate_setting(&stored.capabilities, desired).map_err(reject)?;
+        validation::lighting::validate_setting(&stored.capabilities, desired).map_err(reject)?;
         let next_number = stored
             .revision_number
             .checked_add(1)
@@ -399,7 +406,7 @@ impl Device for MemoryDevice {
             content: next_content,
             ..stored.snapshot.clone()
         };
-        picture::validate_snapshot(&stored.capabilities, &candidate).map_err(reject)?;
+        validation::picture::validate_snapshot(&stored.capabilities, &candidate).map_err(reject)?;
         let next_number = stored
             .revision_number
             .checked_add(1)
@@ -440,7 +447,7 @@ impl Device for MemoryDevice {
         let settings::Content::Editable(current) = content else {
             return Err(reject("Opaque settings cannot be edited".into()));
         };
-        settings::validate_value(&stored.capabilities, edit).map_err(reject)?;
+        validation::settings::validate_value(&stored.capabilities, edit).map_err(reject)?;
         if !current.contains_key(&edit.id) {
             return Err(reject("Unknown settings field".into()));
         }
@@ -455,7 +462,7 @@ impl Device for MemoryDevice {
         values.insert(edit.id.clone(), edit.value.clone());
         next.revision = stored.initial_revision.clone();
         next.revision.extend_from_slice(&next_number.to_be_bytes());
-        settings::validate_snapshot(&stored.capabilities, &next).map_err(reject)?;
+        validation::settings::validate_snapshot(&stored.capabilities, &next).map_err(reject)?;
         stored.snapshot = next.clone();
         stored.revision_number = next_number;
         Ok(next)
@@ -476,7 +483,7 @@ impl Device for MemoryDevice {
             .archive
             .as_ref()
             .ok_or("Native archive operations are unsupported by this device")?;
-        archive::validate_archive(&stored.capabilities, target)?;
+        validation::archive::validate_archive(&stored.capabilities, target)?;
         let changes = if target == &stored.snapshot {
             Vec::new()
         } else {
@@ -506,8 +513,8 @@ impl Device for MemoryDevice {
         let stored = self.archive.as_mut().ok_or_else(|| {
             reject("Native archive operations are unsupported by this device".into())
         })?;
-        archive::validate_archive(&stored.capabilities, expected).map_err(reject)?;
-        archive::validate_archive(&stored.capabilities, target).map_err(reject)?;
+        validation::archive::validate_archive(&stored.capabilities, expected).map_err(reject)?;
+        validation::archive::validate_archive(&stored.capabilities, target).map_err(reject)?;
         if &stored.snapshot != expected {
             return Err(reject("Stale expected native archive".into()));
         }
@@ -665,7 +672,7 @@ pub fn demo() -> Result<MemoryDevice, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use byakko_core::{Action, Layer, PhysicalKey};
+    use byakko_core::model::keymap::{Action, Layer, PhysicalKey};
     use std::collections::BTreeMap;
 
     #[test]
@@ -1061,7 +1068,7 @@ mod tests {
             color: Some(lighting::Color::Rgb([1, 2, 3])),
         };
         let initial = lighting::Snapshot {
-            evidence: byakko_core::SnapshotEvidence::Readback,
+            evidence: byakko_core::model::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![9],
             content: lighting::Content::Editable(setting.clone()),
@@ -1121,7 +1128,7 @@ mod tests {
             lighting_effect: None,
         };
         let initial = picture::Snapshot {
-            evidence: byakko_core::SnapshotEvidence::Readback,
+            evidence: byakko_core::model::SnapshotEvidence::Readback,
             backend_id: "memory".into(),
             revision: vec![0x12, 0x34],
             context_revision: Vec::new(),

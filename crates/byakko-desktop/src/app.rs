@@ -1,9 +1,14 @@
 //! Window lifecycle and effect delivery. Feature policy stays in core.
-use crate::{keymap, macros, panels::UiStyle};
+use crate::{
+    form::{keymap, macros},
+    view,
+    widget::panels::UiStyle,
+};
 use byakko_core::{
     contract::{Command, Completion, Problem},
-    keymap::Status,
-    session::{AssignmentProblem, Connection, Outcome, Session},
+    editor::Status,
+    session::{Connection, Outcome, Session},
+    workflow::macro_assignment::AssignmentProblem,
 };
 use byakko_devices::Executor;
 use iced::{
@@ -149,8 +154,7 @@ impl App {
         let request = match message {
             Message::Select(slot)
                 if self.session.macros().is_some_and(|editor| {
-                    editor.slot() == slot
-                        && editor.status() == &byakko_core::macros::editor::Status::Ready
+                    editor.slot() == slot && editor.status() == &Status::Ready
                 }) =>
             {
                 return Task::none();
@@ -406,34 +410,33 @@ impl App {
 
     fn feature_view(&self, editable: bool) -> Element<'_, Message> {
         match self.page {
-            Page::Keys => self
-                .keys
-                .view(
-                    self.session.descriptor(),
-                    self.session.keymap(),
-                    editable,
-                    &self.style,
-                )
-                .map(Message::Keys),
+            Page::Keys => view::keymap::view(
+                &self.keys,
+                self.session.descriptor(),
+                self.session.keymap(),
+                editable,
+                &self.style,
+            )
+            .map(Message::Keys),
             Page::Macros => match (self.session.macros(), self.session.macro_library()) {
                 (Some(editor), Some(library)) => column![
-                    self.keys
-                        .workspace(
-                            self.session.descriptor(),
-                            self.session.keymap(),
-                            &self.style
-                        )
-                        .map(Message::Keys),
-                    self.macros
-                        .view(
-                            editor,
-                            library,
-                            !self.session.busy(),
-                            self.keys.target(),
-                            self.session.catalog_scanning(),
-                            &self.style
-                        )
-                        .map(Message::Macros),
+                    view::keymap::workspace(
+                        &self.keys,
+                        self.session.descriptor(),
+                        self.session.keymap(),
+                        &self.style
+                    )
+                    .map(Message::Keys),
+                    view::macros::view(
+                        &self.macros,
+                        editor,
+                        library,
+                        !self.session.busy(),
+                        self.keys.target(),
+                        self.session.catalog_scanning(),
+                        &self.style
+                    )
+                    .map(Message::Macros),
                 ]
                 .spacing(self.style.spacing.m)
                 .height(Fill)

@@ -1,8 +1,9 @@
 //! Device-neutral projection and one-field apply for Nia87 scalar settings.
 use super::{adapter, device, settings as native};
+use byakko_core::validation;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
-    settings::{self, Capabilities, Content, Edit, Field, Kind, Snapshot, Value},
+    model::settings::{Capabilities, Content, Edit, Field, Kind, Snapshot, Value},
 };
 use std::path::Path;
 
@@ -207,7 +208,7 @@ pub(super) fn apply_with(
     if !matches!(expected.content, Content::Editable(_)) {
         return Err(not_attempted("Opaque Nia87 settings are read-only".into()));
     }
-    settings::validate_value(&capabilities(), edit).map_err(not_attempted)?;
+    validation::settings::validate_value(&capabilities(), edit).map_err(not_attempted)?;
     let setting = native_setting(&expected_native, edit).map_err(not_attempted)?;
     let actual = access.apply_setting_detailed(&expected_native, setting, backup)?;
     let snapshot = project(&actual);

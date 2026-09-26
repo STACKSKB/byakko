@@ -1,4 +1,4 @@
-use crate::{Change, State};
+use crate::model::keymap::{Change, State};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 /// Correlation belongs to the transport contract, independently of its payload.
@@ -51,16 +51,18 @@ impl<S> FeatureResult<S> {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum CommandPayload {
     Keymap(FeatureCommand<State, Vec<Change>>),
-    Macro(FeatureCommand<crate::macros::Snapshot, crate::macros::Program, String>),
-    Lighting(FeatureCommand<crate::lighting::Snapshot, crate::lighting::Setting>),
-    Picture(FeatureCommand<crate::picture::Snapshot, BTreeMap<String, [u8; 3]>>),
-    Settings(FeatureCommand<crate::settings::Snapshot, crate::settings::Edit>),
-    Archive(FeatureCommand<crate::archive::NativeArchive, crate::archive::NativeArchive>),
+    Macro(FeatureCommand<crate::model::macros::Snapshot, crate::model::macros::Program, String>),
+    Lighting(FeatureCommand<crate::model::lighting::Snapshot, crate::model::lighting::Setting>),
+    Picture(FeatureCommand<crate::model::picture::Snapshot, BTreeMap<String, [u8; 3]>>),
+    Settings(FeatureCommand<crate::model::settings::Snapshot, crate::model::settings::Edit>),
+    Archive(
+        FeatureCommand<crate::model::archive::NativeArchive, crate::model::archive::NativeArchive>,
+    ),
     ReadMacroCatalog {
         slots: Vec<String>,
     },
     ReviewArchive {
-        target: crate::archive::NativeArchive,
+        target: crate::model::archive::NativeArchive,
     },
 }
 
@@ -69,17 +71,17 @@ pub enum CompletionPayload {
     Keymap(FeatureResult<State>),
     Macro {
         slot: String,
-        result: FeatureResult<crate::macros::Snapshot>,
+        result: FeatureResult<crate::model::macros::Snapshot>,
     },
-    Lighting(FeatureResult<crate::lighting::Snapshot>),
-    Picture(FeatureResult<crate::picture::Snapshot>),
-    Settings(FeatureResult<crate::settings::Snapshot>),
-    Archive(FeatureResult<crate::archive::NativeArchive>),
+    Lighting(FeatureResult<crate::model::lighting::Snapshot>),
+    Picture(FeatureResult<crate::model::picture::Snapshot>),
+    Settings(FeatureResult<crate::model::settings::Snapshot>),
+    Archive(FeatureResult<crate::model::archive::NativeArchive>),
     ReadMacroCatalog {
-        result: Result<Vec<crate::macros::Snapshot>, String>,
+        result: Result<Vec<crate::model::macros::Snapshot>, String>,
     },
     ReviewArchive {
-        result: Result<crate::archive::Review, String>,
+        result: Result<crate::model::archive::Review, String>,
     },
 }
 
@@ -107,9 +109,9 @@ pub struct HostTicket {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostStart {
     pub ticket: HostTicket,
-    pub mode: crate::lighting::HostMode,
-    pub setting: Option<crate::lighting::Setting>,
-    pub expected: crate::lighting::Snapshot,
+    pub mode: crate::model::lighting::HostMode,
+    pub setting: Option<crate::model::lighting::Setting>,
+    pub expected: crate::model::lighting::Snapshot,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -137,6 +139,6 @@ pub enum DeviceActivity {
     Read(Feature),
     Apply(Feature),
     ReviewArchive {
-        target: crate::archive::NativeArchive,
+        target: crate::model::archive::NativeArchive,
     },
 }

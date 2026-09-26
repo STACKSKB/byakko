@@ -3,7 +3,7 @@
 //! These values are deliberately kept as small data constructors.  The
 //! configurator's action records are four bytes wide; macro contents are a
 //! separate variable-length stream and are not represented here.
-use byakko_core::ActionCategory;
+use byakko_core::model::keymap::ActionCategory;
 
 /// A named action that can be offered by a keyboard-oriented remapper.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

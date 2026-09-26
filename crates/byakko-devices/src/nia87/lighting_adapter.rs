@@ -1,8 +1,9 @@
 //! Conservative projection of Nia87 global lighting into shared values.
 use crate::nia87::{device, lighting as native};
+use byakko_core::validation;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
-    lighting::{
+    model::lighting::{
         self, Capabilities, Choice, Color, ColorCapability, Content, Effect, HostMode,
         HostParameters, HostSource, Setting, Snapshot,
     },
@@ -133,7 +134,7 @@ fn from_native_setting(value: &native::LightingSetting) -> Setting {
 }
 
 fn to_native(value: &Setting) -> Result<native::LightingSetting, String> {
-    lighting::validate_setting(&capabilities(), value)?;
+    validation::lighting::validate_setting(&capabilities(), value)?;
     let id = value
         .effect
         .parse::<u8>()
@@ -269,6 +270,7 @@ pub(super) fn apply_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use byakko_core::editor::lighting::default_setting;
 
     #[test]
     fn every_native_effect_has_a_plain_english_capability_label() {
@@ -308,7 +310,7 @@ mod tests {
     fn catalog_excludes_host_effects_and_codec_round_trips() {
         let caps = capabilities();
         assert_eq!(caps.effects.len(), 20);
-        lighting::validate_capabilities(&caps).unwrap();
+        validation::lighting::validate_capabilities(&caps).unwrap();
         let setting = Setting {
             effect: "4".into(),
             brightness: Some(3),
@@ -332,7 +334,7 @@ mod tests {
         raw[1] = 21;
         let host = from_bytes(&raw).unwrap();
         assert!(matches!(host.content, Content::Opaque { .. }));
-        let desired = lighting::default_setting(&capabilities(), "1").unwrap();
+        let desired = default_setting(&capabilities(), "1").unwrap();
         assert!(draft(&host, &desired).is_err());
         let mut forged = host.clone();
         forged.content = Content::Editable(desired.clone());
@@ -349,7 +351,7 @@ mod tests {
 
     #[test]
     fn recognized_stored_host_mode_can_exit_to_an_onboard_effect() {
-        let desired = lighting::default_setting(&capabilities(), "1").unwrap();
+        let desired = default_setting(&capabilities(), "1").unwrap();
         for (effect_id, mode_id) in [
             (20, MUSIC_FOLLOW_3),
             (21, SCREEN_AVERAGE),

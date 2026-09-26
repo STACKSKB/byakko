@@ -3,8 +3,8 @@ use super::{
     configuration::{self, Configuration},
     device::Access,
 };
-use byakko_core::archive::{ArchiveCapabilities, NativeArchive, Review, SectionChange};
 use byakko_core::contract::{ApplyFailure, Recovery};
+use byakko_core::model::archive::{ArchiveCapabilities, NativeArchive, Review, SectionChange};
 use std::path::Path;
 
 const BACKEND_ID: &str = "nia87";

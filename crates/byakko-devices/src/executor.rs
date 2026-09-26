@@ -19,10 +19,13 @@ struct Catalog {
     generation: u64,
     operation: u64,
     slots: Vec<String>,
-    snapshots: Vec<byakko_core::macros::Snapshot>,
+    snapshots: Vec<byakko_core::model::macros::Snapshot>,
 }
 impl Catalog {
-    fn finish(self, result: Result<Vec<byakko_core::macros::Snapshot>, String>) -> Completion {
+    fn finish(
+        self,
+        result: Result<Vec<byakko_core::model::macros::Snapshot>, String>,
+    ) -> Completion {
         Completion {
             generation: self.generation,
             operation: self.operation,

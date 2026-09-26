@@ -1,10 +1,11 @@
 //! Translation between portable macro values and the Nia87 simple macro store.
 use crate::nia87::{actions, device, macros as native};
+use byakko_core::validation;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
-    macros::{
-        self, Action, Binding, ButtonChoice, ByteBudget, Capabilities, Choice, Content, Event,
-        Program, Snapshot,
+    model::macros::{
+        Action, Binding, ButtonChoice, ByteBudget, Capabilities, Choice, Content, Event, Program,
+        Snapshot,
     },
 };
 use std::path::Path;
@@ -71,7 +72,7 @@ pub fn capabilities() -> Capabilities {
                     slot: slot_id(slot),
                     id: id.into(),
                     label: label.into(),
-                    action: byakko_core::Action::Macro {
+                    action: byakko_core::model::keymap::Action::Macro {
                         slot: slot.into(),
                         mode,
                     },
@@ -168,7 +169,7 @@ fn from_native(value: &native::Macro) -> Program {
 }
 
 fn to_native(value: &Program) -> Result<native::Macro, String> {
-    macros::validate_program(&capabilities(), value)?;
+    validation::macros::validate_program(&capabilities(), value)?;
     Ok(native::Macro {
         repeat_count: u16::try_from(value.repeat_count).map_err(|_| "Nia87 count exceeds u16")?,
         events: value
@@ -372,7 +373,7 @@ mod tests {
                             .collect(),
                     };
                     assert_eq!(
-                        macros::validate_program(&caps, &program).is_ok(),
+                        validation::macros::validate_program(&caps, &program).is_ok(),
                         native::encode(&native_value).is_ok(),
                         "{action:?} delay={delay_ms} count={count}"
                     );
@@ -384,7 +385,7 @@ mod tests {
     #[test]
     fn binding_capabilities_retain_wire_modes_and_explicit_count_policy() {
         let caps = capabilities();
-        macros::validate_capabilities(&caps).unwrap();
+        validation::macros::validate_capabilities(&caps).unwrap();
         assert!(caps.repeat_counts.contains(&0));
         assert!(!caps.editable_repeat_counts.contains(&0));
         assert!(caps.editable_repeat_counts.contains(&1));

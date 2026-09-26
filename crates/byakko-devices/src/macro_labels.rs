@@ -1,5 +1,5 @@
 //! Append-only local macro labels. Names are preferences, never device state.
-use byakko_core::macros::Choice;
+use byakko_core::model::macros::Choice;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},

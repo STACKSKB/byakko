@@ -1,7 +1,7 @@
 //! A tablet-shaped descriptor exercises the portable binding contract without
 //! claiming support for Wacom reports or continuous ring values.
 use byakko_core::{
-    Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State,
+    model::keymap::{Action, ActionChoice, Change, Descriptor, Layer, PhysicalKey, State},
     session::{Outcome, Session},
 };
 use byakko_devices::{Executor, memory::MemoryDevice};
