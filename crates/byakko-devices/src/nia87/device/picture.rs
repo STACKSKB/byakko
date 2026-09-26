@@ -1,4 +1,4 @@
-use super::apply_error::picture_submit_error;
+use super::apply_error::{ApplyResult, not_attempted, picture_submit_error};
 use super::transaction::{pacing, save_json_backup};
 use super::*;
 
@@ -48,7 +48,7 @@ pub fn apply_picture(
     expected: &[[u8; 3]],
     desired: &[[u8; 3]],
     backup_dir: &std::path::Path,
-) -> Result<Vec<[u8; 3]>> {
+) -> ApplyResult<Vec<[u8; 3]>> {
     apply_picture_with(Selection::Unique, expected, desired, None, backup_dir)
 }
 
@@ -58,18 +58,23 @@ pub(super) fn apply_picture_with(
     desired: &[[u8; 3]],
     expected_context: Option<[u8; 2]>,
     backup_dir: &std::path::Path,
-) -> Result<Vec<[u8; 3]>> {
+) -> ApplyResult<Vec<[u8; 3]>> {
     if expected.len() != 128 || desired.len() != 128 || expected[126..] != desired[126..] {
-        return Err("Invalid picture size or reserved-slot modification".into());
+        return Err(not_attempted(
+            "Invalid picture size or reserved-slot modification",
+        ));
     }
     let physical_slots = crate::nia87::board::physical_slot_mask();
     if (0..126).any(|slot| expected[slot] != desired[slot] && !physical_slots[slot]) {
-        return Err("Picture edit changes an unmapped matrix slot".into());
+        return Err(not_attempted(
+            "Picture edit changes an unmapped matrix slot",
+        ));
     }
     if !(0..126).any(|slot| expected[slot] != desired[slot]) {
         return Ok(expected.to_vec());
     }
-    let reports = crate::nia87::lighting::user_picture_write_reports(desired)?;
+    let reports =
+        crate::nia87::lighting::user_picture_write_reports(desired).map_err(not_attempted)?;
     let backup = save_json_backup(
         backup_dir,
         "picture-before",
@@ -79,8 +84,9 @@ pub(super) fn apply_picture_with(
             "desired": desired,
             "context_revision": expected_context,
         }),
-    )?;
-    let session = Session::open_for(selection)?;
+    )
+    .map_err(not_attempted)?;
+    let session = Session::open_for(selection).map_err(not_attempted)?;
     let device = session.device();
     submit_picture_reports(
         &reports,
@@ -100,25 +106,16 @@ fn submit_picture_reports(
     backup: &std::path::Path,
     mut send: impl FnMut(&[u8; 65]) -> Result<()>,
     mut schedule: impl FnMut(),
-) -> Result<()> {
+) -> ApplyResult<()> {
     for report in reports {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(report);
         schedule();
         if let Err(error) = send(&host) {
-            return Err(picture_submit_error(error.as_ref(), backup).into());
+            return Err(picture_submit_error(error.as_ref(), backup));
         }
     }
     Ok(())
-}
-
-/// Picture submission with typed transport uncertainty on a failed send.
-pub fn apply_picture_detailed(
-    expected: &[[u8; 3]],
-    desired: &[[u8; 3]],
-    backup_dir: &std::path::Path,
-) -> std::result::Result<Vec<[u8; 3]>, byakko_core::contract::ApplyFailure> {
-    detailed(apply_picture(expected, desired, backup_dir))
 }
 
 #[cfg(test)]
@@ -171,7 +168,7 @@ mod tests {
             },
             || schedules.set(schedules.get() + 1),
         );
-        let failure = detailed(result).unwrap_err();
+        let failure = result.unwrap_err();
         assert_eq!(failure.recovery, Recovery::Unverified);
         assert!(failure.message.contains("Disconnected"));
         assert!(failure.message.contains("no automatic restore"));
@@ -249,7 +246,7 @@ mod tests {
         let expected = vec![[0; 3]; 128];
         let mut desired = expected.clone();
         desired[unmapped] = [1, 2, 3];
-        let failure = apply_picture_detailed(
+        let failure = apply_picture(
             &expected,
             &desired,
             std::path::Path::new("unused-backup-path"),
@@ -263,12 +260,12 @@ mod tests {
     fn wrong_size_and_reserved_slot_are_rejected_before_sending() {
         let path = std::path::Path::new("unused-backup-path");
         let expected = vec![[0; 3]; 128];
-        let short = apply_picture_detailed(&expected[..127], &expected, path).unwrap_err();
+        let short = apply_picture(&expected[..127], &expected, path).unwrap_err();
         assert_eq!(short.recovery, Recovery::NotAttempted);
 
         let mut reserved = expected.clone();
         reserved[126] = [1, 2, 3];
-        let failure = apply_picture_detailed(&expected, &reserved, path).unwrap_err();
+        let failure = apply_picture(&expected, &reserved, path).unwrap_err();
         assert_eq!(failure.recovery, Recovery::NotAttempted);
         assert!(failure.message.contains("reserved-slot"));
     }

@@ -210,7 +210,7 @@ pub(super) fn apply_with(
     }
     validation::settings::validate_value(&capabilities(), edit).map_err(not_attempted)?;
     let setting = native_setting(&expected_native, edit).map_err(not_attempted)?;
-    let actual = access.apply_setting_detailed(&expected_native, setting, backup)?;
+    let actual = access.apply_setting(&expected_native, setting, backup)?;
     let snapshot = project(&actual);
     if !matches!(&snapshot.content, Content::Editable(values) if values.get(&edit.id) == Some(&edit.value))
     {

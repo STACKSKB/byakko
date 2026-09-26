@@ -11,21 +11,19 @@ mod transaction;
 mod transport;
 
 use crate::hid::HidDevice;
-use apply_error::detailed;
+use apply_error::ApplyResult;
 #[cfg(test)]
 use apply_error::keymap_apply_error;
 use serde::{Deserialize, Serialize};
 
 pub use access::Access;
 use access::Selection;
-pub use configuration::{apply_configuration, apply_configuration_detailed, capture_configuration};
-pub use keymaps::{apply_keymaps, apply_keymaps_detailed, snapshot};
-pub use lighting::{
-    HostLightingSession, ScreenSession, apply_lighting, apply_lighting_detailed, read_lighting,
-};
-pub use macros::{apply_macro, apply_macro_detailed, read_macro};
-pub use picture::{apply_picture, apply_picture_detailed, read_picture};
-pub use settings::{apply_setting, apply_setting_detailed, read_settings};
+pub use configuration::{apply_configuration, capture_configuration};
+pub use keymaps::{apply_keymaps, snapshot};
+pub use lighting::{HostLightingSession, apply_lighting, read_lighting};
+pub use macros::{apply_macro, read_macro};
+pub use picture::{apply_picture, read_picture};
+pub use settings::{apply_setting, read_settings};
 pub use transport::{
     Availability, Candidate, Target, TargetSelectionError, availability, candidates, descriptor,
     inspect, open_expected, open_unique,

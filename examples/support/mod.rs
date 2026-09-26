@@ -27,6 +27,6 @@ pub fn apply_configuration(
     progress: impl FnMut(&str),
 ) -> device::Result<byakko_devices::nia87::configuration::Configuration> {
     access
-        .apply_configuration_detailed(current, desired, backup_dir, progress)
+        .apply_configuration(current, desired, backup_dir, progress)
         .map_err(|failure| format!("{}; recovery: {:?}", failure.message, failure.recovery).into())
 }

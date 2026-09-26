@@ -252,7 +252,7 @@ pub(super) fn apply_with(
             message,
             recovery: Recovery::NotAttempted,
         })?;
-    let actual = access.apply_lighting_detailed(&expected_native, &native_setting, backup)?;
+    let actual = access.apply_lighting(&expected_native, &native_setting, backup)?;
     let mut snapshot = from_native(&actual);
     if snapshot.revision != expected.revision {
         snapshot.evidence = lighting::Evidence::TransportAccepted;

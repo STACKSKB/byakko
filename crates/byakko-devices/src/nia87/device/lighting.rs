@@ -1,4 +1,4 @@
-use super::apply_error::{ApplyError, lighting_apply_error};
+use super::apply_error::{ApplyResult, lighting_apply_error, not_attempted};
 use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::*;
 use byakko_core::contract::{ApplyFailure, Recovery};
@@ -26,8 +26,6 @@ pub struct HostLightingSession {
     finished: bool,
 }
 
-pub type ScreenSession = HostLightingSession;
-
 #[derive(Clone, Copy)]
 enum CompletionPolicy {
     VerifiedReadback,
@@ -35,42 +33,24 @@ enum CompletionPolicy {
 }
 
 impl HostLightingSession {
-    pub fn start(
-        expected: &crate::nia87::lighting::Lighting,
-        backups: &std::path::Path,
-    ) -> Result<Self> {
-        let desired = crate::nia87::lighting::LightingSetting {
-            effect_id: 21,
-            value: None,
-            speed: None,
-            option: None,
-            rgb: None,
-            dazzle: false,
-        };
-        Self::start_mode(expected, &desired, backups)
-    }
-
-    pub fn start_mode(
-        expected: &crate::nia87::lighting::Lighting,
-        desired: &crate::nia87::lighting::LightingSetting,
-        backups: &std::path::Path,
-    ) -> Result<Self> {
-        Self::start_mode_with(Selection::Unique, expected, desired, backups)
-    }
-
     pub(super) fn start_mode_with(
         selection: Selection<'_>,
         expected: &crate::nia87::lighting::Lighting,
         desired: &crate::nia87::lighting::LightingSetting,
         backups: &std::path::Path,
-    ) -> Result<Self> {
+    ) -> ApplyResult<Self> {
         if !matches!(desired.effect_id, 20..=22) {
-            return Err("Host lighting requires screen or music mode".into());
+            return Err(not_attempted("Host lighting requires screen or music mode"));
         }
-        let session = Session::open_for(selection)?;
-        let target = session.target()?;
-        if !read_settings_on_device(session.device())?.backlight_enabled() {
-            return Err("Enable the backlight in Settings before starting host lighting".into());
+        let session = Session::open_for(selection).map_err(not_attempted)?;
+        let target = session.target().map_err(not_attempted)?;
+        if !read_settings_on_device(session.device())
+            .map_err(not_attempted)?
+            .backlight_enabled()
+        {
+            return Err(not_attempted(
+                "Enable the backlight in Settings before starting host lighting",
+            ));
         }
         let active = apply_lighting_unlocked(
             Selection::Expected(&target),
@@ -109,11 +89,11 @@ impl HostLightingSession {
         Ok(())
     }
 
-    fn restore(&mut self) -> Result<crate::nia87::lighting::Lighting> {
+    fn restore(&mut self) -> ApplyResult<crate::nia87::lighting::Lighting> {
         let setting = self
             .saved
             .recognized_setting()
-            .ok_or("Unrecognized saved lighting")?;
+            .ok_or_else(|| not_attempted("Unrecognized saved lighting"))?;
         let restored = apply_lighting_unlocked(
             Selection::Expected(&self.target),
             &self.active,
@@ -125,7 +105,7 @@ impl HostLightingSession {
         Ok(restored)
     }
 
-    pub fn finish(mut self) -> Result<crate::nia87::lighting::Lighting> {
+    pub fn finish(mut self) -> ApplyResult<crate::nia87::lighting::Lighting> {
         let result = self.restore();
         // Do not silently repeat a failed write during Drop; report it to the UI.
         self.finished = true;
@@ -188,7 +168,7 @@ pub fn apply_lighting(
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
-) -> Result<crate::nia87::lighting::Lighting> {
+) -> ApplyResult<crate::nia87::lighting::Lighting> {
     apply_lighting_with(Selection::Unique, expected, setting, backup_dir)
 }
 
@@ -197,8 +177,8 @@ pub(super) fn apply_lighting_with(
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
-) -> Result<crate::nia87::lighting::Lighting> {
-    let _lock = transaction_lock()?;
+) -> ApplyResult<crate::nia87::lighting::Lighting> {
+    let _lock = transaction_lock().map_err(not_attempted)?;
     apply_lighting_unlocked(
         selection,
         expected,
@@ -208,28 +188,22 @@ pub(super) fn apply_lighting_with(
     )
 }
 
-pub fn apply_lighting_detailed(
-    expected: &crate::nia87::lighting::Lighting,
-    setting: &crate::nia87::lighting::LightingSetting,
-    backup_dir: &std::path::Path,
-) -> std::result::Result<crate::nia87::lighting::Lighting, byakko_core::contract::ApplyFailure> {
-    detailed(apply_lighting(expected, setting, backup_dir))
-}
-
 fn apply_lighting_unlocked(
     selection: Selection<'_>,
     expected: &crate::nia87::lighting::Lighting,
     setting: &crate::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
     policy: CompletionPolicy,
-) -> Result<crate::nia87::lighting::Lighting> {
+) -> ApplyResult<crate::nia87::lighting::Lighting> {
     if expected.raw()[0] != crate::nia87::lighting::LED_READ_COMMAND
         || expected.recognized_setting().is_none()
     {
-        return Err("Lighting baseline is not a recognized Nia87 LED response".into());
+        return Err(not_attempted(
+            "Lighting baseline is not a recognized Nia87 LED response",
+        ));
     }
-    let target = crate::nia87::lighting::write_report(setting)?;
-    let (_, device) = selection.open()?;
+    let target = crate::nia87::lighting::write_report(setting).map_err(not_attempted)?;
+    let (_, device) = selection.open().map_err(not_attempted)?;
     if lighting_matches_report(expected, &target, expected) {
         return Ok(expected.clone());
     }
@@ -244,15 +218,17 @@ fn apply_lighting_unlocked(
             "before": expected,
             "target_report": target.as_slice(),
         }),
-    )?;
+    )
+    .map_err(not_attempted)?;
 
     if matches!(policy, CompletionPolicy::TransportAccepted) {
         // The captured official UI updates its cache after the setter without
         // a getter. Keep transport acceptance distinct from verified reads.
+        let submitted = submitted_lighting(expected, &target).map_err(not_attempted)?;
         submit_lighting_report(&target, backup.path(), |report| {
             write_lighting_report(&device, report)
         })?;
-        return submitted_lighting(expected, &target);
+        return Ok(submitted);
     }
 
     let restore_report = lighting_restore_report(expected);
@@ -290,16 +266,15 @@ fn submit_lighting_report(
     report: &[u8; 64],
     backup: &std::path::Path,
     mut send: impl FnMut(&[u8; 64]) -> Result<()>,
-) -> Result<()> {
+) -> ApplyResult<()> {
     send(report).map_err(|error| {
-        ApplyError(ApplyFailure {
+        ApplyFailure {
             message: format!(
                 "Lighting upload stopped after a transport error: {error}. Device state is unknown; no automatic restore sent. Backup: {}",
                 backup.display()
             ),
             recovery: Recovery::Unverified,
-        })
-        .into()
+        }
     })
 }
 
@@ -320,10 +295,10 @@ mod submission_tests {
         .unwrap();
         assert_eq!(sends, 1);
 
-        let failure = detailed(submit_lighting_report(&report, backup, |_| {
+        let failure = submit_lighting_report(&report, backup, |_| {
             sends += 1;
             Err("Disconnected".into())
-        }))
+        })
         .unwrap_err();
         assert_eq!(sends, 2);
         assert_eq!(failure.recovery, Recovery::Unverified);

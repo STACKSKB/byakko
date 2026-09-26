@@ -220,12 +220,12 @@ fn run() -> device::Result<()> {
         };
         let backups = std::path::Path::new("Research/captures/backups");
         let written = access
-            .apply_picture_detailed(&before, &changed, context, backups)
+            .apply_picture(&before, &changed, context, backups)
             .map_err(apply_failure)?;
         // Preserve read failures until the original picture has been submitted again.
         let observed = access.read_picture_with_context();
         access
-            .apply_picture_detailed(&written, &before, context, backups)
+            .apply_picture(&written, &before, context, backups)
             .map_err(apply_failure)?;
         let (restored, restored_context) = access.read_picture_with_context()?;
         let (observed, observed_context) = observed?;

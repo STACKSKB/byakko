@@ -1,4 +1,4 @@
-use super::apply_error::{detailed, macro_apply_error};
+use super::apply_error::{ApplyResult, macro_apply_error, not_attempted};
 use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::transport::FeatureSetter;
 use super::{HidDevice, Result, Selection, Session, read_payload, transaction_lock};
@@ -43,22 +43,12 @@ pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> R
     Ok(())
 }
 
-/// The existing macro transaction with explicit recovery status.
-pub fn apply_macro_detailed(
-    slot: u8,
-    expected: &[u8],
-    new_macro: &crate::nia87::macros::Macro,
-    backup_dir: &std::path::Path,
-) -> std::result::Result<Vec<u8>, byakko_core::contract::ApplyFailure> {
-    detailed(apply_macro(slot, expected, new_macro, backup_dir))
-}
-
 pub fn apply_macro(
     slot: u8,
     expected: &[u8],
     new_macro: &crate::nia87::macros::Macro,
     backup_dir: &std::path::Path,
-) -> Result<Vec<u8>> {
+) -> ApplyResult<Vec<u8>> {
     apply_macro_with(Selection::Unique, slot, expected, new_macro, backup_dir)
 }
 
@@ -68,8 +58,9 @@ pub(super) fn apply_macro_with(
     expected: &[u8],
     new_macro: &crate::nia87::macros::Macro,
     backup_dir: &std::path::Path,
-) -> Result<Vec<u8>> {
-    let before = crate::nia87::macros::ValidatedBeforeImage::validate(expected)?;
+) -> ApplyResult<Vec<u8>> {
+    let before =
+        crate::nia87::macros::ValidatedBeforeImage::validate(expected).map_err(not_attempted)?;
     apply_macro_validated_with(selection, slot, &before, new_macro, backup_dir)
 }
 
@@ -79,9 +70,9 @@ pub(super) fn apply_macro_validated_with(
     before: &crate::nia87::macros::ValidatedBeforeImage,
     new_macro: &crate::nia87::macros::Macro,
     backup_dir: &std::path::Path,
-) -> Result<Vec<u8>> {
-    let _lock = transaction_lock()?;
-    let target = crate::nia87::macros::encode(new_macro)?;
+) -> ApplyResult<Vec<u8>> {
+    let _lock = transaction_lock().map_err(not_attempted)?;
+    let target = crate::nia87::macros::encode(new_macro).map_err(not_attempted)?;
     let expected = before.as_bytes();
     if target == expected {
         return Ok(target);
@@ -90,8 +81,9 @@ pub(super) fn apply_macro_validated_with(
         backup_dir,
         &format!("macro-{slot}-before"),
         &serde_json::json!({"slot":slot,"bytes":expected}),
-    )?;
-    let (_, device) = selection.open()?;
+    )
+    .map_err(not_attempted)?;
+    let (_, device) = selection.open().map_err(not_attempted)?;
     apply_roundtrip(
         &backup,
         VerifiedStep {

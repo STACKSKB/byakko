@@ -5,7 +5,7 @@
 //! substitutes another keyboard. Feature-specific reads, comparisons, and
 //! recovery plans remain in their feature modules.
 use super::Result;
-use super::apply_error::{ApplyError, RestoreMismatch};
+use super::apply_error::{ApplyResult, RestoreFailure, RestoreResult};
 use serde::Serialize;
 use std::fmt;
 use std::io::Write;
@@ -96,14 +96,14 @@ pub(super) fn save_encoded_backup(
 pub(super) fn apply_with_recovery<T>(
     backup: &DurableBackup,
     apply: impl FnOnce() -> Result<T>,
-    restore: impl FnOnce() -> Result<()>,
-    error: fn(&dyn fmt::Display, Result<()>, &Path) -> ApplyError,
-) -> Result<T> {
+    restore: impl FnOnce() -> RestoreResult,
+    error: fn(&dyn fmt::Display, RestoreResult, &Path) -> byakko_core::contract::ApplyFailure,
+) -> ApplyResult<T> {
     match apply() {
         Ok(value) => Ok(value),
         Err(cause) => {
             let recovery = restore();
-            Err(error(cause.as_ref(), recovery, backup.path()).into())
+            Err(error(cause.as_ref(), recovery, backup.path()))
         }
     }
 }
@@ -121,8 +121,8 @@ pub(super) fn apply_roundtrip<T, TW, TM, BW, BM>(
     target: VerifiedStep<TW, TM>,
     before: VerifiedStep<BW, BM>,
     read: impl Fn() -> Result<T>,
-    error: fn(&dyn fmt::Display, Result<()>, &Path) -> ApplyError,
-) -> Result<T>
+    error: fn(&dyn fmt::Display, RestoreResult, &Path) -> byakko_core::contract::ApplyFailure,
+) -> ApplyResult<T>
 where
     TW: FnOnce() -> Result<()>,
     TM: Fn(&T) -> bool,
@@ -141,11 +141,11 @@ where
             }
         },
         || {
-            (before.write)()?;
-            if (before.matches)(&read()?) {
+            (before.write)().map_err(RestoreFailure::from)?;
+            if (before.matches)(&read().map_err(RestoreFailure::from)?) {
                 Ok(())
             } else {
-                Err(RestoreMismatch(before.mismatch).into())
+                Err(RestoreFailure::Mismatch(before.mismatch))
             }
         },
         error,
@@ -154,9 +154,67 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::super::apply_error::{RestoreMismatch, macro_apply_error};
+    use super::super::apply_error::{RestoreFailure, macro_apply_error, not_attempted};
     use super::*;
     use byakko_core::contract::Recovery;
+
+    #[test]
+    fn restoration_reports_mismatch_separately_from_write_and_read_failures() {
+        let backup = DurableBackup {
+            path: "before.json".into(),
+            stamp: 1,
+        };
+        for (fault, expected, expected_steps) in [
+            ("write", Recovery::Unverified, vec!["apply", "restore"]),
+            (
+                "read",
+                Recovery::Unverified,
+                vec!["apply", "restore", "read"],
+            ),
+            (
+                "mismatch",
+                Recovery::Failed,
+                vec!["apply", "restore", "read"],
+            ),
+        ] {
+            let steps = std::cell::RefCell::new(Vec::new());
+            let failure = apply_roundtrip(
+                &backup,
+                VerifiedStep {
+                    write: || {
+                        steps.borrow_mut().push("apply");
+                        Err("apply transport failed".into())
+                    },
+                    matches: |_: &u8| true,
+                    mismatch: "apply mismatch",
+                },
+                VerifiedStep {
+                    write: || {
+                        steps.borrow_mut().push("restore");
+                        if fault == "write" {
+                            Err("restore transport failed".into())
+                        } else {
+                            Ok(())
+                        }
+                    },
+                    matches: |_: &u8| false,
+                    mismatch: "restore mismatch",
+                },
+                || {
+                    steps.borrow_mut().push("read");
+                    if fault == "read" {
+                        Err("restore read failed".into())
+                    } else {
+                        Ok(0)
+                    }
+                },
+                macro_apply_error,
+            )
+            .unwrap_err();
+            assert_eq!(failure.recovery, expected);
+            assert_eq!(*steps.borrow(), expected_steps);
+        }
+    }
 
     #[test]
     fn verified_path_never_restores_and_failure_preserves_recovery_status() {
@@ -181,17 +239,20 @@ mod tests {
         for (restore, expected) in [
             (Ok(()), Recovery::Verified),
             (
-                Err(RestoreMismatch("restore readback mismatch").into()),
+                Err(RestoreFailure::Mismatch("restore readback mismatch")),
                 Recovery::Failed,
             ),
-            (Err("restore read failed".into()), Recovery::Unverified),
+            (
+                Err(RestoreFailure::Unverified("restore read failed".into())),
+                Recovery::Unverified,
+            ),
         ] {
-            let failure = super::super::apply_error::detailed::<()>(apply_with_recovery(
+            let failure = apply_with_recovery::<()>(
                 &backup,
                 || Err("readback mismatch".into()),
                 || restore,
                 macro_apply_error,
-            ))
+            )
             .unwrap_err();
             assert_eq!(failure.recovery, expected);
             assert!(failure.message.contains("readback mismatch"));
@@ -202,10 +263,13 @@ mod tests {
     #[test]
     fn backup_error_stops_before_setter() {
         let mut setter_called = false;
-        let transaction = (|| -> Result<()> {
-            let backup = save_custom_backup(&std::env::current_exe()?, "unused", |_| {
-                Err("backup storage failed".into())
-            })?;
+        let transaction = (|| -> ApplyResult<()> {
+            let backup = save_custom_backup(
+                &std::env::current_exe().map_err(not_attempted)?,
+                "unused",
+                |_| Err("backup storage failed".into()),
+            )
+            .map_err(not_attempted)?;
             apply_with_recovery(
                 &backup,
                 || {
@@ -261,7 +325,7 @@ mod tests {
         for read_error in [false, true] {
             steps.borrow_mut().clear();
             reads.set(0);
-            let failure = super::super::apply_error::detailed::<i32>(apply_roundtrip(
+            let failure = apply_roundtrip(
                 &backup,
                 VerifiedStep {
                     write: || {
@@ -291,7 +355,7 @@ mod tests {
                     }
                 },
                 macro_apply_error,
-            ))
+            )
             .unwrap_err();
             assert_eq!(failure.recovery, Recovery::Verified);
             assert!(failure.message.contains(if read_error {

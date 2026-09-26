@@ -1,4 +1,6 @@
-use super::apply_error::{RestoreMismatch, keymap_apply_error};
+use super::apply_error::{
+    ApplyResult, RestoreFailure, RestoreResult, keymap_apply_error, not_attempted,
+};
 use super::transaction::{apply_with_recovery, pacing, save_json_backup};
 use super::*;
 
@@ -73,23 +75,12 @@ pub(super) fn write_binding(
     Ok(())
 }
 
-/// The same guarded transaction as `apply_keymaps`, with a typed recovery
-/// outcome for callers that must distinguish verified restore from failure.
-pub fn apply_keymaps_detailed(
-    expected: &Snapshot,
-    base: &[[u8; 4]],
-    function: &[[u8; 4]],
-    backup_dir: &std::path::Path,
-) -> std::result::Result<Snapshot, byakko_core::contract::ApplyFailure> {
-    detailed(apply_keymaps(expected, base, function, backup_dir))
-}
-
 pub fn apply_keymaps(
     expected: &Snapshot,
     base: &[[u8; 4]],
     function: &[[u8; 4]],
     backup_dir: &std::path::Path,
-) -> Result<Snapshot> {
+) -> ApplyResult<Snapshot> {
     apply_keymaps_with(Selection::Unique, expected, base, function, backup_dir)
 }
 
@@ -99,31 +90,31 @@ pub(super) fn apply_keymaps_with(
     base: &[[u8; 4]],
     function: &[[u8; 4]],
     backup_dir: &std::path::Path,
-) -> Result<Snapshot> {
+) -> ApplyResult<Snapshot> {
     if expected.format_version != 1
         || expected.base.len() != 128
         || expected.function.len() != 128
         || base.len() != 128
         || function.len() != 128
     {
-        return Err("Invalid keymap shape or backup format".into());
+        return Err(not_attempted("Invalid keymap shape or backup format"));
     }
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
-        return Err("Cannot modify reserved padding slots".into());
+        return Err(not_attempted("Cannot modify reserved padding slots"));
     }
     crate::nia87::keymap_policy::validate_changes(
         &expected.base,
         &expected.function,
         base,
         function,
-    )?;
+    )
+    .map_err(not_attempted)?;
     if expected.firmware != 0x0100 || expected.profile != 0 {
-        return Err(
-            "Firmware/profile differs from validated Nia87 0x0100/profile 0; no keymap writes sent"
-                .into(),
-        );
+        return Err(not_attempted(
+            "Firmware/profile differs from validated Nia87 0x0100/profile 0; no keymap writes sent",
+        ));
     }
-    let _lock = transaction_lock()?;
+    let _lock = transaction_lock().map_err(not_attempted)?;
     let changes: Vec<_> = (0..126)
         .flat_map(|slot| {
             [
@@ -136,8 +127,8 @@ pub(super) fn apply_keymaps_with(
     if changes.is_empty() {
         return Ok(expected.clone());
     }
-    let backup = save_json_backup(backup_dir, "keymaps-before", expected)?;
-    let (_, device) = selection.open()?;
+    let backup = save_json_backup(backup_dir, "keymaps-before", expected).map_err(not_attempted)?;
+    let (_, device) = selection.open().map_err(not_attempted)?;
     apply_with_recovery(
         &backup,
         || -> Result<Snapshot> {
@@ -175,7 +166,7 @@ pub(super) fn apply_keymaps_with(
             }
             Ok(actual)
         },
-        || -> Result<()> {
+        || -> RestoreResult {
             // A failed setter may have changed either map. Read both maps
             // before recovery, restore Fn first, then reread both maps
             // because those Fn writes might also have affected base.
@@ -197,13 +188,16 @@ pub(super) fn apply_keymaps_with(
                     observed_map,
                     attempted,
                     original,
-                )?;
+                )
+                .map_err(|error| RestoreFailure::Unverified(error.into()))?;
                 for slot in slots {
                     write_binding(&device, is_fn, profile, slot, original[slot])?;
                 }
             }
             if snapshot_on_device(&device)? != *expected {
-                return Err(RestoreMismatch("restored data could not be verified").into());
+                return Err(RestoreFailure::Mismatch(
+                    "restored data could not be verified",
+                ));
             }
             Ok(())
         },

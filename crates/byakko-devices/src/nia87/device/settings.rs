@@ -1,4 +1,4 @@
-use super::apply_error::settings_apply_error;
+use super::apply_error::{ApplyResult, not_attempted, settings_apply_error};
 use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::*;
 
@@ -32,7 +32,7 @@ pub fn apply_setting(
     expected: &crate::nia87::settings::Settings,
     setting: crate::nia87::settings::Setting,
     backup_dir: &std::path::Path,
-) -> Result<crate::nia87::settings::Settings> {
+) -> ApplyResult<crate::nia87::settings::Settings> {
     apply_setting_with(Selection::Unique, expected, setting, backup_dir)
 }
 
@@ -41,23 +41,24 @@ pub(super) fn apply_setting_with(
     expected: &crate::nia87::settings::Settings,
     setting: crate::nia87::settings::Setting,
     backup_dir: &std::path::Path,
-) -> Result<crate::nia87::settings::Settings> {
+) -> ApplyResult<crate::nia87::settings::Settings> {
     use crate::nia87::settings::SettingPlan;
-    let _lock = transaction_lock()?;
+    let _lock = transaction_lock().map_err(not_attempted)?;
     let SettingPlan {
         target,
         report,
         restore_report,
-    } = expected.plan_change(setting)?;
+    } = expected.plan_change(setting).map_err(not_attempted)?;
     if &target == expected {
         return Ok(target);
     }
-    let (_, device) = selection.open()?;
+    let (_, device) = selection.open().map_err(not_attempted)?;
     let backup = save_json_backup(
         backup_dir,
         "settings-before",
         &serde_json::json!({"format_version":1,"before":expected,"target":target}),
-    )?;
+    )
+    .map_err(not_attempted)?;
     let send = |data: &[u8; 64]| -> Result<()> {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(data);
@@ -80,13 +81,4 @@ pub(super) fn apply_setting_with(
         || read_settings_on_device(&device),
         settings_apply_error,
     )
-}
-
-/// Guarded one-setting transaction with an explicit recovery outcome.
-pub fn apply_setting_detailed(
-    expected: &crate::nia87::settings::Settings,
-    setting: crate::nia87::settings::Setting,
-    backup_dir: &std::path::Path,
-) -> std::result::Result<crate::nia87::settings::Settings, byakko_core::contract::ApplyFailure> {
-    detailed(apply_setting(expected, setting, backup_dir))
 }

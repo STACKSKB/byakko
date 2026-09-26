@@ -70,12 +70,8 @@ pub(super) fn apply_with(
 ) -> Result<NativeArchive, ApplyFailure> {
     let expected_config = decode(expected).map_err(not_attempted)?;
     let target_config = decode(target).map_err(not_attempted)?;
-    let actual = access.apply_configuration_detailed(
-        &expected_config,
-        &target_config,
-        backup_dir,
-        |_| {},
-    )?;
+    let actual =
+        access.apply_configuration(&expected_config, &target_config, backup_dir, |_| {})?;
     if actual != target_config {
         return Err(ApplyFailure {
             message: "Complete configuration apply returned a mismatched readback".into(),

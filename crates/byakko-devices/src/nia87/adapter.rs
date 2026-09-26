@@ -344,7 +344,7 @@ pub fn draft_snapshot(expected: &State, changes: &[Change]) -> Result<Snapshot, 
     to_snapshot(&draft)
 }
 
-fn apply_detailed_with(
+fn apply_keymap(
     access: &device::Access,
     expected: &State,
     changes: &[Change],
@@ -361,8 +361,7 @@ fn apply_detailed_with(
         message,
         recovery: Recovery::NotAttempted,
     })?;
-    let actual =
-        access.apply_keymaps_detailed(&original, &draft.base, &draft.function, backup_dir)?;
+    let actual = access.apply_keymaps(&original, &draft.base, &draft.function, backup_dir)?;
     from_snapshot(&actual).map_err(|message| ApplyFailure {
         message,
         recovery: Recovery::Unverified,
@@ -383,7 +382,7 @@ impl crate::Device for BoundNia87Adapter {
         changes: &[Change],
         backup_dir: &Path,
     ) -> Result<State, byakko_core::contract::ApplyFailure> {
-        apply_detailed_with(&self.access, expected, changes, backup_dir)
+        apply_keymap(&self.access, expected, changes, backup_dir)
     }
 
     fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
