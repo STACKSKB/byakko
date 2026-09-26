@@ -210,7 +210,7 @@ fn macro_failure_preserves_draft_and_recovery_across_disconnect() {
         )),
         Outcome::Failed(Problem::Apply(failure.clone()))
     );
-    s.disconnect();
+    s.disconnect().unwrap();
     assert!(s.macros().unwrap().dirty());
     assert!(
         matches!(s.macros().unwrap().status(), crate::editor::Status::Unverified { problem: Problem::Apply(value) } if value == &failure)
@@ -552,4 +552,242 @@ fn exhausted_operation_identity_leaves_no_phantom_submission() {
     assert!(s.keymap().submitted().is_none());
     assert!(s.keymap().dirty());
     assert!(!s.busy());
+}
+#[test]
+fn recording_is_exclusive_local_activity_and_stale_results_do_not_edit_it() {
+    use crate::recorder::macros::{DelayPolicy, StopOutcome, Transition};
+    let mut s = loaded_macro();
+    let read = s.read_macro().unwrap();
+    assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
+    assert_eq!(
+        s.accept(completion(
+            &read,
+            "one",
+            FeatureResult::Read(Ok(snapshot("one", true)))
+        )),
+        Outcome::MacroLoaded
+    );
+    let scan = s.request_macro_catalog().unwrap();
+    assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
+    s.cancel_catalog();
+    s.start_recording(DelayPolicy::Measured { terminal_ms: 5 })
+        .unwrap();
+    assert!(s.recording());
+    assert!(!s.busy());
+    assert!(!s.catalog_scanning());
+    assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
+    assert!(s.read().is_err());
+    assert!(s.read_macro().is_err());
+    assert!(s.save().is_err());
+    assert!(s.save_macro().is_err());
+    assert!(s.connect().is_err());
+    assert!(s.request_macro_catalog().is_err());
+    assert!(
+        s.edit(Change {
+            layer: "base".into(),
+            key: "a".into(),
+            action: Action::Key(5)
+        })
+        .is_err()
+    );
+    assert!(s.edit_macro(macros::Edit::Repeat(2)).is_err());
+    assert!(s.revert().is_err());
+    assert!(s.revert_macro().is_err());
+    assert!(s.select_macro("two").is_err());
+    assert!(s.stage_macro_snapshot(&snapshot("one", true)).is_err());
+    assert!(s.save_and_assign_macro("base", "a", "play").is_err());
+    assert!(s.keymap().submitted().is_none());
+    assert!(s.macros().unwrap().submitted().is_none());
+    let baseline = s.macros().unwrap().baseline().cloned();
+    assert_eq!(
+        s.accept(catalog(&scan, Err("cancelled".into()))),
+        Outcome::Ignored
+    );
+    assert_eq!(s.macros().unwrap().baseline(), baseline.as_ref());
+    assert_eq!(
+        s.record_input(
+            macros::Action::Key {
+                usage: 5,
+                pressed: true
+            },
+            100
+        )
+        .unwrap(),
+        Transition::Recorded
+    );
+    assert_eq!(
+        s.record_input(
+            macros::Action::Key {
+                usage: 5,
+                pressed: true
+            },
+            101
+        )
+        .unwrap(),
+        Transition::Duplicate
+    );
+    assert_eq!(s.stop_recording(125).unwrap(), StopOutcome::Complete);
+    assert!(!s.recording());
+    assert!(!s.busy());
+    let program = s.macros().unwrap().draft().unwrap();
+    assert_eq!(program.events.len(), 3);
+    assert_eq!(program.events[1].delay_ms, 25);
+    assert_eq!(
+        program.events[2].action,
+        macros::Action::Key {
+            usage: 5,
+            pressed: false
+        }
+    );
+    assert_eq!(program.events[2].delay_ms, 5);
+    assert!(s.macros().unwrap().dirty());
+}
+#[test]
+fn recording_start_rejects_unverified_opaque_and_zero_count_programs() {
+    use crate::recorder::macros::DelayPolicy;
+    let mut s = loaded().with_macros(caps()).unwrap();
+    assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
+    let read = s.read_macro().unwrap();
+    let mut zero = snapshot("one", false);
+    let macros::Content::Editable(program) = &mut zero.content else {
+        unreachable!()
+    };
+    program.repeat_count = 0;
+    assert_eq!(
+        s.accept(completion(&read, "one", FeatureResult::Read(Ok(zero)))),
+        Outcome::MacroLoaded
+    );
+    assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
+    assert!(!s.recording());
+    assert!(!s.macros().unwrap().dirty());
+    let read = s.read_macro().unwrap();
+    let mut opaque = snapshot("one", false);
+    opaque.content = macros::Content::Opaque {
+        reason: "raw".into(),
+    };
+    assert_eq!(
+        s.accept(completion(&read, "one", FeatureResult::Read(Ok(opaque)))),
+        Outcome::MacroLoaded
+    );
+    assert!(s.start_recording(DelayPolicy::Fixed(5)).is_err());
+}
+#[test]
+fn rejected_recording_edge_preserves_capacity_for_stop_releases() {
+    use crate::recorder::macros::{DelayPolicy, StopOutcome};
+    let mut capabilities = caps();
+    capabilities.byte_budget = Some(macros::ByteBudget {
+        limit: 4,
+        overhead: 0,
+        key: 2,
+        button: 2,
+        movement: 2,
+        backend: 2,
+        inline_delays: 0..=100,
+        extended_delay: 1,
+    });
+    let mut s = loaded().with_macros(capabilities).unwrap();
+    let read = s.read_macro().unwrap();
+    assert_eq!(
+        s.accept(completion(
+            &read,
+            "one",
+            FeatureResult::Read(Ok(snapshot("one", false)))
+        )),
+        Outcome::MacroLoaded
+    );
+    s.start_recording(DelayPolicy::Measured { terminal_ms: 5 })
+        .unwrap();
+    s.record_input(
+        macros::Action::Key {
+            usage: 4,
+            pressed: true,
+        },
+        100,
+    )
+    .unwrap();
+    let before = s.macros().unwrap().draft().cloned();
+    assert!(
+        s.record_input(
+            macros::Action::Key {
+                usage: 5,
+                pressed: true
+            },
+            110
+        )
+        .is_err()
+    );
+    assert!(s.recording());
+    assert_eq!(s.macros().unwrap().draft(), before.as_ref());
+    assert!(
+        s.record_input(
+            macros::Action::Key {
+                usage: 4,
+                pressed: false
+            },
+            90
+        )
+        .is_err()
+    );
+    assert_eq!(s.macros().unwrap().draft(), before.as_ref());
+    assert_eq!(s.stop_recording(1000).unwrap(), StopOutcome::TimingClamped);
+    assert!(!s.recording());
+    let program = s.macros().unwrap().draft().unwrap();
+    assert_eq!(program.events.len(), 2);
+    assert_eq!(program.events[0].delay_ms, 0);
+    assert_eq!(
+        program.events[1].action,
+        macros::Action::Key {
+            usage: 4,
+            pressed: false
+        }
+    );
+}
+
+#[test]
+fn disconnect_finishes_reserved_releases_at_last_supplied_timestamp() {
+    use crate::recorder::macros::{DelayPolicy, StopOutcome};
+    let mut s = loaded_macro();
+    s.start_recording(DelayPolicy::Measured { terminal_ms: 5 })
+        .unwrap();
+    s.record_input(
+        macros::Action::Key {
+            usage: 5,
+            pressed: true,
+        },
+        100,
+    )
+    .unwrap();
+    s.record_input(
+        macros::Action::Key {
+            usage: 6,
+            pressed: true,
+        },
+        120,
+    )
+    .unwrap();
+    assert_eq!(s.disconnect().unwrap(), Some(StopOutcome::Complete));
+    assert!(!s.recording());
+    assert!(!s.busy());
+    assert_eq!(s.connection(), &Connection::Disconnected);
+    let program = s.macros().unwrap().draft().unwrap();
+    assert_eq!(program.events.len(), 5);
+    assert_eq!(program.events[1].delay_ms, 20);
+    assert_eq!(program.events[2].delay_ms, 0);
+    assert_eq!(
+        program.events[3].action,
+        macros::Action::Key {
+            usage: 6,
+            pressed: false
+        }
+    );
+    assert_eq!(
+        program.events[4].action,
+        macros::Action::Key {
+            usage: 5,
+            pressed: false
+        }
+    );
+    assert_eq!(program.events[4].delay_ms, 5);
+    assert!(s.macros().unwrap().dirty());
+    assert_eq!(s.disconnect().unwrap(), None);
 }

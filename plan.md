@@ -98,8 +98,9 @@ to match this table. Public APIs expose concepts, not every internal helper.
   typed completion and deliberately different memory device. No live writes.
 - [x] Rebuild macro library/editor and pure save-and-assign workflow.
   Preserve unknown slots, candidate reads, count rules and partial outcomes.
-- [ ] Restore exclusive local macro recording and complete the macro interaction
-  review, including user-facing event choices and rendered layout.
+- [x] Restore exclusive local macro recording through the shared macro draft.
+- [ ] Complete macro interaction review, including user-facing event choices
+  and rendered layout.
 - [x] Before expanding features, consolidate the shared editor lifecycle and
   feature implementations under `editor/`. Put the other application roles in
   top-level folders as requested. Remove the macro lifecycle duplication and
@@ -189,8 +190,17 @@ Strict workspace Clippy, formatting and locked development builds pass. The
 built CLI passed memory-only macro read/plan/apply, assignment and discovery.
 Hardware behavior and rendered layout remain separate acceptance work.
 
+The recording checkpoint adds window-local input, measured/fixed timing and
+explicit release of held inputs on stop, focus loss or close. Core owns exclusive
+recording against the sole macro draft; desktop's controller owns only options,
+the local clock and a pending request while library cancellation finishes.
+Recording disables device polling. Tests cover normal input, rejected input,
+held releases, close/discard, scan cancellation and unsubmitted form retention.
+Workspace tests (60 core, 21 desktop), strict Clippy, formatting and development
+builds pass. Recording playback and rendered UI still require user acceptance.
+
 Temporary gaps: automatic discovery/reconnect, the full assignment catalog and
-custom shortcut form, recording and macro interaction review, coalesced lighting/picture/
+custom shortcut form, macro interaction review, coalesced lighting/picture/
 settings, host streaming, local labels/file workflows and diagnostic capture.
 The native APIs, codecs, OS samplers, direct transaction tests and research tools
 remain. Passive catalog priority is restored; host scheduling returns with its

@@ -163,7 +163,7 @@ pub fn view<'a>(
     .into()
 }
 
-fn action_label(action: &Action) -> String {
+pub(super) fn action_label(action: &Action) -> String {
     let direction = |pressed| if pressed { "press" } else { "release" };
     match action {
         Action::Key { usage, pressed } => format!("Key {usage} {}", direction(*pressed)),

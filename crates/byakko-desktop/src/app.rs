@@ -1,7 +1,8 @@
 //! Window lifecycle and effect delivery. Feature policy stays in core.
 use crate::{
-    form::{keymap, macros},
-    view,
+    controller::recording::Controller as Recording,
+    form::{keymap, macros, recording},
+    input, view,
     widget::panels::UiStyle,
 };
 use byakko_core::{
@@ -12,11 +13,14 @@ use byakko_core::{
 };
 use byakko_devices::Executor;
 use iced::{
-    Element, Fill, Subscription, Task,
+    Element, Event, Fill, Subscription, Task,
     widget::{button, column, container, row, text},
     window,
 };
-use std::{sync::mpsc::TryRecvError, time::Duration};
+use std::{
+    sync::mpsc::TryRecvError,
+    time::{Duration, Instant},
+};
 
 type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
 
@@ -24,6 +28,8 @@ type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
 enum Message {
     Keys(keymap::Message),
     Macros(macros::Message),
+    Record(recording::Message),
+    RecordingInput(Event, Instant),
     Page(Page),
     Read,
     Save,
@@ -34,7 +40,7 @@ enum Message {
     KeepEditing,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Page {
     Keys,
     Macros,
@@ -51,6 +57,7 @@ struct App {
     session: Session,
     keys: keymap::Form,
     macros: macros::Form,
+    recording: Recording,
     page: Page,
     worker: Option<Executor>,
     selected_device: Option<String>,
@@ -91,6 +98,7 @@ impl App {
         Self {
             keys: keymap::Form::new(session.descriptor()),
             macros: macros::Form::default(),
+            recording: Recording::default(),
             page: Page::Keys,
             session,
             worker: None,
@@ -111,7 +119,30 @@ impl App {
         {
             return Task::none();
         }
+        if (self.session.recording() || self.recording.pending())
+            && !matches!(
+                message,
+                Message::Record(recording::Message::Stop)
+                    | Message::RecordingInput(..)
+                    | Message::Close
+                    | Message::Poll
+            )
+        {
+            return Task::none();
+        }
         match message {
+            Message::Record(message) => {
+                let was_recording = self.session.recording();
+                let result =
+                    self.recording
+                        .update(message, &mut self.session, self.worker.as_ref());
+                self.recording_notice(result, was_recording);
+            }
+            Message::RecordingInput(event, at) => {
+                let was_recording = self.session.recording();
+                let result = self.recording.input(&event, at, &mut self.session);
+                self.recording_notice(result, was_recording);
+            }
             Message::Page(page) => self.page = page,
             Message::Macros(message) => return self.update_macro(message),
             Message::Keys(message) => {
@@ -147,6 +178,19 @@ impl App {
             Message::Read | Message::Discard => {}
         }
         Task::none()
+    }
+
+    fn recording_notice(&mut self, result: Result<Option<String>, String>, was_recording: bool) {
+        match result {
+            Ok(Some(notice)) | Err(notice) => self.notice = notice,
+            Ok(None) => {}
+        }
+        if self.session.recording() || self.recording.pending() {
+            self.page = Page::Macros;
+        } else if was_recording {
+            self.macros
+                .sync(self.session.macros().and_then(|editor| editor.draft()));
+        }
     }
 
     fn update_macro(&mut self, message: macros::Message) -> Task<Message> {
@@ -224,14 +268,20 @@ impl App {
                 }
             }
             None => {
-                self.session.disconnect();
-                self.notice = "Read the keyboard before editing.".into();
+                self.notice = self
+                    .session
+                    .disconnect()
+                    .err()
+                    .unwrap_or_else(|| "Read the keyboard before editing.".into());
             }
         }
         Task::none()
     }
 
     fn poll(&mut self) -> Task<Message> {
+        if self.session.recording() {
+            return Task::none();
+        }
         let Some(worker) = &self.worker else {
             return Task::none();
         };
@@ -241,10 +291,14 @@ impl App {
             Err(TryRecvError::Disconnected) => {
                 worker.set_generation(0);
                 self.worker = None;
-                self.session.disconnect();
+                if self.recording.pending() {
+                    let _ = self.recording.finish(&mut self.session, Instant::now());
+                }
+                let failure = self.session.disconnect().err();
                 self.closing = Closing::Open;
-                self.notice =
-                    "Connection lost. Edits are retained; reconnect and read before saving.".into();
+                self.notice = failure.unwrap_or_else(|| {
+                    "Connection lost. Edits are retained; reconnect and read before saving.".into()
+                });
                 Task::none()
             }
         }
@@ -264,9 +318,17 @@ impl App {
                 self.notice = "Macro loaded.".into();
             }
             Outcome::MacroSaved => self.notice = "Macro saved and read back.".into(),
-            Outcome::CatalogLoaded => return Task::none(),
+            Outcome::CatalogLoaded => {
+                let result = self.recording.catalog_finished(&mut self.session);
+                self.recording_notice(result, false);
+                return Task::none();
+            }
             Outcome::CatalogFailed(reason) => {
-                self.notice = format!("Macro discovery stopped: {reason}");
+                if !self.recording.pending() {
+                    self.notice = format!("Macro discovery stopped: {reason}");
+                }
+                let result = self.recording.catalog_finished(&mut self.session);
+                self.recording_notice(result, false);
                 return Task::none();
             }
             Outcome::AssignmentSucceeded { macro_saved } => {
@@ -317,6 +379,19 @@ impl App {
     }
 
     fn close(&mut self) -> Task<Message> {
+        if self.session.recording() || self.recording.pending() {
+            match self.recording.finish(&mut self.session, Instant::now()) {
+                Ok(notice) => {
+                    self.notice = notice;
+                    self.macros
+                        .sync(self.session.macros().and_then(|editor| editor.draft()));
+                }
+                Err(reason) => {
+                    self.notice = reason;
+                    return Task::none();
+                }
+            }
+        }
         if self.session.busy() {
             self.closing = Closing::Waiting;
         } else if self.session.keymap().dirty()
@@ -331,28 +406,28 @@ impl App {
 
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
-        if self.session.busy() || self.session.catalog_scanning() {
-            Subscription::batch([
-                close,
-                iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll),
-            ])
-        } else {
-            close
+        let mut subscriptions = vec![close];
+        if self.session.recording() || self.recording.pending() {
+            subscriptions.push(iced::event::listen_with(|event, status, _| {
+                input::recording::captures(&event, status)
+                    .then(|| Message::RecordingInput(event, Instant::now()))
+            }));
         }
+        if !self.session.recording() && (self.session.busy() || self.session.catalog_scanning()) {
+            subscriptions.push(iced::time::every(Duration::from_millis(25)).map(|_| Message::Poll));
+        }
+        Subscription::batch(subscriptions)
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let idle = !self.session.busy();
+        let idle = !self.session.busy() && !self.session.recording() && !self.recording.pending();
         let editable = idle
             && matches!(self.session.connection(), Connection::Connected { .. })
             && self.session.keymap().status() == &Status::Ready;
         let toolbar = row![
-            button("Assignments").on_press(Message::Page(Page::Keys)),
+            button("Assignments").on_press_maybe(idle.then_some(Message::Page(Page::Keys))),
             button("Macros").on_press_maybe(
-                self.session
-                    .macros()
-                    .is_some()
-                    .then_some(Message::Page(Page::Macros))
+                (idle && self.session.macros().is_some()).then_some(Message::Page(Page::Macros))
             ),
             button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)),
             button("Save assignments").on_press_maybe(
@@ -364,7 +439,7 @@ impl App {
         .spacing(self.style.spacing.s);
         let status = if self.closing == Closing::Waiting {
             "Waiting for the device operation before closing…"
-        } else if !idle {
+        } else if self.session.busy() {
             "Working…"
         } else {
             &self.notice
@@ -409,6 +484,36 @@ impl App {
     }
 
     fn feature_view(&self, editable: bool) -> Element<'_, Message> {
+        if (self.session.recording() || self.recording.pending())
+            && let Some(editor) = self.session.macros()
+        {
+            let program = editor.draft();
+            let phase = if self.recording.pending() {
+                view::recording::Phase::Waiting
+            } else {
+                view::recording::Phase::Recording {
+                    events: program.map_or(0, |program| program.events.len()),
+                }
+            };
+            let mut content = column![
+                view::keymap::workspace(
+                    &self.keys,
+                    self.session.descriptor(),
+                    self.session.keymap(),
+                    false,
+                    &self.style
+                )
+                .map(Message::Keys),
+                view::recording::controls(self.recording.options(), phase, &self.style)
+                    .map(Message::Record),
+            ]
+            .spacing(self.style.spacing.m);
+            if let Some(program) = program {
+                content = content
+                    .push(view::recording::preview(program, &self.style).map(Message::Record));
+            }
+            return content.height(Fill).into();
+        }
         match self.page {
             Page::Keys => view::keymap::view(
                 &self.keys,
@@ -424,9 +529,23 @@ impl App {
                         &self.keys,
                         self.session.descriptor(),
                         self.session.keymap(),
+                        true,
                         &self.style
                     )
                     .map(Message::Keys),
+                    view::recording::controls(
+                        self.recording.options(),
+                        view::recording::Phase::Idle {
+                            editable: !self.session.busy()
+                                && editor.status() == &Status::Ready
+                                && editor.draft().is_some_and(|program| editor
+                                    .capabilities()
+                                    .editable_repeat_counts
+                                    .contains(&program.repeat_count)),
+                        },
+                        &self.style
+                    )
+                    .map(Message::Record),
                     view::macros::view(
                         &self.macros,
                         editor,

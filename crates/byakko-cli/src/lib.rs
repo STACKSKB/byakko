@@ -52,7 +52,7 @@ fn execute(
             },
             Err(error) => {
                 executor.set_generation(0);
-                session.disconnect();
+                session.disconnect()?;
                 return Err(format!("Device operation did not complete: {error}"));
             }
         }
@@ -103,7 +103,7 @@ pub fn list_macros(
                 Ok(completion) => completion,
                 Err(error) => {
                     executor.set_generation(0);
-                    session.disconnect();
+                    session.disconnect()?;
                     return Err(format!("Macro discovery did not complete: {error}"));
                 }
             };

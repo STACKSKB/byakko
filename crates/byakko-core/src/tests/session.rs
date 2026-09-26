@@ -90,7 +90,7 @@ fn stale_and_wrong_direction_do_not_consume_ticket() {
 fn reconnect_keeps_edits_until_one_read_reestablishes_baseline() {
     let mut s = loaded();
     edit(&mut s);
-    s.disconnect();
+    s.disconnect().unwrap();
     assert!(s.keymap().dirty());
     s.connect().unwrap();
     assert!(s.save().is_err());
@@ -115,7 +115,7 @@ fn failed_save_and_disconnect_retain_edits() {
         s.accept(result(&c, FeatureResult::Apply(Err(failure.clone())))),
         Outcome::Failed(Problem::Apply(failure))
     );
-    s.disconnect();
+    s.disconnect().unwrap();
     assert!(s.keymap().dirty());
     assert_eq!(s.keymap().changes().len(), 1);
 }
@@ -124,7 +124,7 @@ fn disconnect_during_save_records_uncertainty() {
     let mut s = loaded();
     edit(&mut s);
     let c = s.save().unwrap();
-    s.disconnect();
+    s.disconnect().unwrap();
     assert!(matches!(
         s.keymap().status(),
         crate::editor::Status::Unverified {

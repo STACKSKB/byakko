@@ -81,6 +81,45 @@ impl Feature for MacroRules {
     }
 }
 impl Editor<MacroRules> {
+    pub(crate) fn begin_recording(
+        &self,
+        policy: crate::recorder::macros::DelayPolicy,
+    ) -> Result<crate::recorder::macros::Recorder, String> {
+        self.ready()?;
+        let draft = self.draft().ok_or("Macro is not editable")?;
+        if !self
+            .capabilities()
+            .editable_repeat_counts
+            .contains(&draft.repeat_count)
+        {
+            return Err("Choose a supported repeat count before recording".into());
+        }
+        crate::recorder::macros::Recorder::new(self.capabilities(), draft, policy)
+    }
+    pub(crate) fn record_input(
+        &mut self,
+        recorder: &mut crate::recorder::macros::Recorder,
+        action: Action,
+        now_ms: u64,
+    ) -> Result<crate::recorder::macros::Transition, String> {
+        recorder.transition(
+            &self.rules.capabilities,
+            self.draft.as_mut().ok_or("Macro is not editable")?,
+            action,
+            now_ms,
+        )
+    }
+    pub(crate) fn finish_recording(
+        &mut self,
+        recorder: &crate::recorder::macros::Recorder,
+        now_ms: u64,
+    ) -> Result<crate::recorder::macros::StopOutcome, String> {
+        recorder.stop(
+            &self.rules.capabilities,
+            self.draft.as_mut().ok_or("Macro is not editable")?,
+            now_ms,
+        )
+    }
     pub fn capabilities(&self) -> &Capabilities {
         &self.rules.capabilities
     }

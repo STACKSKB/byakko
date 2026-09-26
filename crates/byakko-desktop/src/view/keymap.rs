@@ -15,6 +15,7 @@ pub fn workspace<'a>(
     form: &'a Form,
     descriptor: &'a Descriptor,
     editor: &'a Editor<KeymapRules>,
+    interactive: bool,
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
     let layers = row(descriptor.layers.iter().map(|layer| {
@@ -22,7 +23,7 @@ pub fn workspace<'a>(
             style,
             &layer.label,
             layer.id == form.layer,
-            Some(Message::Layer(layer.id.clone())),
+            interactive.then(|| Message::Layer(layer.id.clone())),
         )
     }))
     .spacing(style.spacing.s);
@@ -31,7 +32,7 @@ pub fn workspace<'a>(
         descriptor.keys.iter().filter(|key| key.visible).collect(),
         form.selected.clone(),
         physical_board::labels_for_layer(descriptor, editor.draft(), &form.layer),
-        |key| Some(Message::Key(key.id.clone())),
+        move |key| interactive.then(|| Message::Key(key.id.clone())),
     );
     column![layers, board].spacing(style.spacing.m).into()
 }
@@ -70,7 +71,7 @@ pub fn view<'a>(
     ]
     .spacing(style.spacing.s);
     column![
-        workspace(form, descriptor, editor, style),
+        workspace(form, descriptor, editor, true, style),
         container(assignments).width(Fill).height(Fill)
     ]
     .spacing(style.spacing.l)

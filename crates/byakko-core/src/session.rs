@@ -7,6 +7,7 @@ use crate::{
     editor::{Editor, Status, keymap::KeymapRules, macros::MacroRules},
     library::macros::Library,
     model::keymap::{Change, Descriptor},
+    recorder::macros::{DelayPolicy, Recorder, StopOutcome, Transition},
     workflow::macro_assignment::{self, Assignment, AssignmentProblem, Plan},
 };
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,6 +60,7 @@ pub struct Session {
     generation: u64,
     operation: u64,
     pending: Option<Ticket>,
+    recorder: Option<Recorder>,
 }
 impl Session {
     pub fn new(descriptor: Descriptor) -> Result<Self, String> {
@@ -71,6 +73,7 @@ impl Session {
             generation: 0,
             operation: 0,
             pending: None,
+            recorder: None,
         })
     }
     pub fn with_macros(
@@ -112,6 +115,48 @@ impl Session {
     pub fn busy(&self) -> bool {
         self.pending.is_some()
     }
+    pub fn recording(&self) -> bool {
+        self.recorder.is_some()
+    }
+    pub fn start_recording(&mut self, policy: DelayPolicy) -> Result<(), String> {
+        self.idle()?;
+        if self.catalog_scanning() {
+            return Err("Finish macro discovery before recording".into());
+        }
+        self.recorder = Some(
+            self.macros()
+                .ok_or("Macros are not supported")?
+                .begin_recording(policy)?,
+        );
+        Ok(())
+    }
+    pub fn record_input(
+        &mut self,
+        action: crate::model::macros::Action,
+        now_ms: u64,
+    ) -> Result<Transition, String> {
+        let recorder = self
+            .recorder
+            .as_mut()
+            .ok_or("Macro recording is not active")?;
+        self.macros
+            .as_mut()
+            .ok_or("Macros are not supported")?
+            .record_input(recorder, action, now_ms)
+    }
+    pub fn stop_recording(&mut self, now_ms: u64) -> Result<StopOutcome, String> {
+        let recorder = self
+            .recorder
+            .as_ref()
+            .ok_or("Macro recording is not active")?;
+        let outcome = self
+            .macros
+            .as_mut()
+            .ok_or("Macros are not supported")?
+            .finish_recording(recorder, now_ms)?;
+        self.recorder = None;
+        Ok(outcome)
+    }
     pub fn catalog_scanning(&self) -> bool {
         self.macro_library.as_ref().is_some_and(Library::scanning)
     }
@@ -138,7 +183,11 @@ impl Session {
         }
         Ok(self.generation)
     }
-    pub fn disconnect(&mut self) {
+    pub fn disconnect(&mut self) -> Result<Option<StopOutcome>, String> {
+        let recording = match self.recorder.as_ref() {
+            Some(recorder) => self.stop_recording(recorder.last_timestamp()).map(Some),
+            None => Ok(None),
+        };
         if let Some(ticket) = &self.pending
             && matches!(ticket.direction, Direction::Save)
         {
@@ -165,6 +214,7 @@ impl Session {
         if let Some(library) = &mut self.macro_library {
             library.invalidate();
         }
+        recording
     }
     pub fn read(&mut self) -> Result<Command, String> {
         self.begin(
@@ -245,6 +295,9 @@ impl Session {
         Ok(command)
     }
     pub fn request_macro_catalog(&mut self) -> Result<Command, String> {
+        if self.recording() {
+            return Err("Stop recording before macro discovery".into());
+        }
         let generation = self.connected()?;
         if self.catalog_scanning() {
             return Err("Macro discovery is already running".into());
@@ -308,7 +361,9 @@ impl Session {
             .ok_or_else(|| "Macros are not supported".into())
     }
     fn idle(&self) -> Result<(), String> {
-        if self.busy() {
+        if self.recording() {
+            Err("Stop recording before another session activity".into())
+        } else if self.busy() {
             Err("Wait for the current operation".into())
         } else {
             Ok(())

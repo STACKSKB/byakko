@@ -8,7 +8,9 @@ This branch is an **application rewrite in progress**, starting from `3db624f`.
 The old application controllers have been removed. The replacement currently
 supports keymap read, staged assignment, save, revert and manual reconnect through
 Iced and an independent CLI. Macro discovery, selected-slot editing, save-and-assign
-and CLI snapshot workflows also use the replacement core. Other frontend workflows are being rebuilt; this is
+and CLI snapshot workflows also use the replacement core. Window-local macro
+recording appends to the shared draft and releases held inputs on stop, focus loss
+or close. Other frontend workflows are being rebuilt; this is
 not a feature-complete release. See [plan.md](plan.md) for current scope and
 [rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 
@@ -30,7 +32,7 @@ The keymap view uses device-supplied physical geometry and action choices. Edits
 stay in the core editor until Save assignments. Save uses the cached before-image
 and the existing native backup/write/readback transaction. Closing waits for a
 pending save and asks before discarding edits. Automatic discovery/reconnect,
-the richer assignment catalog, custom shortcut form, macro recording, lighting, per-key
+the richer assignment catalog, custom shortcut form, lighting, per-key
 colors, settings and diagnostic capture are pending frontend milestones.
 
 The independent CLI uses the same session/executor contract:
