@@ -100,6 +100,12 @@ are in [rewrite constraints](docs/rewrite-constraints.md). Especially:
 - Keep persistent keyboard workspace, coalesced lighting, native color picker,
   modal discard and passive macro discovery as the interaction target.
 - Public archives are diagnostic capture/export only. Keep developer APIs/tools.
+- User-directed Nia87 global-lighting rule (2026-09-27): mirror the official
+  white convention, semantic `FF FF FF` → wire `FA FF FA` → semantic white.
+  Treat this as intentional backend behavior, not a bug or channel cap. Keep
+  raw snapshots lossless and report exact archive byte differences honestly;
+  the convention does not close unrelated recovery failures. See the
+  [RGB evidence](Research/rgb-white-boundary-20260927.md).
 - Recording is exclusive/local with explicit timestamps and held-input releases.
   Host lighting restores on stop/close. Startup never resets unknown device state.
 

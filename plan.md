@@ -182,6 +182,10 @@ The final archive restores keymaps, all macros, settings and the captured pictur
 exactly. Two lighting RGB bytes remain 250 instead of the original 255: one exact
 native restore attempt reproduced the known raw-white mismatch and verified
 recovery to the preceding canonicalized state. Wave/rainbow is restored.
+The follow-up [RGB comparison](Research/rgb-white-boundary-20260927.md) and user
+direction establish white's `FF FF FF` ↔ `FA FF FA` semantic/wire mapping as
+intentional Nia87 behavior, not a bug or a release gate. The backend preserves
+that official convention, nearby RGB values and lossless raw snapshots.
 Picture diagnostic reads needed explicit settling; no runtime read policy or
 production protocol changes were made. Native window capture remains unavailable.
 

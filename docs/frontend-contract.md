@@ -113,9 +113,12 @@ acceptance evidence; CLI picture writes and picture recovery remain open.
 
 Full archive restore is deferred from the public pre-alpha UI by user
 direction. The lower-level core/device restore APIs, tests and research
-examples remain available to developers outside that workflow; the unresolved
-raw-white mismatch and older Windows collateral changes remain documented in
-the acceptance notes. An archive apply CLI is not part of this pre-alpha. If a
+examples remain available to developers outside that workflow. Older Windows
+collateral changes remain unresolved. Nia87 global lighting intentionally mirrors
+the official `FFFFFF` → wire `FAFFFA` → semantic `FFFFFF` convention; exact native
+archive verification still reports nonidentical bytes. See the
+[white boundary evidence](../Research/rgb-white-boundary-20260927.md).
+An archive apply CLI is not part of this pre-alpha. If a
 future public CLI workflow is proposed, it must show the target identity and
 operation result, preserve opaque values, and use the same expected-state
 check, durable backup, readback and typed recovery outcome provided by the shared session/executor. CLI

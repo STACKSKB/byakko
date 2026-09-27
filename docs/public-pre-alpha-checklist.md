@@ -20,7 +20,9 @@ evidence to resolve, not authorization to change exposed behavior.
 
 The user approved removing full archive import/review/restore from the
 pre-alpha Iced UI. The Diagnostic capture page retains capture/export. This closes the public release exposure gate by deferral. It does not fix
-the raw-white mismatch or older Windows collateral changes. Core/device APIs,
+older Windows collateral changes. The later white comparison establishes an
+intentional official convention, while exact native restore must still report
+nonidentical bytes; see the [boundary evidence](../Research/rgb-white-boundary-20260927.md). Core/device APIs,
 tests and research restore examples remain available to developers outside the
 public workflow, and automatic per-feature before-image backups remain in
 place.
@@ -78,7 +80,13 @@ optional source-inventory script, not the Cargo build or the renderer itself.
   the UI capture/export-only while leaving core/device APIs and
   research restore examples available to developers. This closes the public
   release exposure gate by deferral; it does not establish the cause or fix
-  either failure. Keep the historical gate open for any future public restore
+  the collateral/recovery failure. The later white comparison identifies the
+  intentional official Nia87 semantic `FFFFFF` → wire `FAFFFA` → semantic
+  `FFFFFF` convention, not a bug or release gate. Literal native `FFFFFF`
+  becomes `B4B4B4` on the tested Windows unit, with no general channel cap;
+  exact native restore must still report nonidentical bytes. See the
+  [boundary evidence](../Research/rgb-white-boundary-20260927.md).
+  Keep the historical collateral/recovery gate open for any future public restore
   workflow. See [fault evidence](../Research/configuration-fault-verification.md).
 - [ ] **Accept partial-upload and interrupted-write behavior.** Exercise
   transport errors before and after picture pages, settings/keymap/macro writes,
@@ -244,18 +252,21 @@ physical interaction will be coordinated around the user's availability.
   but the user saw no brightness difference at steady green 4 versus 1. Normal
   command readbacks matched. Exact raw lighting archive restore mismatched and
   rolled back with Verified recovery; original visible settings were restored
-  afterward with user-approved canonical RGB bytes. Root cause and physical
-  brightness remain open; see the Linux handoff and fault investigation.
+  afterward with user-approved canonical RGB bytes. At that date, root cause
+  and physical brightness remained open; see the Linux handoff and fault investigation.
   **Later camera follow-up:** steady green 4→1 now shows reduced output on the
   Linux unit under fixed camera settings, with full baseline restoration. This
-  closes that narrow brightness observation, not the exact archive restore gate
+  closes that narrow brightness observation, not exact native archive restoration
   or Windows behavior. See [brightness evidence](../Research/brightness-investigation.md).
   **Traced restore follow-up:** the approved lighting-only run isolated its
   mismatch to `FF FF FF` → `B4 B4 B4` readback, with no other changed bytes and
   verified full rollback to the canonical `FA FF FA` baseline. The user later
   directed that full archive restore be deferred from the public UI. Historical
-  Windows collateral changes and the raw-white mismatch remain unresolved;
-  scope deferral closes only the current public exposure gate.
+  Windows collateral changes remain unresolved; scope deferral closes only the
+  current public exposure gate. The 2026-09-27 Windows boundary comparison later
+  establishes the intentional official white convention described above. That
+  Windows evidence does not establish the firmware mechanism on the separate
+  Linux unit or turn its nonidentical native restore into an exact restoration.
 
 - [x] Archive mismatch diagnostics now retain complete forward/recovery readbacks
   beside the before-image after recovery finishes, with persistence failures

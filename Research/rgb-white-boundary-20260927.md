@@ -5,6 +5,12 @@ software. On this unit, the evidence rejects a general stored-value cap of 250
 on red or blue. It instead supports special handling of the exact all-255 tuple.
 This tests stored protocol values, not optical intensity or internal LED PWM.
 
+Following this comparison, the user directed that Byakko's Nia87 backend mirror
+the official white behavior and treat it as intentional, not a bug. The required
+global-lighting contract is semantic `FF FF FF` → wire `FA FF FA` → semantic
+`FF FF FF`, with lossless raw snapshots. This supersedes the earlier unresolved
+white-bug/gate classification; unrelated recovery failures remain separate.
+
 ## Native literal writes
 
 The ignored `target/rgb-acceptance` harness opens one validated, immutable Nia87
@@ -108,7 +114,8 @@ macro slots, lighting, captured picture and settings. `before.json`,
 The temporary servers, recorder and helper were stopped.
 
 This restores this experiment's canonicalized starting state. It does not claim
-to restore the earlier all-255 raw archive or close that exact-restore gate.
+to restore the earlier all-255 raw archive. Its exact-byte limitation is expected
+under the intentional Nia87 white convention, not an outstanding white bug.
 No production code, firmware, macro assignment, power-cycle or fault experiment
 was changed/performed. A later optical comparison would need controlled exposure
 or measurement; these near-white readbacks do not establish emitted brightness.

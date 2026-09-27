@@ -46,6 +46,15 @@ The catalog gives value range 0–4 for every mode except `LightOff` and `LightS
 
 For regular RGB modes, byte 4's low nibble is 7 for normal color or 8 for dazzle. Direction and other options occupy the high nibble. Music modes instead use low nibble 4 for normal and 0 for dazzle. `LightUserPicture` uses only the option high nibble and overrides bytes 5–7 with `00 C8 C8`. The writer substitutes RGB `FA FF FA` for literal white `FF FF FF`; its reader converts that sentinel back to white. The codec follows this write behavior while exposing raw response RGB separately so bytes are never hidden.
 
+User-directed interpretation, 2026-09-27: this is intentional Nia87 behavior
+which the backend must preserve, not a bug or channel cap. The
+[live boundary comparison](../Research/rgb-white-boundary-20260927.md) confirmed
+the official frontend substitutes the sentinel before sending white and displays
+it as white after reading. Native literal all-255 instead read back as all-180
+on the tested Windows unit; 253/254 and the tested channel permutations remained
+exact. This global-lighting convention does not change picture/frame codecs or
+make unequal native archive bytes count as an exact restore.
+
 ## User picture and per-key color
 
 The inherited `_getLightPic` method near offset 7,648,644 sends six BIT7 `FEA_CMD_GET_USERPIC` (`0x8c`) page requests, with page number 0–5 in byte 2 and index byte 1 at zero. It concatenates the six full 64-byte replies into 384 bytes, or 128 RGB triples by default-matrix index. There is no response header removal in that method. The native codec returns those triples without conflating matrix index with USB HID usage. Its page requests are read-only. The three catalog labels are global effect options, not evidence of independent editable banks; the [current selected-path audit](../Research/picture-selector-audit.md) establishes that the selected official bulk reader and writer both address index0.
