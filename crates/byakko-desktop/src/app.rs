@@ -908,6 +908,11 @@ impl App {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
+        let picture_context_before = self
+            .session
+            .picture()
+            .and_then(|editor| editor.baseline())
+            .map(|snapshot| snapshot.context_revision.clone());
         // Compare only around an explicit read; the editor remains the program owner.
         let macro_before = match &completion.payload {
             CompletionPayload::Macro {
@@ -928,6 +933,16 @@ impl App {
         };
         let observing = self.observation.matches(&completion);
         let outcome = self.session.accept(completion);
+        if outcome == Outcome::PictureLoaded
+            && picture_context_before.as_deref()
+                != self
+                    .session
+                    .picture()
+                    .and_then(|editor| editor.baseline())
+                    .map(|snapshot| snapshot.context_revision.as_slice())
+        {
+            self.picture.layer_loaded();
+        }
         if observing && !matches!(outcome, Outcome::Ignored) {
             match &outcome {
                 Outcome::Loaded => self.keys.sync_shortcut(self.session.keymap()),

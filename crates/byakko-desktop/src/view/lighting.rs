@@ -124,3 +124,36 @@ pub fn view<'a>(
         text(explanation).into()
     }
 }
+
+/// Picture layers are advertised lighting options; their storage remains owned
+/// by the picture editor, while selection and brightness use lighting edits.
+pub fn picture_controls<'a>(
+    editor: &'a Editor<LightingRules>,
+    editable: bool,
+    style: &'a UiStyle,
+) -> Element<'a, Message> {
+    let Some(setting) = editor.draft() else {
+        return column![].into();
+    };
+    let Ok(mut controls) = lighting::controls(editor.capabilities(), setting) else {
+        return column![].into();
+    };
+    for control in &mut controls.settings {
+        if let lighting::Control::Choices { label, choices } = control
+            && choices
+                .iter()
+                .all(|choice| matches!(choice.edit, byakko_core::model::lighting::Edit::Option(_)))
+        {
+            *label = "Layer";
+        }
+    }
+    crate::widget::lighting::parameters(
+        setting,
+        controls.settings,
+        editable && editor.status() == &Status::Ready,
+        style,
+        format!("lighting:{}", setting.effect),
+        Message::Edit,
+        Message::Picker,
+    )
+}

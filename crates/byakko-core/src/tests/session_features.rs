@@ -5,23 +5,33 @@ fn configured() -> Session {
     session()
         .with_lighting(lighting::Capabilities {
             backend_id: "test".into(),
-            effects: vec![lighting::Effect {
-                id: "steady".into(),
-                label: "Steady".into(),
-                brightness: Some(0..=100),
-                speed: None,
-                color: None,
-                options: vec![
-                    lighting::Choice {
-                        id: "one".into(),
-                        label: "One".into(),
-                    },
-                    lighting::Choice {
-                        id: "two".into(),
-                        label: "Two".into(),
-                    },
-                ],
-            }],
+            effects: vec![
+                lighting::Effect {
+                    id: "steady".into(),
+                    label: "Steady".into(),
+                    brightness: Some(0..=100),
+                    speed: None,
+                    color: None,
+                    options: vec![
+                        lighting::Choice {
+                            id: "one".into(),
+                            label: "One".into(),
+                        },
+                        lighting::Choice {
+                            id: "two".into(),
+                            label: "Two".into(),
+                        },
+                    ],
+                },
+                lighting::Effect {
+                    id: "other".into(),
+                    label: "Other".into(),
+                    brightness: None,
+                    speed: None,
+                    color: None,
+                    options: vec![],
+                },
+            ],
             host_modes: vec![],
         })
         .unwrap()
@@ -153,6 +163,184 @@ fn lighting_submission_retains_newer_intent_and_unrelated_picture() {
     assert_eq!(s.picture().unwrap().status(), &Status::Ready);
     assert!(!s.busy());
     assert_eq!(s.save_lighting().unwrap().operation, command.operation + 1);
+}
+#[test]
+fn dirty_picture_prevents_selector_changes_but_allows_same_layer_controls() {
+    let mut s = loaded_features();
+    s.edit_picture(picture::Edit::Color {
+        key: "a".into(),
+        color: [9; 3],
+    })
+    .unwrap();
+    let before = s.picture().unwrap().draft().cloned();
+    assert!(
+        s.edit_lighting(lighting::Edit::Option("two".into()))
+            .is_err()
+    );
+    assert!(
+        s.edit_lighting(lighting::Edit::Effect("other".into()))
+            .is_err()
+    );
+    let mut target = s.lighting().unwrap().draft().unwrap().clone();
+    target.option = Some("two".into());
+    assert!(s.stage_lighting(target).is_err());
+    s.edit_lighting(lighting::Edit::Option("one".into()))
+        .unwrap();
+    s.edit_lighting(lighting::Edit::Effect("steady".into()))
+        .unwrap();
+    s.edit_lighting(lighting::Edit::Brightness(20)).unwrap();
+    let command = s.save_lighting().unwrap();
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Lighting(FeatureResult::Apply(Ok(light(
+                20,
+                "one",
+                SnapshotEvidence::TransportAccepted
+            ))))
+        )),
+        Outcome::LightingSaved
+    );
+    assert_eq!(s.picture().unwrap().draft(), before.as_ref());
+    assert!(s.picture().unwrap().dirty());
+    assert!(s.save_picture().is_ok());
+}
+
+#[test]
+fn picture_only_client_uses_its_snapshot_context_without_a_lighting_read() {
+    let mut s = configured();
+    s.connect().unwrap();
+    let command = s.read_picture().unwrap();
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Picture(FeatureResult::Read(Ok(picture_snapshot())))
+        )),
+        Outcome::PictureLoaded
+    );
+    assert!(s.lighting().unwrap().baseline().is_none());
+    s.edit_picture(picture::Edit::Color {
+        key: "a".into(),
+        color: [9; 3],
+    })
+    .unwrap();
+    let command = s.save_picture().unwrap();
+    assert_eq!(command.operation, 2);
+    let CommandPayload::Picture(FeatureCommand::Apply { expected, .. }) = command.payload else {
+        panic!("Expected picture save")
+    };
+    assert_eq!(expected, picture_snapshot());
+}
+
+#[test]
+fn picture_upload_allows_a_known_matching_context_outside_its_display_effect() {
+    let mut s = configured();
+    s.connect().unwrap();
+    let command = s.read_lighting().unwrap();
+    let mut snapshot = light(10, "one", SnapshotEvidence::Readback);
+    snapshot.content = lighting::Content::Editable(
+        crate::editor::lighting::default_setting(s.lighting().unwrap().capabilities(), "other")
+            .unwrap(),
+    );
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Lighting(FeatureResult::Read(Ok(snapshot)))
+        )),
+        Outcome::LightingLoaded
+    );
+    let command = s.read_picture().unwrap();
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Picture(FeatureResult::Read(Ok(picture_snapshot())))
+        )),
+        Outcome::PictureLoaded
+    );
+    s.edit_picture(picture::Edit::Color {
+        key: "a".into(),
+        color: [9; 3],
+    })
+    .unwrap();
+    assert!(s.save_picture().is_ok());
+}
+
+#[test]
+fn selected_layer_must_be_loaded_before_painting_or_importing() {
+    let mut s = loaded_features();
+    s.edit_lighting(lighting::Edit::Option("two".into()))
+        .unwrap();
+    let paint = picture::Edit::Color {
+        key: "a".into(),
+        color: [9; 3],
+    };
+    assert!(s.edit_picture(paint.clone()).is_err());
+    assert!(s.stage_picture_snapshot(&picture_snapshot()).is_err());
+    assert!(s.save_picture().is_err());
+    let command = s.save_lighting().unwrap();
+    assert!(s.edit_picture(paint.clone()).is_err());
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Lighting(FeatureResult::Apply(Ok(light(
+                10,
+                "two",
+                SnapshotEvidence::TransportAccepted
+            ))))
+        )),
+        Outcome::LightingSaved
+    );
+    assert!(s.edit_picture(paint.clone()).is_err());
+    let command = s.read_picture().unwrap();
+    let mut target = picture_snapshot();
+    target.context_revision = vec![1, 2];
+    target.revision = vec![2];
+    assert_eq!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Picture(FeatureResult::Read(Ok(target.clone())))
+        )),
+        Outcome::PictureLoaded
+    );
+    s.edit_picture(paint).unwrap();
+    let command = s.save_picture().unwrap();
+    let CommandPayload::Picture(FeatureCommand::Apply { expected, .. }) = command.payload else {
+        panic!("Expected picture save")
+    };
+    assert_eq!(expected, target);
+}
+
+#[test]
+fn failed_layer_selection_retains_intent_and_rejects_old_picture_writes() {
+    let mut s = loaded_features();
+    let before = s.picture().unwrap().baseline().cloned();
+    s.edit_lighting(lighting::Edit::Option("two".into()))
+        .unwrap();
+    let command = s.save_lighting().unwrap();
+    let failure = ApplyFailure {
+        message: "Disconnected".into(),
+        recovery: Recovery::NotAttempted,
+    };
+    assert!(matches!(
+        s.accept(completion(
+            &command,
+            CompletionPayload::Lighting(FeatureResult::Apply(Err(failure)))
+        )),
+        Outcome::Failed(_)
+    ));
+    assert_eq!(
+        s.lighting().unwrap().draft().unwrap().option.as_deref(),
+        Some("two")
+    );
+    assert_eq!(s.picture().unwrap().baseline(), before.as_ref());
+    assert!(
+        s.edit_picture(picture::Edit::Color {
+            key: "a".into(),
+            color: [9; 3]
+        })
+        .is_err()
+    );
+    assert!(s.save_picture().is_err());
 }
 #[test]
 fn selector_save_invalidates_picture_only_after_correlated_success() {

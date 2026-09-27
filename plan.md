@@ -488,3 +488,16 @@ preventing old dropdown labels remaining above replacement text. Incremental
 pixel comparisons reproduce the failure before the correction and pass after it
 at 100%, 125% and 200% scale. See Research/lighting-catalog-20260927.md and
 vendor/iced_tiny_skia/BYAKKO-PATCH.md. No hardware writes were performed.
+
+## Per-key RGB layer selection (2026-09-27)
+
+User-confirmed workflow: select layer 1/2/3, load its colors, then edit them.
+Per-key mode now exposes the advertised layer choices with Fn+Z/X/C labels and
+brightness. It retains the existing keyboard painter and automatic uploads.
+The core blocks selection changes while colors are dirty and blocks painting
+or uploading until the selected layer's context is loaded. Selector application
+uses existing pacing, then one picture read; ordinary uploads retain their
+cached before-image backups and transport-acceptance evidence. There is no new
+packet addressing scheme or post-upload getter. See the updated
+Research/picture-selector-audit.md. Hardware writes were not performed; physical
+independent writes/persistence for layers 2/3 remain for user acceptance.

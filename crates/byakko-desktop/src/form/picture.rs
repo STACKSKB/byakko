@@ -22,6 +22,12 @@ pub struct Form {
 }
 
 impl Form {
+    /// A different stored layer supplies its own selected key color.
+    pub fn layer_loaded(&mut self) {
+        self.brush = None;
+        self.gesture = Gesture::Idle;
+    }
+
     pub fn dragging(&self) -> bool {
         self.gesture == Gesture::Dragging
     }
