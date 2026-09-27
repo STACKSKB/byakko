@@ -142,6 +142,47 @@ Local evidence: `physical-mode-monitor.jsonl`, `idle-handle-samples.json` and
 `rpc-analysis-physical-final.json` in the capture directory. The timestamped
 monitor was stopped after the experiment.
 
+## Additional physical controls capture
+
+The user completed the manual-derived control table in a second capture under
+`Research/captures/onboard-controls-20260927/`, excluding Fn+V. Native official
+startup was captured separately from the physical actions. The timestamped
+monitor observed 18 feature-change notifications (plus start/stop events),
+followed by 12 lighting getters and four keyboard-option getters. All feature
+reports sent in this capture were getters; no keyboard setters were issued by
+the agent or official frontend during these physical tests.
+
+| Physical control / observed change | Vendor message prefix | Official follow-up |
+| --- | --- | --- |
+| Brightness change | `05 06 03 00` | Lighting `87`, brightness 3 |
+| Additional animated-mode selection | `05 04 02 00` | Lighting `87`, mode 2 |
+| Speed down/up | `05 05 03 00`, `05 05 02 00` | One lighting `87` each |
+| Four color changes | `05 07 00..03 00` | One lighting `87` each |
+| Static shortcut | `05 04 01 00` | Lighting `87`, mode 1 |
+| Windows-key lock/unlock | `05 03 01 01`, `05 03 00 01` | **No settings getter** |
+| Power saving on/off | `05 03 01 09`, `05 03 00 09` | One keyboard-option `86` each |
+| Mac/Windows switching | `05 03 02 02`, `05 03 00 02` | One keyboard-option `86` each |
+| Custom selections Z/X/C | `05 04 0D 00`, `05 07 10 00`, `05 07 20 00` | One lighting `87` each; mode 13, selectors 0/1/2 |
+
+Only one brightness-change event was captured, so this does not establish both
+brightness directions despite the requested test sequence. Power and system
+mode returned to their original states in the readbacks. Lock/unlock is
+established by the notification pair, not an independent settings readback.
+Custom selections caused no picture-page reads: the official getter returned
+the lighting selector only, not the selected custom slot's actual colors.
+
+The shared vendor decoder handles settings notification masks 0/2 (system),
+4/9 (power) and 8 (Fn configuration), but does not dispatch mask 1 (Windows-key
+lock). This explains the missing official refresh despite receiving both
+notifications. Byakko should route the observed lock event to its settings
+observation rather than inherit that omission. Selector changes also need the
+existing selector-dependent picture invalidation/read rules.
+
+Evidence is the untouched RPC streams, `analysis.json` and
+`physical-controls-monitor.jsonl`. The monitor was stopped after completion.
+Fn+V recording/save remains untested, as do wireless/pairing controls. No
+additional physical input is required for the controls already captured.
+
 ## Why Byakko's current approach is disruptive
 
 The two-second idle subscription starts an observation cycle using ordinary
