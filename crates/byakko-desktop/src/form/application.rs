@@ -21,6 +21,7 @@ pub enum Message {
     Revert,
     Poll(Instant),
     Scan,
+    ObserveLighting,
     Close,
     Discard,
     KeepEditing,

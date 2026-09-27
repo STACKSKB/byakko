@@ -22,15 +22,7 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let descriptor = session.descriptor();
     let editor = session.keymap();
-    let mut toolbar = row(descriptor.layers.iter().map(|layer| {
-        panels::selectable_button(
-            style,
-            &layer.label,
-            layer.id == form.layer,
-            idle.then(|| Message::Keys(keymap::Message::Layer(layer.id.clone()))),
-        )
-    }))
-    .spacing(style.spacing.s);
+    let mut toolbar = layers(form, session, idle, style);
     if editor.dirty() {
         toolbar = toolbar
             .push(button("Save assignments").on_press_maybe(editable.then_some(Message::Save)))
@@ -84,4 +76,22 @@ pub fn view<'a>(
         }
     }
     detail.into()
+}
+
+/// Keys and macro assignments share the same selected keymap layer.
+pub fn layers<'a>(
+    form: &Form,
+    session: &'a Session,
+    idle: bool,
+    style: &'a UiStyle,
+) -> iced::widget::Row<'a, Message> {
+    row(session.descriptor().layers.iter().map(|layer| {
+        panels::selectable_button(
+            style,
+            &layer.label,
+            layer.id == form.layer,
+            idle.then(|| Message::Keys(keymap::Message::Layer(layer.id.clone()))),
+        )
+    }))
+    .spacing(style.spacing.s)
 }

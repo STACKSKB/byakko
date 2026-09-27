@@ -10,6 +10,7 @@ fn session() -> Session {
         layers: vec![Layer {
             id: "base".into(),
             label: "Base".into(),
+            read_only_keys: vec![],
         }],
         keys: vec![PhysicalKey {
             id: "a".into(),

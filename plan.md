@@ -22,6 +22,16 @@ it is not evidence that new frontend paths work.
 
 ## Architectural decisions
 
+2026-09-27 follow-up: Base/Fn selection now also serves macro assignment; the
+other keyboard views stay on Base. Tooltips, wrapping and a reserved status area
+address the reported display issues. Official Fn system positions and the
+user-requested Fn+Esc restriction are enforced through per-layer capabilities.
+The visible idle lighting editor observes onboard state every two seconds,
+replacing the stale per-key selection without automatic reactivation. This
+explicitly amends load-once caching for onboard-control synchronization; normal
+write pacing and completion evidence remain unchanged. Physical reset/edit
+acceptance remains open; see the dated rewrite acceptance notes.
+
 2026-09-27 UI correction: the source rewrite must preserve the approved workflow.
 The rewritten views now restore the five-tab shell, persistent keyboard,
 macro editor left with Library/Playback right, compact lighting mode dropdown

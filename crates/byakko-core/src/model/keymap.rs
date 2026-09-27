@@ -18,6 +18,9 @@ pub struct PhysicalKey {
 pub struct Layer {
     pub id: String,
     pub label: String,
+    /// Physical positions reserved for onboard commands on this layer.
+    #[serde(default)]
+    pub read_only_keys: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -136,6 +139,18 @@ pub struct Descriptor {
     pub actions: Vec<ActionChoice>,
     #[serde(default)]
     pub shortcuts: Option<ShortcutCapabilities>,
+}
+
+impl Descriptor {
+    pub fn key_is_writable(&self, layer: &str, key: &str) -> bool {
+        self.keys
+            .iter()
+            .any(|entry| entry.id == key && entry.writable)
+            && self
+                .layers
+                .iter()
+                .any(|entry| entry.id == layer && !entry.read_only_keys.iter().any(|id| id == key))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

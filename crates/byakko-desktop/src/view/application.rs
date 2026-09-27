@@ -143,10 +143,7 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         return macro_workspace(input, wide);
     }
     let board = board(input);
-    let mut details = column![].spacing(input.style.spacing.s);
-    if let Some(notice) = notice(input) {
-        details = details.push(text(notice));
-    }
+    let mut details = column![status(input)].spacing(input.style.spacing.s);
     if input.page == Page::Keys {
         let editable = idle
             && input.session.keymap().status() == &Status::Ready
@@ -244,7 +241,14 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
     let labels = keyboard::labels_for_layer(
         descriptor,
         input.session.keymap().draft(),
-        &input.keys.layer,
+        if matches!(input.page, Page::Keys | Page::Macros) {
+            &input.keys.layer
+        } else {
+            descriptor
+                .layers
+                .first()
+                .map_or("", |layer| layer.id.as_str())
+        },
         |action| {
             input
                 .session
@@ -254,7 +258,7 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
         },
     );
     if matches!(input.page, Page::Lighting | Page::Picture)
-        && lighting_mode(input.session, input.lighting, input.page) == Some(lighting::Mode::PerKey)
+        && lighting_mode(input.session, input.lighting) == Some(lighting::Mode::PerKey)
         && let Some(editor) = input.session.picture()
     {
         return view::picture::board(
@@ -272,12 +276,16 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
     keyboard::view_with_labels(
         input.style,
         descriptor.keys.iter().filter(|key| key.visible).collect(),
-        input.keys.selected.clone(),
+        matches!(input.page, Page::Keys | Page::Macros)
+            .then(|| input.keys.selected.clone())
+            .flatten(),
+        matches!(input.page, Page::Keys | Page::Macros),
         labels,
         move |key| {
-            input
-                .idle()
-                .then(|| Message::Keys(keymap::Message::Key(key.id.clone())))
+            (input.idle()
+                && matches!(input.page, Page::Keys | Page::Macros)
+                && descriptor.key_is_writable(&input.keys.layer, &key.id))
+            .then(|| Message::Keys(keymap::Message::Key(key.id.clone())))
         },
     )
 }
@@ -320,10 +328,12 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
                 }),
         }
     };
-    let mut keyboard = column![board(input)].spacing(input.style.spacing.s);
-    if let Some(notice) = notice(input) {
-        keyboard = keyboard.push(text(notice));
-    }
+    let keyboard = column![
+        board(input),
+        view::keymap::layers(input.keys, input.session, idle, input.style),
+        status(input),
+    ]
+    .spacing(input.style.spacing.s);
     view::macros::view(
         view::macros::View {
             form: input.macros,
@@ -332,7 +342,10 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
             library,
             names: input.files,
             idle,
-            target: input.keys.target(),
+            target: input
+                .keys
+                .target()
+                .filter(|(layer, key)| input.session.descriptor().key_is_writable(layer, key)),
             bound_action: input.keys.selected_action(input.session.keymap()),
             bound_slots,
             scanning: input.session.catalog_scanning(),
@@ -372,14 +385,7 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     )
 }
 
-pub(crate) fn lighting_mode(
-    session: &Session,
-    form: &lighting::Form,
-    page: Page,
-) -> Option<lighting::Mode> {
-    if page == Page::Picture {
-        return Some(lighting::Mode::PerKey);
-    }
+pub(crate) fn lighting_mode(session: &Session, form: &lighting::Form) -> Option<lighting::Mode> {
     if let Some(mode) = &form.mode {
         return Some(mode.clone());
     }
@@ -397,7 +403,7 @@ pub(crate) fn lighting_mode(
 
 fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
     let idle = input.idle();
-    let mode = lighting_mode(input.session, input.lighting, input.page);
+    let mode = lighting_mode(input.session, input.lighting);
     let editable = !input.files_busy
         && !input.host_preparing
         && input.session.host().is_idle()
@@ -455,6 +461,14 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
     }
     panels::vertical_scroll(input.style, controls)
         .height(Fill)
+        .into()
+}
+
+/// Reserve a stable status area, including when there is no message. Long
+/// diagnostics wrap and scroll here without moving the editor controls.
+fn status<'a>(input: View<'a>) -> Element<'a, Message> {
+    panels::vertical_scroll(input.style, text(notice(input).unwrap_or_default()))
+        .height(input.style.status_height)
         .into()
 }
 

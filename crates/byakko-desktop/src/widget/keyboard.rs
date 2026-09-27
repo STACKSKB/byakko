@@ -37,7 +37,20 @@ pub fn labels_for_layer(
                         .map(|choice| choice.label.clone())
                 })
                 .unwrap_or_else(|| fallback_action_label(descriptor, action));
-            let compact = compact_action_label(&full);
+            let compact = match action {
+                Action::Opaque { .. } => {
+                    if descriptor
+                        .layers
+                        .iter()
+                        .any(|entry| entry.id == layer && entry.read_only_keys.contains(key))
+                    {
+                        "Onboard".into()
+                    } else {
+                        "Unknown".into()
+                    }
+                }
+                _ => compact_action_label(&full),
+            };
             (key.clone(), BoardLabel { compact, full })
         })
         .collect()
@@ -90,6 +103,8 @@ fn compact_action_label(full: &str) -> String {
         "Delete" => "Del",
         "Insert" => "Ins",
         "Escape" => "Esc",
+        "Display Brightness Up" => "Bright+",
+        "Display Brightness Down" => "Bright−",
         "Volume Up" => "Vol+",
         "Volume Down" => "Vol−",
         "Previous Track" => "Prev",
@@ -98,11 +113,7 @@ fn compact_action_label(full: &str) -> String {
         "Disabled" => "Off",
         _ => full,
     };
-    if compact.chars().count() <= 7 {
-        compact.to_owned()
-    } else {
-        format!("{}…", compact.chars().take(6).collect::<String>())
-    }
+    compact.to_owned()
 }
 
 fn bounds(keys: &[&PhysicalKey]) -> (f32, f32) {
@@ -117,10 +128,21 @@ pub fn view_with_labels<'a, Message: Clone + 'a>(
     style: &'a UiStyle,
     keys: Vec<&'a PhysicalKey>,
     selected: Option<String>,
+    physical_tooltips: bool,
     labels: BTreeMap<String, BoardLabel>,
     on_select: impl Fn(&PhysicalKey) -> Option<Message> + 'a,
 ) -> Element<'a, Message> {
-    colored_view_with_labels(style, keys, selected, BTreeMap::new(), labels, on_select)
+    board_view(
+        style,
+        keys,
+        selected,
+        Appearance {
+            colors: BTreeMap::new(),
+            physical_tooltips,
+        },
+        labels,
+        on_select,
+    )
 }
 
 pub fn colored_view_with_labels<'a, Message: Clone + 'a>(
@@ -128,6 +150,32 @@ pub fn colored_view_with_labels<'a, Message: Clone + 'a>(
     keys: Vec<&'a PhysicalKey>,
     selected: Option<String>,
     colors: BTreeMap<String, [u8; 3]>,
+    labels: BTreeMap<String, BoardLabel>,
+    on_select: impl Fn(&PhysicalKey) -> Option<Message> + 'a,
+) -> Element<'a, Message> {
+    board_view(
+        style,
+        keys,
+        selected,
+        Appearance {
+            colors,
+            physical_tooltips: false,
+        },
+        labels,
+        on_select,
+    )
+}
+
+struct Appearance {
+    colors: BTreeMap<String, [u8; 3]>,
+    physical_tooltips: bool,
+}
+
+fn board_view<'a, Message: Clone + 'a>(
+    style: &'a UiStyle,
+    keys: Vec<&'a PhysicalKey>,
+    selected: Option<String>,
+    appearance: Appearance,
     labels: BTreeMap<String, BoardLabel>,
     on_select: impl Fn(&PhysicalKey) -> Option<Message> + 'a,
 ) -> Element<'a, Message> {
@@ -154,12 +202,13 @@ pub fn colored_view_with_labels<'a, Message: Clone + 'a>(
                 on_select(key),
                 Some((width, height)),
             );
-            if let Some(rgb) = colors.get(&key.id) {
+            if let Some(rgb) = appearance.colors.get(&key.id) {
                 let [r, g, b] = *rgb;
                 let selected = selected.as_deref() == Some(key.id.as_str());
                 key_button = iced::widget::button(
                     iced::widget::text(label.to_owned())
                         .size(style.board.key_label_size)
+                        .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
                         .center(),
                 )
                 .width(width)
@@ -184,31 +233,37 @@ pub fn colored_view_with_labels<'a, Message: Clone + 'a>(
                 })
                 .into();
             }
-            let key_button = tooltip(
-                key_button,
-                text(assigned.map_or_else(
-                    || format!("physical: {}", key.label),
-                    |label| format!("{} · physical: {}", label.full, key.label),
-                ))
-                .size(style.board.key_label_size),
-                tooltip::Position::Bottom,
-            )
-            .padding(style.spacing.xs as f32)
-            .gap(style.spacing.xs as f32)
-            .style(|theme: &iced::Theme| {
-                let palette = theme.extended_palette();
-                container::Style {
-                    background: Some(
-                        iced::Color {
-                            a: 1.0,
-                            ..palette.background.strong.color
-                        }
-                        .into(),
-                    ),
-                    text_color: Some(palette.background.strong.text),
-                    ..Default::default()
-                }
-            });
+            let key_button: Element<'_, Message> = if appearance.physical_tooltips {
+                tooltip(
+                    key_button,
+                    container(
+                        text(format!("physical: {}", key.label))
+                            .size(style.board.key_label_size)
+                            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+                    )
+                    .max_width(style.fields.regular),
+                    tooltip::Position::Bottom,
+                )
+                .padding(style.spacing.xs as f32)
+                .gap(style.spacing.xs as f32)
+                .style(|theme: &iced::Theme| {
+                    let palette = theme.extended_palette();
+                    container::Style {
+                        background: Some(
+                            iced::Color {
+                                a: 1.0,
+                                ..palette.background.strong.color
+                            }
+                            .into(),
+                        ),
+                        text_color: Some(palette.background.strong.text),
+                        ..Default::default()
+                    }
+                })
+                .into()
+            } else {
+                key_button
+            };
             board.push(pin(key_button).x(key.x * unit).y(key.y * unit))
         });
         container(
@@ -277,7 +332,7 @@ mod tests {
             })
         };
         assert_eq!(projected(&names)["key"].full, "Copy address");
-        assert_eq!(projected(&names)["key"].compact, "Copy a…");
+        assert_eq!(projected(&names)["key"].compact, "Copy address");
         names.rename(&binding.slot, "Paste".into());
         assert_eq!(projected(&names)["key"].full, "Paste");
         names.rename(&binding.slot, " ".into());
@@ -294,6 +349,7 @@ mod tests {
             layers: vec![Layer {
                 id: "main".into(),
                 label: "Main".into(),
+                read_only_keys: vec![],
             }],
             actions: vec![
                 ActionChoice {
@@ -345,8 +401,8 @@ mod tests {
     }
 
     #[test]
-    fn long_or_unknown_actions_stay_legible_and_keep_full_description() {
-        let descriptor = Descriptor {
+    fn unknown_actions_keep_bytes_in_description_and_show_reserved_onboard_positions() {
+        let mut descriptor = Descriptor {
             backend_id: "test".into(),
             device_name: "Test".into(),
             keys: vec![key("one", 0.0, 0.0, 1.0)],
@@ -367,6 +423,14 @@ mod tests {
         )]);
         let label = &labels_for_layer(&descriptor, Some(&draft), "main", |_| None)["one"];
         assert_eq!(label.full, "Factory-specific action");
-        assert_eq!(label.compact, "Factor…");
+        assert_eq!(label.compact, "Unknown");
+        descriptor.layers.push(Layer {
+            id: "main".into(),
+            label: "Main".into(),
+            read_only_keys: vec!["one".into()],
+        });
+        let label = &labels_for_layer(&descriptor, Some(&draft), "main", |_| None)["one"];
+        assert_eq!(label.compact, "Onboard");
+        assert_eq!(label.full, "Factory-specific action");
     }
 }

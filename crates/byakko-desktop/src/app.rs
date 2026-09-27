@@ -40,6 +40,7 @@ struct App {
     files: Files,
     assignment_binding: Option<(String, String)>,
     new_macro: Option<String>,
+    lighting_observation: Option<(u64, u64)>,
     config: Config,
     page: Page,
     link: Link,
@@ -86,6 +87,7 @@ impl App {
             files: Files::new(&session, None),
             assignment_binding: None,
             new_macro: None,
+            lighting_observation: None,
             keys: keymap::Form::new(session.descriptor()),
             macros: macros::Form::default(),
             recording: Recording::default(),
@@ -220,6 +222,7 @@ impl App {
                 self.autosave.clear();
                 self.assignment_binding = None;
                 self.new_macro = None;
+                self.lighting_observation = None;
                 self.lighting.mode = None;
                 let request = self.link.read(&mut self.session);
                 return match request {
@@ -242,6 +245,7 @@ impl App {
             }
             Message::Poll(_) => return self.poll(),
             Message::Scan => return self.scan(),
+            Message::ObserveLighting => return self.observe_lighting(),
             Message::Close => return self.close(),
             Message::Discard if self.closing == Closing::ConfirmDiscard => return iced::exit(),
             Message::KeepEditing => self.closing = Closing::Open,
@@ -278,7 +282,7 @@ impl App {
             return self.begin_file(files::Operation::LoadLabels);
         }
         if matches!(self.page, Page::Lighting | Page::Picture)
-            && view::application::lighting_mode(&self.session, &self.lighting, self.page)
+            && view::application::lighting_mode(&self.session, &self.lighting)
                 == Some(lighting::Mode::PerKey)
         {
             if self.picture.selected.is_none() {
@@ -293,7 +297,10 @@ impl App {
             }
             return match self.session.prepare_picture() {
                 Ok(Some(command)) => self.submit(Ok(command)),
-                Ok(None) => Task::none(),
+                Ok(None) => {
+                    self.lighting.mode = None;
+                    Task::none()
+                }
                 Err(reason) => {
                     self.notice = reason;
                     Task::none()
@@ -304,11 +311,6 @@ impl App {
             Page::Lighting if self.session.lighting().is_some_and(needs_read) => {
                 Some(self.session.read_lighting())
             }
-            Page::Picture => match self.session.prepare_picture() {
-                Ok(Some(command)) => Some(Ok(command)),
-                Ok(None) => None,
-                Err(reason) => Some(Err(reason)),
-            },
             Page::Settings if self.session.settings().is_some_and(needs_read) => {
                 Some(self.session.read_settings())
             }
@@ -467,6 +469,7 @@ impl App {
         let request = match message {
             lighting::Message::Read => {
                 self.autosave.cancel(AutoFeature::Lighting);
+                self.lighting.mode = None;
                 self.session.read_lighting()
             }
             lighting::Message::Revert => {
@@ -739,6 +742,10 @@ impl App {
         self.notice.clear();
         self.keys.catalog.input = catalog::InputMode::Browse;
         self.link.invalidate_discovery();
+        self.deliver(command)
+    }
+
+    fn deliver(&mut self, command: Command) -> Task<Message> {
         match self.link.executor() {
             Some(worker) => {
                 if let Err(completion) = worker.try_submit(command) {
@@ -754,6 +761,59 @@ impl App {
             }
         }
         Task::none()
+    }
+
+    /// Onboard controls can change lighting without disconnecting USB. Observe
+    /// only the idle, visible editor; never race an edit, recording or host mode.
+    fn can_observe_lighting(&self) -> bool {
+        self.closing == Closing::Open
+            && matches!(self.page, Page::Lighting | Page::Picture)
+            && matches!(self.session.connection(), Connection::Connected { .. })
+            && !self.session.busy()
+            && !self.session.catalog_scanning()
+            && !self.session.recording()
+            && !self.recording.pending()
+            && !self.host.busy()
+            && self.session.host().is_idle()
+            && !self.files.busy()
+            && !self.autosave.pending()
+            && !self.lighting.dragging()
+            && !self.picture.dragging()
+            && !self.session.requires_manual_read()
+            && self
+                .session
+                .lighting()
+                .is_some_and(|editor| editor.status() == &Status::Ready && !editor.dirty())
+            && !self.session.picture().is_some_and(|editor| {
+                editor.dirty()
+                    || matches!(
+                        editor.status(),
+                        Status::Unverified {
+                            problem: Problem::Read(_)
+                        }
+                    )
+            })
+    }
+
+    fn observe_lighting(&mut self) -> Task<Message> {
+        if !self.can_observe_lighting() {
+            return Task::none();
+        }
+        let request = self.session.read_lighting();
+        self.observe(request)
+    }
+
+    fn observe(&mut self, request: Result<Command, String>) -> Task<Message> {
+        match request {
+            Ok(command) => {
+                self.lighting_observation = Some((command.generation, command.operation));
+                self.deliver(command)
+            }
+            Err(reason) => {
+                self.notice = reason;
+                Task::none()
+            }
+        }
     }
 
     fn poll(&mut self) -> Task<Message> {
@@ -820,7 +880,43 @@ impl App {
             CompletionPayload::Settings(_) => Some(AutoFeature::Settings),
             _ => None,
         };
+        let observing =
+            self.lighting_observation == Some((completion.generation, completion.operation));
         let outcome = self.session.accept(completion);
+        if observing && !matches!(outcome, Outcome::Ignored) {
+            self.lighting_observation = None;
+            match outcome {
+                Outcome::LightingLoaded => {
+                    if self.lighting.mode == Some(lighting::Mode::PerKey) {
+                        self.lighting.mode = None;
+                    }
+                    if self.closing == Closing::Waiting {
+                        return self.close();
+                    }
+                    if !matches!(self.page, Page::Lighting | Page::Picture) {
+                        return self.load_page();
+                    }
+                    if !view::application::picture_is_displayed(&self.session) {
+                        if self.page == Page::Picture {
+                            self.page = Page::Lighting;
+                        }
+                        return Task::none();
+                    }
+                    // Read the displayed picture too: an onboard reset can
+                    // change its colors while retaining the same effect.
+                    let request = self.session.read_picture();
+                    return self.observe(request);
+                }
+                Outcome::PictureLoaded => {
+                    return if self.closing == Closing::Waiting {
+                        self.close()
+                    } else {
+                        self.load_page()
+                    };
+                }
+                _ => {} // Existing failure/conflict handling retains drafts.
+            }
+        }
         let refresh = self.link.advance(&mut self.session, &outcome);
         if matches!(outcome, Outcome::Failed(_) | Outcome::Conflict)
             && let Some(feature) = feature
@@ -839,7 +935,12 @@ impl App {
             }
             Outcome::LightingLoaded => self.notice = "Lighting loaded.".into(),
             Outcome::LightingSaved => self.notice = "Lighting applied.".into(),
-            Outcome::PictureLoaded => self.notice = "Key colors loaded.".into(),
+            Outcome::PictureLoaded => {
+                if self.lighting.mode == Some(lighting::Mode::PerKey) {
+                    self.lighting.mode = None;
+                }
+                self.notice = "Key colors loaded.".into();
+            }
             Outcome::PictureSaved => self.notice = "Key colors applied.".into(),
             Outcome::SettingsLoaded => self.notice = "Settings loaded.".into(),
             Outcome::SettingsSaved => self.notice = "Setting saved and read back.".into(),
@@ -1026,6 +1127,10 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         let mut subscriptions = vec![close];
+        if self.can_observe_lighting() {
+            subscriptions
+                .push(iced::time::every(Duration::from_secs(2)).map(|_| Message::ObserveLighting));
+        }
         if self.host.busy() {
             subscriptions.push(iced::event::listen_with(|event, _, _| {
                 matches!(event, iced::Event::Window(window::Event::Unfocused))

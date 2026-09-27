@@ -103,6 +103,15 @@ are in [rewrite constraints](docs/rewrite-constraints.md). Especially:
   keyboard, unrelated cache invalidation, extra rereads or scan restarts.
 - Only real selector changes invalidate selector-dependent picture observations.
   Unknown macro slots are not empty. Retain foreground candidate reads.
+- User-directed onboard-state synchronization (2026-09-27): while the visible
+  lighting editor is idle, observe lighting every two seconds and read the
+  displayed per-key picture. Reflect onboard changes without activating the
+  previously cached mode. Pause for edits, recording, host activity and errors.
+  This is an explicit exception to load-once caching, not another write preflight
+  or a change to setter completion evidence.
+- Nia87 pre-alpha Fn editing protects the official System Key positions and,
+  at the user's explicit request, Fn+Esc. This applies to macro assignment too;
+  keep raw captures lossless and recovery able to restore protected positions.
 - Keep persistent keyboard workspace, coalesced lighting, native color picker,
   modal discard and passive macro discovery as the interaction target.
 - Public archives are diagnostic capture/export only. Keep developer APIs/tools.

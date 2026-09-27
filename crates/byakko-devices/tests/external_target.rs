@@ -30,6 +30,7 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
         layers: vec![Layer {
             id: "default".into(),
             label: "Default".into(),
+            read_only_keys: vec![],
         }],
         actions: vec![
             ActionChoice {
