@@ -167,17 +167,23 @@ prerequisite and retains one HID handle through restoration. Exact picture
 selector metadata is carried by portable lighting snapshots; baseline matching
 ignores evidence provenance only. No unexpected wire changes were found.
 
-Acceptance remains separate: review rendered assignment/macro/host controls;
-exercise actual OS capture and physical host restoration; coordinate the
-documented playback/settings/recovery and Linux runtime checks. Existing
-physical failures remain open. This source checkpoint is not a hardware release
-acceptance or permission to run device writes.
+Acceptance remains separate: review rendered assignment/macro/host controls and
+native window gestures; coordinate physical key output, playback, persistence,
+reconnect and Linux runtime checks. Existing physical failures remain open.
+The source checkpoint alone is not a hardware release acceptance.
 
 The 2026-09-27 [acceptance follow-up](docs/rewrite-acceptance-20260927.md) records
-actual Iced offscreen renders, layout fixes and widget intent checks, a usable
-keyboard webcam baseline and equal before/after read-only device archives.
-Native window capture failed; active hardware checks await explicit write
-approval after automatic approval review blocked the prepared lighting test.
+actual Iced offscreen renders, layout fixes and widget intent checks. After the
+user explicitly approved backed-up temporary writes, native settings, keymap,
+unbound macro, onboard lighting and per-key picture checks ran. Screen-average
+and playback-music checks exercised the actual desktop controller/OS samplers
+and verified Stop restoration, with webcam evidence of physical output.
+The final archive restores keymaps, all macros, settings and the captured picture
+exactly. Two lighting RGB bytes remain 250 instead of the original 255: one exact
+native restore attempt reproduced the known raw-white mismatch and verified
+recovery to the preceding canonicalized state. Wave/rainbow is restored.
+Picture diagnostic reads needed explicit settling; no runtime read policy or
+production protocol changes were made. Native window capture remains unavailable.
 
 ## Implementation record
 
