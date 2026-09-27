@@ -16,18 +16,21 @@ the exact original bundle, and process/file-size samples are locally retained in
 `Research/captures/onboard-profile-20260927/` (ignored research artifacts).
 
 Startup traffic included one `watchVender` subscription and one `watchDevList`
-subscription. The UI identified Nia87 over USB. After settling, the interval
-17:07:37.713–17:08:08.260 IST (30.547 seconds) contained **zero additional bytes
-in any request or response capture**. In particular, there were no periodic
-frontend getter calls and no notification arrivals during that idle interval.
-The initial capture included eight `sendMsg` and eight `readMsg` calls; those
-are startup activity, not an idle polling rate.
+subscription. The UI identified Nia87 over USB. The initial analysis included
+eight `sendMsg` and eight `readMsg` calls; those are startup activity, not an
+idle polling rate.
+
+Measurement correction: the first 30.547-second sample used directory-entry
+file sizes. Windows retained stale lengths for the open capture files, so the
+initial zero-traffic claim from those samples is withdrawn. Opening each file
+and querying its handle length revealed the ongoing traffic. The CPU samples
+below are independent of that mistake. Do not use the original directory-size
+samples as evidence of idle traffic or absence of notifications.
 
 This observes the frontend/helper boundary. It does not establish the absence
-of USB polling inside the helper. A physical brightness down/up check has been
-requested to correlate an actual onboard change with stream data and the
-subsequent getter. Until that check is captured, actual Nia87 notification
-delivery remains unverified.
+of USB polling inside the helper. The user clarified that the only physical
+onboard action was factory reset: the other lighting-mode changes were made
+in the official software, not through physical mode shortcuts.
 
 CPU measurements use differences in Windows process CPU time over that same
 interval, with 32 logical processors. The four Electron processes consumed
@@ -69,6 +72,76 @@ extracted `resources/app/dist/static/js/main_ccea61a6.js` bundle:
 No periodic full-state observation timer was found in this path. Unrelated
 timers serve host effects, calibration, progress, weather and other devices.
 
+## User's reset and official lighting selections
+
+Re-decoding the actual open streams after the user's experiment produced 119
+RPC exchanges, including 42 `sendMsg` and 23 `readMsg` calls. The vendor stream
+contains a 65-byte message beginning `05 0D 00 00`, which the frontend decodes
+as reset, alongside sixteen start/stop messages beginning `05 0F 01 00` or
+`05 0F 00 00`. No lighting-change event was present in this capture; physical
+lighting shortcuts were not tested.
+
+The main request stream contains a batch of eight keymap-page reads plus
+profile/settings/lighting getters between the earlier and later lighting
+writes. The lighting getter in that batch returned mode 4 (Wave), following
+an earlier mode-13 (custom picture) observation. Static reset handling at
+approximately 15751956 waits two seconds and calls `loadDeviceInfo(false,true)`.
+Together these support reset-triggered internal refresh on this Nia87. They
+do not contradict the user's report that no visible live update was apparent:
+the rendered result was not captured, and the proxy has no cross-stream
+per-message timestamps to establish precise event/read latency.
+
+The user's official UI selections sent global setters with mode IDs 8, 21, 2
+and 13. Both observed custom-picture operations sent `07 0D ...` (activate
+mode 13) followed by seven `0C ...` picture pages. Thus the actual selected-mode
+write precedes the color data in these operations; no polling is needed for
+that explicit user intent to take effect.
+
+Static setter inspection distinguishes two cases:
+
+- Global RGB edits clone the cached lighting setting and send effect, speed,
+  brightness, options and RGB together. This can reactivate the cached mode
+  after an unobserved onboard change.
+- The custom-layer handler activates mode 13 only if its cached mode/selector
+  differs, then writes picture pages. The picture-page setter alone does not
+  activate the mode. Do not infer that every per-key color edit reasserts mode
+  13, or that the official app cannot suffer a stale-cache case.
+
+Relevant bundle offsets: RGB handler ~16586100, global setter ~7708420,
+custom-layer handler ~16627000, picture setter ~7695305. No additional keyboard
+writes or physical reset were performed by the investigating agent.
+
+## Physical Fn+Right Ctrl follow-up
+
+The user subsequently cycled modes with physical Fn+Right Ctrl while a
+timestamped monitor watched the existing capture files (no keyboard polling).
+Between 11:49:38 and 11:51:18 UTC it recorded **19 lighting notifications and
+19 matching lighting getter exchanges**. The notification payload starts
+`05 04 <mode> 00`; observed mode IDs were
+`1,2,3,4,5,6,7,8,9,10,11,19,12,14,15,16,17,18,1`.
+
+For every notification, the official frontend sent one `87` lighting getter
+and obtained the corresponding mode in its response. This activity used no
+keymap, macro or settings getter and no global-lighting/picture setter. There
+were also 38 `changeWirelessLoopStatus` calls and associated start/stop events.
+The lighting-getter request followed the mode notification by approximately
+0.73–0.86 seconds (median 0.75 seconds). These are first-observed file-append
+times from a 100 ms local-file monitor, not precise USB timings.
+
+A separate corrected idle sample, 17:16:29.216–17:16:59.544 IST, checked lengths
+through freshly opened file handles and found no additional request/response
+bytes. This replaces the invalid directory-metadata measurement above.
+
+This physically confirms the Nia87 notification/targeted-read path through the
+official helper. It does not establish that the visible UI reflected every
+mode change, nor yet identify the native HID input descriptor. The evidence
+supports an event-driven replacement for Byakko's repeated full-state cycle.
+The user need not repeat the mode-shortcut experiment.
+
+Local evidence: `physical-mode-monitor.jsonl`, `idle-handle-samples.json` and
+`rpc-analysis-physical-final.json` in the capture directory. The timestamped
+monitor was stopped after the experiment.
+
 ## Why Byakko's current approach is disruptive
 
 The two-second idle subscription starts an observation cycle using ordinary
@@ -100,8 +173,10 @@ collection: usage page `FFFF`, usage `1`, interface `1`. Byakko's selected
 configuration collection is `FFFF/2`, interface `2`, and is feature-only. A
 listener cannot simply read input from the existing feature handle.
 
-Before implementing native observation, verify the input collection's live
-descriptor, report ID/length, actual event bytes and any enable prerequisite.
+The captured RPC reset message establishes delivery through the helper; it does
+not by itself prove the underlying HID collection or report format. Before
+implementing native observation, verify the input collection's live descriptor,
+report ID/length, actual HID event bytes and any enable prerequisite.
 Associate it with the same physical keyboard through a common device ancestor
 (Windows) or USB sysfs ancestor (Linux), rather than replacing interface digits
 in a device path. Use a cancellable input listener, bounded coalescing and typed
@@ -111,5 +186,4 @@ JavaScript in the product, or infer raw HID layout from the RPC wrapper.
 No product source or executable was changed by this profiling investigation.
 The vendor bundle was restored byte-for-byte (SHA-256
 `220C75F28257DDE0F665A7FE41880D11DD859333B31FD608B26FFDAD1F958217`).
-The already-running official app retains its loaded capture endpoint; it and
-the passive proxy remain open for the requested physical brightness check.
+The physical follow-up above completes the requested observation check.
