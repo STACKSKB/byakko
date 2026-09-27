@@ -1,127 +1,96 @@
-# Byakko
+# Byakko — PRE-ALPHA
 
-A native, USB-first Menel Nia87 configurator using Rust and Iced, direct HID
-access and stock firmware. No JavaScript, Electron, webview or vendor helper
-is needed by the product.
+A native Windows and Linux configurator for the **Menel Nia87 over USB**, built
+with Rust and Iced. It uses the keyboard's stock firmware and direct HID access;
+no vendor software, browser, or background service is needed.
 
-This branch contains the **application source rewrite**, starting from `3db624f`.
-The old application controllers have been removed. The replacement
-supports keymap read, staged assignment, save, revert and reconnect through
-Iced and an independent CLI. Macro discovery, selected-slot editing, save-and-assign
-and CLI snapshot workflows also use the replacement core. Window-local macro
-recording appends to the shared draft and releases held inputs on stop, focus loss
-or close. Lighting, per-key painting and scalar settings use the same editors,
-with automatic coalesced saves and native color pickers. Portable macro files,
-local names and diagnostic archive capture/export are restored. Host screen and
-playback lighting prepare their source before startup and restore onboard
-lighting on stop or close, while continuing across focus changes. Music controls
-can change during playback. Shared idle observation refreshes loaded features
-after onboard changes and preserves conflicting drafts. Hardware acceptance remains;
-this is not an accepted release. See [plan.md](plan.md) for current scope and
-[rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
+**This is experimental pre-alpha software.** Hardware validation is still in
+progress, and recovery from every failed write is not guaranteed. The current
+application is on [`master`](https://github.com/STACKSKB/byakko/tree/master).
+Download portable builds from the [Releases page](https://github.com/STACKSKB/byakko/releases).
 
-Application source is grouped by responsibility. Core has `model/`, `editor/`,
-`validation/`, `library/`, `recorder/`, `projection/` and `workflow/`, with
-feature files inside each. Editors share one load/edit/revert/save lifecycle.
-Desktop forms and views live under `form/` and `view/`; native backends retain
-their protocol and board boundaries. The ownership map is in [plan.md](plan.md).
+## What it does
 
-## Build and run
+- Edit base and Fn key assignments, including shortcuts and macro bindings.
+- Record and edit macros, name them locally, and import/export portable macro files.
+- Choose onboard lighting effects or edit per-key RGB in layers 1, 2 and 3
+  (Fn+Z, Fn+X and Fn+C).
+- Run screen-following and music-following lighting, with live music controls.
+- Edit supported keyboard settings and export diagnostic captures.
+- Refresh affected features when the keyboard sends onboard-change events,
+  while retaining unfinished edits.
 
-Use the [source-build instructions](docs/source-build.md) for prerequisites,
-Windows/Linux commands and local checks. The tested toolchain is Rust 1.98.0.
+The independent CLI supports discovery, reads, snapshot planning/apply and
+archive comparison through the same application core. Use `byakko-cli --help`
+for its commands.
+
+## Getting started
+
+See [Build from source](docs/source-build.md) for Windows and Linux prerequisites,
+commands and output locations. To try the interface without a keyboard:
 
 ```sh
-cargo build --release --locked -p byakko-desktop -p byakko-cli
 cargo run --release --locked -p byakko-desktop -- --demo
 ```
 
-Omit `--demo` to discover and read the connected keyboard. The demo uses an
-in-memory keyboard. Linux hardware access needs the narrow permission setup in
-[Linux installation](docs/linux-install.md); run as your ordinary desktop user.
+Omit `--demo` to use a connected Nia87. Connect by USB and close other keyboard
+configurators before starting.
 
-The keymap view uses device-supplied physical geometry and action choices. Edits
-stay in the core editor until Save assignments. Save uses the cached before-image
-and the existing native backup/write/readback transaction. Closing waits for a
-pending save and asks before discarding edits. Discovery runs in the background;
-new connections load each feature once and retain drafts. Conflicts and failed
-writes hold automatic refresh until an explicit Read / reconnect. That action
-replaces the worker even if discovery missed an unplug/replug.
-The assignment catalog supports category navigation, search aliases, physical-key
-capture and capability-described custom shortcuts. Macro repeat edits stage
-immediately; event choices use advertised names and rejected edits retain inputs.
-Host failures retain their diagnostic and keep a pending close open. Rendered
-interaction and physical host restoration still require acceptance.
-Lighting/picture saves report transport
-acceptance after established pacing; settings saves include one readback.
+**Linux requires the Byakko udev rule and permission helper.** Follow
+[Linux installation](docs/linux-install.md) to install
+`packaging/linux/70-byakko-nia87.rules` and `byakko-hidraw-access`, reload udev
+rules, and reconnect the keyboard. Run Byakko as your normal desktop user, not
+with `sudo`. The rule grants access to the configuration interface; simply
+building the executable does not grant device permissions.
 
-The independent CLI uses the same session/executor contract:
+Key assignments and macros have explicit save controls. Lighting and settings
+changes save automatically after a short delay. Per-key RGB starts by selecting
+and loading a layer; apply pending colors before switching layers. Before-image
+backups and local macro names use the [normal-user data directory](docs/local-storage.md).
 
-```sh
-cargo run --release --locked -p byakko-cli -- --help
-cargo run --release --locked -p byakko-cli -- devices
-cargo run --release --locked -p byakko-cli -- read
-cargo run --release --locked -p byakko-cli -- --demo read
-```
+## Pre-alpha limits
 
-The first two commands are discovery/help; `read` sends getters and prints a
-keymap snapshot. `plan-keymap FILE` validates edits from a complete snapshot;
-`apply-keymap FILE` writes with a backup and verifies the result. `--demo` uses
-memory only. `list-macros` reads the macro library; `read-macro SLOT` emits a
-backend snapshot. Retain its revision when editing for `plan-macro FILE` or
-`apply-macro FILE`. `assign-macro SLOT LAYER KEY BINDING` uses the shared core
-assignment workflow. `read-lighting`, `read-picture` and `read-settings` emit
-snapshots for their corresponding `plan-FEATURE FILE` / `apply-FEATURE FILE`
-commands. Retain the revision and selector context; a settings file changes one
-scalar field. `capture-archive NEW_FILE` captures a diagnostic archive;
-`compare-archives BEFORE TARGET` compares CLI archives offline, before discovery.
-Other previous CLI commands are not exposed on this checkpoint.
-Start with the
-[read-only Linux sequence](docs/linux-handoff.md) before any Linux write test.
-Backups use the [normal-user data directory](docs/local-storage.md).
+- Only stock-firmware Nia87 USB configuration is supported. Wireless receivers,
+  QMK/VIA, other keyboards and firmware flashing are outside this version.
+- Fn system keys and Fn+Esc (factory reset) are protected from reassignment.
+- Diagnostic archives can be captured and exported in the UI; restoring a full
+  archive is not a public feature. Historical recovery failures remain unresolved.
+- Physical layer 2/3 RGB persistence, some macro playback cases, host-lighting
+  restoration and Linux hardware/runtime behavior still need acceptance checks.
+  Passing software tests does not establish those results.
+- Linux permissions for native onboard-change notifications still need validation; manual reads remain available.
+- Linux screen-following needs X11; Wayland screen capture is unsupported.
+  Music-following needs PulseAudio or a compatible PipeWire PulseAudio service.
+- The interface is currently English. Translations and wider hardware support
+  remain future work.
 
-Native device APIs, research tools, codecs and fixtures are retained. Public
-archive capture/export is available; archive restore remains a developer
-operation. Desktop exports retain the native archive bytes; CLI exports retain
-their existing `NativeArchive` JSON envelope for offline CLI comparison.
-Existing recovery failures are not fixed by this
-rewrite. The [support and recovery notes](docs/pre-alpha-support.md) describe
-the previous executable and physical evidence, not acceptance of this rewrite.
+Current checks and their boundaries are recorded in the
+[rewrite acceptance notes](docs/rewrite-acceptance-20260927.md).
+When reporting a problem, include the source revision or package name, OS,
+keyboard connection, steps to reproduce, and the complete error message.
 
-## Status and development
+## Development
 
-Application code is organized by responsibility. Core's `editor/` contains one
-shared lifecycle and feature implementations; `model/`, `validation/`,
-`library/`, `recorder/`, `projection/` and `workflow/` contain the corresponding
-feature files. Desktop separates input forms, views and shared widgets. Native
-board and protocol-family modules retain the hardware-specific implementation.
+The application separates portable domain/editor logic (`byakko-core`), native
+device and OS effects (`byakko-devices`), Iced forms/views (`byakko-desktop`), and
+CLI parsing/output (`byakko-cli`). Editors share one baseline/draft lifecycle;
+feature-specific rules stay with their implementations.
 
-- [Current rewrite architecture and sequence](plan.md)
-- [Engineering rules](AGENTS.md) and [constraint inventory](docs/rewrite-constraints.md)
-- [Previous implementation acceptance ledger](docs/parity-status.md) and [pre-alpha checklist](docs/public-pre-alpha-checklist.md)
-- [Previous architecture](docs/pre-alpha-proposal.md) and [previous frontend contract](docs/frontend-contract.md)
+- [Current plan and ownership map](plan.md)
+- [Engineering rules](AGENTS.md) and [rewrite constraints](docs/rewrite-constraints.md)
+- [Build and local verification](docs/source-build.md)
 - [Dependency/source inventory](docs/dependency-source-audit.md)
-- [Performance observations and limits](docs/performance-baseline.md)
 
-The egui application has been retired. Research captures, vendor installers,
-and extracted material are not product assets and are not required to build.
-Original codecs and preserved fixtures live alongside dated observations; no Sharkfin source, tables, tests
-or assets have been incorporated. The renderer's local patch is included in Git.
-
-USB Nia87 comes first. QMK/VIA, 2.4 GHz, browser delivery and unrelated visual
-redesign remain deferred. Firmware flashing, vendor accounts and cloud sharing
-are outside the stock-firmware configurator scope. Development uses local
-build/test commands; this pre-alpha has no CI/CD requirement.
+Older architecture and acceptance documents are historical evidence, not the
+current application design. Research captures and vendor material are not
+product assets or build dependencies. The patched Iced renderer is included in
+the checkout.
 
 ## License
 
-Byakko's original code, documentation and project-owned assets are licensed
-under the GNU General Public License, version 3 or (at your option) any later
-version (`GPL-3.0-or-later`). See [LICENSE](LICENSE). Byakko is distributed
-without any warranty; see the license for details.
+Byakko-owned code, documentation and assets are **GPL-3.0-or-later**. See
+[LICENSE](LICENSE). Byakko is distributed without warranty.
 
-Third-party code and assets retain their own notices and license terms. In
-particular, the vendored `iced_tiny_skia` renderer retains its
-[MIT license](vendor/iced_tiny_skia/LICENSE) and
-[patch provenance](vendor/iced_tiny_skia/BYAKKO-PATCH.md). Files identifying a
-separate third-party license are not relicensed by this project notice.
+Third-party material retains its own licenses and notices. The vendored
+`iced_tiny_skia` renderer retains its [MIT license](vendor/iced_tiny_skia/LICENSE)
+and [patch provenance](vendor/iced_tiny_skia/BYAKKO-PATCH.md).
