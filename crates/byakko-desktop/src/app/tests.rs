@@ -130,6 +130,14 @@ struct ObservedHost {
     fail_restore: bool,
 }
 impl byakko_devices::HostActivity for ObservedHost {
+    fn update_parameters(
+        &mut self,
+        setting: byakko_core::model::lighting::Setting,
+    ) -> Result<(), String> {
+        self.activity.update_parameters(setting)?;
+        self.calls.lock().unwrap().push("host-parameters");
+        Ok(())
+    }
     fn send_frame(&mut self, frame: byakko_devices::HostFrame) -> Result<(), String> {
         self.calls.lock().unwrap().push("host-frame");
         self.activity.send_frame(frame)
@@ -176,7 +184,7 @@ fn poll_host_until(app: &mut App, predicate: impl Fn(&App) -> bool) {
 }
 
 #[test]
-fn host_messages_prepare_stream_restore_on_focus_loss_and_preserve_other_drafts() {
+fn host_messages_prepare_stream_restore_on_stop_and_preserve_other_drafts() {
     let (mut app, calls) = feature_app(false);
     app.host = Host::new(synthetic_sampler);
     edit(&mut app);
@@ -196,7 +204,7 @@ fn host_messages_prepare_stream_restore_on_focus_loss_and_preserve_other_drafts(
     let _ = app.update(Message::Read);
     let _ = app.update(Message::Macros(macros::Message::Clear));
     assert!(app.session.host().active());
-    let _ = app.update(Message::HostFocusLost);
+    let _ = app.update(Message::Host(host::Message::Stop));
     poll_host_until(&mut app, |app| !app.host.busy());
     assert!(app.session.host().is_idle());
     assert_eq!(app.session.keymap().draft(), keymap.as_ref());
@@ -218,6 +226,68 @@ fn host_messages_prepare_stream_restore_on_focus_loss_and_preserve_other_drafts(
         calls
             .iter()
             .all(|call| matches!(*call, "host-start" | "host-frame" | "host-finish"))
+    );
+}
+
+#[test]
+fn music_parameters_apply_while_streaming_and_stop_restores_original_lighting() {
+    use byakko_core::model::lighting::{Color, Edit};
+    let (mut app, calls) = feature_app(false);
+    app.host = Host::new(synthetic_sampler);
+    let baseline = app.session.lighting().unwrap().baseline().cloned();
+    let _ = app.update(Message::Host(host::Message::Mode("playback-audio".into())));
+    let _ = app.update(Message::Host(host::Message::Start));
+    poll_host_until(&mut app, |app| app.session.host().active());
+    let ticket = app.session.host().ticket();
+    let _ = app.update(Message::Host(host::Message::Parameter(Edit::Brightness(4))));
+    let _ = app.update(Message::Host(host::Message::Parameter(Edit::Color(
+        Color::Rgb([9, 80, 150]),
+    ))));
+    let _ = app.update(Message::ObserveDevice);
+    poll_host_until(&mut app, |_| {
+        calls.lock().unwrap().contains(&"host-parameters")
+    });
+    assert_eq!(app.session.host().ticket(), ticket);
+    assert!(app.session.host().active());
+    assert_eq!(app.host_form.setting.as_ref().unwrap().brightness, Some(4));
+    assert_eq!(
+        app.host_form.setting.as_ref().unwrap().color,
+        Some(Color::Rgb([9, 80, 150]))
+    );
+    assert_eq!(
+        app.session.lighting().unwrap().baseline(),
+        baseline.as_ref()
+    );
+    assert!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| matches!(*call, "host-start" | "host-frame" | "host-parameters"))
+    );
+    let _ = app.update(Message::Host(host::Message::Stop));
+    poll_host_until(&mut app, |app| !app.host.busy());
+    assert_eq!(
+        app.session.lighting().unwrap().baseline(),
+        baseline.as_ref()
+    );
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| **call == "host-start")
+            .count(),
+        1
+    );
+    assert_eq!(
+        calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| **call == "host-finish")
+            .count(),
+        1
     );
 }
 
@@ -1033,7 +1103,7 @@ fn onboard_mode_readback_replaces_stale_per_key_mode_without_writing() {
     assert_eq!(app.lighting.mode, None);
     calls.lock().unwrap().clear();
     app.notice = "Key colors applied.".into();
-    let _ = app.update(Message::ObserveLighting);
+    let _ = app.update(Message::ObserveDevice);
     let mut completion = app
         .link
         .executor()
@@ -1044,6 +1114,7 @@ fn onboard_mode_readback_replaces_stale_per_key_mode_without_writing() {
     // real request's correlation so this exercises the window completion path.
     completion.payload = CompletionPayload::Lighting(FeatureResult::Read(Ok(onboard.clone())));
     let _ = app.complete(completion);
+    drain(&mut app);
     assert!(!app.session.busy());
     assert_eq!(app.page, Page::Lighting);
     assert_eq!(app.session.lighting().unwrap().baseline(), Some(&onboard));
@@ -1052,34 +1123,119 @@ fn onboard_mode_readback_replaces_stale_per_key_mode_without_writing() {
         view::application::lighting_mode(&app.session, &app.lighting),
         Some(lighting::Mode::Onboard("steady".into()))
     );
-    assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "read-settings"]);
     assert_eq!(app.notice, "Key colors applied.");
 }
 
 #[test]
-fn idle_lighting_observation_is_quiet_and_pauses_for_edits_and_other_pages() {
+fn idle_observation_refreshes_loaded_features_on_any_page_and_pauses_for_edits() {
     let (mut app, calls) = feature_app(false);
-    let _ = app.update(Message::ObserveLighting);
-    assert!(
-        calls.lock().unwrap().is_empty(),
-        "Keys does not poll lighting"
-    );
+    let _ = app.update(Message::ObserveDevice);
+    drain(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["read-settings", "read-lighting"]);
     let _ = app.update(Message::Lighting(lighting::Message::Mode(
         lighting::Mode::PerKey,
     )));
     drain(&mut app);
     calls.lock().unwrap().clear();
     app.notice = "Key colors applied.".into();
-    let _ = app.update(Message::ObserveLighting);
+    let _ = app.update(Message::ObserveDevice);
     drain(&mut app);
-    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "read-picture"]);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        ["read-lighting", "read-settings", "read-picture"]
+    );
     assert_eq!(app.notice, "Key colors applied.");
     calls.lock().unwrap().clear();
     let _ = app.update(Message::Picture(picture::Message::Color([23, 45, 67])));
     let draft = app.session.picture().unwrap().draft().cloned();
-    let _ = app.update(Message::ObserveLighting);
+    let _ = app.update(Message::ObserveDevice);
     assert!(!app.session.busy());
     assert_eq!(app.session.picture().unwrap().draft(), draft.as_ref());
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn onboard_settings_and_keymap_reads_update_their_editors_without_writes() {
+    use byakko_core::{
+        contract::FeatureResult,
+        model::settings::{Content, Value},
+    };
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Page(Page::Settings));
+    let mut settings = app.session.settings().unwrap().baseline().unwrap().clone();
+    let Content::Editable(values) = &mut settings.content else {
+        panic!()
+    };
+    values.insert("sleep".into(), Value::Number(8));
+    settings.revision.push(1);
+    let _ = app.update(Message::ObserveDevice);
+    let mut completion = app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    completion.payload = CompletionPayload::Settings(FeatureResult::Read(Ok(settings.clone())));
+    let _ = app.complete(completion);
+    let mut keymap = app.session.keymap().baseline().unwrap().clone();
+    keymap
+        .bindings
+        .get_mut(&app.keys.layer)
+        .unwrap()
+        .insert("Alpha".into(), Action::Key(5));
+    keymap.revision.push(1);
+    let mut completion = app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    completion.payload = CompletionPayload::Keymap(FeatureResult::Read(Ok(keymap.clone())));
+    let _ = app.complete(completion);
+    drain(&mut app);
+    assert_eq!(app.session.settings().unwrap().baseline(), Some(&settings));
+    assert_eq!(
+        app.session.settings().unwrap().draft(),
+        match &settings.content {
+            Content::Editable(values) => Some(values),
+            _ => None,
+        }
+    );
+    assert_eq!(app.session.keymap().baseline(), Some(&keymap));
+    assert_eq!(app.session.keymap().draft(), Some(&keymap.bindings));
+    assert_eq!(*calls.lock().unwrap(), ["read-settings", "read-lighting"]);
+}
+
+#[test]
+fn onboard_keymap_change_preserves_dirty_draft_and_stops_the_observation_cycle() {
+    use byakko_core::contract::FeatureResult;
+    let (mut app, calls) = feature_app(false);
+    edit(&mut app);
+    let draft = app.session.keymap().draft().cloned();
+    let mut actual = app.session.keymap().baseline().unwrap().clone();
+    actual
+        .bindings
+        .get_mut(&app.keys.layer)
+        .unwrap()
+        .insert("Beta".into(), Action::Key(6));
+    actual.revision.push(2);
+    let _ = app.update(Message::ObserveDevice);
+    let mut completion = app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    completion.payload = CompletionPayload::Keymap(FeatureResult::Read(Ok(actual.clone())));
+    let _ = app.complete(completion);
+    assert_eq!(app.session.keymap().draft(), draft.as_ref());
+    assert_eq!(
+        app.session.keymap().status(),
+        &Status::Conflict { device: actual }
+    );
+    assert!(!app.session.busy());
+    assert!(!app.can_observe());
     assert!(calls.lock().unwrap().is_empty());
 }
 
@@ -1088,7 +1244,7 @@ fn failed_background_read_stops_observing_and_retains_the_device_error() {
     use byakko_core::contract::FeatureResult;
     let (mut app, calls) = feature_app(false);
     let _ = app.update(Message::Page(Page::Lighting));
-    let _ = app.update(Message::ObserveLighting);
+    let _ = app.update(Message::ObserveDevice);
     let mut completion = app
         .link
         .executor()
@@ -1099,8 +1255,8 @@ fn failed_background_read_stops_observing_and_retains_the_device_error() {
         CompletionPayload::Lighting(FeatureResult::Read(Err("Keyboard disconnected".into())));
     let _ = app.complete(completion);
     assert!(app.notice.contains("Keyboard disconnected"));
-    assert!(!app.can_observe_lighting());
-    let _ = app.update(Message::ObserveLighting);
+    assert!(!app.can_observe());
+    let _ = app.update(Message::ObserveDevice);
     assert!(!app.session.busy());
     assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
 }

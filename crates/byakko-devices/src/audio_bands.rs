@@ -8,7 +8,7 @@ pub struct AudioBands {
     cursor: usize,
     coefficients: [f32; BANDS],
     taper: [f32; WINDOW],
-    levels: [f32; BANDS],
+    magnitudes: [f32; BANDS],
 }
 
 impl AudioBands {
@@ -28,7 +28,7 @@ impl AudioBands {
             taper: std::array::from_fn(|i| {
                 0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / (WINDOW - 1) as f32).cos()
             }),
-            levels: [0.0; BANDS],
+            magnitudes: [0.0; BANDS],
         })
     }
 
@@ -62,11 +62,15 @@ impl AudioBands {
             }
             let power =
                 (previous * previous + older * older - coefficient * previous * older).max(0.0);
-            let magnitude = power.sqrt() * 4.0 / WINDOW as f32;
+            let measured = power.sqrt() * 4.0 / WINDOW as f32;
+            // Smooth the spectrum before quantization, as the official analyser
+            // does (0.4 previous magnitude). Smoothing rows after quantization
+            // leaves boundary jitter and makes each transient jump immediately.
+            let magnitude = 0.4 * self.magnitudes[band] + 0.6 * measured;
+            self.magnitudes[band] = magnitude;
             let db = 20.0 * magnitude.max(1e-6).log10();
             let target = ((db + 60.0) / 48.0).clamp(0.0, 1.0) * 6.0;
-            self.levels[band] = target.max(self.levels[band] - 0.7);
-            self.levels[band].round().clamp(0.0, 6.0) as u8
+            target.round().clamp(0.0, 6.0) as u8
         })
     }
 }
@@ -99,6 +103,27 @@ mod tests {
         assert!(AudioBands::new(0).is_err());
         let mut bands = AudioBands::new(44100).unwrap();
         bands.push(&[f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+        assert_eq!(bands.frame(), [0; 32]);
+    }
+
+    #[test]
+    fn smoothing_retains_a_tone_across_one_silent_window_then_decays() {
+        let mut bands = AudioBands::new(48000).unwrap();
+        let index = 16;
+        let frequency = 60.0 * 200.0f32.powf(index as f32 / 31.0);
+        bands.push(
+            &(0..WINDOW)
+                .map(|i| 0.03 * (std::f32::consts::TAU * frequency * i as f32 / 48000.0).sin())
+                .collect::<Vec<_>>(),
+        );
+        let lit = bands.frame()[index];
+        assert!(lit > 0);
+        bands.silence(WINDOW);
+        let after_gap = bands.frame()[index];
+        assert!(after_gap > 0 && after_gap <= lit);
+        for _ in 0..12 {
+            bands.frame();
+        }
         assert_eq!(bands.frame(), [0; 32]);
     }
 }

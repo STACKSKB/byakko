@@ -78,6 +78,21 @@ impl Controller {
         worker.cancel_catalog();
         Ok(())
     }
+    pub fn update_parameters(
+        &self,
+        form: &Form,
+        session: &Session,
+        worker: &Executor,
+    ) -> Result<(), String> {
+        if !matches!(self.state, State::Attached(_)) {
+            return Err("Host source is not running".into());
+        }
+        let setting = form
+            .setting
+            .clone()
+            .ok_or("This host mode has no parameters")?;
+        worker.update_host(session.update_host(setting)?)
+    }
     pub fn stop(
         &mut self,
         session: &mut Session,

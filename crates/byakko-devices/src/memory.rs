@@ -25,12 +25,21 @@ struct MacroStorage {
 }
 
 struct MemoryHost {
+    mode: lighting::HostMode,
     source: lighting::HostSource,
     saved: lighting::Snapshot,
 }
 impl crate::HostActivity for MemoryHost {
     fn send_frame(&mut self, frame: crate::HostFrame) -> Result<(), String> {
         frame.validate_for(self.source)
+    }
+    fn update_parameters(&mut self, setting: lighting::Setting) -> Result<(), String> {
+        let parameters = self
+            .mode
+            .parameters
+            .as_ref()
+            .ok_or("This mode has no parameters")?;
+        validation::lighting::validate_parameters(&parameters.schema, &setting)
     }
     fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure> {
         Ok(lighting::Snapshot {
@@ -466,6 +475,7 @@ impl Device for MemoryDevice {
         }
         Ok(Box::new(MemoryHost {
             source: mode.source,
+            mode,
             saved: stored.snapshot.clone(),
         }))
     }

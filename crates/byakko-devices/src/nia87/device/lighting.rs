@@ -58,6 +58,19 @@ impl HostLightingSession {
         })
     }
 
+    pub fn update_parameters(
+        &mut self,
+        setting: &crate::nia87::lighting::LightingSetting,
+    ) -> Result<()> {
+        if setting.effect_id != self.active.effect_id() || !matches!(setting.effect_id, 20 | 22) {
+            return Err("Parameter update must retain the active music mode".into());
+        }
+        let report = crate::nia87::lighting::write_report(setting)?;
+        let submitted = submitted_lighting(&self.active, &report)?;
+        write_lighting_report(self.session.device(), &report)?;
+        self.active = submitted;
+        Ok(())
+    }
     pub fn send_color(&self, rgb: [u8; 3]) -> Result<()> {
         if self.active.effect_id() != 21 {
             return Err("Screen frame requires screen mode".into());

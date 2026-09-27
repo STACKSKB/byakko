@@ -15,6 +15,9 @@ pub use byakko_core::model::lighting::HostFrame;
 /// verifies the saved lighting; Drop must attempt restoration on unwinding.
 pub trait HostActivity: Send {
     fn send_frame(&mut self, frame: HostFrame) -> Result<(), String>;
+    fn update_parameters(&mut self, _setting: lighting::Setting) -> Result<(), String> {
+        Err("Host parameter updates are unavailable".into())
+    }
     fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure>;
 }
 

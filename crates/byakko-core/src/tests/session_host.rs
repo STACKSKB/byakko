@@ -466,3 +466,27 @@ fn disconnect_clears_host_with_unverified_hold_and_stale_events_cannot_settle_a_
     assert_eq!(session.host().ticket(), Some(second.ticket));
     assert_eq!(session.host().phase(), Phase::Starting);
 }
+
+#[test]
+fn live_parameters_require_active_valid_mode_and_retain_original_baseline() {
+    let mut session = loaded_host();
+    assert!(session.update_host(setting("audio", 3)).is_err());
+    let start = session.start_host("audio", None).unwrap();
+    assert!(session.update_host(setting("audio", 3)).is_err());
+    session.accept_host(HostEvent {
+        ticket: start.ticket,
+        kind: HostEventKind::Started,
+    });
+    let update = session.update_host(setting("audio", 3)).unwrap();
+    assert_eq!(update.ticket, start.ticket);
+    assert_eq!(update.setting, setting("audio", 3));
+    assert!(session.update_host(setting("audio", 4)).is_err());
+    assert!(session.update_host(setting("steady", 3)).is_err());
+    assert_eq!(
+        session.lighting().unwrap().baseline(),
+        Some(&start.expected)
+    );
+    assert_eq!(session.host().phase(), Phase::Active);
+    session.stop_host();
+    assert!(session.update_host(setting("audio", 3)).is_err());
+}

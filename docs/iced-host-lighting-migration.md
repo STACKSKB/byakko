@@ -1,5 +1,12 @@
 # Iced host lighting migration boundary
 
+2026-09-27 update: the rewritten application keeps host streaming active across
+focus changes, at the user's request. Live music parameters update the same
+session while preserving its original restoration baseline. The focus-loss
+stop behavior described below is historical. Current evidence is in
+[rewrite acceptance](rewrite-acceptance-20260927.md) and
+[official music inspection](../Research/music-follow-20260927.md).
+
 Historical egui baseline (retired 2026-09-26): it ran screen color and playback lighting through separate
 threads (`src/screen_stream.rs` and `src/audio_stream.rs`). Those loops open a
 `HostLightingSession`, send frames, and explicitly restore the saved effect.
