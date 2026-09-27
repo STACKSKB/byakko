@@ -76,6 +76,17 @@ pub fn run(
     )
     .title("Byakko")
     .theme(UiStyle::DEFAULT.theme)
+    .window(window::Settings {
+        icon: Some(
+            window::icon::from_rgba(
+                include_bytes!("../../../packaging/icons/byakko.rgba").to_vec(),
+                64,
+                64,
+            )
+            .expect("bundled 64 by 64 RGBA icon"),
+        ),
+        ..Default::default()
+    })
     .window_size(UiStyle::DEFAULT.initial_window)
     .subscription(App::subscription)
     .exit_on_close_request(false)
