@@ -74,7 +74,7 @@ pub fn view<'a>(
                     content = content.push(lighting::parameters(
                         setting,
                         controls,
-                        editable,
+                        editable || phase == Phase::Active,
                         style,
                         format!("host:{}", mode.id),
                         Message::Parameter,

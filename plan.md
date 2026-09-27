@@ -22,6 +22,15 @@ it is not evidence that new frontend paths work.
 
 ## Architectural decisions
 
+2026-09-27 host/observation follow-up: host screen and music streaming continues
+across window focus changes. Music parameters update in the active session;
+original restoration state remains owned by the lighting lifecycle. Idle
+observations now share a feature-neutral controller for loaded keymap, settings,
+lighting, selected macro and applicable picture data; the former lighting-only
+policy below is superseded. Music magnitude smoothing and packet-gap handling
+were compared with official renderer evidence; physical visual quality remains
+for review. See `Research/music-follow-20260927.md`.
+
 2026-09-27 follow-up: Base/Fn selection now also serves macro assignment; the
 other keyboard views stay on Base. Tooltips, wrapping and a reserved status area
 address the reported display issues. Official Fn system positions and the

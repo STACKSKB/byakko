@@ -273,6 +273,31 @@ impl Session {
         self.host.begin(&start);
         Ok(start)
     }
+    pub fn update_host(
+        &self,
+        setting: lighting::Setting,
+    ) -> Result<crate::contract::HostUpdate, String> {
+        if !self.host.active() {
+            return Err("Host lighting must be running to update parameters".into());
+        }
+        let mode = self
+            .lighting()
+            .ok_or("Lighting is unavailable")?
+            .capabilities()
+            .host_modes
+            .iter()
+            .find(|mode| Some(mode.id.as_str()) == self.host.mode_id())
+            .ok_or("Active host mode is unavailable")?;
+        let parameters = mode
+            .parameters
+            .as_ref()
+            .ok_or("This host mode has no parameters")?;
+        crate::validation::lighting::validate_parameters(&parameters.schema, &setting)?;
+        Ok(crate::contract::HostUpdate {
+            ticket: self.host.ticket().expect("active host owns ticket"),
+            setting,
+        })
+    }
     pub fn stop_host(&mut self) -> Option<HostTicket> {
         self.host.stop()
     }

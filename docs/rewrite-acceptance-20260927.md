@@ -286,3 +286,48 @@ strict workspace Clippy, formatting and locked release builds. The final Iced
 renders and interaction checks passed at 1360×800 and 1024×768. Protected opaque
 bindings display `Onboard`; other opaque bindings display `Unknown`, with their
 full raw labels and snapshots retained internally.
+
+## Background host streaming and shared observations
+
+The user's next feedback supersedes the lighting-only observation scope above.
+One desktop observation controller now sequences ordinary correlated reads for
+loaded keymap, settings, lighting, selected macro and applicable per-key colors.
+Each cycle prioritizes the displayed feature; picture follows lighting so a
+selector change is handled first. It never activates a mode or repeatedly scans
+all macro slots. Pending saves, recording, input capture and host streaming pause
+observation. Dirty manual drafts use the common conflict lifecycle rather than
+being replaced. Failures/conflicts stop observation until resolved.
+
+The provided Nia87 manual was visually read, including its FN combination table.
+It describes factory reset, Windows-key lock, Windows/Mac switching and power
+saving alongside lighting, confirming that onboard changes span multiple
+features. The existing getters still bound what can be observed; this does not
+claim newly decoded protocol support for every manual function.
+
+Screen and music host sessions now continue when the window loses focus.
+Explicit Stop and close still restore the original lighting. Active music
+brightness, color and option edits use a correlated latest-setting slot on the
+same serialized worker; they do not stop/restart the sampler or replace the
+restoration snapshot. Known setter pacing remains intact. Update failures stop
+streaming and use the existing restoration/failure path.
+
+The official renderer inspection, music 2/3 naming and DSP changes are recorded
+in [music evidence](../Research/music-follow-20260927.md). Magnitude smoothing
+precedes six-row quantization, and a 90 ms empty-packet grace prevents an empty
+nonblocking audio read from immediately injecting silence. The original
+logarithmic probes remain; exact vendor spectral matching and physical flicker
+comparison are not claimed.
+
+The real Windows screen sampler returned average RGB `[167,168,171]` and center
+point `[194,194,194]` for the current desktop. Its sandboxed attempt was denied;
+the reviewed read-only native run succeeded. It accessed no HID and saved no
+images. This establishes nonconstant sampling, not physical LED accuracy.
+
+All-target/all-feature workspace tests pass (90 core, 89 desktop, 232 devices,
+plus CLI/research/external tests), strict Clippy and formatting pass. Regressions
+cover changed settings/keymaps, retained conflicting drafts, live music edits,
+stale updates, coalescing and preservation of the original restore baseline.
+Actual Iced slider/color/option/Rainbow events while Running pass at 1360×800
+and 1024×768. Physical background screen/music response, live parameter pacing,
+flicker quality and onboard reset acceptance remain for user review. No hardware
+write or reset was performed in this work.

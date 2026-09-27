@@ -14,7 +14,9 @@ or close. Lighting, per-key painting and scalar settings use the same editors,
 with automatic coalesced saves and native color pickers. Portable macro files,
 local names and diagnostic archive capture/export are restored. Host screen and
 playback lighting prepare their source before startup and restore onboard
-lighting on stop, focus loss or close. Rendered and hardware acceptance remain;
+lighting on stop or close, while continuing across focus changes. Music controls
+can change during playback. Shared idle observation refreshes loaded features
+after onboard changes and preserves conflicting drafts. Hardware acceptance remains;
 this is not an accepted release. See [plan.md](plan.md) for current scope and
 [rewrite constraints](docs/rewrite-constraints.md) for the preserved requirements.
 

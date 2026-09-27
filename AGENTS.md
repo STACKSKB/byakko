@@ -103,12 +103,14 @@ are in [rewrite constraints](docs/rewrite-constraints.md). Especially:
   keyboard, unrelated cache invalidation, extra rereads or scan restarts.
 - Only real selector changes invalidate selector-dependent picture observations.
   Unknown macro slots are not empty. Retain foreground candidate reads.
-- User-directed onboard-state synchronization (2026-09-27): while the visible
-  lighting editor is idle, observe lighting every two seconds and read the
-  displayed per-key picture. Reflect onboard changes without activating the
-  previously cached mode. Pause for edits, recording, host activity and errors.
-  This is an explicit exception to load-once caching, not another write preflight
-  or a change to setter completion evidence.
+- User-directed onboard-state synchronization (2026-09-27): one shared idle
+  observation cycle reads loaded keymap, settings, lighting and the selected
+  macro, then per-key colors when their effect is active. Start every two idle
+  seconds and prioritize the visible feature. Retain dirty drafts and surface
+  conflicting observations through the shared editor lifecycle. Reflect
+  onboard changes without reactivating a cached mode. Pause for pending edits,
+  recording, input capture, host activity and errors. This amends load-once
+  caching; it is not another write preflight or a setter-evidence change.
 - Nia87 pre-alpha Fn editing protects the official System Key positions and,
   at the user's explicit request, Fn+Esc. This applies to macro assignment too;
   keep raw captures lossless and recovery able to restore protected positions.
@@ -122,7 +124,9 @@ are in [rewrite constraints](docs/rewrite-constraints.md). Especially:
   the convention does not close unrelated recovery failures. See the
   [RGB evidence](Research/rgb-white-boundary-20260927.md).
 - Recording is exclusive/local with explicit timestamps and held-input releases.
-  Host lighting restores on stop/close. Startup never resets unknown device state.
+  Host lighting continues when the app loses focus and restores on stop/close.
+  Music parameters may change during streaming without replacing the original
+  restoration baseline. Startup never resets unknown device state.
 
 ## Work and evidence
 

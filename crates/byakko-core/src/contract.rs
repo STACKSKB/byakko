@@ -123,6 +123,12 @@ pub struct HostStart {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct HostUpdate {
+    pub ticket: HostTicket,
+    pub setting: crate::model::lighting::Setting,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct HostEvent {
     pub ticket: HostTicket,
     pub kind: HostEventKind,

@@ -37,6 +37,11 @@ mod tests {
                 _ => Ok(()),
             }
         }
+        fn update_parameters(&mut self, setting: lighting::Setting) -> Result<(), String> {
+            assert_eq!(setting.brightness, Some(3));
+            self.events.send("parameters").unwrap();
+            Ok(())
+        }
         fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure> {
             self.events.send("finish").unwrap();
             if self.fault == "finish panic" {
@@ -118,6 +123,48 @@ mod tests {
             assert!(Instant::now() < deadline, "host event timeout");
             std::thread::yield_now();
         }
+    }
+    #[test]
+    fn parameter_updates_coalesce_reject_stale_and_preserve_restoration() {
+        let (worker, start, events, release) = fixture("");
+        let ticket = start.ticket;
+        let expected = start.expected.clone();
+        worker.start_host(start).unwrap();
+        assert_eq!(events.recv_timeout(TIMEOUT).unwrap(), "start");
+        let update = |brightness| byakko_core::contract::HostUpdate {
+            ticket,
+            setting: lighting::Setting {
+                effect: "music".into(),
+                brightness: Some(brightness),
+                speed: None,
+                option: None,
+                color: None,
+            },
+        };
+        for value in 1..=3 {
+            worker.update_host(update(value)).unwrap();
+        }
+        let mut stale = update(3);
+        stale.ticket.operation += 1;
+        assert!(worker.update_host(stale).is_err());
+        assert_eq!(
+            worker.host.state.lock().unwrap().setting,
+            Some(update(3).setting)
+        );
+        release.send(()).unwrap();
+        assert_eq!(events.recv_timeout(TIMEOUT).unwrap(), "parameters");
+        worker
+            .send_host_frame(ticket, crate::HostFrame::Rgb([1; 3]))
+            .unwrap();
+        assert_eq!(events.recv_timeout(TIMEOUT).unwrap(), "frame");
+        worker.stop_host(ticket, None);
+        assert!(worker.update_host(update(3)).is_err());
+        assert_eq!(events.recv_timeout(TIMEOUT).unwrap(), "finish");
+        assert!(matches!(event(&worker).kind, HostEventKind::Started));
+        assert!(
+            matches!(event(&worker).kind, HostEventKind::Finished { restored: Ok(snapshot), problem: None } if snapshot == expected)
+        );
+        assert!(events.try_recv().is_err());
     }
     #[test]
     fn startup_stop_restores_without_frames_or_draining_notifications() {
@@ -252,6 +299,7 @@ struct State {
     ticket: Option<HostTicket>,
     latest: Option<(u64, u64)>,
     frame: Option<crate::HostFrame>,
+    setting: Option<byakko_core::model::lighting::Setting>,
     stop: Option<Option<String>>,
     events: VecDeque<HostEvent>,
     closed: bool,
@@ -290,6 +338,7 @@ impl Host {
         state.ticket = Some(ticket);
         state.stop = None;
         state.frame = None;
+        state.setting = None;
         Ok(())
     }
     pub(super) fn unreserve(&self) {
@@ -314,11 +363,28 @@ impl Host {
         self.changed.notify_one();
         Ok(())
     }
+    pub(super) fn update(&self, update: byakko_core::contract::HostUpdate) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap();
+        if state.ticket != Some(update.ticket)
+            || state.stop.is_some()
+            || state.closed
+            || state
+                .events
+                .iter()
+                .any(|event| matches!(event.kind, HostEventKind::Finished { .. }))
+        {
+            return Err("Host lighting is not accepting parameter updates".into());
+        }
+        state.setting = Some(update.setting);
+        self.changed.notify_one();
+        Ok(())
+    }
     pub(super) fn stop(&self, ticket: HostTicket, problem: Option<String>) {
         let mut state = self.state.lock().unwrap();
         if state.ticket == Some(ticket) && state.stop.is_none() {
             state.stop = Some(problem);
             state.frame = None;
+            state.setting = None;
             self.changed.notify_one();
         }
     }
@@ -337,6 +403,7 @@ impl Host {
         if matches!(event.kind, HostEventKind::Finished { .. }) {
             state.ticket = None;
             state.frame = None;
+            state.setting = None;
             state.stop = None;
         }
         Ok(event)
@@ -391,6 +458,10 @@ impl Host {
             ticket,
             kind: HostEventKind::Started,
         });
+        enum Input {
+            Frame(crate::HostFrame),
+            Parameters(byakko_core::model::lighting::Setting),
+        }
         let problem = loop {
             let frame = {
                 let mut state = self.state.lock().unwrap();
@@ -401,8 +472,11 @@ impl Host {
                     if state.closed || generation.load(Ordering::Acquire) != ticket.generation {
                         break None;
                     }
+                    if let Some(setting) = state.setting.take() {
+                        break Some(Ok(Input::Parameters(setting)));
+                    }
                     if let Some(frame) = state.frame.take() {
-                        break Some(Ok(frame));
+                        break Some(Ok(Input::Frame(frame)));
                     }
                     state = self.changed.wait(state).unwrap();
                 }
@@ -410,9 +484,12 @@ impl Host {
             match frame {
                 None => break None,
                 Some(Err(problem)) => break problem,
-                Some(Ok(frame)) => {
-                    let result = catch_unwind(AssertUnwindSafe(|| activity.send_frame(frame)))
-                        .unwrap_or_else(|_| Err("Host lighting frame panicked".into()));
+                Some(Ok(input)) => {
+                    let result = catch_unwind(AssertUnwindSafe(|| match input {
+                        Input::Frame(frame) => activity.send_frame(frame),
+                        Input::Parameters(setting) => activity.update_parameters(setting),
+                    }))
+                    .unwrap_or_else(|_| Err("Host lighting frame panicked".into()));
                     if let Err(problem) = result {
                         break Some(problem);
                     }
@@ -423,6 +500,7 @@ impl Host {
             let mut state = self.state.lock().unwrap();
             state.stop = Some(problem.clone());
             state.frame = None;
+            state.setting = None;
         }
         let restored = catch_unwind(AssertUnwindSafe(|| activity.finish())).unwrap_or_else(|_| {
             Err(ApplyFailure {

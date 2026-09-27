@@ -296,6 +296,12 @@ impl Executor {
         }
         self.host.frame(ticket, frame)
     }
+    pub fn update_host(&self, update: byakko_core::contract::HostUpdate) -> Result<(), String> {
+        if update.ticket.generation != self.generation.load(Ordering::Acquire) {
+            return Err("Stale host lighting generation".into());
+        }
+        self.host.update(update)
+    }
     pub fn stop_host(&self, ticket: HostTicket, problem: Option<String>) {
         self.host.stop(ticket, problem);
     }

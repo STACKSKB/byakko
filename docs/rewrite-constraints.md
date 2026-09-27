@@ -126,12 +126,15 @@ records. It is not verification of rewritten code.
   picture data and requires a subsequent picture read. A successful feature
   write must not invalidate unrelated caches or restart library scans.
 - The user's 2026-09-27 onboard-controls feedback amends load-once caching for
-  the visible lighting editor: perform a correlated idle observation every two
-  seconds, followed by the displayed picture when per-key mode is active.
-  An onboard change updates the UI; it must not silently reselect the cached
-  effect. Do not observe during edits, recording, host activity or unresolved
-  errors. These observations are independent of writes and do not change
-  transport-accepted setter evidence into verified readback evidence.
+  every loaded feature. One serialized observation cycle starts every two idle
+  seconds, prioritizes the visible feature and reads keymap, settings, lighting,
+  the loaded selected macro and picture when its display effect is active. Keep
+  dirty drafts and surface conflicts through the shared editor; do not rescan
+  all macro slots on each cycle. An onboard
+  change updates the UI without reselecting a cached effect. Pause during pending
+  edits, recording, input capture, host activity and unresolved errors. These
+  observations are independent of writes and do not change transport-accepted
+  setter evidence into verified readback evidence.
 - Keep backup, expected-state checks, pacing, verification, and recovery
   outcomes explicit in typed results. Failed or unknown recovery is never
   reported as a successful save. Retry only a concrete failure when firmware
@@ -175,9 +178,11 @@ records. It is not verification of rewritten code.
   convention. This is backend behavior, not a bug or release gate; other RGB
   tuples remain unchanged. The [Windows boundary evidence](../Research/rgb-white-boundary-20260927.md)
   found literal native `FFFFFF` becomes `B4B4B4`, rejecting a general channel cap.
-  Host modes use bounded frames sent
+  Host modes continue across app focus changes, and use bounded frames sent
   only to the selected device and separate OS samplers. Start only from a
-  verified editable baseline; Stop and close require verified restoration. A
+  verified editable baseline; Stop and close require verified restoration.
+  Live music parameter changes remain within the active session, coalesce to
+  the latest setting and retain the original restoration baseline. A
   recognized host mode left after a crash can be replaced only by explicit
   onboard-effect selection through the guarded lighting transaction. Preserve
   unknown replies as opaque and send no startup reset. Per-key color files need

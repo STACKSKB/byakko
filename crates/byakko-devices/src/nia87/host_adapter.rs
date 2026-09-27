@@ -13,6 +13,7 @@ use std::path::Path;
 
 struct NiaHostActivity {
     session: device::HostLightingSession,
+    mode: HostMode,
     source: HostSource,
     expected: Snapshot,
     backup_dir: std::path::PathBuf,
@@ -50,6 +51,7 @@ pub(super) fn start(
     Ok(Box::new(NiaHostActivity {
         session,
         source: mode.source,
+        mode,
         expected: expected.clone(),
         backup_dir: backup_dir.to_owned(),
     }))
@@ -140,10 +142,17 @@ impl HostActivity for NiaHostActivity {
         }
     }
 
+    fn update_parameters(&mut self, setting: Setting) -> Result<(), String> {
+        let native = native_mode(&self.mode, Some(&setting)).map_err(|failure| failure.message)?;
+        self.session
+            .update_parameters(&native)
+            .map_err(|error| error.to_string())
+    }
     fn finish(self: Box<Self>) -> Result<lighting::Snapshot, ApplyFailure> {
         let Self {
             session,
             source: _,
+            mode: _,
             expected,
             backup_dir,
         } = *self;

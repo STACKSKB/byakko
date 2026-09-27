@@ -67,12 +67,19 @@ impl Sampler {
                     let rate = sampler.sample_rate();
                     let mut bands = AudioBands::new(rate)?;
                     bands.push(&sampler.sample()?);
+                    let mut last_sample = Instant::now();
                     Ok(move || {
                         let samples = sampler.sample()?;
                         if samples.is_empty() {
-                            bands.silence((rate / 33) as usize);
+                            // An empty nonblocking drain means no packet is ready,
+                            // not a silent packet. Allow packet scheduling jitter;
+                            // genuine absence of playback still fades to darkness.
+                            if last_sample.elapsed() >= Duration::from_millis(90) {
+                                bands.silence((rate / 33) as usize);
+                            }
                         } else {
                             bands.push(&samples);
+                            last_sample = Instant::now();
                         }
                         Ok(HostFrame::Bands(bands.frame().to_vec()))
                     })
