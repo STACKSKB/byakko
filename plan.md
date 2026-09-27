@@ -3,7 +3,7 @@
 Started 2026-09-26 on `codex/application-rewrite`, from `3db624f`.
 
 2026-09-27: User approved merging the current application into `master`.
-The icon remains unapproved and excluded from Git; no release or tag is authorized.
+The user subsequently replaced the character artwork with a geometric B icon and authorized publishing the pre-alpha tag, release and builds.
 
 ## Objective and authority
 

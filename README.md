@@ -7,8 +7,7 @@ no vendor software, browser, or background service is needed.
 **This is experimental pre-alpha software.** Hardware validation is still in
 progress, and recovery from every failed write is not guaranteed. The current
 application is on [`master`](https://github.com/STACKSKB/byakko/tree/master).
-Prebuilt packages are being prepared; no release is published by this update.
-Approved downloads will appear on the [Releases page](https://github.com/STACKSKB/byakko/releases).
+Download portable builds from the [Releases page](https://github.com/STACKSKB/byakko/releases).
 
 ## What it does
 

@@ -1,8 +1,7 @@
 # Build Byakko (PRE-ALPHA)
 
 These instructions build the native Iced desktop and independent CLI from the
-current application branch. Prebuilt packages are being prepared separately;
-this document does not announce a published release.
+master branch. Portable pre-alpha packages are available through GitHub Releases.
 
 ## Prerequisites
 
