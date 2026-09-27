@@ -228,3 +228,27 @@ No product source or executable was changed by this profiling investigation.
 The vendor bundle was restored byte-for-byte (SHA-256
 `220C75F28257DDE0F665A7FE41880D11DD859333B31FD608B26FFDAD1F958217`).
 The physical follow-up above completes the requested observation check.
+
+## Authorized native implementation follow-up
+
+The user subsequently requested replacing polling with these events. A read-only
+Windows HID capability probe established that the sibling collection is
+**four bytes**, report ID **5**, with three 8-bit fields; it is not the 65-byte
+RPC payload. The event collection has input length 4, output/feature length 0;
+the configuration collection has input length 0 and feature length 65. Both
+resolve to the same physical USB composite ancestor. A pending 100 ms input
+read returned no event while idle, and cancellation/drain completed promptly.
+The probe's whole test completed in 0.18 seconds without feature reports.
+
+The native listener retains one overlapped Windows input request across timeout
+waits. Linux uses bounded hidraw input readiness and discards unrelated report
+IDs. The desktop consumes a wake-driven, coalesced mailbox with connection
+generation tags. Only queued events schedule debounce work; no notifications
+means no periodic feature read. Connected enumeration is also paused while the
+listener is healthy. No vendor helper or JavaScript is in the product path.
+
+Linux compilation does not establish hardware support: the packaged udev rule
+currently grants only the configuration node. The separate input interface's
+complete descriptor and narrowly scoped access grant still require Linux
+hardware acceptance. Listener failure is visible and leaves manual refresh
+available rather than silently reinstating feature polling.

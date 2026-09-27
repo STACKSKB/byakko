@@ -331,3 +331,39 @@ Actual Iced slider/color/option/Rainbow events while Running pass at 1360×800
 and 1024×768. Physical background screen/music response, live parameter pacing,
 flicker quality and onboard reset acceptance remain for user review. No hardware
 write or reset was performed in this work.
+
+## Native event observation (2026-09-27)
+
+Supersedes the periodic observation implementation above. The connected Nia87
+now supplies native input notifications through its sibling HID collection,
+matched to the selected configuration collection's physical USB ancestor.
+Windows hardware inspection confirmed report ID 5 with a four-byte input
+report. The listener opens read-only and performs no feature-report polling.
+Lighting/settings notifications queue only the relevant loaded feature reads;
+configuration/reset notifications refresh loaded configuration and invalidate
+macro discovery. Bursts settle for 500 ms (2 seconds for configuration/reset).
+Unchanged lighting does not reread picture pages. Healthy connected sessions
+also stop periodic device enumeration. Failed notification access exposes a
+manual-read fallback; disconnected discovery remains available.
+
+Background reads retain navigation, key selection and draft editing. Serialized
+saves, capture and recording wait for the transaction. Changed device data uses
+ordinary conflict handling; incomplete repeat text and the manual macro event
+composer survive refreshes. An event replacement is rejected if its original
+target changed on the keyboard. Generation checks reject old notifications.
+
+Validation: all-target/all-feature workspace tests passed (94 core, 96 desktop,
+234 devices plus CLI/research/external tests); strict Clippy and formatting
+passed. Linux devices/tests cross-check passed. The native Windows read-only
+probe confirmed collection identity, report shape, idle timeout and safe pending
+read cancellation. Actual Iced interaction/render checks passed at 1360x800 and
+1024x768 for background lighting/settings reads on Keys/Macros, preserving the
+approved layout and editing interactions. The release executable was rebuilt.
+
+A 30-second idle sample of the native release process used Get-Process CPU and
+WorkingSet64 before/after: 0.00 seconds additional CPU at the reported precision,
+25.6 MiB working set. This is a bounded idle observation, not a matched benchmark
+or a USB trace. Physical onboard-change response in the final Byakko build still
+requires user acceptance. No hardware writes or reset were performed. Linux
+notification-node permissions and physical runtime acceptance remain open;
+the existing udev rule was not broadened without a captured input descriptor.

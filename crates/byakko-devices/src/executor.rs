@@ -43,6 +43,7 @@ pub struct Executor {
     catalog_submitted: AtomicU64,
     catalog_cancelled: Arc<AtomicU64>,
     host: Arc<Host>,
+    observer: Option<crate::notifications::Observer>,
 }
 
 /// A retired worker may still be completing its current transaction or restoration.
@@ -220,7 +221,27 @@ impl Executor {
             catalog_submitted: AtomicU64::new(0),
             catalog_cancelled,
             host,
+            observer: None,
         })
+    }
+
+    pub fn with_notifications(
+        mut self,
+        read: impl FnMut(Duration) -> Result<Option<byakko_core::contract::DeviceChange>, String>
+        + Send
+        + 'static,
+    ) -> std::io::Result<Self> {
+        self.observer = Some(crate::notifications::Observer::spawn(
+            Arc::clone(&self.generation),
+            read,
+        )?);
+        Ok(self)
+    }
+
+    pub fn notifications(&self) -> Option<crate::notifications::Notifications> {
+        self.observer
+            .as_ref()
+            .map(|observer| observer.notifications.clone())
     }
 
     /// Cancel queued work and close delivery; the current device call finishes normally.

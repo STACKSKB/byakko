@@ -221,6 +221,69 @@ fn conflict_retains_edits_and_save_accepts_full_readback() {
 }
 #[path = "session_archive.rs"]
 mod archive;
+
+#[test]
+fn background_read_keeps_editing_available_but_serializes_device_operations() {
+    let mut s = loaded();
+    let c = s.observe(crate::contract::Feature::Keymap).unwrap();
+    assert!(s.busy());
+    assert!(!s.blocks_editing());
+    edit(&mut s);
+    assert!(s.read().is_err());
+    assert!(s.save().is_err());
+    assert_eq!(
+        s.accept(result(&c, FeatureResult::Read(Ok(state(Action::Key(4)))))),
+        Outcome::Loaded
+    );
+    assert!(s.keymap().dirty());
+    assert_eq!(s.keymap().changes()[0].action, Action::Key(5));
+    assert!(s.save().is_ok());
+}
+
+#[test]
+fn background_changed_read_preserves_new_draft_as_conflict() {
+    let mut s = loaded();
+    let c = s.observe(crate::contract::Feature::Keymap).unwrap();
+    edit(&mut s);
+    let mut changed = state(Action::Key(4));
+    changed.revision = vec![2];
+    assert_eq!(
+        s.accept(result(&c, FeatureResult::Read(Ok(changed)))),
+        Outcome::Conflict
+    );
+    assert!(s.keymap().dirty());
+    assert_eq!(s.keymap().changes()[0].action, Action::Key(5));
+    assert!(!s.busy());
+}
+
+#[test]
+fn background_read_failure_and_stale_reconnect_preserve_edits() {
+    let mut s = loaded();
+    let c = s.observe(crate::contract::Feature::Keymap).unwrap();
+    edit(&mut s);
+    assert_eq!(
+        s.accept(result(&c, FeatureResult::Read(Err("Disconnected".into())))),
+        Outcome::Failed(Problem::Read("Disconnected".into()))
+    );
+    assert!(s.keymap().dirty());
+    assert!(!s.busy());
+    s.disconnect().unwrap();
+    s.connect().unwrap();
+    let current = s.observe(crate::contract::Feature::Keymap).unwrap();
+    assert_eq!(
+        s.accept(result(&c, FeatureResult::Read(Ok(state(Action::Key(4)))))),
+        Outcome::Ignored
+    );
+    assert!(s.busy());
+    assert_eq!(
+        s.accept(result(
+            &current,
+            FeatureResult::Read(Ok(state(Action::Key(4))))
+        )),
+        Outcome::Loaded
+    );
+    assert!(s.keymap().dirty());
+}
 #[path = "session_features.rs"]
 mod features;
 #[path = "session_host.rs"]

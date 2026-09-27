@@ -20,6 +20,7 @@ pub fn view<'a>(
     actions: &'a [ActionChoice],
     selected: Option<&Action>,
     editable: bool,
+    can_capture: bool,
     style: &'a UiStyle,
 ) -> Element<'a, keymap::Message> {
     let selected_group = form.category.or_else(|| {
@@ -88,8 +89,9 @@ pub fn view<'a>(
         button("Press a key… Esc cancels")
             .on_press(keymap::Message::Catalog(Message::CancelCapture))
     } else {
-        button("Type a key")
-            .on_press_maybe(editable.then_some(keymap::Message::Catalog(Message::Capture)))
+        button("Type a key").on_press_maybe(
+            (editable && can_capture).then_some(keymap::Message::Catalog(Message::Capture)),
+        )
     };
     column![
         text("Assign action").size(style.type_scale.section_title),

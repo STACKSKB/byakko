@@ -10,6 +10,7 @@ pub mod audio_sample;
 pub mod hid;
 pub mod memory;
 pub mod nia87;
+pub mod notifications;
 #[cfg(feature = "research-tools")]
 pub mod research_fault;
 #[cfg(feature = "research-tools")]

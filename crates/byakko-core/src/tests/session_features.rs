@@ -41,6 +41,32 @@ fn configured() -> Session {
         })
         .unwrap()
 }
+
+#[test]
+fn lighting_observation_allows_unrelated_keymap_edits() {
+    let mut s = configured();
+    s.connect().unwrap();
+    let initial = s.read().unwrap();
+    s.accept(result(
+        &initial,
+        FeatureResult::Read(Ok(state(Action::Key(4)))),
+    ));
+    let observation = s.observe(crate::contract::Feature::Lighting).unwrap();
+    edit(&mut s);
+    assert!(!s.blocks_editing());
+    assert_eq!(
+        s.accept(completion(
+            &observation,
+            CompletionPayload::Lighting(FeatureResult::Read(Ok(light(
+                10,
+                "one",
+                SnapshotEvidence::Readback
+            ))))
+        )),
+        Outcome::LightingLoaded
+    );
+    assert!(s.keymap().dirty());
+}
 fn light(level: u16, option: &str, evidence: SnapshotEvidence) -> lighting::Snapshot {
     lighting::Snapshot {
         backend_id: "test".into(),
