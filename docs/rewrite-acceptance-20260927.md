@@ -1,6 +1,7 @@
 # Rewrite acceptance — Windows, 2026-09-27
 
-Source checkpoint: `8045e2c` on `codex/application-rewrite`.
+Source checkpoint: `8045e2c`, with rendered-layout fixes at `e9bb46f`, on
+`codex/application-rewrite`.
 The user positioned the webcam at the keyboard and requested autonomous
 rendered-UI and physical checks, leaving checks requiring physical input for later.
 
@@ -74,26 +75,85 @@ All 76 desktop tests, strict desktop all-target Clippy, formatting and the nativ
 desktop build pass. This establishes layout and widget intent at the inspected
 sizes, not native window gestures, physical output or the user's visual approval.
 
-## Hardware checks and write boundary
+## Hardware checks and restoration
 
-The CLI's read-only planners accepted a proposed debounce change from 1 to 2
-and a proposed base Pause binding to F13. Neither was applied. The complete
-`after-readonly.json` archive compares equal to `before.json`; no captured
-keymap, macro, lighting, picture or settings data changed during these checks.
+The initial read-only phase ended with `after-readonly.json` equal to
+`before.json`. Automatic approval review initially rejected the lighting test
+because it required explicit hardware-write permission. The user then answered
+"Go ahead" to the request for backed-up temporary writes and restoration.
+The following checks ran after that approval, with one hardware owner at a time.
+No firmware flashing, fault injection or cable/power manipulation was performed.
 
-Automatic approval review rejected the prepared red/green lighting test before
-execution because it did not treat the broad instruction as explicit permission
-for hardware writes. Explicit approval for backed-up temporary writes is pending.
-No lighting, picture, settings, keymap or macro writes have run in this check.
+| Check | Observation and restoration |
+| --- | --- |
+| Onboard lighting | Red and green settings matched diagnostic readbacks and visibly changed the keyboard. Wave/rainbow was restored, with the raw-byte exception below. |
+| Scalar settings | Debounce 1 → 2 → 1 passed normal apply verification and restored the complete settings revision. |
+| Keymap | Base Pause (`slot-091`, usage 72) → F13 (104) → Pause passed normal apply verification; both maps restored exactly. No physical key press was tested. |
+| Macro | Slot 0 was read as all 256 bytes zero and unbound in both maps. A count-1 F13 press/release program passed normal save/readback. Developer native restoration recovered all 256 original bytes, including raw repeat zero; both maps and picture/context remained unchanged. It was never assigned or played. |
+| Screen average | Actual desktop host controller, screen sampler, core and selected-device executor streamed for eight seconds. Webcam showed changed pink/white illumination. Explicit Stop restored the complete saved lighting baseline with Readback evidence. |
+| Playback music | The same path streamed `music-follow-2` for eight seconds while a six-second, 480 Hz, 4%-peak local test tone played. Webcam showed nonzero green output. Explicit Stop restored the complete saved lighting baseline. No microphone recording or system volume change was used. |
+| Per-key picture | Under effect 13 / option 1, F1–F3 were set green. All three diagnostic colors matched and the webcam clearly showed green under those keys, retaining the existing red WASD/arrows. All 384 saved picture bytes under that selector were restored, followed by the complete saved lighting baseline. |
 
-The ignored `target/host-acceptance` harness is compiled but unexecuted. It uses
-the real desktop host controller, OS sampler, core and selected-device executor
-for an eight-second stream followed by explicit Stop and restoration readback.
-It also supports a local webcam still during streaming. It is ready for the
-pending write approval; it is not evidence of completed streaming acceptance.
+Host checks use the ignored `target/host-acceptance` harness, which imports the
+actual desktop controller and sampler modules. `host-screen.log` and
+`host-music.log` record completion. The macro harness is in
+`target/macro-acceptance`; `macro-roundtrip.log` records its result. These checks
+exercise real native effects and desktop host orchestration, but do not prove
+native window Start/Stop clicks, focus-loss gestures or close behavior.
+
+Qualitative webcam evidence under `Research/captures/`:
+
+- Red: `keyboard-camera-1790475521972805900.png`.
+- Green: `keyboard-camera-1790475526500062400.png`.
+- Screen average: `keyboard-camera-1790475742055053200.png`.
+- Playback music: `keyboard-camera-1790475834372040600.png`.
+- F1–F3 green: `keyboard-camera-1790476076767047500.png`.
+
+### Exact raw-white restoration remains unresolved
+
+The first ordinary lighting restoration recovered the original Wave/rainbow
+setting, brightness, speed and direction, but lighting raw bytes 5 and 7 changed
+from 255 to 250. The existing normal encoder deliberately maps `FF FF FF` to
+`FA FF FA`; the recognized setting maps this back to semantic white.
+
+One bounded developer archive restoration attempted the original exact lighting
+bytes, with a plan changing lighting only. Its full readback mismatched; automatic
+recovery verified the canonicalized state immediately preceding that attempt.
+Evidence is in `exact-lighting-restore-trace.json` and
+`Research/captures/backups/configuration-apply-mismatch-1790475639791181600.json`.
+This reproduces the recorded exact raw-white restoration limitation on this
+Windows unit. It is not a successful exact restore of the original archive.
+Later checks restored their saved canonicalized lighting baseline exactly.
+No production workaround, guard or protocol change was added.
+
+### Picture diagnostic timing
+
+The first immediate picture getter returned the old color after a successful
+setter, and an immediate restoration getter still returned the test color.
+After allowing two seconds to settle, the full original 384-byte picture was
+confirmed restored before further writes. Subsequent checks used two- or
+three-second diagnostic settling waits, verified the requested colors and then
+verified complete restoration. The three-key webcam comparison resolved the
+ambiguous single-key image. These are investigation waits, not a measured minimum
+firmware delay or a new automatic runtime getter. Normal lighting/picture writes
+continue to report transport acceptance using the existing pacing.
+
+### Final state
+
+One final complete sweep, `after-final.json`, matches the original keymaps, all
+fifty macro slots, settings and picture under the original Wave selector exactly.
+Only lighting raw bytes 5 and 7 differ as described above. The separately visited
+picture selector also matched its complete saved before-image before returning
+to Wave. A single archive does not cover every picture selector.
+
+Final archive SHA-256:
+`ca4cc4ca7d7f2b3b920bb488da57a91ad074784aeab12ce20a67d4a82dedc1e1`.
+It also equals `after-hardware.json`, captured before the final three-key test.
 
 ## Remaining physical checks
 
 Physical key output, macro playback, reactive effects, cable/reconnect behavior,
 and power-cycle persistence need later hands-on coordination. Linux runtime and
 the historical recovery/fault failures remain separate acceptance gates.
+Native window interaction and the user's final rendered-layout review remain
+open; offscreen rendering and successful controller execution do not replace them.
