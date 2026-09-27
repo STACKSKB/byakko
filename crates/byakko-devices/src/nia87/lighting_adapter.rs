@@ -322,6 +322,37 @@ mod tests {
     }
 
     #[test]
+    fn semantic_white_apply_is_accepted_with_official_wire_bytes() {
+        use byakko_core::editor::{Editor, Status, lighting::LightingRules};
+
+        let mut raw = [0; 64];
+        raw[..8].copy_from_slice(&[0x87, 1, 4, 4, 7, 0, 0, 0]);
+        let baseline = from_bytes(&raw).unwrap();
+        let white = default_setting(&capabilities(), "1").unwrap();
+        let mut editor = Editor::new(LightingRules::new(capabilities()).unwrap());
+        editor.accept_read(Ok(baseline));
+        editor.stage(white.clone()).unwrap();
+        let (expected, desired) = editor.request_apply().unwrap();
+        let report = native::write_report(&draft(&expected, &desired).unwrap()).unwrap();
+        assert_eq!(&report[5..8], &[250, 255, 250]);
+
+        // Ordinary setters return the submitted projection without a getter.
+        raw[1..8].copy_from_slice(&report[1..8]);
+        let mut submitted = from_bytes(&raw).unwrap();
+        submitted.evidence = lighting::Evidence::TransportAccepted;
+        editor.accept_apply(Ok(submitted));
+        assert_eq!(editor.status(), &Status::Ready);
+        assert!(!editor.dirty());
+        assert_eq!(editor.draft(), Some(&white));
+        assert_eq!(editor.baseline().unwrap().revision, raw);
+
+        editor.accept_read(Ok(from_bytes(&raw).unwrap()));
+        assert_eq!(editor.status(), &Status::Ready);
+        assert!(!editor.dirty());
+        assert_eq!(editor.draft(), Some(&white));
+    }
+
+    #[test]
     fn catalog_excludes_host_effects_and_codec_round_trips() {
         let caps = capabilities();
         assert_eq!(caps.effects.len(), 20);

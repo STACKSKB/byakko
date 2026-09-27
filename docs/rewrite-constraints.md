@@ -163,7 +163,12 @@ records. It is not verification of rewritten code.
   reserve releases for held inputs, finish before close/focus loss, do not poll
   the device worker while only recording, and do not capture global input.
 - **Lighting and per-key picture:** keep onboard effects separate from host
-  screen-average and playback-music modes. Host modes use bounded frames sent
+  screen-average and playback-music modes. Nia87 global lighting intentionally
+  mirrors the official semantic `FFFFFF` → wire `FAFFFA` → semantic `FFFFFF`
+  convention. This is backend behavior, not a bug or release gate; other RGB
+  tuples remain unchanged. The [Windows boundary evidence](../Research/rgb-white-boundary-20260927.md)
+  found literal native `FFFFFF` becomes `B4B4B4`, rejecting a general channel cap.
+  Host modes use bounded frames sent
   only to the selected device and separate OS samplers. Start only from a
   verified editable baseline; Stop and close require verified restoration. A
   recognized host mode left after a crash can be replaced only by explicit
@@ -187,7 +192,9 @@ records. It is not verification of rewritten code.
   archive APIs for developer use as applicable. Nia87's full archive represents
   both keymaps, 50 raw macro slots, global lighting, 128 picture triples, and
   four settings replies. Capture is one sweep. The archive picture payload is
-  under the captured selector; it is not a multi-selector backup.
+  under the captured selector; it is not a multi-selector backup. Exact native
+  restoration must still report nonidentical bytes, including literal white
+  transformed by the device; semantic white equivalence is not exact restoration.
 - **CLI and files:** keep parsing closed and typed. Load only files associated
   with the chosen command, use the shared bounded JSON reader for snapshots,
   and preserve offline archive comparison before device discovery. CLI flags
@@ -209,10 +216,13 @@ perform hardware writes or fault experiments without authorization.
 The current evidence includes unresolved limits that remain facts until
 addressed with new evidence: earlier picture recovery failed; a fault-injected
 archive apply caused unexplained Windows collateral changes and recovery
-failure; Linux raw-white restore returned canonicalized bytes; Linux GUI/runtime
+failure; Linux GUI/runtime
 acceptance is open; host lighting streaming/restoration and several macro
 playback cases lack physical acceptance; physical Iced settings write/restore
-remains open. Current and dated macro pacing evidence is specific to its
+remains open. The dated Linux literal-white restore reported nonidentical bytes;
+the later Windows white comparison establishes the intentional official semantic
+convention, not an exact native restoration or new Linux hardware proof.
+Current and dated macro pacing evidence is specific to its
 investigated device and transaction. None of these observations is a verified
 rewrite regression or a rewrite fix. See the dated [engineering status](engineering-status.md),
 [protocol boundary](protocol-family-boundary.md), [frontend contract](frontend-contract.md),

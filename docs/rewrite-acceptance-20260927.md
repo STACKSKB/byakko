@@ -109,7 +109,7 @@ Qualitative webcam evidence under `Research/captures/`:
 - Playback music: `keyboard-camera-1790475834372040600.png`.
 - F1–F3 green: `keyboard-camera-1790476076767047500.png`.
 
-### Exact raw-white restoration remains unresolved
+### Intentional Nia87 white encoding and raw archive limits
 
 The first ordinary lighting restoration recovered the original Wave/rainbow
 setting, brightness, speed and direction, but lighting raw bytes 5 and 7 changed
@@ -121,8 +121,9 @@ bytes, with a plan changing lighting only. Its full readback mismatched; automat
 recovery verified the canonicalized state immediately preceding that attempt.
 Evidence is in `exact-lighting-restore-trace.json` and
 `Research/captures/backups/configuration-apply-mismatch-1790475639791181600.json`.
-This reproduces the recorded exact raw-white restoration limitation on this
-Windows unit. It is not a successful exact restore of the original archive.
+This records an exact-byte restoration limitation on this Windows unit, rather
+than a defect in the required semantic white behavior. It is not a successful
+exact restore of the original archive.
 Later checks restored their saved canonicalized lighting baseline exactly.
 No production workaround, guard or protocol change was added.
 
@@ -132,6 +133,10 @@ separates this behavior: native literal `255,255,255` becomes `180,180,180`, whi
 `250,255,250` for white and displays that tuple as white on reload. This supports
 an exact-white device special case, not a general cap at 250. The follow-up
 restored its complete starting archive exactly without changing production code.
+The user then directed that the backend mirror the official behavior and treat
+it as intentional. White encoding is therefore not an unresolved bug or release
+gate. Raw archive differences remain documented; unrelated recovery failures
+remain open.
 
 ### Picture diagnostic timing
 

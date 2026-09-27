@@ -10,6 +10,12 @@ pub const USER_PICTURE_READ_COMMAND: u8 = 0x8c;
 pub const USER_PICTURE_WRITE_COMMAND: u8 = 0x0c;
 pub const PER_KEY_COLOR_WRITE_COMMAND: u8 = 0x14;
 
+// Intentional official Nia87 global-lighting convention, not channel clipping.
+// Literal FF FF FF is device-special; the official UI uses FA FF FA for white.
+// See Research/rgb-white-boundary-20260927.md. Raw snapshots stay lossless.
+const WHITE_RGB: [u8; 3] = [255, 255, 255];
+const WHITE_WIRE_RGB: [u8; 3] = [250, 255, 250];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Effect {
     pub id: u8,
@@ -177,8 +183,8 @@ impl Lighting {
                     [255, 0, 255],
                 ];
                 COMMON[low as usize]
-            } else if raw_rgb == [250, 255, 250] {
-                [255, 255, 255]
+            } else if raw_rgb == WHITE_WIRE_RGB {
+                WHITE_RGB
             } else {
                 raw_rgb
             };
@@ -275,9 +281,8 @@ pub fn write_report(setting: &LightingSetting) -> Result<[u8; REPORT_LEN], Strin
         _ => option | if setting.dazzle { 8 } else { 7 },
     };
     if let Some(mut rgb) = setting.rgb {
-        // The vendor substitutes a near-white sentinel for literal white.
-        if rgb == [255, 255, 255] {
-            rgb = [250, 255, 250];
+        if rgb == WHITE_RGB {
+            rgb = WHITE_WIRE_RGB;
         }
         report[5..8].copy_from_slice(&rgb);
     }
@@ -390,6 +395,48 @@ mod tests {
         let mut invalid = setting;
         invalid.effect_id = 23;
         assert!(write_report(&invalid).is_err());
+    }
+
+    #[test]
+    fn official_white_convention_preserves_other_rgb_values_and_raw_snapshots() {
+        // Captured official requests/readbacks and native boundary experiments,
+        // 2026-09-27. The sentinel is an alias; no channel has a 250 cap.
+        let cases = [
+            ([255, 255, 255], [250, 255, 250], [255, 255, 255]),
+            ([250, 255, 250], [250, 255, 250], [255, 255, 255]),
+            ([253, 253, 253], [253, 253, 253], [253, 253, 253]),
+            ([254, 254, 254], [254, 254, 254], [254, 254, 254]),
+            ([180, 180, 180], [180, 180, 180], [180, 180, 180]),
+            ([255, 250, 250], [255, 250, 250], [255, 250, 250]),
+            ([250, 250, 255], [250, 250, 255], [250, 250, 255]),
+            ([250, 255, 255], [250, 255, 255], [250, 255, 255]),
+            ([255, 250, 255], [255, 250, 255], [255, 250, 255]),
+            ([255, 255, 250], [255, 255, 250], [255, 255, 250]),
+            ([255, 254, 253], [255, 254, 253], [255, 254, 253]),
+            ([255, 0, 0], [255, 0, 0], [255, 0, 0]),
+            ([0, 255, 0], [0, 255, 0], [0, 255, 0]),
+            ([0, 0, 255], [0, 0, 255], [0, 0, 255]),
+        ];
+        for (input, wire, semantic) in cases {
+            let setting = LightingSetting {
+                effect_id: 1,
+                value: Some(4),
+                speed: None,
+                option: None,
+                rgb: Some(input),
+                dazzle: false,
+            };
+            let report = write_report(&setting).unwrap();
+            assert_eq!(&report[5..8], &wire, "input {input:?}");
+            let mut raw = [0; REPORT_LEN];
+            raw[..5].copy_from_slice(&[0x87, 1, 4, 4, 7]);
+            raw[5..8].copy_from_slice(&wire);
+            raw[63] = 0xa5;
+            let observed = Lighting::decode(&raw).unwrap();
+            assert_eq!(observed.recognized_setting().unwrap().rgb, Some(semantic));
+            assert_eq!(observed.raw(), &raw);
+            assert_eq!(observed.raw_rgb(), wire);
+        }
     }
 
     #[test]

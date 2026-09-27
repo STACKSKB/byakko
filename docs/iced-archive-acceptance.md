@@ -31,10 +31,17 @@ plans, summaries, and typed recovery through the memory backend. Those retained
 developer APIs are not part of the public Iced workflow. A historical
 fault-injected restore caused unexplained collateral changes, and a later
 exact-restore run mismatched raw `FF FF FF` lighting bytes against `B4 B4 B4`
-readback before verified rollback. The older Windows collateral change and the
-raw-white mismatch remain unresolved. Deferring restore from the public UI
-closes the release exposure gate by scope; it does not repair either failure or
-establish restore acceptance. See the
+readback before verified rollback. The older Windows collateral change and
+automatic recovery remain unresolved. The later
+[Windows boundary comparison](../Research/rgb-white-boundary-20260927.md) establishes
+the intentional official Nia87 global-lighting convention: semantic `FFFFFF`
+sends wire `FAFFFA`, which decodes as semantic `FFFFFF`. Literal native `FFFFFF`
+read back as `B4B4B4`; nearby colors were preserved, rejecting a general channel
+cap. Exact archive verification must still report these nonidentical native
+bytes; semantic white parity does not establish an exact restore. This convention
+is not a bug or release gate. Deferring restore from the public UI closes the
+release exposure gate by scope; it does not repair the collateral/recovery failure
+or establish restore acceptance. See the
 [fault investigation](../Research/configuration-fault-verification.md) and
 [Linux handoff](linux-handoff.md).
 

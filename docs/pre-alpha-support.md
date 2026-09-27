@@ -33,7 +33,7 @@ backups. A changed lighting selector invalidates dependent picture data.
 | --- | --- | --- |
 | Keymap, macro, settings | Windows reversible native/CLI writes and full readback; Linux read-only baselines | Broader physical key/macro playback, timing, sleep behavior, persistence; Linux writes and final GUI behavior |
 | Ordinary lighting/picture | Windows physical presets, steady/hue response, retained brush; twelve consecutive bulk uploads and later full picture readback. Linux fixed-camera steady-green 4→1 dimming and full baseline restoration | Interrupted-upload recovery, broader effect/selector behavior, persistence and Linux picture writes |
-| Native archives | Iced capture/export diagnostic tool; complete captures use one sweep | Restore is deferred from the public UI. The raw-white mismatch and older Windows collateral changes remain unresolved; retained developer restore APIs are research-only |
+| Native archives | Iced capture/export diagnostic tool; complete captures use one sweep | Restore is deferred from the public UI. Older Windows collateral changes remain unresolved; exact native restore must report nonidentical white bytes under the intentional official convention. Retained developer restore APIs are research-only |
 | Host screen/music | Headless lifecycle plus earlier research-backend physical evidence | Current Iced streaming, focus/close/disconnect restoration and Linux routing/runtime |
 | Linux GUI | Earlier X11 demo startup | Current rendered interaction and Wayland startup; screen capture is X11-only |
 
@@ -66,9 +66,14 @@ Backups live in the `backups` subdirectory of the normal-user data location:
 
 The known archive fault changed an unplanned macro and picture slot; a later
 explicit restore verified, but automatic recovery's cause/coverage remains
-unresolved. A separate exact raw-white restore mismatch also remains unresolved.
-These findings are why full archive restore is deferred from the public
-pre-alpha UI; deferral does not resolve either failure. Keep
+unresolved. Nia87 global lighting intentionally follows the official semantic
+`FFFFFF` → wire `FAFFFA` → semantic `FFFFFF` convention. The
+[Windows boundary comparison](../Research/rgb-white-boundary-20260927.md) found
+literal native `FFFFFF` becomes `B4B4B4`, rather than a general channel cap.
+Exact archive verification still reports nonidentical native bytes; this white
+convention is not a bug or release gate. Full archive restore remains deferred
+from the public pre-alpha UI; deferral does not resolve the collateral/recovery
+failure. Keep
 [the fault evidence](../Research/configuration-fault-verification.md) open.
 Do not repeat the old multi-section fault example unattended or assume it
 matches your current baseline. Any new fault test needs a reviewed before-image,
