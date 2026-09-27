@@ -12,6 +12,7 @@ use crate::{
         catalog, files, host, keymap, lighting, macros, picture, recording, settings,
     },
     input, view,
+    view::status::problem_text,
     widget::panels::UiStyle,
 };
 use byakko_core::{
@@ -219,7 +220,15 @@ impl App {
                 self.autosave.clear();
                 self.assignment_binding = None;
                 let request = self.link.read(&mut self.session);
-                return self.submit(request);
+                return match request {
+                    Ok(Some(command)) => self.submit(Ok(command)),
+                    Ok(None) => {
+                        self.notice =
+                            "Finishing the previous keyboard operation before reconnecting…".into();
+                        Task::none()
+                    }
+                    Err(reason) => self.submit(Err(reason)),
+                };
             }
             Message::Save => {
                 let request = self.session.save();
@@ -261,10 +270,10 @@ impl App {
         {
             return Task::none();
         }
+        if self.files.needs_labels() {
+            return self.begin_file(files::Operation::LoadLabels);
+        }
         let request = match self.page {
-            Page::Macros if self.files.needs_labels() => {
-                return self.begin_file(files::Operation::LoadLabels);
-            }
             Page::Lighting if self.session.lighting().is_some_and(needs_read) => {
                 Some(self.session.read_lighting())
             }
@@ -718,6 +727,15 @@ impl App {
         if self.session.recording() {
             return Task::none();
         }
+        match self.link.poll(&mut self.session) {
+            Ok(Some(command)) => return self.submit(Ok(command)),
+            Err(reason) => {
+                self.notice = reason;
+                self.closing = Closing::Open;
+                return Task::none();
+            }
+            Ok(None) => {}
+        }
         let outcome = self.host.poll(&mut self.session, self.link.executor());
         let finished = matches!(outcome, HostOutcome::Finished);
         self.host_notice(outcome);
@@ -725,6 +743,9 @@ impl App {
             return self.close();
         }
         let Some(worker) = self.link.executor() else {
+            if self.closing == Closing::Waiting && !self.link.settling() {
+                return self.close();
+            }
             return Task::none();
         };
         match worker.try_receive() {
@@ -924,7 +945,7 @@ impl App {
                 }
             }
         }
-        if self.session.busy() || self.files.busy() {
+        if self.session.busy() || self.files.busy() || self.link.settling() {
             self.closing = Closing::Waiting;
         } else if self.autosave.pending() {
             self.closing = Closing::Waiting;
@@ -973,6 +994,7 @@ impl App {
         }
         if !self.session.recording()
             && (self.host.busy()
+                || self.link.settling()
                 || self.session.busy()
                 || self.session.catalog_scanning()
                 || self.autosave.pending())
@@ -1020,21 +1042,6 @@ impl App {
             notice: &self.notice,
             style: &self.style,
         })
-    }
-}
-
-fn problem_text(problem: &Problem) -> String {
-    match problem {
-        Problem::ReadRequired => "Read the keyboard before editing.".into(),
-        Problem::Read(reason) => format!("Read failed: {reason}"),
-        Problem::Apply(failure) => format!(
-            "Save failed: {}. Recovery: {:?}",
-            failure.message, failure.recovery
-        ),
-        Problem::InvalidApplyResult(reason) => format!("Save result was invalid: {reason}"),
-        Problem::ApplyReadbackMismatch => {
-            "The save result did not match the submitted changes.".into()
-        }
     }
 }
 

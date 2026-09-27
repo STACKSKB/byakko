@@ -10,3 +10,4 @@ pub mod picture;
 pub mod recording;
 pub mod settings;
 pub mod shortcut;
+pub mod status;

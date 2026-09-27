@@ -17,6 +17,10 @@ pub fn workspace<'a>(
     editor: &'a Editor<KeymapRules>,
     interactive: bool,
     style: &'a UiStyle,
+    macro_names: Option<(
+        &'a crate::form::files::Form,
+        &'a byakko_core::model::macros::Capabilities,
+    )>,
 ) -> Element<'a, Message> {
     let layers = row(descriptor.layers.iter().map(|layer| {
         crate::widget::panels::selectable_button(
@@ -31,7 +35,11 @@ pub fn workspace<'a>(
         style,
         descriptor.keys.iter().filter(|key| key.visible).collect(),
         form.selected.clone(),
-        physical_board::labels_for_layer(descriptor, editor.draft(), &form.layer),
+        physical_board::labels_for_layer(descriptor, editor.draft(), &form.layer, |action| {
+            macro_names
+                .and_then(|(names, caps)| names.assignment_name(action, caps))
+                .map(str::to_owned)
+        }),
         move |key| interactive.then(|| Message::Key(key.id.clone())),
     );
     column![layers, board].spacing(style.spacing.m).into()
@@ -43,6 +51,10 @@ pub fn view<'a>(
     editor: &'a Editor<KeymapRules>,
     editable: bool,
     style: &'a UiStyle,
+    macro_names: Option<(
+        &'a crate::form::files::Form,
+        &'a byakko_core::model::macros::Capabilities,
+    )>,
 ) -> Element<'a, Message> {
     let can_assign = editable && form.can_assign(editor);
     let mut assignments = row![super::catalog::view(
@@ -63,7 +75,7 @@ pub fn view<'a>(
         );
     }
     column![
-        workspace(form, descriptor, editor, true, style),
+        workspace(form, descriptor, editor, true, style, macro_names),
         container(assignments).width(Fill).height(Fill)
     ]
     .spacing(style.spacing.l)

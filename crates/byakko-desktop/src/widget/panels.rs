@@ -1,6 +1,6 @@
 //! Small, reusable layout primitives shared by desktop views.
 
-use iced::widget::{button, column, container, text};
+use iced::widget::{button, column, container, scrollable, text};
 use iced::{Background, Color, Element, Fill, Length, Theme};
 
 #[derive(Debug, Clone, Copy)]
@@ -137,6 +137,23 @@ pub fn panel<'a, Message: 'a>(
     .width(Fill)
     .padding(style.spacing.panel_padding)
     .into()
+}
+
+/// Reserve a content gutter even before a scrollbar becomes visible. Controls
+/// never extend underneath the scrollbar's track or hit area.
+pub fn vertical_scroll<'a, Message: 'a>(
+    style: &UiStyle,
+    content: impl Into<Element<'a, Message>>,
+) -> scrollable::Scrollable<'a, Message> {
+    scrollable(container(content).width(Fill).padding(iced::Padding {
+        right: f32::from(style.scrollbar_width + style.scrollbar_inset),
+        ..Default::default()
+    }))
+    .direction(scrollable::Direction::Vertical(
+        scrollable::Scrollbar::new()
+            .width(u32::from(style.scrollbar_width))
+            .scroller_width(u32::from(style.scrollbar_width)),
+    ))
 }
 
 pub fn selectable_button<'a, Message: Clone + 'a>(

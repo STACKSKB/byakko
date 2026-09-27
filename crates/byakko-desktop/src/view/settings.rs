@@ -1,7 +1,7 @@
 //! Scalar fields permit one staged setting and preserve unfinished numeric input.
 use crate::{
     form::settings::{Form, Message},
-    widget::panels::UiStyle,
+    widget::panels::{self, UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Feature, Status, settings::SettingsRules},
@@ -9,7 +9,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, checkbox, column, row, scrollable, text, text_input},
+    widget::{button, checkbox, column, row, text, text_input},
 };
 
 pub fn view<'a>(
@@ -119,8 +119,7 @@ pub fn view<'a>(
         };
         content = content.push(text(explanation));
     }
-    scrollable(content.width(Fill))
-        .spacing(f32::from(style.scrollbar_inset))
+    panels::vertical_scroll(style, content.width(Fill))
         .width(Fill)
         .height(Fill)
         .into()

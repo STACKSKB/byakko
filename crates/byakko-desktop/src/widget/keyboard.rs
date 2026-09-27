@@ -20,6 +20,7 @@ pub fn labels_for_layer(
     descriptor: &Descriptor,
     draft: Option<&Bindings>,
     layer: &str,
+    assignment_name: impl Fn(&Action) -> Option<String>,
 ) -> BTreeMap<String, BoardLabel> {
     let Some(bindings) = draft.and_then(|draft| draft.get(layer)) else {
         return BTreeMap::new();
@@ -27,11 +28,14 @@ pub fn labels_for_layer(
     bindings
         .iter()
         .map(|(key, action)| {
-            let full = descriptor
-                .actions
-                .iter()
-                .find(|choice| choice.action == *action)
-                .map(|choice| choice.label.clone())
+            let full = assignment_name(action)
+                .or_else(|| {
+                    descriptor
+                        .actions
+                        .iter()
+                        .find(|choice| choice.action == *action)
+                        .map(|choice| choice.label.clone())
+                })
                 .unwrap_or_else(|| fallback_action_label(descriptor, action));
             let compact = compact_action_label(&full);
             (key.clone(), BoardLabel { compact, full })
@@ -47,7 +51,7 @@ fn fallback_action_label(descriptor: &Descriptor, action: &Action) -> String {
             .and_then(|caps| caps.keys.iter().find(|choice| choice.usage == *usage))
             .map_or_else(|| format!("Key {usage}"), |choice| choice.label.clone()),
         Action::Disabled => "Disabled".into(),
-        Action::Macro { slot, .. } => format!("Macro {slot}"),
+        Action::Macro { .. } => "Macro".into(),
         Action::Shortcut { modifiers, key } => {
             let Some(caps) = &descriptor.shortcuts else {
                 return "Shortcut".into();
@@ -182,7 +186,11 @@ pub fn colored_view_with_labels<'a, Message: Clone + 'a>(
             }
             let key_button = tooltip(
                 key_button,
-                text(format!("physical: {}", key.label)).size(style.board.key_label_size),
+                text(assigned.map_or_else(
+                    || format!("physical: {}", key.label),
+                    |label| format!("{} · physical: {}", label.full, key.label),
+                ))
+                .size(style.board.key_label_size),
                 tooltip::Position::Bottom,
             )
             .padding(style.spacing.xs as f32)
@@ -250,6 +258,34 @@ mod tests {
     }
 
     #[test]
+    fn assigned_macro_names_follow_binding_metadata_and_local_renames() {
+        let device = byakko_devices::memory::demo().unwrap();
+        let session = device.session().unwrap();
+        let caps = session.macros().unwrap().capabilities();
+        let mut names = crate::form::files::Form::default();
+        let binding = &caps.bindings[0];
+        names
+            .names
+            .insert(binding.slot.clone(), "Copy address".into());
+        let draft = Bindings::from([(
+            "main".into(),
+            BTreeMap::from([("key".into(), binding.action.clone())]),
+        )]);
+        let projected = |names: &crate::form::files::Form| {
+            labels_for_layer(session.descriptor(), Some(&draft), "main", |action| {
+                names.assignment_name(action, caps).map(str::to_owned)
+            })
+        };
+        assert_eq!(projected(&names)["key"].full, "Copy address");
+        assert_eq!(projected(&names)["key"].compact, "Copy a…");
+        names.rename(&binding.slot, "Paste".into());
+        assert_eq!(projected(&names)["key"].full, "Paste");
+        names.rename(&binding.slot, " ".into());
+        assert_eq!(projected(&names)["key"].full, caps.slots[0].label);
+        assert!(names.assignment_name(&Action::Disabled, caps).is_none());
+    }
+
+    #[test]
     fn displayed_actions_follow_the_selected_draft_layer() {
         let descriptor = Descriptor {
             backend_id: "test".into(),
@@ -286,7 +322,7 @@ mod tests {
                 BTreeMap::from([("Q".into(), Action::Disabled)]),
             ),
         ]);
-        let main = labels_for_layer(&descriptor, Some(&draft), "main");
+        let main = labels_for_layer(&descriptor, Some(&draft), "main", |_| None);
         assert_eq!(
             main["Q"],
             BoardLabel {
@@ -302,10 +338,10 @@ mod tests {
             }
         );
         assert_eq!(
-            labels_for_layer(&descriptor, Some(&draft), "other")["Q"].compact,
+            labels_for_layer(&descriptor, Some(&draft), "other", |_| None)["Q"].compact,
             "Off"
         );
-        assert!(labels_for_layer(&descriptor, None, "main").is_empty());
+        assert!(labels_for_layer(&descriptor, None, "main", |_| None).is_empty());
     }
 
     #[test]
@@ -329,7 +365,7 @@ mod tests {
                 },
             )]),
         )]);
-        let label = &labels_for_layer(&descriptor, Some(&draft), "main")["one"];
+        let label = &labels_for_layer(&descriptor, Some(&draft), "main", |_| None)["one"];
         assert_eq!(label.full, "Factory-specific action");
         assert_eq!(label.compact, "Factor…");
     }

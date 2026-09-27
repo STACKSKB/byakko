@@ -1,7 +1,7 @@
 //! Macro widgets project the shared editor, library and unsubmitted form.
 use crate::{
     form::macros::{self, Composer, Form, Kind, Message},
-    widget::panels::UiStyle,
+    widget::panels::{self, UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Status, macros::MacroRules},
@@ -13,7 +13,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, checkbox, column, pick_list, row, scrollable, text, text_input},
+    widget::{button, checkbox, column, pick_list, row, text, text_input},
 };
 pub struct View<'a> {
     pub form: &'a Form,
@@ -63,7 +63,7 @@ pub fn view<'a, M: 'a>(
             "Macro library"
         }),
         button("Add macro").on_press_maybe((idle && !editor.dirty()).then_some(Message::Add)),
-        scrollable(slots).spacing(f32::from(style.scrollbar_inset)),
+        panels::vertical_scroll(style, slots),
     ]
     .spacing(style.spacing.s);
     let mut detail = column![
@@ -174,10 +174,12 @@ pub fn view<'a, M: 'a>(
     row![
         iced::widget::container(library.map(on_message))
             .width(iced::Length::FillPortion(style.panes.sidebar)),
-        scrollable(column![detail.map(on_message), files].spacing(style.spacing.l))
-            .spacing(f32::from(style.scrollbar_inset))
-            .height(Fill)
-            .width(iced::Length::FillPortion(style.panes.detail))
+        panels::vertical_scroll(
+            style,
+            column![detail.map(on_message), files].spacing(style.spacing.l)
+        )
+        .height(Fill)
+        .width(iced::Length::FillPortion(style.panes.detail))
     ]
     .spacing(style.spacing.l)
     .height(Fill)
