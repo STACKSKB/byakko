@@ -492,7 +492,7 @@ fn lighting_dropdown_switches_per_key_and_onboard_without_separate_navigation() 
     assert!(picture_is_displayed(&app.session));
     assert!(app.picture.selected.is_some());
     assert_eq!(
-        view::application::lighting_mode(&app.session, &app.lighting, app.page),
+        view::application::lighting_mode(&app.session, &app.lighting),
         Some(lighting::Mode::PerKey)
     );
     let _ = app.update(Message::Lighting(lighting::Message::Mode(
@@ -1021,6 +1021,91 @@ fn elapsed(app: &mut App) {
 }
 
 #[test]
+fn onboard_mode_readback_replaces_stale_per_key_mode_without_writing() {
+    use byakko_core::contract::FeatureResult;
+    let (mut app, calls) = feature_app(false);
+    let onboard = app.session.lighting().unwrap().baseline().unwrap().clone();
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
+    drain(&mut app);
+    assert!(picture_is_displayed(&app.session));
+    assert_eq!(app.lighting.mode, None);
+    calls.lock().unwrap().clear();
+    app.notice = "Key colors applied.".into();
+    let _ = app.update(Message::ObserveLighting);
+    let mut completion = app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    // Simulate the read reply after a physical onboard mode change. Keep the
+    // real request's correlation so this exercises the window completion path.
+    completion.payload = CompletionPayload::Lighting(FeatureResult::Read(Ok(onboard.clone())));
+    let _ = app.complete(completion);
+    assert!(!app.session.busy());
+    assert_eq!(app.page, Page::Lighting);
+    assert_eq!(app.session.lighting().unwrap().baseline(), Some(&onboard));
+    assert!(!picture_is_displayed(&app.session));
+    assert_eq!(
+        view::application::lighting_mode(&app.session, &app.lighting),
+        Some(lighting::Mode::Onboard("steady".into()))
+    );
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
+    assert_eq!(app.notice, "Key colors applied.");
+}
+
+#[test]
+fn idle_lighting_observation_is_quiet_and_pauses_for_edits_and_other_pages() {
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::ObserveLighting);
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "Keys does not poll lighting"
+    );
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
+    drain(&mut app);
+    calls.lock().unwrap().clear();
+    app.notice = "Key colors applied.".into();
+    let _ = app.update(Message::ObserveLighting);
+    drain(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "read-picture"]);
+    assert_eq!(app.notice, "Key colors applied.");
+    calls.lock().unwrap().clear();
+    let _ = app.update(Message::Picture(picture::Message::Color([23, 45, 67])));
+    let draft = app.session.picture().unwrap().draft().cloned();
+    let _ = app.update(Message::ObserveLighting);
+    assert!(!app.session.busy());
+    assert_eq!(app.session.picture().unwrap().draft(), draft.as_ref());
+    assert!(calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn failed_background_read_stops_observing_and_retains_the_device_error() {
+    use byakko_core::contract::FeatureResult;
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Page(Page::Lighting));
+    let _ = app.update(Message::ObserveLighting);
+    let mut completion = app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    completion.payload =
+        CompletionPayload::Lighting(FeatureResult::Read(Err("Keyboard disconnected".into())));
+    let _ = app.complete(completion);
+    assert!(app.notice.contains("Keyboard disconnected"));
+    assert!(!app.can_observe_lighting());
+    let _ = app.update(Message::ObserveLighting);
+    assert!(!app.session.busy());
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
+}
+
+#[test]
 fn file_completion_survives_close_and_import_stages_only_the_selected_draft() {
     let (mut app, reads) = ready_to_record();
     let directory = file_test_directory("import-close");
@@ -1163,7 +1248,9 @@ fn lighting_coalesces_and_keeps_newer_intent_while_a_write_is_submitted() {
 fn picture_colors_batch_and_only_real_selector_changes_require_a_new_read() {
     use byakko_core::model::lighting::Edit;
     let (mut app, calls) = feature_app(false);
-    let _ = app.update(Message::Page(Page::Picture));
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
     drain(&mut app);
     assert_eq!(*calls.lock().unwrap(), ["apply-lighting", "read-picture"]);
     let _ = app.update(Message::Picture(picture::Message::Select("Alpha".into())));
@@ -1191,7 +1278,9 @@ fn picture_colors_batch_and_only_real_selector_changes_require_a_new_read() {
             problem: Problem::ReadRequired
         }
     ));
-    let _ = app.update(Message::Page(Page::Picture));
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
     drain(&mut app);
     assert_eq!(
         *calls.lock().unwrap(),
@@ -1255,7 +1344,9 @@ fn picture_navigation_finishes_queued_lighting_and_reuses_the_brush() {
     let _ = app.update(Message::Lighting(lighting::Message::Edit(
         Edit::Brightness(2),
     )));
-    let _ = app.update(Message::Page(Page::Picture));
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
     assert!(!picture_is_displayed(&app.session));
     drain(&mut app);
     assert!(picture_is_displayed(&app.session));
@@ -1269,7 +1360,9 @@ fn picture_navigation_finishes_queued_lighting_and_reuses_the_brush() {
     elapsed(&mut app);
     drain(&mut app);
     let _ = app.update(Message::Page(Page::Keys));
-    let _ = app.update(Message::Page(Page::Picture));
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
     assert!(!app.session.busy());
     assert_eq!(
         *calls.lock().unwrap(),
@@ -1285,7 +1378,9 @@ fn picture_navigation_finishes_queued_lighting_and_reuses_the_brush() {
 #[test]
 fn failed_picture_activation_does_not_read_or_retry_and_keeps_diagnostic() {
     let (mut app, calls) = feature_app(true);
-    let _ = app.update(Message::Page(Page::Picture));
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
     drain(&mut app);
     assert!(
         app.notice
@@ -1599,7 +1694,9 @@ fn refreshing_a_picture_page_without_macros_never_activates_lighting() {
             ))
         }),
     );
-    let _ = app.update(Message::Page(Page::Picture));
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
     let _ = app.update(Message::Read);
     drain(&mut app);
     assert_eq!(*calls.lock().unwrap(), ["read-lighting", "read-picture"]);

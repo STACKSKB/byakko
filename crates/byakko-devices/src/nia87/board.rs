@@ -118,6 +118,12 @@ pub fn writable_keymap_slot_mask() -> [bool; 128] {
     mask
 }
 
+/// Official “System Key” positions plus Fn+Esc, protected by the user's
+/// pre-alpha policy because it is the factory-reset combination.
+pub const FN_SYSTEM_SLOTS: [usize; 21] = [
+    0, 1, 7, 13, 19, 25, 79, 85, 86, 16, 22, 28, 34, 76, 82, 17, 59, 71, 77, 83, 89,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

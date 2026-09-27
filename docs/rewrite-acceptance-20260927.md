@@ -248,3 +248,41 @@ clicks and selection from the lighting dropdown. A controller regression covers
 explicit revert/read after a conflicting lighting or picture result. Images are under
 `target/visual-review/approved-restored`. These are software/rendered checks;
 the user's final native UI and physical reconnect/playback review remain open.
+
+## Layer controls, onboard changes and stable status layout
+
+The next user feedback is implemented in the rewritten views. Lighting has no
+keyboard hover tooltip; assignment tooltips contain only `physical: …`. Macro
+names wrap on the keys. Keys and Macros share Base/Fn selection; Lighting,
+Settings and Diagnostic capture always project Base. A reserved, scrollable
+status area keeps short success notices and long diagnostics from moving the
+controls below the keyboard.
+
+The live official interface marked 20 Fn positions as System Keys and refused
+editing them. Byakko now protects those positions and, by explicit user request,
+Fn+Esc in the pre-alpha. The guard applies to key changes, macro assignment and
+native forward writes. Snapshots remain lossless and recovery retains its
+separate repair policy. See [official inspection evidence](../Research/official-fn-guards-20260927.md).
+
+The visible idle Lighting editor now observes the keyboard every two seconds;
+per-key mode also reads the displayed picture. An observed onboard mode replaces
+the stale UI selection without automatically reactivating per-key mode. Explicit
+selection of per-key mode still uses its guarded activation workflow. Reads
+pause during edits, recording, host activity and unresolved errors. This is a
+user-directed exception to load-once caching, independent of setter completion
+evidence. It is periodic observation, not an instantaneous hardware notification.
+
+Controller regressions cover an onboard mode change arriving through a correlated
+read, quiet unchanged observations, preservation of queued edits, and stopping on
+a failed read. Offline Iced mouse/pixel checks cover the Macro Fn selector,
+tooltip behavior, Base-only pages and unchanged control positions with empty,
+short and long notices. The physical onboard-reset → updated UI → edit sequence
+remains for the user to check; no keyboard reset or hardware write was performed
+for this change.
+
+Final offline verification: all-target/all-feature workspace tests pass (89 core,
+86 desktop, 230 device tests plus CLI, external-target and research tests), as do
+strict workspace Clippy, formatting and locked release builds. The final Iced
+renders and interaction checks passed at 1360×800 and 1024×768. Protected opaque
+bindings display `Onboard`; other opaque bindings display `Unknown`, with their
+full raw labels and snapshots retained internally.

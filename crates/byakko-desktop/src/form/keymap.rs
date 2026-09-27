@@ -55,14 +55,10 @@ impl Form {
     }
     pub fn can_assign(&self, editor: &Editor<KeymapRules>) -> bool {
         editor.status() == &Status::Ready
-            && self.selected.as_ref().is_some_and(|id| {
-                editor
-                    .rules()
-                    .descriptor()
-                    .keys
-                    .iter()
-                    .any(|key| &key.id == id && key.writable)
-            })
+            && self
+                .selected
+                .as_ref()
+                .is_some_and(|id| editor.rules().descriptor().key_is_writable(&self.layer, id))
     }
     pub fn update(
         &mut self,

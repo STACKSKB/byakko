@@ -17,12 +17,17 @@ pub fn validate_changes(
         return Err("Both key matrices must contain 128 bindings".into());
     }
     let writable = board::writable_keymap_slot_mask();
-    for (name, before, after) in [
-        ("base", old_base, new_base),
-        ("function", old_function, new_function),
+    for (name, before, after, protected) in [
+        ("base", old_base, new_base, &[][..]),
+        (
+            "function",
+            old_function,
+            new_function,
+            &board::FN_SYSTEM_SLOTS[..],
+        ),
     ] {
         for (slot, (old, new)) in before.iter().zip(after).enumerate() {
-            if old != new && !writable[slot] {
+            if old != new && (!writable[slot] || protected.contains(&slot)) {
                 return Err(format!(
                     "Cannot modify reserved or unmapped {name} keymap slot {slot}"
                 ));
@@ -35,6 +40,22 @@ pub fn validate_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn onboard_fn_positions_are_protected_without_restricting_base_or_ordinary_fn() {
+        let before = vec![[0; 4]; 128];
+        for slot in board::FN_SYSTEM_SLOTS {
+            let mut after = before.clone();
+            after[slot] = [0, 0, 4, 0];
+            assert!(validate_changes(&before, &before, &before, &after).is_err());
+            if slot != 59 {
+                validate_changes(&before, &before, &after, &before).unwrap();
+            }
+        }
+        let mut after = before.clone();
+        after[9] = [9, 0, 1, 0];
+        validate_changes(&before, &before, &before, &after).unwrap();
+    }
 
     #[test]
     fn preserves_opaque_entries_but_rejects_edits_outside_known_keys() {

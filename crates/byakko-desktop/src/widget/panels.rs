@@ -69,6 +69,7 @@ pub struct UiStyle {
     pub color_picker_size: (f32, f32),
     pub color_hue_width: f32,
     pub board: BoardGeometry,
+    pub status_height: f32,
     pub scrollbar_width: u16,
     pub scrollbar_inset: u16,
     pub palette: SemanticPalette,
@@ -113,6 +114,7 @@ impl UiStyle {
             key_gap: 3.0,
             key_label_size: 11,
         },
+        status_height: 40.0,
         scrollbar_width: 10,
         scrollbar_inset: 8,
         palette: SemanticPalette {
@@ -231,26 +233,31 @@ fn selectable_button_inner<'a, Message: Clone + 'a>(
     layout: ButtonLayout,
 ) -> Element<'a, Message> {
     let palette = style.palette;
-    button(text(label.into()).size(layout.label_size).center())
-        .width(layout.width)
-        .height(layout.height)
-        .padding(layout.padding)
-        .on_press_maybe(on_press)
-        .style(move |theme: &Theme, status| {
-            let mut visual = if selected {
-                button::primary(theme, status)
-            } else {
-                button::secondary(theme, status)
-            };
-            if selected {
-                if let Some(background) = palette.selected_background {
-                    visual.background = Some(Background::Color(background));
-                }
-                if let Some(text) = palette.selected_text {
-                    visual.text_color = text;
-                }
+    button(
+        text(label.into())
+            .size(layout.label_size)
+            .wrapping(iced::widget::text::Wrapping::WordOrGlyph)
+            .center(),
+    )
+    .width(layout.width)
+    .height(layout.height)
+    .padding(layout.padding)
+    .on_press_maybe(on_press)
+    .style(move |theme: &Theme, status| {
+        let mut visual = if selected {
+            button::primary(theme, status)
+        } else {
+            button::secondary(theme, status)
+        };
+        if selected {
+            if let Some(background) = palette.selected_background {
+                visual.background = Some(Background::Color(background));
             }
-            visual
-        })
-        .into()
+            if let Some(text) = palette.selected_text {
+                visual.text_color = text;
+            }
+        }
+        visual
+    })
+    .into()
 }

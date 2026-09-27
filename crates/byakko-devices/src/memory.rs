@@ -668,6 +668,7 @@ fn demo_descriptor() -> Descriptor {
             .map(|id| Layer {
                 id: id.into(),
                 label: id.into(),
+                read_only_keys: vec![],
             })
             .collect(),
         actions: [
@@ -1366,6 +1367,7 @@ mod tests {
             layers: vec![Layer {
                 id: "base".into(),
                 label: "Base".into(),
+                read_only_keys: vec![],
             }],
             actions: vec![],
             shortcuts: None,

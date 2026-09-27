@@ -125,6 +125,13 @@ records. It is not verification of rewritten code.
   rollback. A real lighting selector change invalidates selector-dependent
   picture data and requires a subsequent picture read. A successful feature
   write must not invalidate unrelated caches or restart library scans.
+- The user's 2026-09-27 onboard-controls feedback amends load-once caching for
+  the visible lighting editor: perform a correlated idle observation every two
+  seconds, followed by the displayed picture when per-key mode is active.
+  An onboard change updates the UI; it must not silently reselect the cached
+  effect. Do not observe during edits, recording, host activity or unresolved
+  errors. These observations are independent of writes and do not change
+  transport-accepted setter evidence into verified readback evidence.
 - Keep backup, expected-state checks, pacing, verification, and recovery
   outcomes explicit in typed results. Failed or unknown recovery is never
   reported as a successful save. Retry only a concrete failure when firmware

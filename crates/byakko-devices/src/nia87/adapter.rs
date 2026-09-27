@@ -222,10 +222,12 @@ pub fn descriptor() -> Descriptor {
             Layer {
                 id: LAYERS[0].into(),
                 label: "Base".into(),
+                read_only_keys: vec![],
             },
             Layer {
                 id: LAYERS[1].into(),
                 label: "Fn".into(),
+                read_only_keys: board::FN_SYSTEM_SLOTS.into_iter().map(key_id).collect(),
             },
         ],
         actions: choices,
@@ -293,7 +295,7 @@ pub fn to_snapshot(state: &State) -> Result<Snapshot, String> {
         for (slot, raw) in records.iter_mut().enumerate() {
             let action = &state.bindings[layer][&key_id(slot)];
             let encoded = raw_from_action(action)?;
-            if !descriptor.keys[slot].writable && encoded != *raw {
+            if !descriptor.key_is_writable(layer, &key_id(slot)) && encoded != *raw {
                 return Err(format!("Cannot modify reserved slot {slot}"));
             }
             *raw = encoded;
@@ -491,6 +493,27 @@ mod tests {
             base,
             function: vec![[7, 8, 9, 10]; 128],
         }
+    }
+    #[test]
+    fn fn_system_keys_reject_key_and_macro_changes_and_preserve_raw_snapshots() {
+        use byakko_core::validation::keymap::validate_changes;
+        let descriptor = descriptor();
+        let baseline = from_snapshot(&snapshot()).unwrap();
+        for slot in board::FN_SYSTEM_SLOTS {
+            for action in [Action::Key(4), Action::Macro { slot: 1, mode: 0 }] {
+                let change = Change {
+                    layer: "fn".into(),
+                    key: key_id(slot),
+                    action,
+                };
+                assert!(validate_changes(&descriptor, std::slice::from_ref(&change)).is_err());
+                assert!(draft_snapshot(&baseline, &[change]).is_err());
+            }
+        }
+        assert!(!descriptor.key_is_writable("fn", &key_id(0)));
+        assert!(descriptor.key_is_writable("fn", &key_id(9)));
+        assert!(descriptor.key_is_writable("base", &key_id(79)));
+        assert_eq!(to_snapshot(&baseline).unwrap(), snapshot());
     }
     #[test]
     fn round_trips_every_raw_slot() {

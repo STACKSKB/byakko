@@ -74,6 +74,14 @@ pub fn validate_state(descriptor: &Descriptor, state: &State) -> Result<(), Stri
     }) {
         return Err("Invalid visible key geometry".into());
     }
+    for layer in &descriptor.layers {
+        let protected: BTreeSet<_> = layer.read_only_keys.iter().collect();
+        if protected.len() != layer.read_only_keys.len()
+            || protected.iter().any(|key| !keys.contains(key.as_str()))
+        {
+            return Err("Layer has duplicate or unknown read-only keys".into());
+        }
+    }
     if state.bindings.len() != layers.len()
         || state
             .bindings
@@ -105,8 +113,8 @@ pub fn validate_changes(descriptor: &Descriptor, changes: &[Change]) -> Result<(
                 change.layer, change.key
             ));
         }
-        if !keys[change.key.as_str()] {
-            return Err(format!("Key {} is read-only", change.key));
+        if !descriptor.key_is_writable(&change.layer, &change.key) {
+            return Err("This key is reserved for an onboard keyboard command".into());
         }
         if !seen.insert((&change.layer, &change.key)) {
             return Err("Duplicate key change".into());
