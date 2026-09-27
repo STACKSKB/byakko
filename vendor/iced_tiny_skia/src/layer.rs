@@ -1,8 +1,6 @@
 use crate::Primitive;
 use crate::core::renderer::Quad;
-use crate::core::{
-    self, Background, Color, Point, Rectangle, Svg, Transformation,
-};
+use crate::core::{self, Background, Color, Point, Rectangle, Svg, Transformation};
 use crate::graphics::damage;
 use crate::graphics::layer;
 use crate::graphics::text::{Editor, Paragraph, Text};
@@ -83,8 +81,7 @@ impl Layer {
             bounds: Rectangle::new(position, text.bounds) * transformation,
             color,
             size: text.size * transformation.scale_factor(),
-            line_height: text.line_height.to_absolute(text.size)
-                * transformation.scale_factor(),
+            line_height: text.line_height.to_absolute(text.size) * transformation.scale_factor(),
             font: text.font,
             align_x: text.align_x,
             align_y: text.align_y,
@@ -95,11 +92,7 @@ impl Layer {
         self.text.push(Item::Live(text));
     }
 
-    pub fn draw_text_raw(
-        &mut self,
-        raw: graphics::text::Raw,
-        transformation: Transformation,
-    ) {
+    pub fn draw_text_raw(&mut self, raw: graphics::text::Raw, transformation: Transformation) {
         let raw = Text::Raw {
             raw,
             transformation,
@@ -156,8 +149,7 @@ impl Layer {
     ) {
         let image = Image::Raster {
             image: core::Image {
-                border_radius: image.border_radius
-                    * transformation.scale_factor(),
+                border_radius: image.border_radius * transformation.scale_factor(),
                 ..image
             },
             bounds: bounds * transformation,
@@ -235,7 +227,7 @@ impl Layer {
             |item| {
                 item.as_slice()
                     .iter()
-                    .filter_map(Text::visible_bounds)
+                    .filter_map(text_damage_bounds)
                     .map(|bounds| bounds * item.transformation())
                     .collect()
             },
@@ -244,7 +236,7 @@ impl Layer {
                     text_a.as_slice(),
                     text_b.as_slice(),
                     |text| {
-                        text.visible_bounds()
+                        text_damage_bounds(text)
                             .into_iter()
                             .map(|bounds| bounds * text_a.transformation())
                             .collect()
@@ -259,15 +251,13 @@ impl Layer {
             &current.primitives,
             |item| match item {
                 Item::Live(primitive) => vec![primitive.visible_bounds()],
-                Item::Group(primitives, group_bounds, transformation) => {
-                    primitives
-                        .as_slice()
-                        .iter()
-                        .map(Primitive::visible_bounds)
-                        .map(|bounds| bounds * *transformation)
-                        .filter_map(|bounds| bounds.intersection(group_bounds))
-                        .collect()
-                }
+                Item::Group(primitives, group_bounds, transformation) => primitives
+                    .as_slice()
+                    .iter()
+                    .map(Primitive::visible_bounds)
+                    .map(|bounds| bounds * *transformation)
+                    .filter_map(|bounds| bounds.intersection(group_bounds))
+                    .collect(),
                 Item::Cached(_primitives, bounds, _transformation) => {
                     vec![*bounds]
                 }
@@ -296,6 +286,35 @@ impl Layer {
         damage.extend(primitives);
         damage.extend(images);
         damage
+    }
+}
+
+fn text_damage_bounds(text: &Text) -> Option<Rectangle> {
+    match text {
+        Text::Cached {
+            bounds,
+            align_x,
+            align_y,
+            clip_bounds,
+            ..
+        } => {
+            // Cached text positions are alignment anchors. In particular, a
+            // pick list anchors its label at the vertical center of the field.
+            // Treating that anchor as the top-left leaves old glyphs above it.
+            let mut bounds = *bounds;
+            bounds.x -= match align_x {
+                core::text::Alignment::Center => bounds.width / 2.0,
+                core::text::Alignment::Right => bounds.width,
+                _ => 0.0,
+            };
+            bounds.y -= match align_y {
+                core::alignment::Vertical::Center => bounds.height / 2.0,
+                core::alignment::Vertical::Bottom => bounds.height,
+                core::alignment::Vertical::Top => 0.0,
+            };
+            bounds.intersection(clip_bounds)
+        }
+        _ => text.visible_bounds(),
     }
 }
 
@@ -397,16 +416,16 @@ impl<T> Item<T> {
     pub fn transformation(&self) -> Transformation {
         match self {
             Item::Live(_) => Transformation::IDENTITY,
-            Item::Group(_, _, transformation)
-            | Item::Cached(_, _, transformation) => *transformation,
+            Item::Group(_, _, transformation) | Item::Cached(_, _, transformation) => {
+                *transformation
+            }
         }
     }
 
     pub fn clip_bounds(&self) -> Rectangle {
         match self {
             Item::Live(_) => Rectangle::INFINITE,
-            Item::Group(_, clip_bounds, _)
-            | Item::Cached(_, clip_bounds, _) => *clip_bounds,
+            Item::Group(_, clip_bounds, _) | Item::Cached(_, clip_bounds, _) => *clip_bounds,
         }
     }
 
@@ -415,6 +434,85 @@ impl<T> Item<T> {
             Item::Live(item) => std::slice::from_ref(item),
             Item::Group(group, _, _) => group.as_slice(),
             Item::Cached(cache, _, _) => cache,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::text::Renderer as _;
+    use crate::core::{Font, Pixels, Size, alignment, text};
+    use crate::graphics::Viewport;
+
+    fn label(content: &str) -> crate::Renderer {
+        let mut renderer = crate::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        renderer.fill_text(
+            core::Text {
+                content: content.into(),
+                bounds: Size::new(220.0, 20.8),
+                size: Pixels(16.0),
+                line_height: text::LineHeight::Absolute(Pixels(20.8)),
+                font: Font::DEFAULT,
+                align_x: text::Alignment::Default,
+                align_y: alignment::Vertical::Center,
+                shaping: text::Shaping::Basic,
+                wrapping: text::Wrapping::None,
+            },
+            Point::new(10.0, 30.0),
+            Color::WHITE,
+            Rectangle::with_size(Size::new(260.0, 60.0)),
+        );
+        renderer
+    }
+
+    #[test]
+    fn changing_centered_picker_label_matches_a_fresh_frame() {
+        // A recognized lighting mode becomes opaque, so its name is replaced
+        // by the picker placeholder. Exercise incremental window rendering,
+        // which a fresh headless screenshot alone cannot verify.
+        for scale in [1.0, 1.25, 2.0] {
+            for (before, after) in [
+                ("Breathing", "Select lighting mode"),
+                ("Select lighting mode", "Rainbow wave"),
+                ("Rainbow wave", "Breathing"),
+            ] {
+                let size = Size::new((260.0 * scale) as u32, (60.0 * scale) as u32);
+                let viewport = Viewport::with_physical_size(size, scale);
+                let full = Rectangle::with_size(Size::new(260.0, 60.0));
+                let mut pixels = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+                let mut mask = tiny_skia::Mask::new(size.width, size.height).unwrap();
+                let mut previous = label(before);
+                previous.draw(
+                    &mut pixels.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &[full],
+                    Color::BLACK,
+                );
+                let mut current = label(after);
+                let damage = Layer::damage(&previous.layers()[0], &current.layers()[0]);
+                let damage = graphics::damage::group(damage, full);
+                current.draw(
+                    &mut pixels.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &damage,
+                    Color::BLACK,
+                );
+                let mut fresh = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+                current.draw(
+                    &mut fresh.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &[full],
+                    Color::BLACK,
+                );
+                assert!(
+                    pixels.data() == fresh.data(),
+                    "stale label: {before} -> {after} at {scale}x"
+                );
+            }
         }
     }
 }

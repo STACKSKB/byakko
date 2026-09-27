@@ -367,3 +367,26 @@ or a USB trace. Physical onboard-change response in the final Byakko build still
 requires user acceptance. No hardware writes or reset were performed. Linux
 notification-node permissions and physical runtime acceptance remain open;
 the existing udev rule was not broadened without a captured input descriptor.
+
+## Neon and dropdown redraw correction (2026-09-27)
+
+The official Nia87 catalog audit found no missing mode or control among its 22
+advertised effects. A read of the user-selected failing mode returned Neon:
+`87 03 02 04 00 FF FF FF`, followed by zeros. The decoder now accepts this
+observed zero color nibble for Neon, keeping raw data and existing setter bytes
+unchanged. A read-only live check projects brightness 4 and speed 2 correctly.
+All 19 previously captured onboard mode replies are regression-tested for
+editable projection and draft planning. See the lighting catalog research note.
+
+Dropdown text tearing was independently reproduced in incremental rendering:
+the centered label's damage area excluded its upper half. The vendored renderer
+now computes alignment-aware damage. A pixel regression fails before the fix
+and passes at 100%, 125% and 200% scale afterward. Production opaque-state views
+were inspected at 1360x800 and 1024x768; existing background-edit and music
+control interaction checks also pass. Evidence is retained under the ignored
+`target/visual-review` directory. No UI layout or interaction was redesigned.
+
+Workspace tests pass (94 core, 96 desktop, 235 devices plus the other targets),
+three vendored renderer tests pass, strict Clippy and formatting pass, and the
+release executable was rebuilt. This investigation performed read-only device
+checks; physical LED output and all-mode host behavior were not re-tested.

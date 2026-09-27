@@ -475,3 +475,16 @@ All-feature workspace tests (89 core, 76 desktop, 223 devices plus external
 integration, seven CLI tests), strict all-target/all-feature Clippy and formatting
 pass. No hardware writes or fault experiments were performed. Rendered controls,
 real OS capture and physical host output/restoration remain unaccepted.
+
+## Lighting read and dropdown correction (2026-09-27)
+
+Checked the official Driver 2.1.97 Nia87 catalog: all 22 advertised modes,
+field capabilities and option lists are represented. The reported failure was
+Neon's observed zero color nibble being rejected despite that mode having no
+color control. The exact failing keyboard read is now editable, and all 19
+captured onboard-mode replies have regression coverage. No setter changed.
+The cached-text redraw damage calculation also now accounts for alignment,
+preventing old dropdown labels remaining above replacement text. Incremental
+pixel comparisons reproduce the failure before the correction and pass after it
+at 100%, 125% and 200% scale. See Research/lighting-catalog-20260927.md and
+vendor/iced_tiny_skia/BYAKKO-PATCH.md. No hardware writes were performed.

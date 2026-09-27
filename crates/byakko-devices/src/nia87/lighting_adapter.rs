@@ -276,6 +276,44 @@ mod tests {
     use byakko_core::editor::lighting::default_setting;
 
     #[test]
+    fn official_onboard_mode_cycle_is_editable_without_altering_raw_snapshots() {
+        // Actual official-app read replies during the user's Fn+RCtrl cycle.
+        // Research/captures/onboard-profile-20260927/rpc-analysis-physical-final.json.
+        let prefixes = [
+            [135, 1, 2, 4, 8, 255, 255, 255],
+            [135, 2, 2, 4, 8, 255, 255, 255],
+            [135, 3, 2, 4, 0, 255, 255, 255],
+            [135, 4, 2, 4, 8, 255, 255, 255],
+            [135, 5, 2, 4, 8, 255, 255, 255],
+            [135, 6, 2, 4, 8, 255, 255, 255],
+            [135, 7, 2, 4, 8, 255, 255, 255],
+            [135, 8, 2, 4, 8, 255, 255, 255],
+            [135, 9, 2, 4, 8, 255, 255, 255],
+            [135, 10, 2, 4, 8, 255, 255, 255],
+            [135, 11, 2, 4, 8, 255, 255, 255],
+            [135, 12, 2, 4, 8, 255, 255, 255],
+            [135, 13, 4, 4, 0, 0, 200, 200],
+            [135, 14, 2, 4, 8, 255, 255, 255],
+            [135, 15, 2, 4, 8, 255, 255, 255],
+            [135, 16, 2, 4, 8, 255, 255, 255],
+            [135, 17, 2, 4, 8, 255, 255, 255],
+            [135, 18, 2, 4, 8, 255, 255, 255],
+            [135, 19, 2, 4, 8, 255, 255, 255],
+        ];
+        for prefix in prefixes {
+            let mut raw = [0; native::REPORT_LEN];
+            raw[..8].copy_from_slice(&prefix);
+            let snapshot = from_bytes(&raw).unwrap();
+            let Content::Editable(setting) = &snapshot.content else {
+                panic!("official mode {} rejected", prefix[1]);
+            };
+            assert_eq!(setting.effect, prefix[1].to_string());
+            assert_eq!(snapshot.revision, raw);
+            assert!(draft(&snapshot, setting).is_ok());
+        }
+    }
+
+    #[test]
     fn opaque_parameters_keep_exact_selector_metadata() {
         let mut raw = [0u8; 64];
         raw[0] = native::LED_READ_COMMAND;

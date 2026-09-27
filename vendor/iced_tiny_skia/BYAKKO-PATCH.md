@@ -13,3 +13,11 @@ The local patch always masks cached text to the intersection of its declared
 clip and the current layer/damage bounds. No timing or full-window redraw
 workaround is involved. Remove this patch when an upstream release includes
 an equivalent fix and the raster regression passes against it.
+
+The 2026-09-27 follow-up in layer.rs accounts for cached text alignment when
+calculating damage. Pick-list labels use a vertical-center anchor; treating it
+as the top-left left the upper half of the old label visible after replacement.
+Damage now includes the aligned text rectangle. The regression replaces an
+effect name with the opaque-state placeholder and back, comparing incremental
+pixels with a fresh frame at 100%, 125% and 200% scale. It fails against the
+original damage calculation. This preserves partial redraws and the existing UX.
