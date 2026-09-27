@@ -75,6 +75,7 @@ pub struct Form {
     pub(crate) delay: String,
     pub(crate) pressed: bool,
     pub(crate) composer: Composer,
+    replacing: Option<Event>,
     pub(crate) binding_choices: std::collections::BTreeMap<String, String>,
 }
 impl Form {
@@ -116,6 +117,16 @@ impl Form {
         self.repeat = program.map_or_else(String::new, |program| program.repeat_count.to_string());
         self.reset_event();
     }
+    /// Device observations update committed values without clearing unfinished input.
+    pub fn observe(&mut self, before: Option<&Program>, after: Option<&Program>) {
+        if before.is_some_and(|program| {
+            self.repeat.trim().parse::<u32>().ok() == Some(program.repeat_count)
+        }) || (before.is_none() && self.repeat.is_empty())
+        {
+            self.repeat =
+                after.map_or_else(String::new, |program| program.repeat_count.to_string());
+        }
+    }
     fn reset_event(&mut self) {
         self.kind = None;
         self.value.clear();
@@ -123,6 +134,7 @@ impl Form {
         self.delay.clear();
         self.pressed = false;
         self.composer = Composer::Closed;
+        self.replacing = None;
     }
     pub fn accepted(&mut self, edit: &Edit) {
         if !matches!(edit, Edit::Repeat(_)) {
@@ -227,7 +239,14 @@ impl Form {
                         at: editor.draft().ok_or("Read a macro first")?.events.len(),
                         event,
                     },
-                    Composer::Replace(at) => Edit::Replace { at, event },
+                    Composer::Replace(at) => {
+                        if editor.draft().and_then(|program| program.events.get(at))
+                            != self.replacing.as_ref()
+                        {
+                            return Err("This event changed on the keyboard. Select the event again before replacing it.".into());
+                        }
+                        Edit::Replace { at, event }
+                    }
                     Composer::Closed => return Err("Open the event composer before staging".into()),
                 })
             }
@@ -247,6 +266,7 @@ impl Form {
     fn load_event(&mut self, index: usize, event: &Event, caps: &Capabilities) {
         self.reset_event();
         self.composer = Composer::Replace(index);
+        self.replacing = Some(event.clone());
         self.delay = event.delay_ms.to_string();
         self.kind = Some(match &event.action {
             Action::Key { usage, pressed } => {

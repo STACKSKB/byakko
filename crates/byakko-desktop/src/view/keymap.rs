@@ -22,10 +22,13 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let descriptor = session.descriptor();
     let editor = session.keymap();
-    let mut toolbar = layers(form, session, idle, style);
+    let mut toolbar = layers(form, session, editable, style);
     if editor.dirty() {
         toolbar = toolbar
-            .push(button("Save assignments").on_press_maybe(editable.then_some(Message::Save)))
+            .push(
+                button("Save assignments")
+                    .on_press_maybe((editable && idle).then_some(Message::Save)),
+            )
             .push(button("Revert").on_press_maybe(idle.then_some(Message::Revert)));
     }
     let mut detail = column![toolbar].spacing(style.spacing.m);

@@ -103,14 +103,16 @@ are in [rewrite constraints](docs/rewrite-constraints.md). Especially:
   keyboard, unrelated cache invalidation, extra rereads or scan restarts.
 - Only real selector changes invalidate selector-dependent picture observations.
   Unknown macro slots are not empty. Retain foreground candidate reads.
-- User-directed onboard-state synchronization (2026-09-27): one shared idle
-  observation cycle reads loaded keymap, settings, lighting and the selected
-  macro, then per-key colors when their effect is active. Start every two idle
-  seconds and prioritize the visible feature. Retain dirty drafts and surface
-  conflicting observations through the shared editor lifecycle. Reflect
-  onboard changes without reactivating a cached mode. Pause for pending edits,
-  recording, input capture, host activity and errors. This amends load-once
-  caching; it is not another write preflight or a setter-evidence change.
+- User-directed onboard synchronization (2026-09-27): use selected-keyboard
+  native input notifications, not periodic feature reads. Coalesce lighting and
+  settings changes for 500 ms; reset/profile changes settle for two seconds.
+  Read only affected loaded features, including Windows-key lock. Refresh
+  picture data only after a selector change or configuration reset. Keep edits
+  and navigation available during background reads; serialize device operations
+  and retain conflicts. Queue events during recording, host activity and edits.
+  No repeated enumeration while the connected listener is healthy. Listener
+  failure exposes manual read/reconnect; disconnected discovery remains bounded.
+  These observations do not change setter evidence or introduce write preflights.
 - Nia87 pre-alpha Fn editing protects the official System Key positions and,
   at the user's explicit request, Fn+Esc. This applies to macro assignment too;
   keep raw captures lossless and recovery able to restore protected positions.

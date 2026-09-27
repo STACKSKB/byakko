@@ -20,8 +20,10 @@ use linux as backend;
 compile_error!("The original HID backend currently supports Windows and Linux only");
 
 pub use backend::Device as HidDevice;
+pub(crate) use backend::InputDevice;
 
 pub struct DeviceInfo {
+    pub(crate) physical_device: Option<String>,
     pub(crate) path: CString,
     pub(crate) vid: u16,
     pub(crate) pid: u16,

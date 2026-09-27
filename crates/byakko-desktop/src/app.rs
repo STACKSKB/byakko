@@ -117,6 +117,34 @@ impl App {
     }
 
     fn reduce(&mut self, message: Message) -> Task<Message> {
+        if let Message::DeviceEvent(event) = message {
+            if self.session.connection()
+                != &(Connection::Connected {
+                    generation: event.generation,
+                })
+            {
+                return Task::none();
+            }
+            match event.result {
+                Ok(change) => {
+                    if change == byakko_core::contract::DeviceChange::Configuration {
+                        self.session.configuration_changed();
+                        if let Some(worker) = self.link.executor() {
+                            worker.cancel_catalog();
+                        }
+                    }
+                    self.observation
+                        .receive(change, Instant::now(), &self.session);
+                }
+                Err(reason) => {
+                    self.observation.unavailable = true;
+                    self.notice = format!(
+                        "Live keyboard updates stopped: {reason}. Use Read / reconnect to refresh."
+                    );
+                }
+            }
+            return Task::none();
+        }
         if self.closing != Closing::Open
             && !matches!(
                 message,
@@ -181,6 +209,9 @@ impl App {
             Message::Page(page) => {
                 self.keys.catalog.input = catalog::InputMode::Browse;
                 self.page = page;
+                if self.session.busy() {
+                    return Task::none();
+                }
                 if page == Page::Picture
                     && self.session.lighting().is_some_and(|editor| editor.dirty())
                 {
@@ -243,7 +274,8 @@ impl App {
             }
             Message::Poll(_) => return self.poll(),
             Message::Scan => return self.scan(),
-            Message::ObserveDevice => return self.observe_device(),
+            Message::ObserveDevice(at) => return self.observe_device(at),
+            Message::DeviceEvent(_) => unreachable!("device events handled before activity guards"),
             Message::Close => return self.close(),
             Message::Discard if self.closing == Closing::ConfirmDiscard => return iced::exit(),
             Message::KeepEditing => self.closing = Closing::Open,
@@ -371,7 +403,10 @@ impl App {
     }
 
     fn update_files(&mut self, message: files::Message) -> Task<Message> {
-        if self.session.busy() {
+        if self.session.blocks_editing()
+            || (self.session.busy()
+                && matches!(message, files::Message::Begin(_) | files::Message::Capture))
+        {
             return Task::none();
         }
         match message {
@@ -693,7 +728,7 @@ impl App {
                 return Task::none();
             }
             message => {
-                if self.session.busy() {
+                if self.session.blocks_editing() {
                     return Task::none();
                 }
                 let edit = self
@@ -726,7 +761,11 @@ impl App {
         {
             return Task::none();
         }
+        let connection = self.session.connection().clone();
         let request = self.link.scan(&mut self.session);
+        if &connection != self.session.connection() {
+            self.observation = Observation::default();
+        }
         if !matches!(self.session.connection(), Connection::Connected { .. }) {
             self.keys.catalog.input = catalog::InputMode::Browse;
         }
@@ -791,17 +830,10 @@ impl App {
             && !observation::has_read_error(&self.session)
     }
 
-    fn observe_device(&mut self) -> Task<Message> {
-        if !self.can_observe() {
+    fn observe_device(&mut self, at: Instant) -> Task<Message> {
+        if !self.can_observe() || !self.observation.ready(at) {
             return Task::none();
         }
-        use byakko_core::contract::Feature;
-        let preferred = match self.page {
-            Page::Lighting | Page::Picture => Feature::Lighting,
-            Page::Settings => Feature::Settings,
-            Page::Keys | Page::Macros | Page::Archive => Feature::Keymap,
-        };
-        self.observation.start(preferred, &self.session);
         self.continue_observation()
     }
 
@@ -811,12 +843,14 @@ impl App {
             return self.close();
         }
         if !self.can_observe() {
-            self.observation = Observation::default();
+            return Task::none();
+        }
+        if !self.observation.ready(Instant::now()) {
             return Task::none();
         }
         match self.observation.next(&mut self.session) {
             Ok(Some(command)) => self.deliver(command),
-            Ok(None) => Task::none(),
+            Ok(None) => self.load_page(),
             Err(reason) => {
                 self.observation = Observation::default();
                 self.notice = reason;
@@ -830,7 +864,10 @@ impl App {
             return Task::none();
         }
         match self.link.poll(&mut self.session) {
-            Ok(Some(command)) => return self.submit(Ok(command)),
+            Ok(Some(command)) => {
+                self.observation = Observation::default();
+                return self.submit(Ok(command));
+            }
             Err(reason) => {
                 self.notice = reason;
                 self.closing = Closing::Open;
@@ -895,10 +932,8 @@ impl App {
             match &outcome {
                 Outcome::Loaded => self.keys.sync_shortcut(self.session.keymap()),
                 Outcome::LightingLoaded => {
-                    if self.lighting.mode == Some(lighting::Mode::PerKey) {
-                        self.lighting.mode = None;
-                    }
                     if self.page == Page::Picture
+                        && self.lighting.mode != Some(lighting::Mode::PerKey)
                         && !view::application::picture_is_displayed(&self.session)
                     {
                         self.page = Page::Lighting;
@@ -907,7 +942,7 @@ impl App {
                 Outcome::MacroLoaded => {
                     let draft = self.session.macros().and_then(|editor| editor.draft());
                     if macro_before.as_ref() != draft {
-                        self.macros.sync(draft);
+                        self.macros.observe(macro_before.as_ref(), draft);
                     }
                 }
                 _ => {}
@@ -1134,9 +1169,23 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         let mut subscriptions = vec![close];
-        if self.can_observe() {
+        if let Some(notifications) = self
+            .link
+            .executor()
+            .and_then(byakko_devices::Executor::notifications)
+        {
+            subscriptions.push(Subscription::run_with(notifications, |notifications| {
+                iced::futures::stream::unfold(notifications.clone(), |notifications| async move {
+                    notifications
+                        .next()
+                        .await
+                        .map(|event| (Message::DeviceEvent(event), notifications))
+                })
+            }));
+        }
+        if self.observation.queued() && self.can_observe() {
             subscriptions
-                .push(iced::time::every(Duration::from_secs(2)).map(|_| Message::ObserveDevice));
+                .push(iced::time::every(Duration::from_millis(50)).map(Message::ObserveDevice));
         }
         if self.page == Page::Keys
             && self.keys.catalog.input == catalog::InputMode::Capture
@@ -1168,6 +1217,12 @@ impl App {
         }
         if self.closing == Closing::Open
             && self.link.monitoring()
+            && (self
+                .link
+                .executor()
+                .and_then(byakko_devices::Executor::notifications)
+                .is_none()
+                || self.observation.unavailable)
             && !self.session.recording()
             && !self.recording.pending()
             && !self.session.busy()
@@ -1204,6 +1259,7 @@ impl App {
             page: self.page,
             closing: self.closing,
             notice: &self.notice,
+            live_updates_unavailable: self.observation.unavailable,
             style: &self.style,
         })
     }

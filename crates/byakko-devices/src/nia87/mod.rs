@@ -18,6 +18,7 @@ pub mod lighting_adapter;
 pub mod macro_adapter;
 pub mod macro_file;
 pub mod macros;
+pub mod notifications;
 pub mod picture_adapter;
 pub mod profiles;
 pub mod protocol;

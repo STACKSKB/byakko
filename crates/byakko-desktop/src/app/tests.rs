@@ -243,7 +243,8 @@ fn music_parameters_apply_while_streaming_and_stop_restores_original_lighting() 
     let _ = app.update(Message::Host(host::Message::Parameter(Edit::Color(
         Color::Rgb([9, 80, 150]),
     ))));
-    let _ = app.update(Message::ObserveDevice);
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    observe_due(&mut app);
     poll_host_until(&mut app, |_| {
         calls.lock().unwrap().contains(&"host-parameters")
     });
@@ -1090,6 +1091,22 @@ fn elapsed(app: &mut App) {
     let _ = app.update(Message::Poll(Instant::now() + Duration::from_secs(61)));
 }
 
+fn notify(app: &mut App, change: byakko_core::contract::DeviceChange) {
+    let Connection::Connected { generation } = *app.session.connection() else {
+        panic!("notification test needs a connection")
+    };
+    let _ = app.update(Message::DeviceEvent(byakko_devices::notifications::Event {
+        generation,
+        result: Ok(change),
+    }));
+}
+
+fn observe_due(app: &mut App) {
+    let _ = app.update(Message::ObserveDevice(
+        Instant::now() + Duration::from_secs(3),
+    ));
+}
+
 #[test]
 fn onboard_mode_readback_replaces_stale_per_key_mode_without_writing() {
     use byakko_core::contract::FeatureResult;
@@ -1103,7 +1120,8 @@ fn onboard_mode_readback_replaces_stale_per_key_mode_without_writing() {
     assert_eq!(app.lighting.mode, None);
     calls.lock().unwrap().clear();
     app.notice = "Key colors applied.".into();
-    let _ = app.update(Message::ObserveDevice);
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    observe_due(&mut app);
     let mut completion = app
         .link
         .executor()
@@ -1123,40 +1141,41 @@ fn onboard_mode_readback_replaces_stale_per_key_mode_without_writing() {
         view::application::lighting_mode(&app.session, &app.lighting),
         Some(lighting::Mode::Onboard("steady".into()))
     );
-    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "read-settings"]);
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
     assert_eq!(app.notice, "Key colors applied.");
 }
 
 #[test]
-fn idle_observation_refreshes_loaded_features_on_any_page_and_pauses_for_edits() {
+fn idle_has_no_reads_and_repeated_lighting_events_are_coalesced() {
     let (mut app, calls) = feature_app(false);
-    let _ = app.update(Message::ObserveDevice);
+    observe_due(&mut app);
     drain(&mut app);
-    assert_eq!(*calls.lock().unwrap(), ["read-settings", "read-lighting"]);
+    assert!(calls.lock().unwrap().is_empty());
     let _ = app.update(Message::Lighting(lighting::Message::Mode(
         lighting::Mode::PerKey,
     )));
     drain(&mut app);
     calls.lock().unwrap().clear();
     app.notice = "Key colors applied.".into();
-    let _ = app.update(Message::ObserveDevice);
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    let _ = app.update(Message::ObserveDevice(Instant::now()));
+    assert!(!app.session.busy());
+    observe_due(&mut app);
     drain(&mut app);
-    assert_eq!(
-        *calls.lock().unwrap(),
-        ["read-lighting", "read-settings", "read-picture"]
-    );
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
     assert_eq!(app.notice, "Key colors applied.");
     calls.lock().unwrap().clear();
     let _ = app.update(Message::Picture(picture::Message::Color([23, 45, 67])));
     let draft = app.session.picture().unwrap().draft().cloned();
-    let _ = app.update(Message::ObserveDevice);
+    observe_due(&mut app);
     assert!(!app.session.busy());
     assert_eq!(app.session.picture().unwrap().draft(), draft.as_ref());
     assert!(calls.lock().unwrap().is_empty());
 }
 
 #[test]
-fn onboard_settings_and_keymap_reads_update_their_editors_without_writes() {
+fn settings_notification_reads_only_settings() {
     use byakko_core::{
         contract::FeatureResult,
         model::settings::{Content, Value},
@@ -1169,7 +1188,8 @@ fn onboard_settings_and_keymap_reads_update_their_editors_without_writes() {
     };
     values.insert("sleep".into(), Value::Number(8));
     settings.revision.push(1);
-    let _ = app.update(Message::ObserveDevice);
+    notify(&mut app, byakko_core::contract::DeviceChange::Settings);
+    observe_due(&mut app);
     let mut completion = app
         .link
         .executor()
@@ -1177,21 +1197,6 @@ fn onboard_settings_and_keymap_reads_update_their_editors_without_writes() {
         .receive(Some(Duration::from_secs(2)))
         .unwrap();
     completion.payload = CompletionPayload::Settings(FeatureResult::Read(Ok(settings.clone())));
-    let _ = app.complete(completion);
-    let mut keymap = app.session.keymap().baseline().unwrap().clone();
-    keymap
-        .bindings
-        .get_mut(&app.keys.layer)
-        .unwrap()
-        .insert("Alpha".into(), Action::Key(5));
-    keymap.revision.push(1);
-    let mut completion = app
-        .link
-        .executor()
-        .unwrap()
-        .receive(Some(Duration::from_secs(2)))
-        .unwrap();
-    completion.payload = CompletionPayload::Keymap(FeatureResult::Read(Ok(keymap.clone())));
     let _ = app.complete(completion);
     drain(&mut app);
     assert_eq!(app.session.settings().unwrap().baseline(), Some(&settings));
@@ -1202,15 +1207,17 @@ fn onboard_settings_and_keymap_reads_update_their_editors_without_writes() {
             _ => None,
         }
     );
-    assert_eq!(app.session.keymap().baseline(), Some(&keymap));
-    assert_eq!(app.session.keymap().draft(), Some(&keymap.bindings));
-    assert_eq!(*calls.lock().unwrap(), ["read-settings", "read-lighting"]);
+    assert_eq!(*calls.lock().unwrap(), ["read-settings"]);
 }
 
 #[test]
 fn onboard_keymap_change_preserves_dirty_draft_and_stops_the_observation_cycle() {
     use byakko_core::contract::FeatureResult;
     let (mut app, calls) = feature_app(false);
+    notify(&mut app, byakko_core::contract::DeviceChange::Configuration);
+    observe_due(&mut app);
+    assert!(app.session.busy());
+    assert!(!app.session.blocks_editing());
     edit(&mut app);
     let draft = app.session.keymap().draft().cloned();
     let mut actual = app.session.keymap().baseline().unwrap().clone();
@@ -1220,7 +1227,6 @@ fn onboard_keymap_change_preserves_dirty_draft_and_stops_the_observation_cycle()
         .unwrap()
         .insert("Beta".into(), Action::Key(6));
     actual.revision.push(2);
-    let _ = app.update(Message::ObserveDevice);
     let mut completion = app
         .link
         .executor()
@@ -1240,11 +1246,181 @@ fn onboard_keymap_change_preserves_dirty_draft_and_stops_the_observation_cycle()
 }
 
 #[test]
+fn background_settings_read_keeps_navigation_and_key_assignment_available() {
+    let (mut app, calls) = feature_app(false);
+    let before = app.session.keymap().baseline().cloned();
+    notify(&mut app, byakko_core::contract::DeviceChange::Settings);
+    observe_due(&mut app);
+    let _ = app.update(Message::Page(Page::Keys));
+    assert_eq!(app.page, Page::Keys);
+    edit(&mut app);
+    assert!(app.session.keymap().dirty());
+    assert_eq!(
+        app.session.keymap().draft().unwrap()["Typing"]["Alpha"],
+        Action::Key(5)
+    );
+    settle(&mut app);
+    assert_eq!(app.session.keymap().baseline(), before.as_ref());
+    assert!(app.session.keymap().dirty());
+    assert_eq!(*calls.lock().unwrap(), ["read-settings"]);
+}
+
+#[test]
+fn background_macro_read_retains_repeat_entered_while_reply_is_pending() {
+    let (mut app, _) = ready_to_record();
+    app.config.short_edit_delay = Duration::from_secs(60);
+    app.config.auto_save_delay = Duration::from_secs(60);
+    notify(&mut app, byakko_core::contract::DeviceChange::Configuration);
+    observe_due(&mut app);
+    settle(&mut app); // keymap; selected macro is the next loaded feature
+    assert!(app.session.busy());
+    let _ = app.update(Message::Macros(macros::Message::Repeat("17".into())));
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        17
+    );
+    settle(&mut app);
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        17
+    );
+    assert!(app.session.macros().unwrap().dirty());
+}
+
+#[test]
+fn background_macro_change_preserves_unfinished_form_and_rejects_obsolete_event_target() {
+    let (mut app, _) = ready_to_record();
+    notify(&mut app, byakko_core::contract::DeviceChange::Configuration);
+    observe_due(&mut app);
+    settle(&mut app);
+    let _ = app.update(Message::Macros(macros::Message::Event(0)));
+    let _ = app.update(Message::Macros(macros::Message::Delay("12".into())));
+    let _ = app.update(Message::Macros(macros::Message::Repeat(String::new())));
+    let mut completion = app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    let CompletionPayload::Macro {
+        result: byakko_core::contract::FeatureResult::Read(Ok(snapshot)),
+        ..
+    } = &mut completion.payload
+    else {
+        panic!("expected macro observation");
+    };
+    let byakko_core::model::macros::Content::Editable(program) = &mut snapshot.content else {
+        panic!("expected editable program");
+    };
+    program.repeat_count = 2;
+    program.events[0].delay_ms += 1;
+    snapshot.revision.push(99);
+    let _ = app.complete(completion);
+    assert_eq!(app.macros.repeat, "");
+    assert_eq!(app.macros.delay, "12");
+    assert_eq!(app.macros.composer, macros::Composer::Replace(0));
+    let editor = app.session.macros().unwrap();
+    assert_eq!(editor.draft().unwrap().repeat_count, 2);
+    assert!(!editor.dirty());
+    assert!(
+        app.macros
+            .update(macros::Message::StageEvent, editor)
+            .is_err()
+    );
+}
+
+#[test]
+fn old_connection_notifications_do_not_refresh_the_current_keyboard() {
+    let (mut app, calls) = feature_app(false);
+    let Connection::Connected { generation } = *app.session.connection() else {
+        panic!()
+    };
+    let _ = app.update(Message::DeviceEvent(byakko_devices::notifications::Event {
+        generation: generation - 1,
+        result: Ok(byakko_core::contract::DeviceChange::Configuration),
+    }));
+    observe_due(&mut app);
+    assert!(!app.session.busy());
+    assert!(calls.lock().unwrap().is_empty());
+    assert!(!app.observation.queued());
+}
+
+#[test]
+fn queued_notification_waits_for_an_automatic_setting_save() {
+    use byakko_core::model::settings::{Edit, Value};
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Settings(crate::form::settings::Message::Edit(
+        Edit {
+            id: "sleep".into(),
+            value: Value::Number(8),
+        },
+    )));
+    assert!(app.autosave.pending());
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    observe_due(&mut app);
+    assert!(!app.session.busy());
+    assert!(app.observation.queued());
+    assert!(calls.lock().unwrap().is_empty());
+    elapsed(&mut app);
+    drain(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["apply-settings"]);
+    observe_due(&mut app);
+    drain(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["apply-settings", "read-lighting"]);
+    assert!(!app.observation.queued());
+}
+
+#[test]
+fn onboard_events_received_during_recording_refresh_after_recording_stops() {
+    let (mut app, reads) = ready_to_record();
+    let before = reads.load(Ordering::SeqCst);
+    let _ = app.update(Message::Record(recording::Message::Start));
+    assert!(app.session.recording());
+    notify(&mut app, byakko_core::contract::DeviceChange::Configuration);
+    observe_due(&mut app);
+    assert!(app.observation.queued());
+    assert!(!app.session.busy());
+    assert_eq!(reads.load(Ordering::SeqCst), before);
+    let _ = app.update(Message::Record(recording::Message::Stop));
+    observe_due(&mut app);
+    drain(&mut app);
+    assert_eq!(reads.load(Ordering::SeqCst), before + 1);
+    assert!(!app.observation.queued());
+}
+
+#[test]
+fn selector_change_reads_one_picture_after_the_lighting_event() {
+    use byakko_core::contract::FeatureResult;
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
+    drain(&mut app);
+    calls.lock().unwrap().clear();
+    let mut actual = app.session.lighting().unwrap().baseline().unwrap().clone();
+    actual.picture_context.push(7);
+    actual.evidence = byakko_core::model::SnapshotEvidence::Readback;
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    observe_due(&mut app);
+    let mut completion = app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    completion.payload = CompletionPayload::Lighting(FeatureResult::Read(Ok(actual)));
+    let _ = app.complete(completion);
+    drain(&mut app);
+    assert_eq!(*calls.lock().unwrap(), ["read-lighting", "read-picture"]);
+}
+
+#[test]
 fn failed_background_read_stops_observing_and_retains_the_device_error() {
     use byakko_core::contract::FeatureResult;
     let (mut app, calls) = feature_app(false);
     let _ = app.update(Message::Page(Page::Lighting));
-    let _ = app.update(Message::ObserveDevice);
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    observe_due(&mut app);
     let mut completion = app
         .link
         .executor()
@@ -1256,7 +1432,8 @@ fn failed_background_read_stops_observing_and_retains_the_device_error() {
     let _ = app.complete(completion);
     assert!(app.notice.contains("Keyboard disconnected"));
     assert!(!app.can_observe());
-    let _ = app.update(Message::ObserveDevice);
+    notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
+    observe_due(&mut app);
     assert!(!app.session.busy());
     assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
 }

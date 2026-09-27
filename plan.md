@@ -22,6 +22,16 @@ it is not evidence that new frontend paths work.
 
 ## Architectural decisions
 
+2026-09-27 event-driven follow-up supersedes the periodic observation decisions
+below. Native Nia87 input reports wake the desktop through a bounded mailbox;
+there is no idle feature-read timer or connected inventory scan while listening.
+Lighting/settings events refresh their own editors; configuration events refresh
+loaded features. Selector changes refresh picture data, and Windows-key lock is
+handled despite the vendor UI's omission. Background reads preserve navigation
+and draft edits; device operations stay serialized. Native Windows report shape
+and idle cancellation are verified; Linux listener compiles, but its input-node
+permission rule and physical acceptance remain open.
+
 2026-09-27 host/observation follow-up: host screen and music streaming continues
 across window focus changes. Music parameters update in the active session;
 original restoration state remains owned by the lighting lifecycle. Idle

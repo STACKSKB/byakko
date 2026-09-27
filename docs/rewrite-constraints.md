@@ -125,16 +125,19 @@ records. It is not verification of rewritten code.
   rollback. A real lighting selector change invalidates selector-dependent
   picture data and requires a subsequent picture read. A successful feature
   write must not invalidate unrelated caches or restart library scans.
-- The user's 2026-09-27 onboard-controls feedback amends load-once caching for
-  every loaded feature. One serialized observation cycle starts every two idle
-  seconds, prioritizes the visible feature and reads keymap, settings, lighting,
-  the loaded selected macro and picture when its display effect is active. Keep
-  dirty drafts and surface conflicts through the shared editor; do not rescan
-  all macro slots on each cycle. An onboard
-  change updates the UI without reselecting a cached effect. Pause during pending
-  edits, recording, input capture, host activity and unresolved errors. These
-  observations are independent of writes and do not change transport-accepted
-  setter evidence into verified readback evidence.
+- The user's 2026-09-27 event-driven follow-up supersedes the unsuccessful
+  two-second polling implementation. Match the notification input collection to
+  the selected keyboard's physical USB ancestor. Validate the native four-byte
+  report (ID 5); the official RPC wrapper is not the native report format.
+  Coalesce events and issue only affected loaded-feature reads. Include lock,
+  system/power settings and selector changes. Reset/profile events refresh loaded
+  configuration and invalidate macro occupancy summaries. Ordinary lighting
+  events must not reread unchanged picture data, macros or settings. Preserve
+  queued events during other activities and reject stale generations. Background
+  reads retain editable drafts/navigation while saves and other operations remain
+  serialized. Failure/conflict retention and setter completion evidence are
+  unchanged. A healthy native listener replaces connected inventory polling too;
+  discovery remains available for absent devices and listener failure.
 - Keep backup, expected-state checks, pacing, verification, and recovery
   outcomes explicit in typed results. Failed or unknown recovery is never
   reported as a successful save. Retry only a concrete failure when firmware

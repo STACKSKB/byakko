@@ -17,6 +17,9 @@ const MAX_DESCRIPTOR: usize = 4096;
 const HOST_REPORT_LEN: usize = 65;
 const HIDRAW_CLASS: &str = "/sys/class/hidraw";
 
+mod input;
+pub(crate) use input::InputDevice;
+
 // Linux asm-generic/ioctl.h encodes direction, size, type, and number in these
 // bit positions. hidraw.h defines the 'H' ioctl numbers used below.
 const fn ioc(direction: u32, number: u32, size: u32) -> libc::c_ulong {
@@ -184,6 +187,7 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
         let dev_path = PathBuf::from("/dev").join(name);
         let path = CString::new(dev_path.as_os_str().as_bytes())?;
         found.push(DeviceInfo {
+            physical_device: usb_device(&canonical).map(|path| path.to_string_lossy().into_owned()),
             path,
             vid,
             pid,
@@ -201,6 +205,12 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
     }
     found.sort_by(|left, right| left.path.as_bytes().cmp(right.path.as_bytes()));
     Ok(found)
+}
+
+fn usb_device(path: &Path) -> Option<&Path> {
+    path.ancestors().find(|ancestor| {
+        ancestor.join("idVendor").is_file() && ancestor.join("idProduct").is_file()
+    })
 }
 
 fn valid_hidraw_name(name: &str) -> bool {
@@ -273,6 +283,7 @@ fn descriptor_from_fd(fd: libc::c_int) -> Result<Vec<u8>> {
 
 #[derive(Clone, Copy, Debug)]
 struct DescriptorInfo {
+    notification_input_valid: bool,
     target: bool,
     target_feature_shape_valid: bool,
     target_feature_count: usize,
@@ -298,6 +309,9 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
     let mut depth = 0usize;
     let mut target = false;
     let mut target_collection_depth = None;
+    let mut notification_collection_depth = None;
+    let mut notification_input_count = 0;
+    let mut notification_input_valid = true;
     let mut report_size = None;
     let mut report_count = None;
     let mut report_id = None;
@@ -368,6 +382,11 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
                         // Keep the Nia collection discoverable even if a
                         // descriptor has another application collection first.
                         application_usage = Some((page, usage));
+                    } else if page == 0xffff && usage == 1 {
+                        notification_collection_depth = Some(depth + 1);
+                        if !target {
+                            application_usage = Some((page, usage));
+                        }
                     } else if application_usage.is_none() {
                         application_usage = Some((page, usage));
                     }
@@ -387,6 +406,16 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
                 local_usage = None;
                 local_minimum = None;
             }
+            (0, 8)
+                if notification_collection_depth
+                    .is_some_and(|event_depth| depth >= event_depth) =>
+            {
+                notification_input_count += 1;
+                notification_input_valid &=
+                    report_size == Some(8) && report_count == Some(3) && report_id == Some(5);
+                local_usage = None;
+                local_minimum = None;
+            }
             (0, 12) => {
                 // Main: End Collection
                 if depth == 0 {
@@ -394,6 +423,9 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
                 }
                 if target_collection_depth == Some(depth) {
                     target_collection_depth = None;
+                }
+                if notification_collection_depth == Some(depth) {
+                    notification_collection_depth = None;
                 }
                 depth -= 1;
                 local_usage = None;
@@ -407,6 +439,7 @@ fn parse_descriptor(bytes: &[u8]) -> Option<DescriptorInfo> {
         }
     }
     (depth == 0 && global_stack.is_empty()).then_some(DescriptorInfo {
+        notification_input_valid: notification_input_valid && notification_input_count == 1,
         target,
         target_feature_shape_valid,
         target_feature_count,
@@ -425,6 +458,23 @@ fn full_usage(page: u32, value: u32, size: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_descriptor_requires_actual_report_five_three_byte_payload() {
+        let observed = [
+            0x06, 0xff, 0xff, 0x09, 0x01, 0xa1, 0x01, 0x85, 0x05, 0x75, 0x08, 0x95, 0x03, 0x81,
+            0x02, 0xc0,
+        ];
+        let parsed = parse_descriptor(&observed).unwrap();
+        assert!(parsed.notification_input_valid);
+        assert_eq!(parsed.application_usage, Some((0xffff, 1)));
+        for (index, value) in [(8, 4), (10, 7), (12, 64), (4, 2)] {
+            let mut wrong = observed;
+            wrong[index] = value;
+            assert!(!parse_descriptor(&wrong).unwrap().notification_input_valid);
+        }
+        assert!(parse_descriptor(&observed[..observed.len() - 1]).is_none());
+    }
 
     #[test]
     fn feature_reply_accepts_only_complete_unnumbered_shapes() {

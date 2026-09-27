@@ -10,9 +10,10 @@ use std::mem::{offset_of, size_of};
 use std::ptr::{null, null_mut};
 
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
-    DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, HDEVINFO, SP_DEVICE_INTERFACE_DATA,
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces,
-    SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW,
+    CM_Get_Device_IDW, CM_Get_Parent, CR_SUCCESS, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, HDEVINFO,
+    SP_DEVICE_INTERFACE_DATA, SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
+    SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW,
+    SetupDiGetDeviceInterfaceDetailW,
 };
 use windows_sys::Win32::Devices::HumanInterfaceDevice::{
     HIDD_ATTRIBUTES, HIDP_CAPS, HIDP_STATUS_SUCCESS, HidD_FreePreparsedData, HidD_GetAttributes,
@@ -31,6 +32,9 @@ use windows_sys::core::GUID;
 use super::{DeviceInfo, Result};
 
 const HOST_REPORT_LEN: usize = 65;
+
+mod input;
+pub(crate) use input::InputDevice;
 
 struct InfoSet(HDEVINFO);
 
@@ -148,7 +152,7 @@ fn nia_path(path: &str) -> bool {
     lower.contains("vid_3151") && (lower.contains("pid_4011") || lower.contains("pid_4015"))
 }
 
-fn interface_path(set: HDEVINFO, interface: &SP_DEVICE_INTERFACE_DATA) -> Result<CString> {
+fn interface_path(set: HDEVINFO, interface: &SP_DEVICE_INTERFACE_DATA) -> Result<(CString, u32)> {
     let mut needed = 0u32;
     // SAFETY: this sizing call intentionally passes a null output buffer.
     let first = unsafe {
@@ -172,9 +176,13 @@ fn interface_path(set: HDEVINFO, interface: &SP_DEVICE_INTERFACE_DATA) -> Result
     // structure's cbSize is initialized before SetupAPI writes the path.
     unsafe { (*detail).cbSize = size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32 };
     let mut written = 0u32;
+    let mut info = SP_DEVINFO_DATA {
+        cbSize: size_of::<SP_DEVINFO_DATA>() as u32,
+        ..Default::default()
+    };
     // SAFETY: detail points into the live buffer, sized in bytes as requested.
     if unsafe {
-        SetupDiGetDeviceInterfaceDetailW(set, interface, detail, needed, &mut written, null_mut())
+        SetupDiGetDeviceInterfaceDetailW(set, interface, detail, needed, &mut written, &mut info)
     } == 0
     {
         return Err(error("Could not read HID device interface path"));
@@ -192,7 +200,30 @@ fn interface_path(set: HDEVINFO, interface: &SP_DEVICE_INTERFACE_DATA) -> Result
         .position(|&unit| unit == 0)
         .ok_or("HID device interface path was not terminated")?;
     let text = String::from_utf16(&path_units[..end])?;
-    Ok(CString::new(text)?)
+    Ok((CString::new(text)?, info.DevInst))
+}
+
+/// The USB composite device, rather than its interface or HID collection.
+fn physical_device(mut node: u32) -> Option<String> {
+    for _ in 0..32 {
+        let mut id = [0u16; 512];
+        // SAFETY: node comes from SetupAPI and id is a writable bounded buffer.
+        if unsafe { CM_Get_Device_IDW(node, id.as_mut_ptr(), id.len() as u32, 0) } != CR_SUCCESS {
+            return None;
+        }
+        let end = id.iter().position(|unit| *unit == 0)?;
+        let id = String::from_utf16(&id[..end]).ok()?.to_ascii_uppercase();
+        if id.starts_with("USB\\VID_") && !id.split('\\').nth(1)?.contains("&MI_") {
+            return Some(id);
+        }
+        let mut parent = 0;
+        // SAFETY: parent is writable and node is a valid device instance.
+        if unsafe { CM_Get_Parent(&mut parent, node, 0) } != CR_SUCCESS {
+            return None;
+        }
+        node = parent;
+    }
+    None
 }
 
 pub fn enumerate() -> Result<Vec<DeviceInfo>> {
@@ -232,7 +263,7 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
         }
         index += 1;
         // An unrelated HID may disappear between enumeration and path lookup.
-        let path = match interface_path(set.0, &interface) {
+        let (path, node) = match interface_path(set.0, &interface) {
             Ok(path) => path,
             Err(_) => continue,
         };
@@ -265,6 +296,7 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
             }
         };
         found.push(DeviceInfo {
+            physical_device: physical_device(node),
             path,
             vid: attr.VendorID,
             pid: attr.ProductID,

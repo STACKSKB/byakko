@@ -52,7 +52,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     let target = nia87::device::Target::from_candidate(&candidate)
                         .map_err(|error| error.to_string())?;
+                    let mut listener = nia87::notifications::Listener::open(&candidate.identity())
+                        .map_err(|error| error.to_string());
                     let worker = Executor::spawn(BoundNia87Adapter::new(target), backups.clone())
+                        .and_then(|worker| {
+                            worker.with_notifications(move |timeout| match &mut listener {
+                                Ok(listener) => listener
+                                    .read_timeout(timeout)
+                                    .map_err(|error| error.to_string()),
+                                Err(reason) => Err(reason.clone()),
+                            })
+                        })
                         .map_err(|error| error.to_string())?;
                     Ok((id, worker))
                 },

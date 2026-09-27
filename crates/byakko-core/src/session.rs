@@ -74,6 +74,7 @@ struct Ticket {
     operation: u64,
     direction: Direction,
     feature: Feature,
+    background: bool,
 }
 pub struct Session {
     keymap: Editor<KeymapRules>,
@@ -190,6 +191,34 @@ impl Session {
     }
     pub fn busy(&self) -> bool {
         self.pending.is_some()
+    }
+    /// Background observations serialize I/O without preventing draft edits.
+    pub fn blocks_editing(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|ticket| !ticket.background)
+    }
+    pub fn observe(&mut self, feature: crate::contract::Feature) -> Result<Command, String> {
+        let command = match feature {
+            crate::contract::Feature::Keymap => self.read(),
+            crate::contract::Feature::Lighting => self.read_lighting(),
+            crate::contract::Feature::Settings => self.read_settings(),
+            crate::contract::Feature::Picture => self.read_picture(),
+            crate::contract::Feature::Macro { slot } => {
+                if self.macros().is_none_or(|editor| editor.slot() != slot) {
+                    return Err("Observe only the selected macro slot".into());
+                }
+                self.read_macro()
+            }
+            crate::contract::Feature::Archive => {
+                return Err("Archive capture is not a background observation".into());
+            }
+        }?;
+        self.pending
+            .as_mut()
+            .expect("read owns its ticket")
+            .background = true;
+        Ok(command)
     }
     pub fn requires_manual_read(&self) -> bool {
         requires_manual_read(self.keymap.status())
@@ -354,6 +383,12 @@ impl Session {
             library.cancel();
         }
     }
+    /// A reset/profile notification makes cached occupancy summaries obsolete.
+    pub fn configuration_changed(&mut self) {
+        if let Some(library) = &mut self.macro_library {
+            library.invalidate();
+        }
+    }
     pub fn connect(&mut self) -> Result<u64, String> {
         self.idle()?;
         self.generation = self
@@ -459,7 +494,7 @@ impl Session {
         )
     }
     pub fn edit(&mut self, change: Change) -> Result<(), String> {
-        self.idle()?;
+        self.editable_activity(&Feature::Keymap)?;
         self.keymap.edit(change)
     }
     pub fn revert(&mut self) -> Result<(), String> {
@@ -491,7 +526,12 @@ impl Session {
         )
     }
     pub fn edit_macro(&mut self, edit: crate::model::macros::Edit) -> Result<(), String> {
-        self.idle()?;
+        let slot = self
+            .macros()
+            .ok_or("Macros are not supported")?
+            .slot()
+            .to_owned();
+        self.editable_activity(&Feature::Macro { slot })?;
         self.macro_feature()?.edit(edit)
     }
     pub fn revert_macro(&mut self) -> Result<(), String> {
@@ -825,7 +865,8 @@ impl Session {
         }
         if !self.recording()
             && self.pending.as_ref().is_some_and(|ticket| {
-                ticket.feature == *feature && matches!(ticket.direction, Direction::Save)
+                ticket.background
+                    || (ticket.feature == *feature && matches!(ticket.direction, Direction::Save))
             })
         {
             Ok(())
@@ -912,6 +953,7 @@ impl Session {
             operation,
             direction,
             feature,
+            background: false,
         });
         Ok(Command {
             generation,

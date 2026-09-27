@@ -38,9 +38,18 @@ pub struct View<'a> {
     pub page: Page,
     pub closing: Closing,
     pub notice: &'a str,
+    pub live_updates_unavailable: bool,
     pub style: &'a UiStyle,
 }
 impl View<'_> {
+    fn editing_allowed(&self) -> bool {
+        !self.session.blocks_editing()
+            && !self.files_busy
+            && !self.session.recording()
+            && !self.recording_pending
+            && !self.host_preparing
+            && self.session.host().is_idle()
+    }
     fn idle(&self) -> bool {
         !self.session.busy()
             && !self.files_busy
@@ -78,11 +87,12 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
                 input.style,
                 label,
                 input.page == page || (page == Page::Lighting && input.page == Page::Picture),
-                idle.then_some(Message::Page(page)),
+                input.editing_allowed().then_some(Message::Page(page)),
             ));
         }
     }
     if !matches!(input.session.connection(), Connection::Connected { .. })
+        || input.live_updates_unavailable
         || input.session.requires_manual_read()
         || matches!(input.session.keymap().status(), Status::Unverified { .. })
     {
@@ -145,7 +155,7 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     let board = board(input);
     let mut details = column![status(input)].spacing(input.style.spacing.s);
     if input.page == Page::Keys {
-        let editable = idle
+        let editable = input.editing_allowed()
             && input.session.keymap().status() == &Status::Ready
             && matches!(input.session.connection(), Connection::Connected { .. });
         details = details.push(view::keymap::view(
@@ -161,6 +171,7 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
             &input.session.descriptor().actions,
             input.keys.selected_action(input.session.keymap()),
             editable && input.keys.can_assign(input.session.keymap()),
+            idle,
             input.style,
         )
         .map(Message::Keys);
@@ -200,7 +211,8 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         Page::Settings => match input.session.settings() {
             Some(editor) => view::settings::view(
                 editor,
-                !input.files_busy && (!input.session.busy() || editor.submitted().is_some()),
+                !input.files_busy
+                    && (!input.session.blocks_editing() || editor.submitted().is_some()),
                 idle,
                 input.style,
             )
@@ -266,7 +278,7 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
             descriptor,
             editor,
             !input.files_busy
-                && (!input.session.busy() || editor.submitted().is_some())
+                && (!input.session.blocks_editing() || editor.submitted().is_some())
                 && picture_is_displayed(input.session),
             input.style,
             labels,
@@ -282,7 +294,7 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
         matches!(input.page, Page::Keys | Page::Macros),
         labels,
         move |key| {
-            (input.idle()
+            (input.editing_allowed()
                 && matches!(input.page, Page::Keys | Page::Macros)
                 && descriptor.key_is_writable(&input.keys.layer, &key.id))
             .then(|| Message::Keys(keymap::Message::Key(key.id.clone())))
@@ -330,7 +342,12 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     };
     let keyboard = column![
         board(input),
-        view::keymap::layers(input.keys, input.session, idle, input.style),
+        view::keymap::layers(
+            input.keys,
+            input.session,
+            input.editing_allowed(),
+            input.style
+        ),
         status(input),
     ]
     .spacing(input.style.spacing.s);
@@ -342,6 +359,7 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
             library,
             names: input.files,
             idle,
+            editing_allowed: input.editing_allowed(),
             target: input
                 .keys
                 .target()
@@ -407,7 +425,7 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
     let editable = !input.files_busy
         && !input.host_preparing
         && input.session.host().is_idle()
-        && (!input.session.busy()
+        && (!input.session.blocks_editing()
             || input
                 .session
                 .lighting()
@@ -430,7 +448,7 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
                 input.session.descriptor(),
                 editor,
                 !input.files_busy
-                    && (!input.session.busy() || editor.submitted().is_some())
+                    && (!input.session.blocks_editing() || editor.submitted().is_some())
                     && picture_is_displayed(input.session),
                 idle,
                 input.style,

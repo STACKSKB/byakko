@@ -22,6 +22,7 @@ pub struct View<'a> {
     pub library: &'a Library,
     pub names: &'a crate::form::files::Form,
     pub idle: bool,
+    pub editing_allowed: bool,
     pub target: Option<(&'a str, &'a str)>,
     pub bound_action: Option<&'a KeyAction>,
     pub bound_slots: Vec<String>,
@@ -45,6 +46,7 @@ pub fn view<'a, M: Clone + 'a>(
         library,
         names,
         idle,
+        editing_allowed,
         target,
         bound_action,
         bound_slots,
@@ -52,7 +54,7 @@ pub fn view<'a, M: Clone + 'a>(
         wide,
         style,
     } = input;
-    let editable = idle && editor.status() == &Status::Ready && editor.draft().is_some();
+    let editable = editing_allowed && editor.status() == &Status::Ready && editor.draft().is_some();
     let repeat_valid = form.validate_repeat(editor).is_ok();
     let selected = editor.baseline().is_some();
     let visible_slots: Vec<_> = editor
@@ -203,7 +205,7 @@ pub fn view<'a, M: Clone + 'a>(
                 style,
                 &choice.label,
                 binding.is_some_and(|selected| selected.id == choice.id),
-                idle.then(|| Message::ChooseBinding(choice.id.clone())),
+                editable.then(|| Message::ChooseBinding(choice.id.clone())),
             )
         }))
     .spacing(style.spacing.s)
@@ -242,7 +244,8 @@ pub fn view<'a, M: Clone + 'a>(
         })
         .on_press_maybe(
             binding
-                .filter(|_| editable
+                .filter(|_| idle
+                    && editable
                     && target.is_some()
                     && repeat_valid
                     && repeat_restriction.is_none())
@@ -250,7 +253,7 @@ pub fn view<'a, M: Clone + 'a>(
         ),
         row![
             button("Save only").on_press_maybe(
-                (editable && editor.dirty() && repeat_valid).then_some(Message::Save)
+                (idle && editable && editor.dirty() && repeat_valid).then_some(Message::Save)
             ),
             button("Revert edits")
                 .on_press_maybe((idle && editor.dirty()).then_some(Message::Revert)),
@@ -481,11 +484,9 @@ mod tests {
             .retain(|choice| matches!(choice.action, KeyAction::Key(4 | 5)));
         let mut caps = session.macros().unwrap().capabilities().clone();
         caps.keys = Some(5..=100);
-        let mut form = Form {
-            composer: Composer::Replace(0),
-            value: "100".into(),
-            ..Form::default()
-        };
+        let mut form = Form::default();
+        form.composer = Composer::Replace(0);
+        form.value = "100".into();
         let choices = key_choices(&form, &descriptor, &caps);
         assert_eq!(
             choices,

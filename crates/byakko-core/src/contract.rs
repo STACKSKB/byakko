@@ -22,6 +22,20 @@ impl<T> Envelope<T> {
 pub type Command = Envelope<CommandPayload>;
 pub type Completion = Envelope<CompletionPayload>;
 
+/// Device-originated changes identify what needs refreshing, without protocol bytes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum DeviceChange {
+    Lighting,
+    Settings,
+    Configuration,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DeviceNotification {
+    pub generation: u64,
+    pub change: DeviceChange,
+}
+
 /// Read and apply share one operation shape across all feature types.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum FeatureCommand<S, E, R = ()> {
