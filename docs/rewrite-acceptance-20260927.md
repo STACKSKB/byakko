@@ -126,6 +126,13 @@ Windows unit. It is not a successful exact restore of the original archive.
 Later checks restored their saved canonicalized lighting baseline exactly.
 No production workaround, guard or protocol change was added.
 
+The subsequent [RGB boundary investigation](../Research/rgb-white-boundary-20260927.md)
+separates this behavior: native literal `255,255,255` becomes `180,180,180`, while
+253/254 and channel permutations are preserved. The official software writes
+`250,255,250` for white and displays that tuple as white on reload. This supports
+an exact-white device special case, not a general cap at 250. The follow-up
+restored its complete starting archive exactly without changing production code.
+
 ### Picture diagnostic timing
 
 The first immediate picture getter returned the old color after a successful
