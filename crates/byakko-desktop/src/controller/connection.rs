@@ -5,13 +5,17 @@ use byakko_core::{
     editor::Status,
     session::{Outcome, Session},
 };
-use byakko_devices::Executor;
+use byakko_devices::{Executor, Retirement};
 
 pub type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
 
 enum Refresh {
     Idle,
     Reading,
+}
+enum Reconnect {
+    Manual,
+    Discovered(String),
 }
 pub enum RefreshStep {
     Inactive,
@@ -21,6 +25,8 @@ pub enum RefreshStep {
 
 pub struct Connection {
     worker: Option<Executor>,
+    retiring: Option<Retirement>,
+    reconnect: Option<Reconnect>,
     selected: Option<String>,
     presence: Availability,
     discovery: Option<Discovery>,
@@ -32,6 +38,8 @@ impl Connection {
     pub fn new(attach: Box<Attach>) -> Self {
         Self {
             worker: None,
+            retiring: None,
+            reconnect: None,
             selected: None,
             presence: Availability::Unknown,
             discovery: None,
@@ -48,6 +56,9 @@ impl Connection {
     pub fn executor(&self) -> Option<&Executor> {
         self.worker.as_ref()
     }
+    pub fn settling(&self) -> bool {
+        self.retiring.is_some() || self.reconnect.is_some()
+    }
     pub fn monitoring(&self) -> bool {
         self.discovery.is_some()
     }
@@ -62,17 +73,34 @@ impl Connection {
     pub fn retire(&mut self, session: &mut Session) -> Result<(), String> {
         self.invalidate_discovery();
         self.refresh = Refresh::Idle;
+        self.reconnect = None;
         self.selected = None;
         if let Some(worker) = self.worker.take() {
-            worker.set_generation(0);
-            worker.cancel_catalog();
+            self.retiring = Some(worker.retire());
         }
         session.disconnect().map(|_| ())
     }
     /// An explicit read reselects the current collection even if no scan saw removal.
-    pub fn read(&mut self, session: &mut Session) -> Result<Command, String> {
+    pub fn read(&mut self, session: &mut Session) -> Result<Option<Command>, String> {
         self.retire(session)?;
-        self.attach(session, None)
+        self.reconnect = Some(Reconnect::Manual);
+        self.poll(session)
+    }
+    /// Finish the old worker before opening another device transaction.
+    pub fn poll(&mut self, session: &mut Session) -> Result<Option<Command>, String> {
+        if self
+            .retiring
+            .as_ref()
+            .is_some_and(|worker| !worker.is_finished())
+        {
+            return Ok(None);
+        }
+        self.retiring = None;
+        match self.reconnect.take() {
+            Some(Reconnect::Manual) => self.attach(session, None).map(Some),
+            Some(Reconnect::Discovered(id)) => self.attach(session, Some(&id)).map(Some),
+            None => Ok(None),
+        }
     }
     fn attach(&mut self, session: &mut Session, expected: Option<&str>) -> Result<Command, String> {
         let (id, worker) = (self.attach)(expected)?;
@@ -88,6 +116,9 @@ impl Connection {
     }
     /// Called only while device, file and recording activities are idle.
     pub fn scan(&mut self, session: &mut Session) -> Result<Option<Command>, String> {
+        if self.settling() {
+            return self.poll(session);
+        }
         let observed = self.discovery.as_mut().and_then(Discovery::receive);
         if let Some(observed) = observed {
             let changed = observed != self.presence;
@@ -113,7 +144,8 @@ impl Connection {
                     self.retire(session)?;
                 }
                 if !session.requires_manual_read() {
-                    return self.attach(session, Some(&id)).map(Some);
+                    self.reconnect = Some(Reconnect::Discovered(id));
+                    return self.poll(session);
                 }
             }
         }

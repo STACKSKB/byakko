@@ -33,7 +33,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let candidate = match nia87::device::availability() {
                         nia87::device::Availability::Available(candidate) => candidate,
                         nia87::device::Availability::Unavailable => {
-                            return Err("Connect a supported keyboard, then select Read.".into());
+                            return Err(
+                                "Connect the keyboard by USB, then choose Read / reconnect.".into(),
+                            );
                         }
                         nia87::device::Availability::Ambiguous(_) => {
                             return Err("Connect one supported keyboard at a time.".into());

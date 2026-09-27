@@ -12,7 +12,7 @@ use crate::{
 use byakko_core::model::keymap::{Action, ActionChoice};
 use iced::{
     Element, Fill,
-    widget::{button, column, container, row, scrollable, text, text_input},
+    widget::{button, column, container, row, text, text_input},
 };
 
 pub fn view<'a>(
@@ -98,21 +98,13 @@ pub fn view<'a>(
             .on_submit_maybe(editable.then_some(keymap::Message::Catalog(Message::SubmitSearch))),
         capture,
         row![
-            container(scrollable(groups))
+            container(panels::vertical_scroll(style, groups))
                 .width(style.action_group_width)
                 .height(Fill),
             container(
-                scrollable(container(results).width(Fill).padding(iced::Padding {
-                    right: f32::from(style.scrollbar_width + style.scrollbar_inset),
-                    ..Default::default()
-                }))
-                .direction(scrollable::Direction::Vertical(
-                    scrollable::Scrollbar::new()
-                        .width(u32::from(style.scrollbar_width))
-                        .scroller_width(u32::from(style.scrollbar_width))
-                ))
-                .id("action-catalog")
-                .on_scroll(|_| keymap::Message::Catalog(Message::Scrolled))
+                panels::vertical_scroll(style, results)
+                    .id("action-catalog")
+                    .on_scroll(|_| keymap::Message::Catalog(Message::Scrolled))
             )
             .width(Fill)
             .height(Fill),

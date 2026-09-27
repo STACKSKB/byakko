@@ -22,6 +22,13 @@ it is not evidence that new frontend paths work.
 
 ## Architectural decisions
 
+2026-09-27 corrective checkpoint: named macro assignments, shared scrollbar
+gutters, plain-language failure messages and asynchronous worker retirement
+before reconnect are implemented. The fresh release build includes the rewrite;
+the user's prior running executable predated it. Workspace tests, strict Clippy
+and offscreen rendered interaction checks pass. Physical reconnect review remains
+open. See [acceptance evidence](docs/rewrite-acceptance-20260927.md#user-feedback-and-corrective-build).
+
 1. Four product crates: core, devices, desktop, CLI. Root research tools depend
    inward. Do not add packages merely to impose another privacy layer.
 2. Core `contract` owns serializable commands/completions, IDs and outcomes,

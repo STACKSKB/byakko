@@ -3,7 +3,7 @@ mod device;
 mod executor;
 
 pub use device::{Device, HostActivity, HostFrame};
-pub use executor::Executor;
+pub use executor::{Executor, Retirement};
 
 pub mod audio_bands;
 pub mod audio_sample;

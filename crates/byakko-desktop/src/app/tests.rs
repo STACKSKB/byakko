@@ -266,7 +266,7 @@ fn host_sampler_failure_restores_lighting_and_retains_the_error() {
     let _ = app.update(Message::Host(host::Message::Start));
     poll_host_until(&mut app, |app| !app.host.busy());
     assert!(app.notice.contains("Injected capture failure"));
-    assert!(app.notice.contains("Verified"));
+    assert!(app.notice.contains("The previous settings were restored."));
     assert_eq!(app.closing, Closing::Open);
     assert_eq!(app.session.lighting().unwrap().status(), &Status::Ready);
     assert_eq!(
@@ -366,7 +366,7 @@ fn macro_app(fail_assignment: bool) -> (App, Arc<AtomicUsize>) {
 }
 
 fn drain(app: &mut App) {
-    while app.session.busy() || app.session.catalog_scanning() {
+    while app.session.busy() || app.session.catalog_scanning() || app.link.settling() {
         settle(app);
     }
 }
@@ -451,6 +451,15 @@ fn partial_assignment_failure_keeps_saved_macro_and_discard_prompt() {
 }
 
 fn settle(app: &mut App) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.link.settling() {
+        assert!(Instant::now() < deadline, "worker did not retire");
+        let _ = app.update(Message::Poll(Instant::now()));
+        std::thread::yield_now();
+    }
+    if !app.session.busy() && !app.session.catalog_scanning() {
+        return;
+    }
     let completion = app
         .link
         .executor()
@@ -1301,6 +1310,7 @@ fn manual_refresh_replaces_worker_even_without_a_discovery_change_and_failure_re
     assert!(h.app.session.keymap().dirty());
     h.reject_attach.store(true, Ordering::SeqCst);
     let _ = h.app.update(Message::Read);
+    drain(&mut h.app);
     assert!(h.app.link.executor().is_none());
     assert_eq!(h.app.session.connection(), &Connection::Disconnected);
     assert!(h.app.session.keymap().dirty());
@@ -1330,6 +1340,90 @@ fn failed_write_holds_automatic_refresh_until_explicit_read() {
     assert!(!h.app.session.requires_manual_read());
     assert!(h.app.session.keymap().dirty());
     assert_eq!(h.attachments.lock().unwrap().last(), Some(&None));
+}
+
+#[test]
+fn reconnect_after_read_failure_waits_for_cleanup_and_keeps_edits() {
+    struct FailingDevice {
+        memory: MemoryDevice,
+        reads: usize,
+        release: std::sync::mpsc::Receiver<()>,
+        retiring: std::sync::mpsc::Sender<()>,
+    }
+    impl Device for FailingDevice {
+        fn read(&mut self) -> Result<State, String> {
+            self.reads += 1;
+            if self.reads == 1 {
+                self.memory.read()
+            } else {
+                Err("The keyboard was disconnected.".into())
+            }
+        }
+        fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+            unreachable!("this test never writes")
+        }
+    }
+    impl Drop for FailingDevice {
+        fn drop(&mut self) {
+            let _ = self.retiring.send(());
+            // Model a worker still releasing its native resources after a failed read.
+            let _ = self.release.recv_timeout(Duration::from_secs(3));
+        }
+    }
+    let (release, released) = std::sync::mpsc::channel();
+    let (retiring, retired) = std::sync::mpsc::channel();
+    let first = Mutex::new(Some(FailingDevice {
+        memory: memory::demo().unwrap(),
+        reads: 0,
+        release: released,
+        retiring,
+    }));
+    let attachments = Arc::new(AtomicUsize::new(0));
+    let count = attachments.clone();
+    let mut app = App::new(
+        Session::new(memory::demo().unwrap().descriptor().clone()).unwrap(),
+        Box::new(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+            let worker = if let Some(first) = first.lock().unwrap().take() {
+                Executor::spawn(first, Default::default())
+            } else {
+                Executor::spawn(memory::demo()?, Default::default())
+            }
+            .map_err(|error| error.to_string())?;
+            Ok(("demo".into(), worker))
+        }),
+    );
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    edit(&mut app);
+    let draft = app.session.keymap().draft().cloned();
+    let request = app.session.read();
+    let _ = app.submit(request);
+    drain(&mut app);
+    assert!(
+        !app.session.busy(),
+        "failure must clear the pending operation"
+    );
+    assert!(app.notice.contains("keyboard was disconnected"));
+    let _ = app.update(Message::Read);
+    retired.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(app.link.settling());
+    assert!(app.link.executor().is_none());
+    for _ in 0..3 {
+        let _ = app.update(Message::Poll(Instant::now()));
+        let _ = app.update(Message::Read);
+    }
+    assert_eq!(attachments.load(Ordering::SeqCst), 1);
+    assert_eq!(app.session.keymap().draft(), draft.as_ref());
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+    release.send(()).unwrap();
+    drain(&mut app);
+    assert_eq!(attachments.load(Ordering::SeqCst), 2);
+    assert_eq!(app.session.keymap().status(), &Status::Ready);
+    assert_eq!(app.session.keymap().draft(), draft.as_ref());
+    assert!(app.session.keymap().dirty());
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
 }
 
 #[test]

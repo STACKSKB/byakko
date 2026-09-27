@@ -6,7 +6,7 @@ use crate::{
         files, host, keymap, lighting, macros, picture, recording, settings,
     },
     view,
-    widget::panels::UiStyle,
+    widget::panels::{self, UiStyle},
 };
 use byakko_core::{
     editor::Status,
@@ -14,7 +14,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, container, row, scrollable, text},
+    widget::{button, column, container, row, text},
 };
 
 /// Borrowed render inputs, assembled for a frame; no effects or owned state.
@@ -142,6 +142,10 @@ fn connection_status(presence: &Availability, manual_read: bool) -> String {
 }
 
 fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
+    let macro_names = input
+        .session
+        .macros()
+        .map(|editor| (input.files, editor.capabilities()));
     let idle = !input.session.busy()
         && !input.files_busy
         && !input.host_preparing
@@ -163,7 +167,8 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                 input.session.descriptor(),
                 input.session.keymap(),
                 false,
-                input.style
+                input.style,
+                macro_names
             )
             .map(Message::Keys),
             view::recording::controls(input.recording_options, phase, input.style)
@@ -190,6 +195,7 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
             input.session.keymap(),
             editable,
             input.style,
+            macro_names,
         )
         .map(Message::Keys),
         Page::Macros => match (input.session.macros(), input.session.macro_library()) {
@@ -199,7 +205,8 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     input.session.descriptor(),
                     input.session.keymap(),
                     !input.files_busy,
-                    input.style
+                    input.style,
+                    macro_names
                 )
                 .map(Message::Keys),
                 view::recording::controls(
@@ -250,10 +257,12 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     input.session.descriptor(),
                     input.session.keymap(),
                     false,
-                    input.style
+                    input.style,
+                    macro_names
                 )
                 .map(Message::Keys),
-                scrollable(
+                panels::vertical_scroll(
+                    input.style,
                     column![
                         view::lighting::view(
                             input.lighting,
@@ -278,7 +287,6 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     ]
                     .spacing(input.style.spacing.l)
                 )
-                .spacing(f32::from(input.style.scrollbar_inset))
                 .height(Fill),
             ]
             .spacing(input.style.spacing.m)
@@ -307,7 +315,8 @@ fn feature_view<'a>(input: &View<'a>, editable: bool) -> Element<'a, Message> {
                     input.session.descriptor(),
                     input.session.keymap(),
                     false,
-                    input.style
+                    input.style,
+                    macro_names
                 )
                 .map(Message::Keys),
                 view::settings::view(

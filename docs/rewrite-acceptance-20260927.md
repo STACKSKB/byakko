@@ -169,3 +169,39 @@ and power-cycle persistence need later hands-on coordination. Linux runtime and
 the historical recovery/fault failures remain separate acceptance gates.
 Native window interaction and the user's final rendered-layout review remain
 open; offscreen rendering and successful controller execution do not replace them.
+
+## User feedback and corrective build
+
+The user reports that macro writes, keymap reassignment and lighting-mode changes
+work. This is bounded user evidence for those operations; it does not establish
+every playback mode, persistence, Linux behavior or fault recovery.
+
+The reported UI problems were zero-based macro assignment labels, scrollbars
+overlapping controls, technical connection diagnostics and a busy transaction
+message after disconnect/re-read. The running release executable at inspection
+was dated 2026-09-26 17:17:11 and preceded the source rewrite. The fixes below
+apply to the current source, and the release executable was rebuilt in place.
+
+- Assigned macro labels resolve local names through advertised binding metadata
+  on both the Assignments and Macros pages. Unnamed slots use advertised one-based
+  labels; long names retain full tooltips. Local labels load on the initial
+  workspace, without requiring a visit to Macros.
+- One shared vertical scroll container reserves a content gutter for the track
+  and hit area, including macro events and host display/lighting controls.
+- Connection errors refer to the keyboard. Save and host errors explain typed
+  restoration outcomes in ordinary language instead of exposing enum/debug text.
+- A replacement executor waits asynchronously for the previous worker to finish
+  releasing its resources. Failed native opens release their OS lock; lock I/O
+  errors no longer masquerade as another active transaction. No lock is forcibly
+  released while an operation or restoration is still running.
+
+All-feature/all-target workspace tests pass (89 core, 80 desktop, 228 devices,
+seven CLI, external target and research tests), as does strict workspace Clippy.
+Regression checks exercise real isolated OS locks, queued stale-command rejection,
+failed reads/opens, repeated reconnect intent, retained drafts and close during
+cleanup. Actual Iced offscreen renders and relevant click checks passed at
+1360×800 and 1024×768; images remain under `target/visual-review/png-after`.
+These checks performed no keyboard writes and did not physically disconnect it.
+The older executable's exact lock failure is not conclusively attributed to the
+current source race. A physical reconnect check of the rebuilt release remains
+for the user.

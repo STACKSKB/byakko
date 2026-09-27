@@ -93,6 +93,103 @@ fn receive_can_time_out_without_losing_worker() {
     );
 }
 
+struct LockedRead {
+    path: PathBuf,
+    entered: SyncSender<()>,
+    release: Receiver<()>,
+    calls: Arc<AtomicUsize>,
+}
+impl Device for LockedRead {
+    fn read(&mut self) -> Result<State, String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&self.path)
+            .unwrap();
+        lock.try_lock().unwrap();
+        self.entered.send(()).unwrap();
+        self.release.recv_timeout(Duration::from_secs(2)).unwrap();
+        Err("Keyboard disconnected".into())
+    }
+    fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
+        unreachable!("only read commands are submitted")
+    }
+}
+
+#[test]
+fn retirement_waits_for_failed_transaction_and_releases_lock_before_replacement_read() {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "byakko-retirement-test-{}-{stamp}",
+        std::process::id()
+    ));
+    let (entered, waiting) = mpsc::sync_channel(1);
+    let (release, resumed) = mpsc::sync_channel(1);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let worker = Executor::spawn(
+        LockedRead {
+            path: path.clone(),
+            entered,
+            release: resumed,
+            calls: Arc::clone(&calls),
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    worker.set_generation(1);
+    worker.try_submit(command(1, 1)).unwrap();
+    waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+    worker.try_submit(command(1, 2)).unwrap();
+    let retirement = worker.retire();
+    assert!(!retirement.is_finished());
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&path)
+        .unwrap();
+    assert!(matches!(
+        lock.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    release.send(()).unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    while !retirement.is_finished() {
+        assert!(std::time::Instant::now() < deadline, "retirement timeout");
+        std::thread::yield_now();
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1, "queued read must not run");
+    lock.try_lock().unwrap();
+    drop(lock);
+
+    let (entered, waiting) = mpsc::sync_channel(1);
+    let (release, resumed) = mpsc::sync_channel(1);
+    let replacement = Executor::spawn(
+        LockedRead {
+            path,
+            entered,
+            release: resumed,
+            calls,
+        },
+        PathBuf::new(),
+    )
+    .unwrap();
+    replacement.set_generation(2);
+    replacement.try_submit(command(2, 1)).unwrap();
+    waiting.recv_timeout(Duration::from_secs(2)).unwrap();
+    release.send(()).unwrap();
+    let completion = replacement.receive(Some(Duration::from_secs(2))).unwrap();
+    assert!(matches!(completion.payload,
+        CompletionPayload::Keymap(FeatureResult::Read(Err(reason)))
+        if reason == "Keyboard disconnected"
+    ));
+}
+
 struct GatedProbe {
     entered: mpsc::SyncSender<()>,
     release: mpsc::Receiver<()>,

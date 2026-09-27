@@ -132,9 +132,9 @@ impl Controller {
                 }
                 HostOutcome::Failed(failure) => {
                     self.state = State::Idle;
-                    return Outcome::Failed(format!(
-                        "Host lighting failed: {}. Recovery: {:?}",
-                        failure.message, failure.recovery
+                    return Outcome::Failed(crate::view::status::apply_failure(
+                        "Could not run host lighting",
+                        &failure,
                     ));
                 }
             },

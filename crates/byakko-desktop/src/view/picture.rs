@@ -1,7 +1,10 @@
 //! Physical-key color selection uses advertised picture keys and the core draft.
 use crate::{
     form::picture::{Form, Message},
-    widget::{color_picker, keyboard, panels::UiStyle},
+    widget::{
+        color_picker, keyboard,
+        panels::{self, UiStyle},
+    },
 };
 use byakko_core::{
     editor::{Editor, Status, picture::PictureRules},
@@ -10,7 +13,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, row, scrollable, slider, text},
+    widget::{button, column, row, slider, text},
 };
 use std::collections::BTreeMap;
 
@@ -84,5 +87,5 @@ pub fn view<'a>(
     } else if editor.draft().is_none() {
         content = content.push(text("Read per-key colors to load the current picture."));
     }
-    scrollable(content).height(Fill).into()
+    panels::vertical_scroll(style, content).height(Fill).into()
 }

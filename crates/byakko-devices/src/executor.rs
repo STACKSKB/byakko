@@ -36,12 +36,25 @@ impl Catalog {
     }
 }
 pub struct Executor {
+    worker: Option<std::thread::JoinHandle<()>>,
     commands: SyncSender<Request>,
     completions: Receiver<Completion>,
     generation: Arc<AtomicU64>,
     catalog_submitted: AtomicU64,
     catalog_cancelled: Arc<AtomicU64>,
     host: Arc<Host>,
+}
+
+/// A retired worker may still be completing its current transaction or restoration.
+/// Reconnection waits for it without blocking the UI or releasing an active OS lock.
+pub struct Retirement {
+    worker: std::thread::JoinHandle<()>,
+}
+
+impl Retirement {
+    pub fn is_finished(&self) -> bool {
+        self.worker.is_finished()
+    }
 }
 
 enum Request {
@@ -60,7 +73,7 @@ impl Executor {
         let worker_cancelled = Arc::clone(&catalog_cancelled);
         let host = Arc::new(Host::default());
         let worker_host = Arc::clone(&host);
-        std::thread::Builder::new()
+        let worker = std::thread::Builder::new()
             .name("byakko-device".into())
             .spawn(move || {
                 let mut latest = None;
@@ -200,6 +213,7 @@ impl Executor {
                 }
             })?;
         Ok(Self {
+            worker: Some(worker),
             commands,
             completions,
             generation,
@@ -207,6 +221,14 @@ impl Executor {
             catalog_cancelled,
             host,
         })
+    }
+
+    /// Cancel queued work and close delivery; the current device call finishes normally.
+    pub fn retire(mut self) -> Retirement {
+        let worker = self.worker.take().expect("executor owns its worker");
+        // Drop closes both channels and invalidates the generation before returning.
+        drop(self);
+        Retirement { worker }
     }
 
     /// Does not interrupt a transaction already in progress.

@@ -19,9 +19,16 @@ fn lock_file(path: &std::path::Path) -> Result<std::fs::File> {
         .create(true)
         .truncate(false)
         .open(path)?;
-    file.try_lock()
-        .map_err(|_| "Another Byakko transaction is active; retry after it finishes")?;
+    file.try_lock().map_err(lock_error)?;
     Ok(file)
+}
+
+fn lock_error(error: std::fs::TryLockError) -> Box<dyn std::error::Error + Send + Sync> {
+    match error {
+        std::fs::TryLockError::WouldBlock =>
+            "The keyboard is busy with another Byakko operation. Wait for it to finish, then try again.".into(),
+        std::fs::TryLockError::Error(error) => error.into(),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -80,16 +87,18 @@ pub enum TargetSelectionError {
 impl std::fmt::Display for TargetSelectionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Missing => f.write_str("The selected Nia87 collection is no longer present"),
+            Self::Missing => f.write_str(
+                "The keyboard was disconnected. Reconnect it and choose Read / reconnect.",
+            ),
             Self::Ambiguous(count) => write!(
                 f,
-                "Expected one Nia87 configuration collection; found {count}"
+                "Found {count} compatible keyboards. Connect only the keyboard you want to configure."
             ),
             Self::Changed => {
-                f.write_str("The selected Nia87 collection identity changed; no device opened")
+                f.write_str("The keyboard connection changed. Choose Read / reconnect.")
             }
             Self::Unsupported => {
-                f.write_str("The candidate is not a supported Nia87 configuration collection")
+                f.write_str("This keyboard connection cannot be configured by Byakko.")
             }
         }
     }
@@ -170,12 +179,10 @@ fn matching_candidates(api: &HidApi) -> Vec<Candidate> {
 
 pub fn open_unique() -> Result<(Candidate, HidDevice)> {
     let list = candidates()?;
-    if list.len() != 1 {
-        return Err(format!(
-            "Expected one Nia87 configuration collection; found {}. Connect one keyboard by USB.",
-            list.len()
-        )
-        .into());
+    match list.len() {
+        0 => return Err(TargetSelectionError::Missing.into()),
+        1 => {}
+        count => return Err(TargetSelectionError::Ambiguous(count).into()),
     }
     let candidate = list.into_iter().next().unwrap();
     let api = HidApi::new()?;
@@ -341,8 +348,13 @@ pub(super) struct Session {
 
 impl Session {
     pub(super) fn open_for(selection: super::Selection<'_>) -> Result<Self> {
-        let lock = transaction_lock()?;
-        let (_, device) = selection.open()?;
+        Self::open_locked(transaction_lock()?, || {
+            selection.open().map(|(_, device)| device)
+        })
+    }
+
+    fn open_locked(lock: std::fs::File, open: impl FnOnce() -> Result<HidDevice>) -> Result<Self> {
+        let device = open()?;
         Ok(Self {
             device,
             _lock: lock,
@@ -357,8 +369,8 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::{
-        Availability, Candidate, FeatureReadError, ReadPhase, Target, TargetSelectionError,
-        classify, feature_read_exchange, lock_file,
+        Availability, Candidate, FeatureReadError, ReadPhase, Session, Target,
+        TargetSelectionError, classify, feature_read_exchange, lock_error, lock_file,
     };
 
     fn candidate(path: &str) -> Candidate {
@@ -462,6 +474,45 @@ mod tests {
         drop(first);
         assert!(lock_file(&path).is_ok());
         // Retain the empty test artifact in accordance with the no-deletion rule.
+    }
+
+    #[test]
+    fn lock_errors_preserve_operating_system_failures_instead_of_reporting_busy() {
+        let error = lock_error(std::fs::TryLockError::Error(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "configuration lock permission denied",
+        )));
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert!(error.to_string().contains("permission denied"));
+        let busy = lock_error(std::fs::TryLockError::WouldBlock);
+        assert!(busy.to_string().contains("keyboard is busy"));
+    }
+
+    #[test]
+    fn failed_session_open_releases_lock_for_missing_target_and_io_failure() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "byakko-open-lock-test-{}-{stamp}",
+            std::process::id()
+        ));
+        for error in [
+            Box::new(TargetSelectionError::Missing) as Box<dyn std::error::Error + Send + Sync>,
+            std::io::Error::new(std::io::ErrorKind::NotConnected, "keyboard disconnected").into(),
+        ] {
+            let reason = error.to_string();
+            let result = Session::open_locked(lock_file(&path).unwrap(), || Err(error));
+            assert_eq!(result.err().unwrap().to_string(), reason);
+            assert!(
+                lock_file(&path).is_ok(),
+                "failed open must release the transaction"
+            );
+        }
     }
 
     #[test]
