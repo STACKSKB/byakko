@@ -162,6 +162,9 @@ impl Lighting {
         };
         let low = self.raw[4] & 0x0f;
         let dazzle = match effect.id {
+            // Onboard Neon returns zero here; the official decoder does not
+            // interpret a color for this mode. Its software setter uses seven.
+            3 if low == 0 => false,
             13 if low == 0 => false,
             20 | 22 if low == 0 => true,
             20 | 22 if low == 4 => false,
