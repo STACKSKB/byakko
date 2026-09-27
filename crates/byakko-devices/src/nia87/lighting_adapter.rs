@@ -64,7 +64,13 @@ fn effect_schema(id: String, effect: &native::Effect) -> Effect {
             .iter()
             .map(|option| Choice {
                 id: (*option).into(),
-                label: (*option).into(),
+                label: match (effect.id, *option) {
+                    (13, "1") => "1 (Fn+Z)",
+                    (13, "2") => "2 (Fn+X)",
+                    (13, "3") => "3 (Fn+C)",
+                    _ => option,
+                }
+                .into(),
             })
             .collect(),
         color: match (effect.rgb, effect.dazzle) {
@@ -274,6 +280,39 @@ pub(super) fn apply_with(
 mod tests {
     use super::*;
     use byakko_core::editor::lighting::default_setting;
+
+    #[test]
+    fn picture_layers_advertise_shortcuts_and_encode_the_global_selector() {
+        let caps = capabilities();
+        let effect = caps
+            .effects
+            .iter()
+            .find(|effect| effect.id == "13")
+            .unwrap();
+        assert_eq!(
+            effect
+                .options
+                .iter()
+                .map(|choice| choice.label.as_str())
+                .collect::<Vec<_>>(),
+            ["1 (Fn+Z)", "2 (Fn+X)", "3 (Fn+C)"]
+        );
+        for (index, choice) in effect.options.iter().enumerate() {
+            let setting = Setting {
+                option: Some(choice.id.clone()),
+                ..default_setting(&caps, "13").unwrap()
+            };
+            let report = native::write_report(&to_native(&setting).unwrap()).unwrap();
+            assert_eq!(report[1], 13);
+            assert_eq!(report[4], (index as u8) << 4);
+            let mut response = report;
+            response[0] = native::LED_READ_COMMAND;
+            assert_eq!(
+                from_bytes(&response).unwrap().content,
+                Content::Editable(setting)
+            );
+        }
+    }
 
     #[test]
     fn official_onboard_mode_cycle_is_editable_without_altering_raw_snapshots() {

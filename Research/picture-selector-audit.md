@@ -67,3 +67,29 @@ selector is chosen, including when their RGB contents happen to match. It
 does not prove independent writable banks or protect against a different
 process changing the device in the middle of a multi-key write. Physical
 per-key writes remain pending their separate acceptance gate.
+
+## Layer-first editing, 2026-09-27
+
+The user selected this workflow: choose RGB layer 1/2/3, load its stored colors,
+then edit that layer. This is distinct from copying an unsaved source design to
+a separate upload destination. The native Driver 2.1.97 UI near character offset
+16,626,898 of `Research/extracted/nia-app/resources/app/dist/static/js/main_ccea61a6.js`
+selects LightUserPicture and option 1/2/3 before its existing setLightPic call.
+Its separate Load action uses the same selection before getLightPic. Both bulk
+paths keep report index byte 1 at zero; changing that byte would invent a new
+addressing scheme. Fn+Z/X/C select global option indices 0/1/2 respectively.
+
+Byakko exposes these advertised options in per-key mode with their shortcuts.
+Selection uses the existing backed-up lighting transaction and settling delay,
+then reads the selected picture once. Edits upload the ordinary seven pages
+against that layer's cached before-image. Pending color edits must finish or be
+reverted before changing layers; old picture data remains unwritable until the
+new selection's colors have loaded. Brightness changes do not reload colors.
+The earlier per-read/per-write context checks described above are historical:
+current runtime policy uses cached context and native events, not extra read
+preflights. No upload packet format or automatic post-upload getter is added.
+
+No hardware writes were made for this implementation. Existing captures show
+three distinct selector-dependent readbacks and official selected-layer upload
+behavior; physical independent persistence of new writes to layers 2/3 remains
+an acceptance check.

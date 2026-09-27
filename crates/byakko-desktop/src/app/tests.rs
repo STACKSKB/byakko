@@ -1,4 +1,5 @@
 use super::*;
+mod picture_layers;
 use crate::controller::discovery::Availability;
 use crate::view::application::picture_is_displayed;
 use byakko_core::{
@@ -608,6 +609,10 @@ fn lighting_and_picture_conflicts_have_an_explicit_revert_then_read_path() {
     drain(&mut app);
     assert_eq!(app.session.lighting().unwrap().status(), &Status::Ready);
 
+    let _ = app.update(Message::Lighting(crate::form::lighting::Message::Mode(
+        crate::form::lighting::Mode::PerKey,
+    )));
+    drain(&mut app);
     let key = app.session.picture().unwrap().capabilities().keys[0].clone();
     app.session
         .edit_picture(picture::Edit::Color {

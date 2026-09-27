@@ -443,17 +443,36 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
     .spacing(input.style.spacing.m);
     let detail = match mode {
         Some(lighting::Mode::PerKey) => input.session.picture().map(|editor| {
-            view::picture::view(
-                input.picture,
-                input.session.descriptor(),
-                editor,
-                !input.files_busy
-                    && (!input.session.blocks_editing() || editor.submitted().is_some())
-                    && picture_is_displayed(input.session),
-                idle,
-                input.style,
-            )
-            .map(Message::Picture)
+            let mut detail = column![].spacing(input.style.spacing.m);
+            if let Some(lighting) = input.session.lighting()
+                && lighting.draft().is_some_and(|setting| {
+                    editor.capabilities().lighting_effect.as_ref() == Some(&setting.effect)
+                })
+            {
+                detail = detail.push(
+                    view::lighting::picture_controls(
+                        lighting,
+                        input.editing_allowed() && !editor.dirty() && editor.submitted().is_none(),
+                        input.style,
+                    )
+                    .map(Message::Lighting),
+                );
+            }
+            detail
+                .push(
+                    view::picture::view(
+                        input.picture,
+                        input.session.descriptor(),
+                        editor,
+                        !input.files_busy
+                            && (!input.session.blocks_editing() || editor.submitted().is_some())
+                            && picture_is_displayed(input.session),
+                        idle,
+                        input.style,
+                    )
+                    .map(Message::Picture),
+                )
+                .into()
         }),
         Some(lighting::Mode::Host(_)) => input.session.lighting().map(|editor| {
             view::host::view(

@@ -390,3 +390,35 @@ Workspace tests pass (94 core, 96 desktop, 235 devices plus the other targets),
 three vendored renderer tests pass, strict Clippy and formatting pass, and the
 release executable was rebuilt. This investigation performed read-only device
 checks; physical LED output and all-mode host behavior were not re-tested.
+
+## Per-key RGB layers (2026-09-27)
+
+The user selected a layer-first workflow: choose layer 1 (Fn+Z), 2 (Fn+X), or
+3 (Fn+C), load its stored colors, then edit that layer. Per-key mode exposes these
+backend-advertised choices and brightness above the existing picker. A layer
+change uses the ordinary lighting setter and settling delay, then loads that
+layer's picture once. The picker resets to the selected key's color on a real
+context change. Dirty color edits block layer switching until applied or
+reverted; pending/failed selection cannot upload old-layer data. No new packet
+addressing, hidden color copies, or post-upload getters were introduced.
+
+Actual Iced click checks cover all three layer buttons, brightness and color
+editing at 1360x800 and 1024x768. Clean/dirty controls retain their positions;
+dirty colors disable layer changes while keeping the painter available.
+Production-view renders are under `target/visual-review/approved-restored/`
+with prefix `picture-layers`, and the ignored check log is
+`target/visual-review/picture-layers-review.log`. The previous background-read
+and music interaction checks still pass.
+
+An independent three-layer device fixture drives actual app messages through
+selection, one destination read, edits/uploads and returning to each layer.
+It verifies all three distinct color maps, unaffected keys, correct before-image,
+coalesced choices, failure retention, and no automatic getter after upload.
+These are software tests, not physical persistence evidence. No keyboard write
+was performed; independent physical writes/persistence for layers 2/3 remain
+for user acceptance.
+
+Final validation: all-target/all-feature workspace tests pass (99 core,
+100 desktop, 236 devices, plus CLI/research/external targets). Strict workspace
+Clippy and formatting pass; the release executable is rebuilt. CLI picture-only
+operations retain one cached feature read without a new lighting preflight.

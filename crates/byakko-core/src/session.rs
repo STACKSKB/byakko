@@ -658,6 +658,16 @@ impl Session {
     }
     pub fn edit_lighting(&mut self, edit: lighting::Edit) -> Result<(), String> {
         self.editable_activity(&Feature::Lighting)?;
+        if let Some(editor) = self.lighting()
+            && let Some(current) = editor.draft()
+        {
+            let next = crate::editor::lighting::edit_setting(
+                editor.capabilities(),
+                current,
+                edit.clone(),
+            )?;
+            self.check_picture_selector_change(&next)?;
+        }
         self.lighting
             .as_mut()
             .ok_or("Lighting is not supported")?
@@ -671,6 +681,9 @@ impl Session {
             .revert()
     }
     pub fn save_lighting(&mut self) -> Result<Command, String> {
+        if let Some(desired) = self.lighting().and_then(|editor| editor.draft()) {
+            self.check_picture_selector_change(desired)?;
+        }
         let (expected, desired) = self
             .lighting
             .as_mut()
@@ -707,6 +720,7 @@ impl Session {
     }
     pub fn edit_picture(&mut self, edit: picture::Edit) -> Result<(), String> {
         self.editable_activity(&Feature::Picture)?;
+        self.check_picture_selector()?;
         self.picture
             .as_mut()
             .ok_or("Picture is not supported")?
@@ -720,6 +734,7 @@ impl Session {
             .revert()
     }
     pub fn save_picture(&mut self) -> Result<Command, String> {
+        self.check_picture_selector()?;
         let (expected, desired) = self
             .picture
             .as_mut()
@@ -783,6 +798,7 @@ impl Session {
 
     pub fn stage_lighting(&mut self, setting: lighting::Setting) -> Result<(), String> {
         self.editable_activity(&Feature::Lighting)?;
+        self.check_picture_selector_change(&setting)?;
         self.lighting
             .as_mut()
             .ok_or("Lighting is not supported")?
@@ -790,10 +806,69 @@ impl Session {
     }
     pub fn stage_picture_snapshot(&mut self, target: &picture::Snapshot) -> Result<(), String> {
         self.editable_activity(&Feature::Picture)?;
+        self.check_picture_selector()?;
         self.picture
             .as_mut()
             .ok_or("Picture is not supported")?
             .import(target)
+    }
+    fn check_picture_selector_change(&self, desired: &lighting::Setting) -> Result<(), String> {
+        let Some(picture) = self.picture() else {
+            return Ok(());
+        };
+        if picture.capabilities().lighting_effect.is_none() || !picture.dirty() {
+            return Ok(());
+        }
+        let current = self
+            .lighting()
+            .and_then(|editor| editor.baseline())
+            .and_then(|snapshot| match &snapshot.content {
+                lighting::Content::Editable(setting) => Some(setting),
+                _ => None,
+            });
+        if current.is_none_or(|current| {
+            current.effect != desired.effect || current.option != desired.option
+        }) {
+            return Err(
+                "Save or revert per-key color edits before changing the lighting layer or mode"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+    fn check_picture_selector(&self) -> Result<(), String> {
+        let Some(picture) = self.picture() else {
+            return Ok(());
+        };
+        if picture.capabilities().lighting_effect.is_none() {
+            return Ok(());
+        }
+        // A picture-only client already obtains its context with the picture
+        // read. A separately loaded lighting baseline adds a consistency check;
+        // it must not impose another read on that client.
+        let Some(lighting) = self.lighting() else {
+            return Ok(());
+        };
+        let Some(baseline) = lighting.baseline() else {
+            return Ok(());
+        };
+        let selector_pending = match &baseline.content {
+            lighting::Content::Editable(current) => lighting.draft().is_none_or(|draft| {
+                draft.effect != current.effect || draft.option != current.option
+            }),
+            _ => lighting.draft().is_some(),
+        };
+        if !matches!(lighting.status(), Status::Ready)
+            || selector_pending
+            || picture
+                .baseline()
+                .is_none_or(|snapshot| snapshot.context_revision != baseline.picture_context)
+        {
+            return Err(
+                "Wait for the selected lighting layer to load before editing per-key colors".into(),
+            );
+        }
+        Ok(())
     }
     pub fn prepare_picture(&mut self) -> Result<Option<Command>, String> {
         self.idle()?;
