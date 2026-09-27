@@ -255,3 +255,45 @@ the Linux task; it should not be repeated.
   If completing an observation requires a hardware write, return the smallest
   concrete backed-up test and restoration proposal rather than guessing. Do not
   block this UX profiling on camera availability or repeat brightness tests.
+
+
+### WIN-20260927-LINUX-RELEASE: Tagged Linux asset transfer
+
+- Revision: 1
+- Status: ready for Windows retrieval/upload
+- Source: `0be1cd98f4c4f17eae3963d7efd3ef08924331bf`, tag
+  `v0.1.0-pre-alpha.1`. This inbox-only follow-up does not move the tag.
+- User authorization: Windows coordinator relayed explicit publication authority
+  and specifically requested an orphan `codex/linux-release-artifact` branch
+  if direct transfer was unavailable. No hardware writes performed.
+- Artifact branch: `codex/linux-release-artifact`, root commit `7020a89`.
+  It contains only the public archive, checksum sidecar and `TRANSFER.json`.
+  **Do not merge this orphan branch into master.** Fetch it and extract its
+  archive into Windows' release staging directory with binary-safe file I/O.
+- Filename: `byakko-v0.1.0-pre-alpha.1-linux-x86_64.tar.gz`
+- SHA-256: `118ff71cb4118d7a733854600ec008bd50da4ccb40348a3acdee89992861ab26`
+- Size: 6,196,829 bytes.
+- Local path:
+  `/tmp/Byakko-linux-release/target/release-packages/byakko-v0.1.0-pre-alpha.1-linux-x86_64.tar.gz`.
+- Built desktop, CLI and permission helper from exact tagged source with
+  `cargo build --release --locked --offline`; packaged with the committed
+  `tools/package_release.py --platform linux --icon packaging/icons/byakko.png`.
+  `BUILD.json` revision, executable hashes/modes, icon, rules, docs and license
+  inventory were verified in the 349-file archive. Archive was copied unchanged
+  from `/tmp` to the requested staging path.
+- Validation: 435 core/devices/desktop/CLI tests passed; 2 permission-helper
+  tests passed; workspace formatting passed. Debian 13.7 x86-64, Rust 1.98.0.
+  ELF maximum GLIBC requirements: desktop 2.39; CLI/helper 2.34. Direct `ldd`
+  dependencies resolve; X11/Xrandr/Wayland/xkbcommon/Pulse runtime libraries
+  are installed. No claim of GUI/hardware acceptance or older-distro testing.
+- Notifications: no Nia87 attached; complete Linux notification descriptor
+  remains unverified. No permission broadening. Manual-refresh limitation is
+  documented in the tagged source's Linux install guide.
+- Transfer/auth: `gh` absent; no GitHub API login established here. `scp` client
+  exists but no working incoming SSH route established. `tailscale` executable
+  exists, but this session cannot connect to local tailscaled. No service was
+  started. Use the authorized Git artifact branch; Windows can upload once its
+  pending user API login succeeds. No release/tag creation or API upload here.
+- Coordination: direct `send_message_to_thread` to Windows task
+  `01a0ddc8-670a-7943-8c97-a4a4bacb1e13` repeatedly returns
+  `No Codex thread found`; this Git inbox is the handoff channel.
