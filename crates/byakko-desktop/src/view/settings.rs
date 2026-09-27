@@ -1,19 +1,18 @@
-//! Scalar fields permit one staged setting and preserve unfinished numeric input.
+//! Compact settings grid; each accepted slider or toggle edit uses the core draft.
 use crate::{
-    form::settings::{Form, Message},
+    form::settings::Message,
     widget::panels::{self, UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Feature, Status, settings::SettingsRules},
-    model::settings::{Content, Edit, Kind, Value},
+    model::settings::{Content, Edit, Field, Kind, Value},
 };
 use iced::{
-    Element, Fill,
-    widget::{button, checkbox, column, row, text, text_input},
+    Alignment, Element, Fill,
+    widget::{button, checkbox, column, container, row, slider, text},
 };
 
 pub fn view<'a>(
-    form: &'a Form,
     editor: &'a Editor<SettingsRules>,
     editable: bool,
     idle: bool,
@@ -29,98 +28,126 @@ pub fn view<'a>(
             .map(|(id, _)| id.as_str())
     });
     let pending = submitted.or_else(|| changes.first().map(|edit| edit.id.as_str()));
-    let mut content = column![
-        row![
-            button("Read").on_press_maybe(idle.then_some(Message::Read)),
-            button("Revert").on_press_maybe(
-                (idle && (editor.dirty() || form.has_input())).then_some(Message::Revert)
-            ),
-            button("Apply now")
-                .on_press_maybe((idle && editor.dirty() && editable).then_some(Message::Save)),
-        ]
-        .spacing(style.spacing.s),
-        text("One setting at a time. Accepted values apply automatically."),
-    ]
-    .spacing(style.spacing.m);
+    let mut content = column![].spacing(style.spacing.s);
+    if !matches!(editor.status(), Status::Ready) {
+        let mut actions = row![].spacing(style.spacing.s);
+        if editor.dirty() {
+            actions =
+                actions.push(button("Revert").on_press_maybe(idle.then_some(Message::Revert)));
+        }
+        actions = actions.push(
+            button(if editor.status() == &Status::Unloaded {
+                "Read settings"
+            } else {
+                "Reload & retry"
+            })
+            .on_press_maybe((idle && !editor.dirty()).then_some(Message::Read)),
+        );
+        content = content.push(actions);
+    }
     if let Some(values) = editor.draft() {
+        let mut grid = column![].spacing(style.spacing.xs).width(Fill);
         for field in &editor.capabilities().fields {
-            let can_edit = editable
-                && pending.is_none_or(|id| id == field.id)
-                && form.input.as_ref().is_none_or(|(id, _)| id == &field.id);
+            let can_edit = editable && pending.is_none_or(|id| id == field.id);
             let Some(value) = values.get(&field.id) else {
                 continue;
             };
-            let control: Element<'a, Message> = match (&field.kind, value) {
-                (Kind::Toggle, Value::Toggle(value)) => {
-                    let id = field.id.clone();
-                    checkbox(*value)
-                        .label(&field.label)
-                        .on_toggle_maybe(can_edit.then_some(move |value| {
-                            Message::Edit(Edit {
-                                id: id.clone(),
-                                value: Value::Toggle(value),
-                            })
-                        }))
-                        .into()
-                }
-                (
-                    Kind::Number {
-                        min,
-                        max,
-                        step,
-                        unit,
-                        disabled_zero,
-                    },
-                    Value::Number(value),
-                ) => {
-                    let id = field.id.clone();
-                    let shown = form
-                        .input
-                        .as_ref()
-                        .filter(|(id, _)| id == &field.id)
-                        .map_or_else(|| value.to_string(), |(_, input)| input.clone());
-                    let input = text_input("Value", &shown)
-                        .on_input_maybe(
-                            can_edit.then_some(move |value| Message::Number(id.clone(), value)),
-                        )
-                        .on_submit_maybe(
-                            (can_edit && form.input.is_some())
-                                .then(|| Message::ApplyNumber(field.id.clone())),
-                        )
-                        .width(style.fields.compact);
-                    let range = format!(
-                        "{min}–{max} {unit}, step {step}{}",
-                        if *disabled_zero { "; 0 = disabled" } else { "" }
-                    );
-                    column![
-                        text(&field.label),
-                        row![
-                            input,
-                            button("Set").on_press_maybe(
-                                (can_edit && form.input.is_some())
-                                    .then(|| Message::ApplyNumber(field.id.clone()))
-                            ),
-                            text(unit),
-                        ]
-                        .spacing(style.spacing.s),
-                        text(range)
+            grid = grid.push(
+                container(
+                    row![
+                        text(&field.label).width(style.fields.regular),
+                        control(style, field, value, can_edit)
                     ]
                     .spacing(style.spacing.s)
-                    .into()
-                }
-                _ => text(format!("{}: unavailable", field.label)).into(),
-            };
-            content = content.push(control);
+                    .align_y(Alignment::Center),
+                )
+                .padding(style.spacing.xs as u16)
+                .width(Fill),
+            );
         }
-    } else {
-        let explanation = match editor.baseline().map(|s| &s.content) {
-            Some(Content::Opaque { reason }) => reason.as_str(),
-            _ => "Read settings to load the available fields.",
-        };
-        content = content.push(text(explanation));
+        content = content.push(
+            panels::vertical_scroll(style, grid)
+                .width(Fill)
+                .height(Fill),
+        );
+    } else if let Some(Content::Opaque { reason }) =
+        editor.baseline().map(|snapshot| &snapshot.content)
+    {
+        content = content.push(text(reason));
     }
-    panels::vertical_scroll(style, content.width(Fill))
-        .width(Fill)
-        .height(Fill)
-        .into()
+    content.height(Fill).into()
+}
+
+fn control<'a>(
+    style: &'a UiStyle,
+    field: &'a Field,
+    value: &Value,
+    editable: bool,
+) -> Element<'a, Message> {
+    match (&field.kind, value) {
+        (Kind::Toggle, Value::Toggle(current)) => {
+            let id = field.id.clone();
+            checkbox(*current)
+                .label(if *current { "Enabled" } else { "Disabled" })
+                .on_toggle_maybe(editable.then_some(move |enabled| {
+                    Message::Edit(Edit {
+                        id: id.clone(),
+                        value: Value::Toggle(enabled),
+                    })
+                }))
+                .into()
+        }
+        (
+            Kind::Number {
+                min,
+                max,
+                step,
+                disabled_zero,
+                unit,
+            },
+            Value::Number(current),
+        ) => {
+            let shown = if *disabled_zero && *current == 0 {
+                "Disabled".into()
+            } else {
+                format!("{current} {unit}")
+            };
+            let mut controls = row![text(shown).width(style.fields.compact)]
+                .spacing(style.spacing.s)
+                .align_y(Alignment::Center);
+            if editable {
+                let id = field.id.clone();
+                let max_value = u32::from(*max);
+                let disabled_position = max_value + u32::from(*step);
+                controls = controls.push(
+                    slider(
+                        u32::from(*min)..=if *disabled_zero {
+                            disabled_position
+                        } else {
+                            max_value
+                        },
+                        if *disabled_zero && *current == 0 {
+                            disabled_position
+                        } else {
+                            u32::from(*current)
+                        },
+                        move |number| {
+                            Message::Edit(Edit {
+                                id: id.clone(),
+                                value: Value::Number(if number > max_value {
+                                    0
+                                } else {
+                                    number as u16
+                                }),
+                            })
+                        },
+                    )
+                    .step(u32::from(*step))
+                    .width(style.fields.regular),
+                );
+            }
+            controls.into()
+        }
+        _ => text("Setting value does not match its capability").into(),
+    }
 }

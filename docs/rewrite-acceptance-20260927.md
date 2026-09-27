@@ -205,3 +205,46 @@ These checks performed no keyboard writes and did not physically disconnect it.
 The older executable's exact lock failure is not conclusively attributed to the
 current source race. A physical reconnect check of the rebuilt release remains
 for the user.
+
+## Approved workflow restoration
+
+The user rejected the replacement executable's changed workflow. The source
+rewrite did not authorize a UX redesign; its earlier rendered checks established
+reachability, not equivalence to the approved UI. The rewritten views have now
+been corrected against the supplied screenshots and interaction requirements:
+
+- Keys, Macros, Lighting, Settings and Diagnostic capture remain the five tabs.
+  The keyboard persists above the editor and beside the appropriate sidebar.
+  Connection actions appear when needed, and assignment saves remain with Keys.
+- Macros use the left editor and right Library/Playback arrangement. Name,
+  recording/fixed wait, event count, manual editing and compact event actions
+  retain their placement. Only configured, bound and selected candidate slots
+  appear. Playback selection, repeat, assign, save/revert and collapsed file
+  options retain their separate roles. Scrollbar gutters remain reserved.
+- One Lighting dropdown selects onboard, per-key and host modes. Per-key mode
+  paints the same keyboard with the compact native picker. Effect parameters
+  sit beside the picker; there are no extra RGB channel sliders or separate
+  per-key navigation tab. Onboard selection derives from the core draft.
+- Settings again use compact labeled sliders/toggles and automatic application.
+  The rewrite's numeric text-entry form and explicit apply toolbar are removed.
+
+The disabled Record regression came from omitting the explicit New macro
+initialization. After its foreground read confirms an empty slot, a stored count
+outside editor limits is changed only in the local draft to the advertised
+minimum. The original snapshot remains untouched. Ordinary reads, nonempty
+programs and opaque slots are not normalized. The controller regression exercises
+New macro → Record → Stop without a manual count edit or hardware writes.
+
+These views are self-contained implementations over the current shared models,
+projections and controllers. They have no build/runtime dependency on retired
+application views. The named macro, scrollbar and reconnect fixes remain.
+
+All-feature workspace tests pass (89 core, 83 desktop, 228 devices, seven CLI,
+external target and research tests). Strict all-target/all-feature Clippy and
+formatting pass. Offline Iced renders at 1360×800 and 1024×768 exercise a 42-event
+macro, two named/bound macros, recording, lighting modes and settings. Mouse-event
+checks exercise Record, event deletion beside the gutter, non-destructive gutter
+clicks and selection from the lighting dropdown. A controller regression covers
+explicit revert/read after a conflicting lighting or picture result. Images are under
+`target/visual-review/approved-restored`. These are software/rendered checks;
+the user's final native UI and physical reconnect/playback review remain open.

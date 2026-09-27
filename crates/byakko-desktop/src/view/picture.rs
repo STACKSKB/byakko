@@ -1,91 +1,74 @@
-//! Physical-key color selection uses advertised picture keys and the core draft.
+//! The lighting workspace owns the board; per-key mode owns this compact brush picker.
 use crate::{
     form::picture::{Form, Message},
-    widget::{
-        color_picker, keyboard,
-        panels::{self, UiStyle},
-    },
+    widget::{color_picker, keyboard, panels::UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Status, picture::PictureRules},
     model::{keymap::Descriptor, picture::Content},
-    projection::picture::channels,
 };
 use iced::{
-    Element, Fill,
-    widget::{button, column, row, slider, text},
+    Element,
+    widget::{button, column, text},
 };
 use std::collections::BTreeMap;
 
-pub fn view<'a>(
+pub fn board<'a>(
     form: &'a Form,
     descriptor: &'a Descriptor,
+    editor: &'a Editor<PictureRules>,
+    editable: bool,
+    style: &'a UiStyle,
+    labels: BTreeMap<String, keyboard::BoardLabel>,
+) -> Element<'a, Message> {
+    let editable = editable && editor.status() == &Status::Ready && editor.draft().is_some();
+    let advertised = &editor.capabilities().keys;
+    keyboard::colored_view_with_labels(
+        style,
+        descriptor.keys.iter().filter(|key| key.visible).collect(),
+        form.selected.clone(),
+        editor.draft().cloned().unwrap_or_default(),
+        labels,
+        move |key| {
+            (editable && advertised.contains(&key.id)).then(|| Message::Select(key.id.clone()))
+        },
+    )
+}
+
+pub fn view<'a>(
+    form: &'a Form,
+    _descriptor: &'a Descriptor,
     editor: &'a Editor<PictureRules>,
     editable: bool,
     idle: bool,
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
-    let editable = editable && editor.status() == &Status::Ready && editor.draft().is_some();
-    let advertised = &editor.capabilities().keys;
-    let board = keyboard::colored_view_with_labels(
-        style,
-        descriptor.keys.iter().filter(|key| key.visible).collect(),
-        form.selected.clone(),
-        editor.draft().cloned().unwrap_or_default(),
-        BTreeMap::new(),
-        move |key| {
-            (editable && advertised.contains(&key.id)).then(|| Message::Select(key.id.clone()))
-        },
-    );
-    let mut content = column![
-        board,
-        row![
-            button("Read").on_press_maybe(idle.then_some(Message::Read)),
-            button("Revert").on_press_maybe((idle && editor.dirty()).then_some(Message::Revert)),
-            button("Apply now")
-                .on_press_maybe((idle && editable && editor.dirty()).then_some(Message::Save)),
+    if !matches!(editor.status(), Status::Ready) {
+        let mut content = column![
+            text("Stored colors need to be read before editing."),
+            button("Retry color read").on_press_maybe(idle.then_some(Message::Read))
         ]
-        .spacing(style.spacing.s),
-        text("Select a key to paint. Changes apply automatically after a pause."),
-    ]
-    .spacing(style.spacing.m);
-    if let Some((key, rgb)) = form
-        .selected
-        .as_ref()
-        .and_then(|key| form.color(editor).map(|rgb| (key, rgb)))
-    {
-        let label = descriptor
-            .keys
-            .iter()
-            .find(|candidate| &candidate.id == key)
-            .map_or(key.as_str(), |key| key.label.as_str());
-        content = content
-            .push(text(format!("Color · {label}")))
-            .push(color_picker::view(
-                style,
-                rgb,
-                format!("picture:{key}"),
-                Message::Picker,
-                editable.then_some(Message::Color),
-            ));
-        for control in channels(rgb) {
-            let input: Element<'a, Message> = if editable {
-                slider(0..=255, control.value, move |value| {
-                    Message::Channel(control.channel, value)
-                })
-                .into()
-            } else {
-                text(control.value.to_string()).into()
-            };
-            content = content.push(
-                column![text(format!("{}: {}", control.label, control.value)), input]
-                    .spacing(style.spacing.s),
-            );
+        .spacing(style.spacing.s);
+        if editor.dirty() {
+            content = content
+                .push(button("Revert edits").on_press_maybe(idle.then_some(Message::Revert)));
         }
-    } else if let Some(Content::Opaque { reason }) = editor.baseline().map(|s| &s.content) {
-        content = content.push(text(reason));
-    } else if editor.draft().is_none() {
-        content = content.push(text("Read per-key colors to load the current picture."));
+        return content.into();
     }
-    panels::vertical_scroll(style, content).height(Fill).into()
+    let editable = editable && editor.status() == &Status::Ready && editor.draft().is_some();
+    if let Some(rgb) = form.color(editor) {
+        color_picker::view(
+            style,
+            rgb,
+            "picture-brush".into(),
+            Message::Picker,
+            editable.then_some(Message::Color),
+        )
+    } else if let Some(Content::Opaque { reason }) = editor.baseline().map(|s| &s.content) {
+        text(reason).into()
+    } else if editor.draft().is_none() {
+        text("Loading stored colors…").into()
+    } else {
+        text("Select a key to paint.").into()
+    }
 }

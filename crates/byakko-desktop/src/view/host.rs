@@ -1,10 +1,7 @@
 //! Advertised host modes, local source choices, and explicit start/stop.
 use crate::{
     form::host::{Displays, Form, Message},
-    widget::{
-        lighting,
-        panels::{self, UiStyle},
-    },
+    widget::{lighting, panels::UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Status, lighting::LightingRules},
@@ -41,17 +38,30 @@ pub fn view<'a>(
     }
     let busy = preparing || phase != Phase::Idle;
     let editable = idle && !busy;
-    let modes = row(editor.capabilities().host_modes.iter().map(|mode| {
-        panels::selectable_button(
-            style,
-            mode.label.clone(),
-            form.mode.as_deref() == Some(&mode.id),
-            editable.then(|| Message::Mode(mode.id.clone())),
-        )
-    }))
-    .spacing(style.spacing.s)
-    .wrap();
-    let mut content = column![text("Host lighting"), modes].spacing(style.spacing.s);
+    let ready = editable
+        && editor.status() == &Status::Ready
+        && !editor.dirty()
+        && editor.draft().is_some()
+        && form.mode.is_some();
+    let mut content = column![
+        row![
+            button("Start").on_press_maybe(ready.then_some(Message::Start)),
+            button("Stop & restore").on_press_maybe(busy.then_some(Message::Stop)),
+            text(if preparing {
+                "Preparing source…"
+            } else {
+                match phase {
+                    Phase::Idle => "",
+                    Phase::Starting => "Starting…",
+                    Phase::Active => "Running",
+                    Phase::Stopping => "Restoring onboard lighting…",
+                }
+            }),
+        ]
+        .spacing(style.spacing.s),
+    ]
+    .spacing(style.spacing.s);
+
     if let Some(mode) = editor
         .capabilities()
         .host_modes
@@ -78,30 +88,7 @@ pub fn view<'a>(
             content = content.push(screen(form, editable, style));
         }
     }
-    let ready = editable
-        && editor.status() == &Status::Ready
-        && !editor.dirty()
-        && editor.draft().is_some()
-        && form.mode.is_some();
-    content
-        .push(
-            row![
-                button("Start").on_press_maybe(ready.then_some(Message::Start)),
-                button("Stop & restore").on_press_maybe(busy.then_some(Message::Stop)),
-                text(if preparing {
-                    "Preparing source…"
-                } else {
-                    match phase {
-                        Phase::Idle => "",
-                        Phase::Starting => "Starting…",
-                        Phase::Active => "Running",
-                        Phase::Stopping => "Restoring onboard lighting…",
-                    }
-                }),
-            ]
-            .spacing(style.spacing.s),
-        )
-        .into()
+    content.into()
 }
 fn screen<'a>(form: &'a Form, editable: bool, style: &'a UiStyle) -> Element<'a, Message> {
     let mut choices = vec![DisplayChoice {

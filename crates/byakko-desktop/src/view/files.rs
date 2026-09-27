@@ -9,7 +9,7 @@ use iced::{
     widget::{button, column, row, text, text_input},
 };
 
-pub fn macros<'a>(
+pub fn name_controls<'a>(
     form: &'a Form,
     editor: &'a Editor<MacroRules>,
     idle: bool,
@@ -21,21 +21,36 @@ pub fn macros<'a>(
         text("Name"),
         text_input("Macro name", form.name(editor.slot()))
             .on_input_maybe(editable.then_some(Message::Name))
-            .width(style.fields.regular)
+            .width(iced::Fill)
     ]
     .spacing(style.spacing.s);
-    if names_available {
-        names = names
-            .push(button("Save name").on_press_maybe(
-                (idle && form.labels_dirty()).then_some(Message::Begin(Operation::SaveLabels)),
-            ))
-            .push(
-                button("Reload names")
-                    .on_press_maybe(idle.then_some(Message::Begin(Operation::LoadLabels))),
-            );
+    if names_available && form.labels_dirty() {
+        names = names.push(button("Save name").on_press_maybe(
+            (idle && form.labels_dirty()).then_some(Message::Begin(Operation::SaveLabels)),
+        ));
+    }
+    names.into()
+}
+
+pub fn macros<'a>(
+    form: &'a Form,
+    editor: &'a Editor<MacroRules>,
+    idle: bool,
+    _names_available: bool,
+    style: &'a UiStyle,
+) -> Element<'a, Message> {
+    let editable = idle && editor.draft().is_some();
+    let toggle = button(if form.expanded {
+        "Hide file options"
+    } else {
+        "Import or export…"
+    })
+    .on_press_maybe(idle.then_some(Message::Toggle));
+    if !form.expanded {
+        return toggle.into();
     }
     column![
-        names,
+        toggle,
         row![
             text_input("Path to macro JSON", &form.macro_path)
                 .on_input_maybe(idle.then_some(Message::MacroPath)),

@@ -22,6 +22,16 @@ it is not evidence that new frontend paths work.
 
 ## Architectural decisions
 
+2026-09-27 UI correction: the source rewrite must preserve the approved workflow.
+The rewritten views now restore the five-tab shell, persistent keyboard,
+macro editor left with Library/Playback right, compact lighting mode dropdown
+including per-key colors, compact settings sliders and collapsed macro file
+options. They use the current shared editors and controllers without dependencies
+on retired views. Explicit New macro again initializes a confirmed empty slot's
+local repeat count, enabling Record while preserving its raw baseline. Tests and
+rendered interaction checks are recorded in the acceptance notes; user review of
+the replacement executable is still required.
+
 2026-09-27 corrective checkpoint: named macro assignments, shared scrollbar
 gutters, plain-language failure messages and asynchronous worker retirement
 before reconnect are implemented. The fresh release build includes the rewrite;

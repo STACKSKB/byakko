@@ -46,6 +46,7 @@ mod tests {
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    Toggle,
     MacroPath(String),
     ArchivePath(String),
     Name(String),
@@ -55,6 +56,7 @@ pub enum Message {
 
 #[derive(Default)]
 pub struct Form {
+    pub expanded: bool,
     pub macro_path: String,
     pub archive_path: String,
     pub(crate) names: BTreeMap<String, String>,

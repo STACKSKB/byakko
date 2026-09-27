@@ -36,10 +36,10 @@ struct App {
     host: Host,
     host_form: host::Form,
     picture: picture::Form,
-    settings: settings::Form,
     autosave: Autosave,
     files: Files,
     assignment_binding: Option<(String, String)>,
+    new_macro: Option<String>,
     config: Config,
     page: Page,
     link: Link,
@@ -85,6 +85,7 @@ impl App {
         Self {
             files: Files::new(&session, None),
             assignment_binding: None,
+            new_macro: None,
             keys: keymap::Form::new(session.descriptor()),
             macros: macros::Form::default(),
             recording: Recording::default(),
@@ -92,7 +93,6 @@ impl App {
             host: Host::default(),
             host_form: host::Form::default(),
             picture: picture::Form::default(),
-            settings: settings::Form::default(),
             autosave: Autosave::default(),
             config: Config::default(),
             page: Page::Keys,
@@ -219,6 +219,8 @@ impl App {
                 self.keys.catalog.input = catalog::InputMode::Browse;
                 self.autosave.clear();
                 self.assignment_binding = None;
+                self.new_macro = None;
+                self.lighting.mode = None;
                 let request = self.link.read(&mut self.session);
                 return match request {
                     Ok(Some(command)) => self.submit(Ok(command)),
@@ -264,6 +266,8 @@ impl App {
 
     fn load_page(&mut self) -> Task<Message> {
         if self.session.busy()
+            || self.session.recording()
+            || self.recording.pending()
             || self.host.busy()
             || self.files.busy()
             || !matches!(self.session.connection(), Connection::Connected { .. })
@@ -272,6 +276,29 @@ impl App {
         }
         if self.files.needs_labels() {
             return self.begin_file(files::Operation::LoadLabels);
+        }
+        if matches!(self.page, Page::Lighting | Page::Picture)
+            && view::application::lighting_mode(&self.session, &self.lighting, self.page)
+                == Some(lighting::Mode::PerKey)
+        {
+            if self.picture.selected.is_none() {
+                self.picture.selected = self.session.picture().and_then(|editor| {
+                    self.keys
+                        .target()
+                        .map(|(_, key)| key)
+                        .filter(|key| editor.capabilities().keys.iter().any(|id| id == key))
+                        .map(str::to_owned)
+                        .or_else(|| editor.capabilities().keys.first().cloned())
+                });
+            }
+            return match self.session.prepare_picture() {
+                Ok(Some(command)) => self.submit(Ok(command)),
+                Ok(None) => Task::none(),
+                Err(reason) => {
+                    self.notice = reason;
+                    Task::none()
+                }
+            };
         }
         let request = match self.page {
             Page::Lighting if self.session.lighting().is_some_and(needs_read) => {
@@ -355,6 +382,7 @@ impl App {
                     self.files.form.rename(editor.slot(), name);
                 }
             }
+            files::Message::Toggle => self.files.form.expanded = !self.files.form.expanded,
             files::Message::Begin(operation) => return self.begin_file(operation),
             files::Message::Capture => {
                 let request = self.session.capture_archive();
@@ -402,19 +430,48 @@ impl App {
     }
 
     fn update_lighting(&mut self, message: lighting::Message) -> Task<Message> {
+        if let lighting::Message::Mode(mode) = message {
+            match mode {
+                lighting::Mode::PerKey => {
+                    self.lighting.mode = Some(lighting::Mode::PerKey);
+                    return self.reduce(Message::Page(Page::Picture));
+                }
+                lighting::Mode::Onboard(effect) => {
+                    let result = self
+                        .session
+                        .edit_lighting(byakko_core::model::lighting::Edit::Effect(effect.clone()));
+                    if result.is_ok() {
+                        self.lighting.mode = None;
+                        self.page = Page::Lighting;
+                    }
+                    self.edited(AutoFeature::Lighting, result);
+                }
+                lighting::Mode::Host(id) => {
+                    let result = self
+                        .session
+                        .lighting()
+                        .ok_or("Lighting is unavailable".to_owned())
+                        .and_then(|editor| {
+                            self.host_form
+                                .update(host::Message::Mode(id.clone()), editor.capabilities())
+                        });
+                    if result.is_ok() {
+                        self.lighting.mode = Some(lighting::Mode::Host(id));
+                        self.page = Page::Lighting;
+                    }
+                    self.notice = result.err().unwrap_or_default();
+                }
+            }
+            return Task::none();
+        }
         let request = match message {
             lighting::Message::Read => {
                 self.autosave.cancel(AutoFeature::Lighting);
                 self.session.read_lighting()
             }
-            lighting::Message::Save => {
-                self.autosave.cancel(AutoFeature::Lighting);
-                self.session.save_lighting()
-            }
             lighting::Message::Revert => {
-                if let Err(reason) = self.session.revert_lighting() {
-                    self.notice = reason;
-                } else {
+                self.notice = self.session.revert_lighting().err().unwrap_or_default();
+                if self.notice.is_empty() {
                     self.autosave.cancel(AutoFeature::Lighting);
                 }
                 return Task::none();
@@ -436,14 +493,9 @@ impl App {
                 self.autosave.cancel(AutoFeature::Picture);
                 self.session.read_picture()
             }
-            picture::Message::Save => {
-                self.autosave.cancel(AutoFeature::Picture);
-                self.session.save_picture()
-            }
             picture::Message::Revert => {
-                if let Err(reason) = self.session.revert_picture() {
-                    self.notice = reason;
-                } else {
+                self.notice = self.session.revert_picture().err().unwrap_or_default();
+                if self.notice.is_empty() {
                     self.autosave.cancel(AutoFeature::Picture);
                 }
                 return Task::none();
@@ -472,48 +524,27 @@ impl App {
     }
 
     fn update_settings(&mut self, message: settings::Message) -> Task<Message> {
-        let request = match message {
+        match message {
             settings::Message::Read => {
                 self.autosave.cancel(AutoFeature::Settings);
-                self.session.read_settings()
-            }
-            settings::Message::Save => {
-                self.autosave.cancel(AutoFeature::Settings);
-                self.session.save_settings()
+                let request = self.session.read_settings();
+                self.submit(request)
             }
             settings::Message::Revert => {
                 if let Err(reason) = self.session.revert_settings() {
                     self.notice = reason;
                 } else {
                     self.autosave.cancel(AutoFeature::Settings);
-                    self.settings.clear();
                 }
-                return Task::none();
+                Task::none()
             }
-            message => {
-                let edit = self
-                    .session
-                    .settings()
-                    .ok_or_else(|| "Settings are unavailable".to_owned())
-                    .and_then(|editor| self.settings.update(message, editor));
-                match edit {
-                    Ok(Some(edit)) => {
-                        let id = edit.id.clone();
-                        let result = self.session.edit_settings(edit);
-                        if result.is_ok() {
-                            self.settings.accepted(&id);
-                        }
-                        self.edited(AutoFeature::Settings, result);
-                    }
-                    Err(reason) => self.notice = reason,
-                    Ok(None) => {}
-                }
-                return Task::none();
+            settings::Message::Edit(edit) => {
+                let result = self.session.edit_settings(edit);
+                self.edited(AutoFeature::Settings, result);
+                Task::none()
             }
-        };
-        self.submit(request)
+        }
     }
-
     fn host_notice(&mut self, outcome: HostOutcome) {
         match outcome {
             HostOutcome::None => {}
@@ -603,16 +634,18 @@ impl App {
             {
                 return Task::none();
             }
-            Message::Select(slot) => self
-                .session
-                .select_macro(&slot)
-                .and_then(|()| self.session.read_macro()),
-            Message::Add => self
-                .session
-                .macro_candidate()
-                .and_then(|slot| self.session.select_macro(&slot))
-                .and_then(|()| self.session.read_macro()),
+            Message::Select(slot) => self.session.select_macro(&slot).and_then(|()| {
+                self.new_macro = None;
+                self.session.read_macro()
+            }),
+            Message::Add => self.session.macro_candidate().and_then(|slot| {
+                self.session.select_macro(&slot)?;
+                let command = self.session.read_macro()?;
+                self.new_macro = Some(slot);
+                Ok(command)
+            }),
             Message::Read => self.session.read_macro(),
+            Message::ReadCatalog => self.session.request_macro_catalog(),
             Message::Save => self
                 .session
                 .macros()
@@ -823,6 +856,9 @@ impl App {
             }
             Outcome::Continue(command) => return self.submit(Ok(command)),
             Outcome::MacroLoaded => {
+                if let Some(slot) = self.new_macro.take() {
+                    self.initialize_new_macro(&slot);
+                }
                 let draft = self.session.macros().and_then(|editor| editor.draft());
                 if macro_before.as_ref() != draft {
                     self.macros.sync(draft);
@@ -833,7 +869,7 @@ impl App {
             Outcome::CatalogLoaded => {
                 let result = self.recording.catalog_finished(&mut self.session);
                 self.recording_notice(result, false);
-                return Task::none();
+                return self.load_page();
             }
             Outcome::CatalogFailed(reason) => {
                 if !self.recording.pending() {
@@ -902,6 +938,7 @@ impl App {
                 return Task::none();
             }
             Outcome::Failed(problem) => {
+                self.new_macro = None;
                 self.assignment_binding = None;
                 self.closing = Closing::Open;
                 self.notice = problem_text(&problem);
@@ -916,6 +953,29 @@ impl App {
             Task::none()
         } else {
             self.load_page()
+        }
+    }
+
+    /// Only an explicitly added and confirmed empty slot gets a writable default count.
+    fn initialize_new_macro(&mut self, slot: &str) {
+        let count = self.session.macros().and_then(|editor| {
+            let draft = editor.draft()?;
+            (editor.slot() == slot
+                && editor.status() == &Status::Ready
+                && !editor.dirty()
+                && draft.events.is_empty()
+                && !editor
+                    .capabilities()
+                    .editable_repeat_counts
+                    .contains(&draft.repeat_count))
+            .then(|| *editor.capabilities().editable_repeat_counts.start())
+        });
+        if let Some(count) = count {
+            self.notice = self
+                .session
+                .edit_macro(byakko_core::model::macros::Edit::Repeat(count))
+                .err()
+                .unwrap_or_default();
         }
     }
 
@@ -955,7 +1015,6 @@ impl App {
             || self.session.lighting().is_some_and(|editor| editor.dirty())
             || self.session.picture().is_some_and(|editor| editor.dirty())
             || self.session.settings().is_some_and(|editor| editor.dirty())
-            || self.settings.has_input()
         {
             self.closing = Closing::ConfirmDiscard;
         } else {
@@ -1031,7 +1090,6 @@ impl App {
             host: &self.host_form,
             host_preparing: self.host.preparing(),
             picture: &self.picture,
-            settings: &self.settings,
             files: &self.files.form,
             files_busy: self.files.busy(),
             names_available: self.files.can_save_labels(),

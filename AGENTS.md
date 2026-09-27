@@ -86,6 +86,12 @@ third-party notices. No JavaScript, Electron, webview, QML, vendor helper or loc
 server in the native product/build. Keep core suitable for a future browser.
 Stock USB Nia87 first; no flashing. No unrelated UX redesign during the rewrite.
 
+The approved screenshots and workflow remain the UI/UX contract. Rewriting source
+does not authorize changing navigation, feature placement or interaction flows.
+Implement equivalent views on the current models/controllers; do not depend on,
+include or link to retired application code. Verify rendered layouts and actual
+control messages before calling a replacement executable ready for user review.
+
 The complete feature/read/pacing/recovery/file/UX/localization/performance rules
 are in [rewrite constraints](docs/rewrite-constraints.md). Especially:
 
