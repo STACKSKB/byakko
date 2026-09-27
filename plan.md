@@ -2,6 +2,9 @@
 
 Started 2026-09-26 on `codex/application-rewrite`, from `3db624f`.
 
+2026-09-27: User approved merging the current application into `master`.
+The icon remains unapproved and excluded from Git; no release or tag is authorized.
+
 ## Objective and authority
 
 Replace the accumulated application with a human-readable, modular program.

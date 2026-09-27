@@ -2,8 +2,7 @@
 
 ## Current authority
 
-The user authorized replacing the application on 2026-09-26. Work on
-`codex/application-rewrite`; Git preserves the prior implementation at `3db624f`.
+The user authorized replacing the application on 2026-09-26 and merging it into master on 2026-09-27. Git preserves the prior implementation at `3db624f`.
 Remove old orchestration instead of maintaining a parallel legacy application
 or compatibility wrappers. Temporary feature gaps are allowed during construction
 and must be recorded in [plan.md](plan.md); the full configurator target remains.
