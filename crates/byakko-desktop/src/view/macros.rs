@@ -23,11 +23,18 @@ pub struct View<'a> {
     pub names: &'a crate::form::files::Form,
     pub idle: bool,
     pub target: Option<(&'a str, &'a str)>,
+    pub bound_action: Option<&'a KeyAction>,
+    pub bound_slots: Vec<String>,
     pub scanning: bool,
+    pub wide: bool,
     pub style: &'a UiStyle,
 }
-pub fn view<'a, M: 'a>(
+pub fn view<'a, M: Clone + 'a>(
     input: View<'a>,
+    keyboard: Element<'a, M>,
+    recording_controls: Element<'a, M>,
+    recording_preview: Option<Element<'a, M>>,
+    name_controls: Element<'a, M>,
     files: Element<'a, M>,
     on_message: fn(Message) -> M,
 ) -> Element<'a, M> {
@@ -39,153 +46,264 @@ pub fn view<'a, M: 'a>(
         names,
         idle,
         target,
+        bound_action,
+        bound_slots,
         scanning,
+        wide,
         style,
     } = input;
     let editable = idle && editor.status() == &Status::Ready && editor.draft().is_some();
     let repeat_valid = form.validate_repeat(editor).is_ok();
-    let slots = column(editor.capabilities().slots.iter().map(|slot| {
-        let occupancy = match library.occupancy(&slot.id) {
-            Some(Occupancy::Empty) => "empty",
-            Some(Occupancy::Configured) => "configured",
-            Some(Occupancy::Opaque) => "preserved",
-            Some(Occupancy::Unknown) | None => "unread",
-        };
-        button(text(format!("{} · {occupancy}", names.name(&slot.id))))
-            .on_press_maybe((idle && !editor.dirty()).then(|| Message::Select(slot.id.clone())))
-            .into()
-    }))
+    let selected = editor.baseline().is_some();
+    let visible_slots: Vec<_> = editor
+        .capabilities()
+        .slots
+        .iter()
+        .filter(|slot| {
+            matches!(
+                library.occupancy(&slot.id),
+                Some(Occupancy::Configured | Occupancy::Opaque)
+            ) || bound_slots.contains(&slot.id)
+                || editor
+                    .baseline()
+                    .is_some_and(|snapshot| snapshot.slot == slot.id)
+        })
+        .collect();
+    let candidate = editor.capabilities().slots.iter().any(|slot| {
+        matches!(
+            library.occupancy(&slot.id),
+            Some(Occupancy::Empty | Occupancy::Unknown)
+        ) && !bound_slots.contains(&slot.id)
+    });
+    let selected_empty = editor.baseline().is_some_and(|snapshot| matches!(&snapshot.content, Content::Editable(program) if program.events.is_empty()));
+    let mut slots = column![button("+ New macro").on_press_maybe(
+        (idle && !editor.dirty() && candidate && !selected_empty).then_some(Message::Add)
+    )]
     .spacing(style.spacing.s);
-    let library = column![
-        text(if scanning {
-            "Macro library · reading…"
+    for slot in visible_slots {
+        let label = if names.name(&slot.id).trim().is_empty() {
+            slot.label.as_str()
         } else {
-            "Macro library"
-        }),
-        button("Add macro").on_press_maybe((idle && !editor.dirty()).then_some(Message::Add)),
-        panels::vertical_scroll(style, slots),
-    ]
-    .spacing(style.spacing.s);
-    let mut detail = column![
+            names.name(&slot.id)
+        };
+        slots = slots.push(panels::selectable_button_fill_width(
+            style,
+            label,
+            slot.id == editor.slot(),
+            (idle && !editor.dirty()).then(|| Message::Select(slot.id.clone())),
+        ));
+    }
+    if let Some(error) = library.error() {
+        slots = slots.push(text(format!("Library scan failed: {error}")));
+        slots = slots.push(
+            button("Retry scan")
+                .on_press_maybe((idle && !scanning).then_some(Message::ReadCatalog)),
+        );
+    } else if scanning {
+        slots = slots.push(text("Finding saved macros…"));
+    } else {
+        let used = library
+            .slots()
+            .values()
+            .filter(|occupancy| matches!(occupancy, Occupancy::Configured | Occupancy::Opaque))
+            .count();
+        slots = slots.push(text(format!(
+            "{used} of {} slots used",
+            editor.capabilities().slots.len()
+        )));
+    }
+    let library: Element<'a, Message> = slots.width(Fill).into();
+    let library = panels::panel(style, "Library", library.map(on_message));
+    let mut detail = column![].spacing(style.spacing.s).width(Fill);
+    if selected {
+        detail = detail.push(name_controls).push(recording_controls);
+    } else {
+        detail = detail.push(text("Select a macro or add one to begin"));
+    }
+    if let Some(program) = editor.draft() {
+        if !editor
+            .capabilities()
+            .editable_repeat_counts
+            .contains(&program.repeat_count)
+        {
+            let count = *editor.capabilities().editable_repeat_counts.start();
+            detail = detail.push(text(format!("This slot has a stored repeat count of {}. Choose a count before recording or saving.", program.repeat_count)))
+                .push(button(text(format!("Use repeat {count}"))).on_press_maybe(editable.then_some(on_message(Message::Repeat(count.to_string())))));
+        }
+        detail = detail.push(text(format!("{} events", program.events.len())));
+        let actions: Element<'a, Message> = row![
+            button("Clear events")
+                .on_press_maybe((editable && !program.events.is_empty()).then_some(Message::Clear)),
+            button(if form.composer == Composer::Closed {
+                "Edit events manually"
+            } else {
+                "Hide manual editor"
+            })
+            .on_press_maybe(editable.then_some(Message::ToggleComposer)),
+        ]
+        .spacing(style.spacing.s)
+        .into();
+        detail = detail.push(actions.map(on_message));
+        if form.composer != Composer::Closed {
+            detail =
+                detail.push(composer(form, descriptor, editor, editable, style).map(on_message));
+        }
+        if let Some(preview) = recording_preview {
+            detail = detail.push(preview);
+        } else {
+            let events = column(program.events.iter().enumerate().map(|(index, event)| {
+                row![
+                    button(text(format!(
+                        "{:02}  {} · wait {} ms",
+                        index + 1,
+                        action_label(&event.action, descriptor, editor.capabilities()),
+                        event.delay_ms
+                    )))
+                    .width(Fill)
+                    .on_press_maybe(editable.then_some(Message::Event(index))),
+                    button("↑").on_press_maybe((editable && index > 0).then_some(Message::Move {
+                        from: index,
+                        to: index.saturating_sub(1)
+                    })),
+                    button("↓").on_press_maybe(
+                        (editable && index + 1 < program.events.len()).then_some(Message::Move {
+                            from: index,
+                            to: index + 1
+                        })
+                    ),
+                    button("×").on_press_maybe(editable.then_some(Message::Remove(index))),
+                ]
+                .spacing(style.spacing.xs)
+                .into()
+            }))
+            .spacing(style.spacing.xs);
+            let events: Element<'a, Message> =
+                panels::vertical_scroll(style, events).height(Fill).into();
+            detail = detail.push(events.map(on_message));
+        }
+    } else if let Some(snapshot) = editor.baseline()
+        && let Content::Opaque { reason } = &snapshot.content
+    {
+        detail = detail.push(text(format!("Preserved as read-only: {reason}")));
+    }
+    if selected && editor.status() != &Status::Ready {
+        detail = detail
+            .push(text("Slot needs attention; read it again to continue."))
+            .push(button("Retry read").on_press_maybe(idle.then_some(on_message(Message::Read))));
+    }
+    let detail = panels::panel(style, "Macro editor", detail.height(Fill).into());
+    let binding = form.selected_binding(editor, bound_action);
+    let modes = row(editor
+        .capabilities()
+        .bindings
+        .iter()
+        .filter(|binding| binding.slot == editor.slot())
+        .map(|choice| {
+            panels::selectable_button(
+                style,
+                &choice.label,
+                binding.is_some_and(|selected| selected.id == choice.id),
+                idle.then(|| Message::ChooseBinding(choice.id.clone())),
+            )
+        }))
+    .spacing(style.spacing.s)
+    .wrap();
+    let repeat_restriction = binding
+        .and_then(|choice| choice.required_repeat_count)
+        .filter(|required| {
+            editor
+                .draft()
+                .is_none_or(|program| program.repeat_count != *required)
+        });
+    let mut playback = column![
+        text(target.map_or_else(
+            || "Key: —".into(),
+            |(_, key)| {
+                let label = descriptor
+                    .keys
+                    .iter()
+                    .find(|candidate| candidate.id == key)
+                    .map_or(key, |candidate| candidate.label.as_str());
+                format!("Key: {label}")
+            }
+        )),
+        modes,
         row![
-            button("Read slot").on_press_maybe(idle.then_some(Message::Read)),
-            button("Save macro").on_press_maybe(
+            text("Repeat"),
+            text_input("Count", &form.repeat)
+                .width(style.fields.compact)
+                .on_input_maybe(editable.then_some(Message::Repeat))
+        ]
+        .spacing(style.spacing.s),
+        button(if editor.dirty() {
+            "Save & assign"
+        } else {
+            "Assign macro"
+        })
+        .on_press_maybe(
+            binding
+                .filter(|_| editable
+                    && target.is_some()
+                    && repeat_valid
+                    && repeat_restriction.is_none())
+                .map(|choice| Message::Assign(choice.id.clone()))
+        ),
+        row![
+            button("Save only").on_press_maybe(
                 (editable && editor.dirty() && repeat_valid).then_some(Message::Save)
             ),
-            button("Revert macro")
+            button("Revert edits")
                 .on_press_maybe((idle && editor.dirty()).then_some(Message::Revert)),
         ]
         .spacing(style.spacing.s),
     ]
-    .spacing(style.spacing.m);
-    if let Some(program) = editor.draft() {
-        detail = detail.push(
-            row![
-                text("Repeats"),
-                text_input("Count", &form.repeat)
-                    .on_input_maybe(editable.then_some(Message::Repeat))
-                    .width(style.fields.compact),
-                text(format!("Current: {}", program.repeat_count)),
-            ]
-            .spacing(style.spacing.s),
-        );
-        let events = column(program.events.iter().enumerate().map(|(index, event)| {
-            row![
-                button(text(format!(
-                    "{}: {} · {} ms",
-                    index + 1,
-                    action_label(&event.action, descriptor, editor.capabilities()),
-                    event.delay_ms
-                )))
-                .on_press_maybe(editable.then_some(Message::Event(index))),
-                button("↑").on_press_maybe((editable && index > 0).then_some(Message::Move {
-                    from: index,
-                    to: index.saturating_sub(1)
-                })),
-                button("↓").on_press_maybe(
-                    (editable && index + 1 < program.events.len()).then_some(Message::Move {
-                        from: index,
-                        to: index + 1
-                    })
-                ),
-                button("Remove").on_press_maybe(editable.then_some(Message::Remove(index))),
-            ]
-            .spacing(style.spacing.s)
-            .into()
-        }))
-        .spacing(style.spacing.xs);
-        detail = detail.push(events);
-        let caps = editor.capabilities();
-        detail = detail.push(
-            row![
-                button(if form.composer == Composer::Closed {
-                    "Edit events manually"
-                } else {
-                    "Hide manual editor"
-                })
-                .on_press_maybe(editable.then_some(Message::ToggleComposer)),
-                button("Clear events").on_press_maybe(
-                    (editable && !program.events.is_empty()).then_some(Message::Clear)
-                ),
-            ]
-            .spacing(style.spacing.s),
-        );
-        if form.composer != Composer::Closed {
-            detail = detail.push(composer(form, descriptor, editor, editable, style));
-        }
-        detail = detail.push(text(format!(
-            "Wait after event: {}–{} ms · repeats: {}–{}",
-            caps.delays_ms.start(),
-            caps.delays_ms.end(),
-            caps.editable_repeat_counts.start(),
-            caps.editable_repeat_counts.end()
+    .spacing(style.spacing.s);
+    if let Some(required) = repeat_restriction {
+        playback = playback.push(text(format!(
+            "This playback mode requires repeat {required}."
         )));
-        if let Some(budget) = &caps.byte_budget {
-            detail = detail.push(text(format!(
-                "Storage limit: {} encoded bytes",
-                budget.limit
-            )));
-        }
-        detail = detail.push(text(target.map_or_else(
-            || "Select a key in Assignments to bind this macro.".into(),
-            |(layer, key)| format!("Assign to {layer} / {key}"),
-        )));
-        for binding in caps
-            .bindings
-            .iter()
-            .filter(|binding| binding.slot == editor.slot())
-        {
-            detail = detail.push(
-                button(text(format!("Save and assign · {}", binding.label))).on_press_maybe(
-                    (editable && target.is_some() && repeat_valid)
-                        .then(|| Message::Assign(binding.id.clone())),
-                ),
-            );
-        }
-    } else if let Some(snapshot) = editor.baseline() {
-        if let Content::Opaque { reason } = &snapshot.content {
-            detail = detail.push(text(format!("Preserved macro: {reason}")));
-        }
-    } else {
-        detail = detail.push(text("Read this slot to edit it."));
     }
-    let library: Element<'a, Message> = library.into();
-    let detail: Element<'a, Message> = detail.into();
-    row![
-        iced::widget::container(library.map(on_message))
-            .width(iced::Length::FillPortion(style.panes.sidebar)),
-        panels::vertical_scroll(
-            style,
-            column![detail.map(on_message), files].spacing(style.spacing.l)
-        )
+    let playback: Element<'a, Message> = playback.into();
+    let playback = panels::panel(
+        style,
+        "Playback",
+        column![playback.map(on_message), files]
+            .spacing(style.spacing.s)
+            .into(),
+    );
+    if !wide {
+        return column![
+            keyboard,
+            row![
+                iced::widget::container(detail)
+                    .width(iced::Length::FillPortion(style.panes.detail)),
+                iced::widget::container(panels::vertical_scroll(
+                    style,
+                    column![library, playback].spacing(style.spacing.m)
+                ))
+                .width(iced::Length::FillPortion(style.panes.sidebar))
+                .height(Fill),
+            ]
+            .spacing(style.spacing.m)
+            .height(Fill),
+        ]
+        .spacing(style.spacing.m)
         .height(Fill)
-        .width(iced::Length::FillPortion(style.panes.detail))
+        .into();
+    }
+    row![
+        column![keyboard, detail]
+            .spacing(style.spacing.m)
+            .width(Fill)
+            .height(Fill),
+        panels::vertical_scroll(style, column![library, playback].spacing(style.spacing.m))
+            .width(style.key_sidebar_width)
+            .height(Fill),
     ]
     .spacing(style.spacing.l)
     .height(Fill)
     .into()
 }
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct KeyChoice {
     usage: u16,
@@ -320,7 +438,7 @@ pub(super) fn action_label(
     descriptor: &Descriptor,
     caps: &Capabilities,
 ) -> String {
-    let direction = |pressed| if pressed { "press" } else { "release" };
+    let direction = |pressed| if pressed { "down" } else { "up" };
     match action {
         Action::Key { usage, pressed } => {
             let label = descriptor
@@ -399,7 +517,7 @@ mod tests {
                 session.descriptor(),
                 &caps
             ),
-            "B release"
+            "B up"
         );
     }
 }

@@ -1,83 +1,87 @@
-//! Keymap widgets project the shared editor and unsubmitted form.
+//! Assignment controls sit below the persistent keyboard, with the catalog beside it.
 use crate::{
-    form::keymap::{Form, Message},
-    widget::{keyboard as physical_board, panels::UiStyle},
+    form::{application::Message, files, keymap, keymap::Form},
+    widget::{
+        keyboard,
+        panels::{self, UiStyle},
+    },
 };
-use byakko_core::{
-    editor::{Editor, keymap::KeymapRules},
-    model::keymap::Descriptor,
-};
+use byakko_core::session::Session;
 use iced::{
-    Element, Fill,
-    widget::{column, container, row},
+    Element,
+    widget::{button, column, row, text},
 };
-pub fn workspace<'a>(
-    form: &'a Form,
-    descriptor: &'a Descriptor,
-    editor: &'a Editor<KeymapRules>,
-    interactive: bool,
-    style: &'a UiStyle,
-    macro_names: Option<(
-        &'a crate::form::files::Form,
-        &'a byakko_core::model::macros::Capabilities,
-    )>,
-) -> Element<'a, Message> {
-    let layers = row(descriptor.layers.iter().map(|layer| {
-        crate::widget::panels::selectable_button(
-            style,
-            &layer.label,
-            layer.id == form.layer,
-            interactive.then(|| Message::Layer(layer.id.clone())),
-        )
-    }))
-    .spacing(style.spacing.s);
-    let board = physical_board::view_with_labels(
-        style,
-        descriptor.keys.iter().filter(|key| key.visible).collect(),
-        form.selected.clone(),
-        physical_board::labels_for_layer(descriptor, editor.draft(), &form.layer, |action| {
-            macro_names
-                .and_then(|(names, caps)| names.assignment_name(action, caps))
-                .map(str::to_owned)
-        }),
-        move |key| interactive.then(|| Message::Key(key.id.clone())),
-    );
-    column![layers, board].spacing(style.spacing.m).into()
-}
 
 pub fn view<'a>(
     form: &'a Form,
-    descriptor: &'a Descriptor,
-    editor: &'a Editor<KeymapRules>,
+    session: &'a Session,
+    names: &'a files::Form,
     editable: bool,
+    idle: bool,
     style: &'a UiStyle,
-    macro_names: Option<(
-        &'a crate::form::files::Form,
-        &'a byakko_core::model::macros::Capabilities,
-    )>,
 ) -> Element<'a, Message> {
-    let can_assign = editable && form.can_assign(editor);
-    let mut assignments = row![super::catalog::view(
-        &form.catalog,
-        &descriptor.actions,
-        form.selected_action(editor),
-        can_assign,
-        style
-    )]
-    .spacing(style.spacing.l);
+    let descriptor = session.descriptor();
+    let editor = session.keymap();
+    let mut toolbar = row(descriptor.layers.iter().map(|layer| {
+        panels::selectable_button(
+            style,
+            &layer.label,
+            layer.id == form.layer,
+            idle.then(|| Message::Keys(keymap::Message::Layer(layer.id.clone()))),
+        )
+    }))
+    .spacing(style.spacing.s);
+    if editor.dirty() {
+        toolbar = toolbar
+            .push(button("Save assignments").on_press_maybe(editable.then_some(Message::Save)))
+            .push(button("Revert").on_press_maybe(idle.then_some(Message::Revert)));
+    }
+    let mut detail = column![toolbar].spacing(style.spacing.m);
     if let Some(caps) = &descriptor.shortcuts {
-        assignments = assignments.push(
-            container(
-                super::shortcut::view(&form.shortcut, caps, can_assign, style)
-                    .map(Message::Shortcut),
+        detail = detail.push(
+            super::shortcut::view(
+                &form.shortcut,
+                caps,
+                editable && form.can_assign(editor),
+                style,
             )
-            .width(style.fields.regular),
+            .map(|message| Message::Keys(keymap::Message::Shortcut(message))),
         );
     }
-    column![
-        workspace(form, descriptor, editor, true, style, macro_names),
-        container(assignments).width(Fill).height(Fill)
-    ]
-    .spacing(style.spacing.l)
-    .into()
+    let changes = editor.changes();
+    if !changes.is_empty() {
+        detail = detail.push(text("Changes to save"));
+        for change in changes {
+            let labels = |draft| {
+                keyboard::labels_for_layer(descriptor, draft, &change.layer, |action| {
+                    session
+                        .macros()
+                        .and_then(|editor| names.assignment_name(action, editor.capabilities()))
+                        .map(str::to_owned)
+                })
+            };
+            let before = labels(editor.baseline().map(|state| &state.bindings));
+            let after = labels(editor.draft());
+            let key = descriptor
+                .keys
+                .iter()
+                .find(|key| key.id == change.key)
+                .map_or(change.key.as_str(), |key| key.label.as_str());
+            let layer = descriptor
+                .layers
+                .iter()
+                .find(|layer| layer.id == change.layer)
+                .map_or(change.layer.as_str(), |layer| layer.label.as_str());
+            detail = detail.push(text(format!(
+                "{layer} / {key}: {} → {}",
+                before
+                    .get(&change.key)
+                    .map_or("Unknown", |label| label.full.as_str()),
+                after
+                    .get(&change.key)
+                    .map_or("Unknown", |label| label.full.as_str())
+            )));
+        }
+    }
+    detail.into()
 }

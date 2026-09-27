@@ -1,17 +1,16 @@
-//! Shared controls for onboard effects and host-mode parameters.
+//! Compact native color picker beside the effect's advertised controls.
 use super::{
     color_picker,
     panels::{self, UiStyle},
 };
 use byakko_core::{
     model::lighting::{Color, Edit, Setting},
-    projection::lighting::Control,
+    projection::lighting::{Control, LevelEdit},
 };
 use iced::{
-    Element,
+    Alignment, Element,
     widget::{column, row, slider, text},
 };
-
 pub(crate) fn parameters<'a, M: Clone + 'static>(
     setting: &Setting,
     controls: Vec<Control>,
@@ -21,21 +20,27 @@ pub(crate) fn parameters<'a, M: Clone + 'static>(
     edit_message: fn(Edit) -> M,
     picker_message: fn(color_picker::Interaction) -> M,
 ) -> Element<'a, M> {
-    let mut content = column![].spacing(style.spacing.m);
+    let mut settings = column![].spacing(style.spacing.s);
     for control in controls {
         let control: Element<'a, M> = match control {
-            Control::Choices { label, choices } => column![
-                text(label),
+            Control::Level {
+                edit: LevelEdit::Channel(_),
+                ..
+            } => continue,
+            Control::Choices { label, choices } => row![
+                text(label).width(style.fields.compact),
                 row(choices.into_iter().map(|choice| panels::selectable_button(
                     style,
                     choice.label,
                     choice.selected,
-                    editable.then(|| edit_message(choice.edit)),
+                    editable.then(|| edit_message(choice.edit))
                 )))
-                .spacing(style.spacing.s)
-                .wrap(),
+                .spacing(style.spacing.xs)
+                .width(style.fields.regular)
+                .wrap()
             ]
             .spacing(style.spacing.s)
+            .align_y(Alignment::Center)
             .into(),
             Control::Level {
                 label,
@@ -43,29 +48,35 @@ pub(crate) fn parameters<'a, M: Clone + 'static>(
                 value,
                 edit,
             } => {
-                let control: Element<'a, M> = if editable {
-                    slider(range, value, move |value| {
-                        edit_message(edit.edit(value).expect("projected lighting range"))
-                    })
-                    .into()
-                } else {
-                    text(value.to_string()).into()
-                };
-                column![text(format!("{label}: {value}")), control]
-                    .spacing(style.spacing.s)
-                    .into()
+                let mut controls = row![
+                    text(label).width(style.fields.compact),
+                    text(value.to_string()).width(style.color_hue_width)
+                ]
+                .spacing(style.spacing.s)
+                .align_y(Alignment::Center);
+                if editable && range.start() != range.end() {
+                    controls = controls.push(
+                        slider(range, value, move |value| {
+                            edit_message(edit.edit(value).expect("projected lighting range"))
+                        })
+                        .step(1u16)
+                        .width(style.fields.regular),
+                    );
+                }
+                controls.into()
             }
         };
-        content = content.push(control);
+        settings = settings.push(control);
     }
-    if let Some(Color::Rgb(rgb)) = setting.color {
-        content = content.push(color_picker::view(
+    let picker = match setting.color {
+        Some(Color::Rgb(rgb)) => color_picker::view(
             style,
             rgb,
             picker_id,
             picker_message,
             editable.then_some(move |rgb| edit_message(Edit::Color(Color::Rgb(rgb)))),
-        ));
-    }
-    content.into()
+        ),
+        _ => column![].into(),
+    };
+    row![picker, settings].spacing(style.spacing.m).into()
 }

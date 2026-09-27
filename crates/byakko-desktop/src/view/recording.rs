@@ -1,11 +1,11 @@
 //! Local recording controls; no device state or clocks live in the view.
 use crate::{
     form::recording::{Message, Options},
-    widget::panels::UiStyle,
+    widget::panels::{self, UiStyle},
 };
 use iced::{
     Element, Fill,
-    widget::{button, checkbox, column, row, scrollable, text, text_input},
+    widget::{button, checkbox, column, row, text, text_input},
 };
 
 pub enum Phase {
@@ -20,7 +20,8 @@ pub fn preview<'a>(
     caps: &'a byakko_core::model::macros::Capabilities,
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
-    scrollable(
+    panels::vertical_scroll(
+        style,
         column(program.events.iter().enumerate().map(|(index, event)| {
             text(format!(
                 "{}: {} · {} ms",

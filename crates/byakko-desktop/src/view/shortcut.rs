@@ -5,8 +5,8 @@ use crate::{
 };
 use byakko_core::model::keymap::ShortcutCapabilities;
 use iced::{
-    Element, Fill,
-    widget::{button, column, row, text, text_input},
+    Element, Fill, Length,
+    widget::{button, column, container, row, text, text_input},
 };
 
 pub fn view<'a>(
@@ -40,6 +40,7 @@ pub fn view<'a>(
             )
         }))
     .spacing(style.spacing.xs)
+    .width(style.fields.regular)
     .wrap();
     let selected = caps
         .keys
@@ -47,11 +48,20 @@ pub fn view<'a>(
         .find(|choice| Some(choice.usage) == form.key)
         .map_or("Choose a key", |choice| choice.label.as_str());
     column![
-        text("Shortcut").size(style.type_scale.section_title),
+        text("Shortcut"),
         modifiers,
-        text(form.error.as_deref().unwrap_or(" ")).style(text::danger),
+        container(
+            text(form.error.as_deref().unwrap_or(" "))
+                .style(text::danger)
+                .size(style.type_scale.body)
+        )
+        .width(Fill)
+        .height(Length::Fixed(
+            (style.type_scale.body * 2 + style.spacing.s) as f32
+        )),
         text_input("Find shortcut key…", &form.query)
-            .on_input_maybe(editable.then_some(Message::Search)),
+            .on_input_maybe(editable.then_some(Message::Search))
+            .width(style.fields.regular),
         matches,
         text(selected),
         button("Stage shortcut")

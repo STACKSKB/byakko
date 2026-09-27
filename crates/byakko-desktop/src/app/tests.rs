@@ -450,6 +450,119 @@ fn partial_assignment_failure_keeps_saved_macro_and_discard_prompt() {
     assert_eq!(app.closing, Closing::ConfirmDiscard);
 }
 
+#[test]
+fn new_macro_is_recordable_without_changing_the_stored_zero_count() {
+    let (mut app, reads) = macro_app(false);
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    let _ = app.update(Message::Macros(macros::Message::Select("Spare".into())));
+    drain(&mut app);
+    assert_eq!(
+        app.session.macros().unwrap().draft().unwrap().repeat_count,
+        0,
+        "ordinary reads preserve the stored count"
+    );
+    let _ = app.update(Message::Macros(macros::Message::Add));
+    drain(&mut app);
+    let editor = app.session.macros().unwrap();
+    assert_eq!(editor.slot(), "Spare");
+    assert_eq!(editor.draft().unwrap().repeat_count, 1);
+    assert_eq!(app.macros.repeat, "1");
+    assert!(matches!(&editor.baseline().unwrap().content,
+        byakko_core::model::macros::Content::Editable(program) if program.repeat_count == 0));
+    let before = reads.load(Ordering::SeqCst);
+    let _ = app.update(Message::Record(recording::Message::Start));
+    assert!(
+        app.session.recording(),
+        "New macro must allow Record immediately"
+    );
+    let _ = app.update(Message::Record(recording::Message::Stop));
+    assert!(!app.session.recording());
+    assert!(app.session.macros().unwrap().dirty());
+    assert_eq!(reads.load(Ordering::SeqCst), before, "recording is local");
+}
+
+#[test]
+fn lighting_dropdown_switches_per_key_and_onboard_without_separate_navigation() {
+    let (mut app, calls) = feature_app(false);
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::PerKey,
+    )));
+    drain(&mut app);
+    assert!(picture_is_displayed(&app.session));
+    assert!(app.picture.selected.is_some());
+    assert_eq!(
+        view::application::lighting_mode(&app.session, &app.lighting, app.page),
+        Some(lighting::Mode::PerKey)
+    );
+    let _ = app.update(Message::Lighting(lighting::Message::Mode(
+        lighting::Mode::Onboard("steady".into()),
+    )));
+    let _ = app.flush_saves(Instant::now(), true);
+    drain(&mut app);
+    assert_eq!(app.page, Page::Lighting);
+    assert_eq!(
+        app.lighting.mode, None,
+        "onboard selection derives from the draft"
+    );
+    assert!(!picture_is_displayed(&app.session));
+    assert!(calls.lock().unwrap().contains(&"apply-lighting"));
+}
+
+#[test]
+fn lighting_and_picture_conflicts_have_an_explicit_revert_then_read_path() {
+    use byakko_core::{
+        contract::FeatureResult,
+        model::{lighting, picture},
+    };
+    let (mut app, _) = feature_app(false);
+    app.session
+        .edit_lighting(lighting::Edit::Brightness(2))
+        .unwrap();
+    let mut changed = app.session.lighting().unwrap().baseline().unwrap().clone();
+    changed.revision.push(99);
+    if let lighting::Content::Editable(setting) = &mut changed.content {
+        setting.brightness = Some(3);
+    }
+    let read = app.session.read_lighting().unwrap();
+    let _ =
+        app.complete(read.map(|_| CompletionPayload::Lighting(FeatureResult::Read(Ok(changed)))));
+    assert!(matches!(
+        app.session.lighting().unwrap().status(),
+        Status::Conflict { .. }
+    ));
+    let _ = app.update(Message::Lighting(crate::form::lighting::Message::Revert));
+    assert!(!app.session.lighting().unwrap().dirty());
+    let _ = app.update(Message::Lighting(crate::form::lighting::Message::Read));
+    drain(&mut app);
+    assert_eq!(app.session.lighting().unwrap().status(), &Status::Ready);
+
+    let key = app.session.picture().unwrap().capabilities().keys[0].clone();
+    app.session
+        .edit_picture(picture::Edit::Color {
+            key: key.clone(),
+            color: [1, 2, 3],
+        })
+        .unwrap();
+    let mut changed = app.session.picture().unwrap().baseline().unwrap().clone();
+    changed.revision.push(99);
+    if let picture::Content::Editable(colors) = &mut changed.content {
+        colors.insert(key, [4, 5, 6]);
+    }
+    let read = app.session.read_picture().unwrap();
+    let _ =
+        app.complete(read.map(|_| CompletionPayload::Picture(FeatureResult::Read(Ok(changed)))));
+    assert!(matches!(
+        app.session.picture().unwrap().status(),
+        Status::Conflict { .. }
+    ));
+    let _ = app.update(Message::Picture(crate::form::picture::Message::Revert));
+    assert!(!app.session.picture().unwrap().dirty());
+    let _ = app.update(Message::Picture(crate::form::picture::Message::Read));
+    drain(&mut app);
+    assert_eq!(app.session.picture().unwrap().status(), &Status::Ready);
+}
+
 fn settle(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.link.settling() {
@@ -1100,12 +1213,11 @@ fn close_flushes_queued_scalar_edits_and_failed_save_retains_draft_without_retry
     let (mut app, calls) = feature_app(false);
     let _ = app.update(Message::Page(Page::Settings));
     drain(&mut app);
-    let _ = app.update(Message::Settings(settings::Message::Number(
-        "sleep".into(),
-        "7".into(),
-    )));
-    let _ = app.update(Message::Settings(settings::Message::ApplyNumber(
-        "sleep".into(),
+    let _ = app.update(Message::Settings(settings::Message::Edit(
+        byakko_core::model::settings::Edit {
+            id: "sleep".into(),
+            value: Value::Number(7),
+        },
     )));
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::Waiting);

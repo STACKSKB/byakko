@@ -1,7 +1,7 @@
 //! Unsubmitted text and composer intent; the core editor owns the program.
 use byakko_core::{
     editor::{Editor, macros::MacroRules},
-    model::macros::{Action, Capabilities, Edit, Event, Program},
+    model::macros::{Action, Binding, Capabilities, Edit, Event, Program},
 };
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Kind {
@@ -47,9 +47,11 @@ pub enum Message {
     Select(String),
     Add,
     Read,
+    ReadCatalog,
     Save,
     Revert,
     Assign(String),
+    ChooseBinding(String),
     Repeat(String),
     Kind(Kind),
     Value(String),
@@ -73,8 +75,43 @@ pub struct Form {
     pub(crate) delay: String,
     pub(crate) pressed: bool,
     pub(crate) composer: Composer,
+    pub(crate) binding_choices: std::collections::BTreeMap<String, String>,
 }
 impl Form {
+    /// Preserve explicit playback intent per slot, then the selected key's mode.
+    pub fn selected_binding<'a>(
+        &self,
+        editor: &'a Editor<MacroRules>,
+        bound_action: Option<&byakko_core::model::keymap::Action>,
+    ) -> Option<&'a Binding> {
+        let choices: Vec<_> = editor
+            .capabilities()
+            .bindings
+            .iter()
+            .filter(|binding| binding.slot == editor.slot())
+            .collect();
+        self.binding_choices
+            .get(editor.slot())
+            .and_then(|id| choices.iter().copied().find(|choice| &choice.id == id))
+            .or_else(|| {
+                bound_action.and_then(|action| {
+                    choices
+                        .iter()
+                        .copied()
+                        .find(|choice| &choice.action == action)
+                })
+            })
+            .or_else(|| {
+                choices.iter().copied().find(|choice| {
+                    choice.required_repeat_count.is_none_or(|required| {
+                        editor
+                            .draft()
+                            .is_some_and(|program| program.repeat_count == required)
+                    })
+                })
+            })
+            .or_else(|| choices.first().copied())
+    }
     pub fn sync(&mut self, program: Option<&Program>) {
         self.repeat = program.map_or_else(String::new, |program| program.repeat_count.to_string());
         self.reset_event();
@@ -115,6 +152,18 @@ impl Form {
         editor: &Editor<MacroRules>,
     ) -> Result<Option<Edit>, String> {
         let edit = match message {
+            Message::ChooseBinding(id) => {
+                if !editor
+                    .capabilities()
+                    .bindings
+                    .iter()
+                    .any(|binding| binding.slot == editor.slot() && binding.id == id)
+                {
+                    return Err("Choose an advertised playback mode for this slot".into());
+                }
+                self.binding_choices.insert(editor.slot().into(), id);
+                None
+            }
             Message::Repeat(value) => {
                 self.repeat = value;
                 let count = number::<u32>(&self.repeat, "Repeat count")?;
@@ -188,6 +237,7 @@ impl Form {
             Message::Select(_)
             | Message::Add
             | Message::Read
+            | Message::ReadCatalog
             | Message::Save
             | Message::Revert
             | Message::Assign(_) => None,
@@ -270,6 +320,54 @@ fn number<T: std::str::FromStr>(input: &str, field: &str) -> Result<T, String> {
 mod tests {
     use super::*;
     use byakko_core::model::macros::{ButtonChoice, Choice, Content, Snapshot};
+    #[test]
+    fn playback_choice_preserves_bound_mode_and_explicit_intent_without_staging_program_edits() {
+        let session = byakko_devices::nia87::application::session().unwrap();
+        let caps = session.macros().unwrap().capabilities().clone();
+        let slot = caps.slots[0].id.clone();
+        let mut editor = Editor::new(MacroRules::new(caps).unwrap());
+        editor.accept_read(Ok(Snapshot {
+            backend_id: editor.capabilities().backend_id.clone(),
+            slot,
+            revision: vec![],
+            content: Content::Editable(Program {
+                repeat_count: 2,
+                events: vec![],
+            }),
+        }));
+        let mut form = Form::default();
+        form.sync(editor.draft());
+        let hold = editor
+            .capabilities()
+            .bindings
+            .iter()
+            .find(|binding| binding.slot == editor.slot() && binding.id == "hold")
+            .unwrap()
+            .action
+            .clone();
+        assert_eq!(form.selected_binding(&editor, None).unwrap().id, "counted");
+        assert_eq!(
+            form.selected_binding(&editor, Some(&hold)).unwrap().id,
+            "hold"
+        );
+        assert!(
+            form.update(Message::ChooseBinding("toggle".into()), &editor)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            form.selected_binding(&editor, Some(&hold)).unwrap().id,
+            "toggle"
+        );
+        assert!(!editor.dirty());
+        assert!(
+            form.update(Message::ChooseBinding("unsupported".into()), &editor)
+                .is_err()
+        );
+        assert_eq!(form.selected_binding(&editor, None).unwrap().id, "toggle");
+        form.sync(editor.draft());
+        assert_eq!(form.selected_binding(&editor, None).unwrap().id, "toggle");
+    }
     fn editor() -> Editor<MacroRules> {
         let caps = Capabilities {
             backend_id: "synthetic".into(),

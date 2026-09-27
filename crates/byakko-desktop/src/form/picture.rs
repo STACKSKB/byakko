@@ -2,18 +2,16 @@
 use crate::widget::color_picker::{Gesture, Interaction};
 use byakko_core::{
     editor::{Editor, picture::PictureRules},
-    model::picture::{Channel, Edit},
+    model::picture::Edit,
 };
 
 #[derive(Clone, Debug)]
 pub enum Message {
     Select(String),
     Color([u8; 3]),
-    Channel(Channel, u8),
     Picker(Interaction),
     Read,
     Revert,
-    Save,
 }
 
 #[derive(Default)]
@@ -59,24 +57,9 @@ impl Form {
                     color,
                 });
             }
-            Message::Channel(channel, value) => {
-                let mut color = self.color(editor)?;
-                color[match channel {
-                    Channel::Red => 0,
-                    Channel::Green => 1,
-                    Channel::Blue => 2,
-                }] = value;
-                return Some(Edit::Color {
-                    key: self.selected.clone()?,
-                    color,
-                });
-            }
             Message::Picker(Interaction::Started) => self.gesture = Gesture::Dragging,
             Message::Picker(Interaction::Finished) => self.gesture = Gesture::Idle,
-            Message::Picker(Interaction::Moved)
-            | Message::Read
-            | Message::Revert
-            | Message::Save => {}
+            Message::Picker(Interaction::Moved) | Message::Read | Message::Revert => {}
         }
         None
     }
@@ -122,9 +105,7 @@ mod tests {
             }
         );
         assert_eq!(editor.draft().unwrap()["b"], [4, 5, 6]);
-        let edit = form
-            .update(Message::Channel(Channel::Green, 22), &editor)
-            .unwrap();
+        let edit = form.update(Message::Color([1, 22, 3]), &editor).unwrap();
         assert_eq!(
             edit,
             Edit::Color {
