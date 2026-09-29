@@ -1,7 +1,7 @@
 //! Bounded synthetic host frames with camera evidence and effect restoration.
 mod support;
 use byakko_devices::nia87::device;
-use byakko_devices::nia87::host_lighting;
+use byakko_protocol::nia87::host_lighting;
 use byakko_protocol::nia87::lighting::LightingSetting;
 
 fn main() -> device::Result<()> {

@@ -6,6 +6,6 @@ pub fn session() -> Result<Session, String> {
         .with_macros(macro_adapter::capabilities())?
         .with_lighting(lighting_adapter::capabilities())?
         .with_picture(picture_adapter::capabilities())?
-        .with_settings(super::settings_adapter::capabilities())?
-        .with_archive(super::archive_adapter::capabilities())
+        .with_settings(byakko_protocol::nia87::settings_adapter::capabilities())?
+        .with_archive(byakko_protocol::nia87::archive_adapter::capabilities())
 }

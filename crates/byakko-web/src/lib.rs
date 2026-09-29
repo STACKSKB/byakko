@@ -2,9 +2,30 @@
 //! the WebHID adapter; editor and workflow policy belong to byakko-core.
 
 mod executor;
+mod host;
 mod session;
 pub use executor::BrowserOperation;
+pub use host::{BrowserHostActivity, BrowserHostOperation};
 pub use session::BrowserSession;
+
+/// Identical frequency/intensity projection for native loopback and browser
+/// shared-audio samples; capture itself belongs to each platform.
+#[wasm_bindgen]
+pub struct BrowserAudioBands(byakko_core::projection::audio::AudioBands);
+
+#[wasm_bindgen]
+impl BrowserAudioBands {
+    #[wasm_bindgen(constructor)]
+    pub fn new(sample_rate: u32) -> Result<Self, JsValue> {
+        byakko_core::projection::audio::AudioBands::new(sample_rate)
+            .map(Self)
+            .map_err(|error| JsValue::from_str(&error))
+    }
+    pub fn frame(&mut self, samples: &[f32]) -> Vec<u8> {
+        self.0.push(samples);
+        self.0.frame().to_vec()
+    }
+}
 
 use byakko_protocol::nia87::{lighting, protocol};
 use serde_json::{Value, json};

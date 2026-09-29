@@ -8,11 +8,12 @@ use byakko_core::{
         ApplyFailure, Command, CommandPayload, Completion, CompletionPayload, FeatureCommand,
         FeatureResult, Recovery,
     },
-    model::{keymap, lighting, macros, picture},
+    model::{keymap, lighting, macros, picture, settings},
 };
 use byakko_protocol::nia87::{
-    adapter, lighting as native_lighting, lighting_adapter, macro_adapter, macros as native_macros,
-    picture_adapter, protocol, recovery_keymaps,
+    adapter, archive_adapter, configuration, lighting as native_lighting, lighting_adapter,
+    macro_adapter, macros as native_macros, picture_adapter, protocol, recovery_keymaps,
+    settings as native_settings, settings_adapter,
 };
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -27,6 +28,7 @@ enum ReplyTag {
     PictureContext,
     PicturePage,
     MacroPage,
+    Setting(u8),
 }
 
 #[derive(Clone)]
@@ -54,6 +56,7 @@ struct Replies {
     context: Option<[u8; 64]>,
     picture: Vec<[u8; 64]>,
     macro_pages: Vec<[u8; 64]>,
+    settings: Vec<[u8; 64]>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,10 +74,38 @@ enum MacroStage {
     Restore,
     Verify,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsStage {
+    Main,
+    Restore,
+    Verify,
+}
+#[derive(Clone, Copy)]
+enum ArchiveStage {
+    Keymap,
+    Lighting,
+    Settings,
+    Picture,
+    Macro(u8),
+}
+
+#[derive(Default)]
+struct ArchiveCapture {
+    keymaps: Option<adapter::Snapshot>,
+    lighting: Option<native_lighting::Lighting>,
+    settings: Option<native_settings::Settings>,
+    picture: Option<Vec<[u8; 3]>>,
+    macros: Vec<Vec<u8>>,
+}
 
 enum Plan {
     ReadKeymap,
     ReadLighting,
+    ReadSettings,
+    ReadArchive {
+        stage: ArchiveStage,
+        capture: ArchiveCapture,
+    },
     ReadPicture,
     ReadMacro {
         slot: String,
@@ -100,6 +131,14 @@ enum Plan {
     },
     ApplyLighting {
         submitted: lighting::Snapshot,
+    },
+    ApplySettings {
+        before: native_settings::Settings,
+        target: native_settings::Settings,
+        restore_report: [u8; 64],
+        edit: settings::Edit,
+        stage: SettingsStage,
+        cause: Option<String>,
     },
     ApplyPicture {
         submitted: picture::Snapshot,
@@ -283,6 +322,33 @@ impl BrowserOperation {
         );
         self.write(report, 0, 500);
         self.plan = Plan::ApplyLighting { submitted };
+    }
+
+    fn start_settings(&mut self, expected: settings::Snapshot, desired: settings::Edit) {
+        let (before, planned) = match settings_adapter::prepare(&expected, &desired) {
+            Ok(value) => value,
+            Err(error) => {
+                self.failed(error, Recovery::NotAttempted);
+                return;
+            }
+        };
+        if before == planned.target {
+            self.complete(CompletionPayload::Settings(FeatureResult::Apply(Ok(
+                expected,
+            ))));
+            return;
+        }
+        self.backup("settings", json!(before), json!(planned.target));
+        self.write(planned.report, 0, 500);
+        self.plan = Plan::ApplySettings {
+            before,
+            target: planned.target,
+            restore_report: planned.restore_report,
+            edit: desired,
+            stage: SettingsStage::Main,
+            cause: None,
+        };
+        self.settings_read();
     }
 
     fn start_picture(
@@ -563,6 +629,179 @@ impl BrowserOperation {
         }
     }
 
+    fn begin_settings_recovery(
+        &mut self,
+        before: native_settings::Settings,
+        target: native_settings::Settings,
+        restore_report: [u8; 64],
+        edit: settings::Edit,
+        cause: String,
+    ) {
+        self.queue.clear();
+        self.write(restore_report, 0, 500);
+        self.plan = Plan::ApplySettings {
+            before,
+            target,
+            restore_report,
+            edit,
+            stage: SettingsStage::Restore,
+            cause: Some(cause),
+        };
+    }
+
+    fn settings_stage_done(
+        &mut self,
+        before: native_settings::Settings,
+        target: native_settings::Settings,
+        restore_report: [u8; 64],
+        edit: settings::Edit,
+        stage: SettingsStage,
+        cause: Option<String>,
+    ) {
+        match stage {
+            SettingsStage::Main => {
+                let result = self.settings_native().and_then(|actual| {
+                    if actual != target {
+                        return Err("Settings readback does not match the complete intended state".into());
+                    }
+                    let snapshot = settings_adapter::project(&actual);
+                    if !matches!(&snapshot.content, settings::Content::Editable(values) if values.get(&edit.id) == Some(&edit.value)) {
+                        return Err("Settings readback does not match the requested field".into());
+                    }
+                    Ok(snapshot)
+                });
+                match result {
+                    Ok(snapshot) => self.complete(CompletionPayload::Settings(
+                        FeatureResult::Apply(Ok(snapshot)),
+                    )),
+                    Err(error) => {
+                        self.begin_settings_recovery(before, target, restore_report, edit, error)
+                    }
+                }
+            }
+            SettingsStage::Restore => {
+                self.plan = Plan::ApplySettings {
+                    before,
+                    target,
+                    restore_report,
+                    edit,
+                    stage: SettingsStage::Verify,
+                    cause,
+                };
+                self.settings_read();
+            }
+            SettingsStage::Verify => {
+                let original_cause = cause.unwrap_or_else(|| "Settings apply failed".into());
+                match self.settings_native() {
+                    Ok(actual) if actual == before => self.failed(
+                        format!("{original_cause}; original settings restored and verified"),
+                        Recovery::Verified,
+                    ),
+                    Ok(_) => self.failed(
+                        format!("{original_cause}; restored settings differ from backup"),
+                        Recovery::Failed,
+                    ),
+                    Err(error) => self.failed(
+                        format!("{original_cause}; restoration could not be verified: {error}"),
+                        Recovery::Unverified,
+                    ),
+                }
+            }
+        }
+    }
+
+    fn archive_stage_done(&mut self, mut capture: ArchiveCapture, stage: ArchiveStage) {
+        match stage {
+            ArchiveStage::Keymap => {
+                let result = self.keymap_snapshot();
+                match result {
+                    Ok(keymaps) if keymaps.firmware == 0x0100 && keymaps.profile == 0 => {
+                        capture.keymaps = Some(keymaps);
+                        self.plan = Plan::ReadArchive {
+                            stage: ArchiveStage::Lighting,
+                            capture,
+                        };
+                        self.lighting_read(ReplyTag::Lighting);
+                    }
+                    Ok(_) => self.read_failed(
+                        "Configuration capture requires firmware 0x0100, profile 0".into(),
+                    ),
+                    Err(error) => self.read_failed(error),
+                }
+            }
+            ArchiveStage::Lighting => {
+                let result = self
+                    .replies
+                    .lighting
+                    .ok_or("Missing lighting response".to_owned())
+                    .and_then(|bytes| native_lighting::Lighting::decode(&bytes));
+                match result {
+                    Ok(lighting) => {
+                        capture.lighting = Some(lighting);
+                        self.plan = Plan::ReadArchive {
+                            stage: ArchiveStage::Settings,
+                            capture,
+                        };
+                        self.settings_read();
+                    }
+                    Err(error) => self.read_failed(error),
+                }
+            }
+            ArchiveStage::Settings => match self.settings_native() {
+                Ok(settings) => {
+                    capture.settings = Some(settings);
+                    self.plan = Plan::ReadArchive {
+                        stage: ArchiveStage::Picture,
+                        capture,
+                    };
+                    self.archive_picture_read();
+                }
+                Err(error) => self.read_failed(error),
+            },
+            ArchiveStage::Picture => {
+                match native_lighting::user_picture_from_pages(&self.replies.picture) {
+                    Ok(picture) => {
+                        capture.picture = Some(picture);
+                        self.plan = Plan::ReadArchive {
+                            stage: ArchiveStage::Macro(0),
+                            capture,
+                        };
+                        self.macro_read(0);
+                    }
+                    Err(error) => self.read_failed(error),
+                }
+            }
+            ArchiveStage::Macro(slot) => match self.macro_bytes() {
+                Ok(raw) => {
+                    capture.macros.push(raw);
+                    if slot < 49 {
+                        let next = slot + 1;
+                        self.plan = Plan::ReadArchive {
+                            stage: ArchiveStage::Macro(next),
+                            capture,
+                        };
+                        self.macro_read(next);
+                    } else {
+                        let config = configuration::Configuration {
+                            keymaps: capture.keymaps.expect("keymaps captured before macros"),
+                            macros: capture.macros,
+                            lighting: capture.lighting.expect("lighting captured before macros"),
+                            picture: capture.picture.expect("picture captured before macros"),
+                            settings: capture.settings.expect("settings captured before macros"),
+                        };
+                        match archive_adapter::encode(&config) {
+                            Ok(archive) => self.complete(CompletionPayload::Archive(
+                                FeatureResult::Read(Ok(archive)),
+                            )),
+                            Err(error) => self.read_failed(error),
+                        }
+                    }
+                }
+                Err(error) => self.read_failed(error),
+            },
+        }
+    }
+
     fn fail_step(&mut self, error: String) {
         let current = self.current.clone();
         if matches!(current, Step::Backup(_)) {
@@ -576,6 +815,8 @@ impl BrowserOperation {
         match plan {
             Plan::ReadKeymap
             | Plan::ReadLighting
+            | Plan::ReadSettings
+            | Plan::ReadArchive { .. }
             | Plan::ReadPicture
             | Plan::ReadMacro { .. }
             | Plan::ReadCatalog { .. } => self.read_failed(error),
@@ -617,6 +858,18 @@ impl BrowserOperation {
                 ..
             } => self.begin_macro_recovery(slot, number, before, target, error),
             Plan::ApplyMacro { cause, .. } => self.failed(
+                format!("{}; recovery failed: {error}", cause.unwrap_or_default()),
+                Recovery::Unverified,
+            ),
+            Plan::ApplySettings {
+                before,
+                target,
+                restore_report,
+                edit,
+                stage: SettingsStage::Main,
+                ..
+            } => self.begin_settings_recovery(before, target, restore_report, edit, error),
+            Plan::ApplySettings { cause, .. } => self.failed(
                 format!("{}; recovery failed: {error}", cause.unwrap_or_default()),
                 Recovery::Unverified,
             ),
@@ -767,6 +1020,9 @@ impl BrowserOperation {
             CommandPayload::Picture(_) => {
                 CompletionPayload::Picture(FeatureResult::Apply(Err(failure)))
             }
+            CommandPayload::Settings(_) => {
+                CompletionPayload::Settings(FeatureResult::Apply(Err(failure)))
+            }
             _ => CompletionPayload::ReadMacroCatalog {
                 result: Err(failure.message),
             },
@@ -788,6 +1044,12 @@ impl BrowserOperation {
             }
             CommandPayload::Picture(_) => {
                 CompletionPayload::Picture(FeatureResult::Read(Err(message)))
+            }
+            CommandPayload::Settings(_) => {
+                CompletionPayload::Settings(FeatureResult::Read(Err(message)))
+            }
+            CommandPayload::Archive(FeatureCommand::Read(())) => {
+                CompletionPayload::Archive(FeatureResult::Read(Err(message)))
             }
             CommandPayload::ReadMacroCatalog { .. } => CompletionPayload::ReadMacroCatalog {
                 result: Err(message),
@@ -840,6 +1102,17 @@ impl BrowserOperation {
                 self.plan = Plan::ReadLighting;
                 self.lighting_read(ReplyTag::Lighting);
             }
+            CommandPayload::Settings(FeatureCommand::Read(())) => {
+                self.plan = Plan::ReadSettings;
+                self.settings_read();
+            }
+            CommandPayload::Archive(FeatureCommand::Read(())) => {
+                self.plan = Plan::ReadArchive {
+                    stage: ArchiveStage::Keymap,
+                    capture: ArchiveCapture::default(),
+                };
+                self.keymap_read();
+            }
             CommandPayload::Picture(FeatureCommand::Read(())) => {
                 self.plan = Plan::ReadPicture;
                 self.picture_read();
@@ -884,6 +1157,9 @@ impl BrowserOperation {
             CommandPayload::Lighting(FeatureCommand::Apply { expected, desired }) => {
                 self.start_lighting(expected, desired)
             }
+            CommandPayload::Settings(FeatureCommand::Apply { expected, desired }) => {
+                self.start_settings(expected, desired)
+            }
             CommandPayload::Picture(FeatureCommand::Apply { expected, desired }) => {
                 self.start_picture(expected, desired)
             }
@@ -917,6 +1193,12 @@ impl BrowserOperation {
         self.replies = Replies::default();
         self.exchange(native_lighting::read_request(), ReplyTag::PictureContext);
     }
+    fn archive_picture_read(&mut self) {
+        self.replies = Replies::default();
+        for report in native_lighting::user_picture_read_requests() {
+            self.exchange(report, ReplyTag::PicturePage);
+        }
+    }
     fn macro_read(&mut self, number: u8) {
         self.replies = Replies::default();
         for page in 0..4 {
@@ -927,6 +1209,20 @@ impl BrowserOperation {
                     return;
                 }
             }
+        }
+    }
+    fn settings_read(&mut self) {
+        self.replies = Replies::default();
+        for (opcode, report) in [
+            native_settings::DEBOUNCE_READ,
+            native_settings::AUTO_OS_READ,
+            native_settings::SLEEP_READ,
+            native_settings::OPTIONS_READ,
+        ]
+        .into_iter()
+        .zip(native_settings::read_requests())
+        {
+            self.exchange(report, ReplyTag::Setting(opcode));
         }
     }
 
@@ -972,6 +1268,15 @@ impl BrowserOperation {
             }
             ReplyTag::PicturePage => self.replies.picture.push(reply),
             ReplyTag::MacroPage => self.replies.macro_pages.push(reply),
+            ReplyTag::Setting(opcode) => {
+                if reply[0] != opcode {
+                    return Err(format!(
+                        "Unrelated settings response: expected 0x{opcode:02x}, got 0x{:02x}",
+                        reply[0]
+                    ));
+                }
+                self.replies.settings.push(reply);
+            }
         }
         Ok(())
     }
@@ -998,6 +1303,16 @@ impl BrowserOperation {
             .iter()
             .flat_map(|page| page.iter().copied())
             .collect())
+    }
+
+    fn settings_native(&self) -> Result<native_settings::Settings, String> {
+        let [debounce, auto_os, sleep, options]: &[[u8; 64]; 4] = self
+            .replies
+            .settings
+            .as_slice()
+            .try_into()
+            .map_err(|_| "Incomplete settings reply".to_owned())?;
+        native_settings::Settings::decode(debounce, auto_os, sleep, options)
     }
 
     fn next(&mut self) {
@@ -1035,6 +1350,13 @@ impl BrowserOperation {
                 ))),
                 Err(error) => self.read_failed(error),
             },
+            Plan::ReadSettings => match self.settings_native() {
+                Ok(native) => self.complete(CompletionPayload::Settings(FeatureResult::Read(Ok(
+                    settings_adapter::project(&native),
+                )))),
+                Err(error) => self.read_failed(error),
+            },
+            Plan::ReadArchive { stage, capture } => self.archive_stage_done(capture, stage),
             Plan::ReadPicture => {
                 let result = self
                     .replies
@@ -1108,6 +1430,14 @@ impl BrowserOperation {
                 stage,
                 cause,
             } => self.macro_stage_done(slot, number, before, target, stage, cause),
+            Plan::ApplySettings {
+                before,
+                target,
+                restore_report,
+                edit,
+                stage,
+                cause,
+            } => self.settings_stage_done(before, target, restore_report, edit, stage, cause),
             Plan::ApplyLighting { submitted } => self.complete(CompletionPayload::Lighting(
                 FeatureResult::Apply(Ok(submitted)),
             )),

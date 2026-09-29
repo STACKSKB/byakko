@@ -1,12 +1,13 @@
 //! Pure preflight for restoring a complete Nia87 configuration archive.
 //! A plan contains intent only; constructing one never contacts a device.
 
-use crate::nia87::{
+use crate::nia87::profiles;
+use byakko_protocol::nia87::{
+    actions, board,
     configuration::{self, Configuration},
-    profiles,
+    macros,
     settings::{self, Setting},
 };
-use byakko_protocol::nia87::{actions, board, macros};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeSummary {
@@ -183,9 +184,9 @@ pub fn plan(current: &Configuration, target: &Configuration) -> Result<ChangeSum
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nia87::settings::Settings;
     use byakko_protocol::nia87::adapter::Snapshot;
     use byakko_protocol::nia87::lighting::{Lighting, LightingSetting};
+    use byakko_protocol::nia87::settings::Settings;
 
     fn fixture() -> Configuration {
         let mut replies = [[0u8; 64]; 4];

@@ -38,10 +38,19 @@ export class DeviceExecutor {
   }
 
   run(command) {
+    return this.#enqueue(new this.#Operation(JSON.stringify(command)), Boolean(command.payload.ReadMacroCatalog), false);
+  }
+
+  // Host transactions share this exact selected-device queue and effect shell.
+  // The host controller bounds pending frames before enqueueing an operation.
+  runHost(operation) {
+    return this.#enqueue(operation, false, true);
+  }
+
+  #enqueue(operation, catalog, host) {
     return new Promise((resolve, reject) => {
-      const operation = new this.#Operation(JSON.stringify(command));
       const job = { operation, step: JSON.parse(operation.step()), resolve, reject,
-        catalog: Boolean(command.payload.ReadMacroCatalog), cancelled: false };
+        catalog, host, cancelled: false };
       (job.catalog ? this.#catalogs : this.#foreground).push(job);
       void this.#pump();
     });
@@ -123,7 +132,7 @@ export class DeviceExecutor {
               break;
             }
           }
-          if (!yielded) job.resolve(job.step.completion);
+          if (!yielded) job.resolve(job.host ? job.step : job.step.completion);
         } catch (error) {
           job.reject(error);
         } finally {

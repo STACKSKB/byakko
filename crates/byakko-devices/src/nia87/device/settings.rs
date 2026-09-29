@@ -2,25 +2,25 @@ use super::apply_error::{ApplyResult, not_attempted, settings_apply_error};
 use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::*;
 
-pub fn read_settings() -> Result<crate::nia87::settings::Settings> {
+pub fn read_settings() -> Result<byakko_protocol::nia87::settings::Settings> {
     read_settings_with(Selection::Unique)
 }
 
 pub(super) fn read_settings_with(
     selection: Selection<'_>,
-) -> Result<crate::nia87::settings::Settings> {
+) -> Result<byakko_protocol::nia87::settings::Settings> {
     let session = Session::open_for(selection)?;
     read_settings_on_device(session.device())
 }
 
 pub(super) fn read_settings_on_device(
     device: &HidDevice,
-) -> Result<crate::nia87::settings::Settings> {
+) -> Result<byakko_protocol::nia87::settings::Settings> {
     let replies = [0x91, 0x97, 0x92, 0x86]
         .into_iter()
         .map(|opcode| read_payload(device, opcode, 0, 0))
         .collect::<Result<Vec<_>>>()?;
-    Ok(crate::nia87::settings::Settings::decode(
+    Ok(byakko_protocol::nia87::settings::Settings::decode(
         &replies[0],
         &replies[1],
         &replies[2],
@@ -29,20 +29,20 @@ pub(super) fn read_settings_on_device(
 }
 
 pub fn apply_setting(
-    expected: &crate::nia87::settings::Settings,
-    setting: crate::nia87::settings::Setting,
+    expected: &byakko_protocol::nia87::settings::Settings,
+    setting: byakko_protocol::nia87::settings::Setting,
     backup_dir: &std::path::Path,
-) -> ApplyResult<crate::nia87::settings::Settings> {
+) -> ApplyResult<byakko_protocol::nia87::settings::Settings> {
     apply_setting_with(Selection::Unique, expected, setting, backup_dir)
 }
 
 pub(super) fn apply_setting_with(
     selection: Selection<'_>,
-    expected: &crate::nia87::settings::Settings,
-    setting: crate::nia87::settings::Setting,
+    expected: &byakko_protocol::nia87::settings::Settings,
+    setting: byakko_protocol::nia87::settings::Setting,
     backup_dir: &std::path::Path,
-) -> ApplyResult<crate::nia87::settings::Settings> {
-    use crate::nia87::settings::SettingPlan;
+) -> ApplyResult<byakko_protocol::nia87::settings::Settings> {
+    use byakko_protocol::nia87::settings::SettingPlan;
     let _lock = transaction_lock().map_err(not_attempted)?;
     let SettingPlan {
         target,
@@ -70,12 +70,12 @@ pub(super) fn apply_setting_with(
         &backup,
         VerifiedStep {
             write: || send(&report),
-            matches: |actual: &crate::nia87::settings::Settings| *actual == target,
+            matches: |actual: &byakko_protocol::nia87::settings::Settings| *actual == target,
             mismatch: "Setting readback mismatch",
         },
         VerifiedStep {
             write: || send(&restore_report),
-            matches: |actual: &crate::nia87::settings::Settings| actual == expected,
+            matches: |actual: &byakko_protocol::nia87::settings::Settings| actual == expected,
             mismatch: "Settings restoration mismatch",
         },
         || read_settings_on_device(&device),

@@ -11,13 +11,15 @@ const named = {
   ArrowDown: 0x51, ArrowUp: 0x52, NumLock: 0x53,
   NumpadDivide: 0x54, NumpadMultiply: 0x55, NumpadSubtract: 0x56,
   NumpadAdd: 0x57, NumpadEnter: 0x58, NumpadDecimal: 0x63,
+  IntlBackslash: 0x64, ContextMenu: 0x65, NumpadEqual: 0x67,
+  IntlRo: 0x87, IntlYen: 0x89,
   ControlLeft: 0xe0, ShiftLeft: 0xe1, AltLeft: 0xe2, MetaLeft: 0xe3,
   ControlRight: 0xe4, ShiftRight: 0xe5, AltRight: 0xe6, MetaRight: 0xe7,
 };
 for (let digit = 1; digit <= 9; digit++) named[`Digit${digit}`] = 0x1d + digit;
 named.Digit0 = 0x27;
 for (let digit = 0; digit <= 9; digit++) named[`Numpad${digit}`] = digit === 0 ? 0x62 : 0x58 + digit;
-for (let index = 1; index <= 12; index++) named[`F${index}`] = 0x39 + index;
+for (let index = 1; index <= 24; index++) named[`F${index}`] = index <= 12 ? 0x39 + index : 0x68 + index - 13;
 
 export function usageForCode(code) {
   if (/^Key[A-Z]$/.test(code)) return code.charCodeAt(3) - 65 + 4;
@@ -27,4 +29,25 @@ export function usageForCode(code) {
 export function recordedKey(event, pressed) {
   const usage = usageForCode(event.code);
   return usage === null ? null : { Key: { usage, pressed } };
+}
+
+export function pointerButtonUsage(button) {
+  return [1, 3, 2, 4, 5][button] ?? null;
+}
+
+export function recordedPointer(event, pressed, capabilities) {
+  const button = pointerButtonUsage(event.button);
+  return button !== null && capabilities.buttons.some(choice => choice.button === button)
+    ? { Button: { button, pressed } } : null;
+}
+
+export function recordingPolicy({ fixed, delay }, capabilities) {
+  const { start, end } = capabilities.delays_ms;
+  if (!fixed) return { Measured: { terminal_ms: Math.min(50, end) } };
+  const spelling = String(delay).trim();
+  const value = Number(spelling);
+  if (!/^[0-9]+$/.test(spelling) || !Number.isSafeInteger(value) || value <= 0 || value < start || value > end) {
+    throw new Error(`Enter a fixed delay between ${Math.max(1, start)} and ${end} ms.`);
+  }
+  return { Fixed: value };
 }

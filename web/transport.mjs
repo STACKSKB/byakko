@@ -3,6 +3,9 @@
 export const filters = [0x4011, 0x4015].map(productId => ({
   vendorId: 0x3151, productId, usagePage: 0xffff, usage: 2,
 }));
+// Ask for the whole physical keyboard so its notification interface can be
+// returned alongside configuration. Each interface is still validated below.
+export const selectionFilters = filters.map(({ vendorId, productId }) => ({ vendorId, productId }));
 
 export class HidError extends Error {
   constructor(code, message, cause) {

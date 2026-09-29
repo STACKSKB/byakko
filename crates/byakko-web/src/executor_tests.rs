@@ -26,6 +26,7 @@ struct Device {
     lighting: [u8; 64],
     picture: Vec<[u8; 3]>,
     macro_bytes: Vec<u8>,
+    settings: [[u8; 64]; 4],
     effects: Vec<String>,
     writes: Vec<Vec<u8>>,
 }
@@ -34,12 +35,26 @@ impl Device {
     fn new() -> Self {
         let mut lighting = [0; 64];
         lighting[..8].copy_from_slice(&[0x87, 13, 4, 4, 16, 0, 200, 200]);
+        let mut settings = [[0; 64]; 4];
+        for (reply, opcode) in settings.iter_mut().zip([0x91, 0x97, 0x92, 0x86]) {
+            reply[0] = opcode;
+        }
+        settings[0][2] = 4;
+        settings[1][1] = 1;
+        for (index, seconds) in [120u16, 180, 600, 900].into_iter().enumerate() {
+            settings[2][1 + index * 2..3 + index * 2].copy_from_slice(&seconds.to_le_bytes());
+        }
+        settings[3][50] = 0xa5;
+        settings[3][7] = !settings[3][..7]
+            .iter()
+            .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
         Self {
             base: vec![[0; 4]; 128],
             function: vec![[0; 4]; 128],
             lighting,
             picture: vec![[0; 3]; 128],
             macro_bytes: vec![0; 256],
+            settings,
             effects: Vec::new(),
             writes: Vec::new(),
         }
@@ -53,6 +68,18 @@ impl Device {
             base: self.base.clone(),
             function: self.function.clone(),
         }
+    }
+
+    fn settings_snapshot(&self) -> settings::Snapshot {
+        settings_adapter::project(
+            &native_settings::Settings::decode(
+                &self.settings[0],
+                &self.settings[1],
+                &self.settings[2],
+                &self.settings[3],
+            )
+            .unwrap(),
+        )
     }
 
     fn reply(&mut self, report: &[u8]) -> Vec<u8> {
@@ -69,6 +96,10 @@ impl Device {
                 reply.to_vec()
             }
             0x87 => self.lighting.to_vec(),
+            0x91 => self.settings[0].to_vec(),
+            0x97 => self.settings[1].to_vec(),
+            0x92 => self.settings[2].to_vec(),
+            0x86 => self.settings[3].to_vec(),
             0x89 | 0x90 => {
                 let matrix = if report[0] == 0x89 {
                     &self.base
@@ -104,6 +135,15 @@ impl Device {
             0x07 => {
                 self.lighting[1..8].copy_from_slice(&report[1..8]);
             }
+            0x11 => self.settings[0][2] = report[2],
+            0x17 => self.settings[1][1] = report[1],
+            0x12 => self.settings[2][1..9].copy_from_slice(&report[8..16]),
+            0x06 => {
+                let reply_checksum = self.settings[3][7];
+                self.settings[3].copy_from_slice(report);
+                self.settings[3][0] = 0x86;
+                self.settings[3][7] = reply_checksum;
+            }
             0x16 => {
                 let start = usize::from(report[2]) * 56;
                 let length = usize::from(report[3]);
@@ -131,7 +171,7 @@ fn run(
     fail_write: Option<usize>,
 ) -> Completion {
     let mut writes = 0;
-    for _ in 0..200 {
+    for _ in 0..500 {
         let action = step(operation);
         match action["kind"].as_str().unwrap() {
             "backup" => {
@@ -428,4 +468,222 @@ fn catalog_can_yield_only_after_a_whole_slot() {
     assert_eq!((report[0], report[1]), (0x8b, 1));
     advance(&mut operation, json!({"Ok":device.reply(&report)}));
     assert!(!operation.can_yield());
+}
+
+#[test]
+fn settings_read_uses_four_ordered_full_replies_and_rejects_wrong_opcode() {
+    let mut device = Device::new();
+    let mut operation = make_operation(CommandPayload::Settings(FeatureCommand::Read(())));
+    let complete = run(&mut operation, &mut device, None);
+    let CompletionPayload::Settings(FeatureResult::Read(Ok(snapshot))) = complete.payload else {
+        panic!("wrong settings result");
+    };
+    assert_eq!(snapshot, device.settings_snapshot());
+    assert_eq!(device.effects, ["read:91", "read:97", "read:92", "read:86"]);
+    assert_eq!(snapshot.revision[3 * 64 + 50], 0xa5);
+
+    let mut operation = make_operation(CommandPayload::Settings(FeatureCommand::Read(())));
+    let mut bad = device.settings[0];
+    bad[0] = 0x92;
+    advance(&mut operation, json!({"Ok":bad.as_slice()}));
+    let CompletionPayload::Settings(FeatureResult::Read(Err(message))) =
+        serde_json::from_value::<Completion>(step(&operation)["completion"].clone())
+            .unwrap()
+            .payload
+    else {
+        panic!("wrong bad-reply result");
+    };
+    assert!(message.contains("Unrelated settings response"));
+}
+
+#[test]
+fn settings_apply_backs_up_before_one_setter_and_one_full_readback() {
+    let mut device = Device::new();
+    let before = device.settings_snapshot();
+    let mut operation = make_operation(CommandPayload::Settings(FeatureCommand::Apply {
+        expected: before,
+        desired: settings::Edit {
+            id: "radio_24_sleep".into(),
+            value: settings::Value::Number(4),
+        },
+    }));
+    let first = step(&operation);
+    assert_eq!(first["kind"], "backup");
+    assert_eq!(first["record"]["before"]["sleep_raw"][3], 180);
+    let complete = run(&mut operation, &mut device, None);
+    let CompletionPayload::Settings(FeatureResult::Apply(Ok(snapshot))) = complete.payload else {
+        panic!("wrong settings apply result");
+    };
+    assert_eq!(snapshot, device.settings_snapshot());
+    assert_eq!(
+        device.effects,
+        [
+            "backup", "write:12", "read:91", "read:97", "read:92", "read:86"
+        ]
+    );
+    assert_eq!(device.writes[0][10..12], 240u16.to_le_bytes());
+    assert_eq!(device.settings[3][50], 0xa5);
+}
+
+#[test]
+fn settings_failed_send_restores_cached_reply_and_verifies_it() {
+    let mut device = Device::new();
+    let before = device.settings_snapshot();
+    let original = device.settings;
+    let mut operation = make_operation(CommandPayload::Settings(FeatureCommand::Apply {
+        expected: before,
+        desired: settings::Edit {
+            id: "backlight".into(),
+            value: settings::Value::Toggle(false),
+        },
+    }));
+    let complete = run(&mut operation, &mut device, Some(1));
+    let CompletionPayload::Settings(FeatureResult::Apply(Err(failure))) = complete.payload else {
+        panic!("wrong settings failure result");
+    };
+    assert_eq!(failure.recovery, Recovery::Verified);
+    assert_eq!(device.settings, original);
+    assert_eq!(
+        device.effects,
+        [
+            "backup", "write:06", "write:06", "read:91", "read:97", "read:92", "read:86"
+        ]
+    );
+    assert_eq!(device.writes[1][50], 0xa5);
+}
+
+#[test]
+fn settings_pre_send_failure_never_attempts_recovery() {
+    let device = Device::new();
+    let mut operation = make_operation(CommandPayload::Settings(FeatureCommand::Apply {
+        expected: device.settings_snapshot(),
+        desired: settings::Edit {
+            id: "debounce".into(),
+            value: settings::Value::Number(5),
+        },
+    }));
+    advance(&mut operation, json!({"Ok":null}));
+    assert_eq!(step(&operation)["kind"], "write");
+    advance(
+        &mut operation,
+        json!({"Err":{"message":"open failed","setterAttempted":false}}),
+    );
+    let action = step(&operation);
+    assert_eq!(action["kind"], "complete");
+    let CompletionPayload::Settings(FeatureResult::Apply(Err(failure))) =
+        serde_json::from_value::<Completion>(action["completion"].clone())
+            .unwrap()
+            .payload
+    else {
+        panic!("wrong settings failure result");
+    };
+    assert_eq!(failure.recovery, Recovery::NotAttempted);
+}
+
+#[test]
+fn settings_mismatched_readback_restores_then_checks_all_four_replies() {
+    let mut device = Device::new();
+    let original = device.settings;
+    let mut operation = make_operation(CommandPayload::Settings(FeatureCommand::Apply {
+        expected: device.settings_snapshot(),
+        desired: settings::Edit {
+            id: "debounce".into(),
+            value: settings::Value::Number(5),
+        },
+    }));
+    advance(&mut operation, json!({"Ok":null})); // durable backup
+    let report: Vec<u8> = serde_json::from_value(step(&operation)["report"].clone()).unwrap();
+    device.write(&report);
+    advance(&mut operation, json!({"Ok":null}));
+    for index in 0..4 {
+        let report: Vec<u8> = serde_json::from_value(step(&operation)["report"].clone()).unwrap();
+        let mut reply = device.reply(&report);
+        if index == 0 {
+            reply[2] = 6; // Valid full reply, but not the target value.
+        }
+        advance(&mut operation, json!({"Ok":reply}));
+    }
+    assert_eq!(step(&operation)["kind"], "write");
+    let complete = run(&mut operation, &mut device, None);
+    let CompletionPayload::Settings(FeatureResult::Apply(Err(failure))) = complete.payload else {
+        panic!("wrong settings failure result");
+    };
+    assert_eq!(failure.recovery, Recovery::Verified);
+    assert_eq!(device.settings, original);
+    assert_eq!(
+        device
+            .effects
+            .iter()
+            .filter(|effect| effect.starts_with("read:"))
+            .count(),
+        8
+    );
+}
+
+#[test]
+fn archive_capture_reads_every_raw_section_without_any_setter() {
+    let mut device = Device::new();
+    device.base[8] = [0xfa, 0xfb, 0xfc, 0xfd];
+    device.function[9] = [0x81, 0x82, 0x83, 0x84];
+    device.lighting[63] = 0xa5;
+    device.picture[127] = [0x91, 0x92, 0x93];
+    device.macro_bytes[255] = 0xab;
+    device.settings[3][50] = 0xcd;
+    let mut operation = make_operation(CommandPayload::Archive(FeatureCommand::Read(())));
+    let complete = run(&mut operation, &mut device, None);
+    let CompletionPayload::Archive(FeatureResult::Read(Ok(archive))) = complete.payload else {
+        panic!("wrong archive result");
+    };
+    let config = archive_adapter::decode(&archive).unwrap();
+    assert_eq!(config.keymaps, device.snapshot());
+    assert_eq!(config.macros.len(), 50);
+    assert_eq!(config.macros[49][255], 0xab);
+    assert_eq!(config.lighting.raw()[63], 0xa5);
+    assert_eq!(config.picture[127], [0x91, 0x92, 0x93]);
+    assert_eq!(config.settings.raw_reply(0x86).unwrap()[50], 0xcd);
+    assert_eq!(archive.format_id, "byakko-configuration-v1");
+    let document: Value = serde_json::from_slice(&archive.bytes).unwrap();
+    assert_eq!(document["format"], "byakko-configuration");
+    assert_eq!(document["version"], 1);
+    assert_eq!(document["board_id"], "nia87");
+    assert_eq!(document["macros"].as_array().unwrap().len(), 50);
+    assert!(device.writes.is_empty());
+    assert_eq!(device.effects.len(), 18 + 1 + 4 + 6 + 50 * 4);
+    assert_eq!(&device.effects[..3], ["read:80", "read:85", "read:89"]);
+    assert_eq!(
+        &device.effects[18..24],
+        [
+            "read:87", "read:91", "read:97", "read:92", "read:86", "read:8c"
+        ]
+    );
+    assert!(
+        device.effects[29..]
+            .iter()
+            .all(|effect| effect == "read:8b")
+    );
+}
+
+#[test]
+fn archive_capture_stops_on_failed_macro_reply_without_export_or_setter() {
+    let mut device = Device::new();
+    let mut operation = make_operation(CommandPayload::Archive(FeatureCommand::Read(())));
+    for _ in 0..29 {
+        let action = step(&operation);
+        assert_eq!(action["kind"], "exchange");
+        let report: Vec<u8> = serde_json::from_value(action["report"].clone()).unwrap();
+        advance(&mut operation, json!({"Ok":device.reply(&report)}));
+    }
+    assert_eq!(step(&operation)["report"][0], 0x8b);
+    advance(&mut operation, json!({"Err":"macro read failed"}));
+    let action = step(&operation);
+    assert_eq!(action["kind"], "complete");
+    let CompletionPayload::Archive(FeatureResult::Read(Err(message))) =
+        serde_json::from_value::<Completion>(action["completion"].clone())
+            .unwrap()
+            .payload
+    else {
+        panic!("wrong archive failure result");
+    };
+    assert_eq!(message, "macro read failed");
+    assert!(device.writes.is_empty());
 }

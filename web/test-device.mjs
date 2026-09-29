@@ -14,6 +14,11 @@ export class TestDevice extends EventTarget {
   lighting = new Uint8Array(64);
   pictures = Array.from({ length: 3 }, (_, layer) => new Uint8Array(384).fill(20 + layer));
   macros = Array.from({ length: 50 }, () => new Uint8Array(256));
+  settings = [0x91, 0x97, 0x92, 0x86].map(opcode => {
+    const reply = new Uint8Array(64);
+    reply[0] = opcode;
+    return reply;
+  });
   request = null;
   beforeSend = null;
   beforeReceive = null;
@@ -24,6 +29,14 @@ export class TestDevice extends EventTarget {
     this.base.set([0, 0, 4, 0], 9 * 4);
     this.base.set([0, 0, 5, 0], 40 * 4);
     this.fn.set([0, 0, 41, 0], 0); // Protected Fn+Esc capture remains lossless.
+    this.settings[0][2] = 4;
+    this.settings[1][1] = 1;
+    for (const [index, seconds] of [120, 180, 600, 900].entries()) {
+      this.settings[2][1 + index * 2] = seconds & 0xff;
+      this.settings[2][2 + index * 2] = seconds >> 8;
+    }
+    this.settings[3][7] = 0x79;
+    this.settings[3][50] = 0xa5;
   }
   async open() { this.calls.push({ kind: "open" }); this.opened = true; }
   async close() { this.calls.push({ kind: "close" }); this.opened = false; }
@@ -37,12 +50,25 @@ export class TestDevice extends EventTarget {
       (report[0] === 0x13 ? this.base : this.fn).set(report.slice(8, 12), report[2] * 4);
     } else if (report[0] === 0x07) {
       this.lighting.set(report.slice(1, 8), 1);
+    } else if (report[0] === 0x0d || report[0] === 0x0e) {
+      // Host frames affect current output without replacing onboard settings.
     } else if (report[0] === 0x16) {
       this.macros[report[1]].set(report.slice(8, 8 + report[3]), report[2] * 56);
     } else if (report[0] === 0x0c) {
       const picture = this.pictures[this.lighting[4] >> 4];
       const offset = report[4] * 56;
       picture.set(report.slice(8, 8 + Math.min(56, 384 - offset)), offset);
+    } else if (report[0] === 0x11) {
+      this.settings[0][2] = report[2];
+    } else if (report[0] === 0x17) {
+      this.settings[1][1] = report[1];
+    } else if (report[0] === 0x12) {
+      this.settings[2].set(report.slice(8, 16), 1);
+    } else if (report[0] === 0x06) {
+      const replyChecksum = this.settings[3][7];
+      this.settings[3].set(report);
+      this.settings[3][0] = 0x86;
+      this.settings[3][7] = replyChecksum;
     } else throw new Error(`Unexpected setter ${report[0]}`);
   }
   async receiveFeatureReport(id) {
@@ -59,6 +85,10 @@ export class TestDevice extends EventTarget {
       case 0x90: response = this.fn.slice(request[2] * 64, (request[2] + 1) * 64); break;
       case 0x8b: response = this.macros[request[1]].slice(request[2] * 64, (request[2] + 1) * 64); break;
       case 0x8c: response = this.pictures[this.lighting[4] >> 4].slice(request[2] * 64, (request[2] + 1) * 64); break;
+      case 0x91: response = this.settings[0].slice(); break;
+      case 0x97: response = this.settings[1].slice(); break;
+      case 0x92: response = this.settings[2].slice(); break;
+      case 0x86: response = this.settings[3].slice(); break;
       default: throw new Error(`Unexpected read ${request[0]}`);
     }
     // Deliberately use an offset DataView like native browser buffers may.

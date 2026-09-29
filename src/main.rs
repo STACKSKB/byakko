@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
-use byakko_devices::nia87::{configuration, configuration_plan, device, settings};
+use byakko_devices::nia87::{configuration, configuration_plan, device};
+use byakko_protocol::nia87::settings;
 use byakko_protocol::nia87::{adapter::Snapshot, macros};
 
 fn run() -> device::Result<()> {

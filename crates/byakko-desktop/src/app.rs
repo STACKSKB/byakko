@@ -6,7 +6,6 @@ use crate::{
     controller::discovery::Discovery,
     controller::files::{Accepted as FileAccepted, Files},
     controller::host::{Controller as Host, Outcome as HostOutcome},
-    controller::observation::{self, Observation},
     controller::recording::Controller as Recording,
     form::{
         application::{Closing, Message, Page},
@@ -20,7 +19,10 @@ use byakko_core::{
     contract::{Command, Completion, CompletionPayload, Problem},
     editor::Status,
     session::{Connection, Outcome, Session},
-    workflow::Problem as WorkflowProblem,
+    workflow::{
+        Problem as WorkflowProblem,
+        observation::{self, Observation},
+    },
 };
 use iced::{Element, Subscription, Task, window};
 use std::{
@@ -42,6 +44,7 @@ struct App {
     assignment_binding: Option<(String, String)>,
     new_macro: Option<String>,
     observation: Observation,
+    observation_origin: Instant,
     config: Config,
     page: Page,
     link: Link,
@@ -100,6 +103,7 @@ impl App {
             assignment_binding: None,
             new_macro: None,
             observation: Observation::default(),
+            observation_origin: Instant::now(),
             keys: keymap::Form::new(session.descriptor()),
             macros: macros::Form::default(),
             recording: Recording::default(),
@@ -144,8 +148,8 @@ impl App {
                             worker.cancel_catalog();
                         }
                     }
-                    self.observation
-                        .receive(change, Instant::now(), &self.session);
+                    let now_ms = self.observation_time_ms(Instant::now());
+                    self.observation.receive(change, now_ms, &self.session);
                 }
                 Err(reason) => {
                     self.observation.unavailable = true;
@@ -823,26 +827,27 @@ impl App {
     }
 
     /// Onboard changes are observed through the same loaded feature editors.
+    fn observation_time_ms(&self, at: Instant) -> u64 {
+        at.saturating_duration_since(self.observation_origin)
+            .as_millis()
+            .min(u64::MAX as u128) as u64
+    }
+
     fn can_observe(&self) -> bool {
         self.closing == Closing::Open
-            && matches!(self.session.connection(), Connection::Connected { .. })
-            && !self.session.busy()
-            && !self.session.catalog_scanning()
-            && !self.session.recording()
             && !self.recording.pending()
             && !self.host.busy()
-            && self.session.host().is_idle()
             && !self.files.busy()
             && !self.autosave.pending()
             && !self.lighting.dragging()
             && !self.picture.dragging()
             && self.keys.catalog.input != catalog::InputMode::Capture
-            && !self.session.requires_manual_read()
-            && !observation::has_read_error(&self.session)
+            && observation::can_observe(&self.session)
     }
 
     fn observe_device(&mut self, at: Instant) -> Task<Message> {
-        if !self.can_observe() || !self.observation.ready(at) {
+        let now_ms = self.observation_time_ms(at);
+        if !self.can_observe() || !self.observation.ready(now_ms) {
             return Task::none();
         }
         self.continue_observation()
@@ -856,7 +861,8 @@ impl App {
         if !self.can_observe() {
             return Task::none();
         }
-        if !self.observation.ready(Instant::now()) {
+        let now_ms = self.observation_time_ms(Instant::now());
+        if !self.observation.ready(now_ms) {
             return Task::none();
         }
         match self.observation.next(&mut self.session) {

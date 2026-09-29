@@ -1,6 +1,7 @@
 //! Reversible multi-section archive check, with no macro binding or playback.
 mod support;
-use byakko_devices::nia87::{configuration, device, settings::Settings};
+use byakko_devices::nia87::{configuration, device};
+use byakko_protocol::nia87::settings::Settings;
 use byakko_protocol::nia87::{
     lighting::Lighting,
     macros::{self, Macro, MacroEvent},

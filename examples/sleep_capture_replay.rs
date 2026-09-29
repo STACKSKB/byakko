@@ -1,9 +1,7 @@
 //! Bounded replay of the current Nia87 sleep setter; restores all four timers.
 mod support;
-use byakko_devices::nia87::{
-    device::{self, Result},
-    settings::Settings,
-};
+use byakko_devices::nia87::device::{self, Result};
+use byakko_protocol::nia87::settings::Settings;
 
 fn send(target: &device::Target, values: [u16; 4]) -> Result<()> {
     let (_, device) = device::open_expected(target)?;

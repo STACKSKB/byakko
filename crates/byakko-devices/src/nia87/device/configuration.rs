@@ -11,7 +11,10 @@ use byakko_core::contract::{ApplyFailure, Recovery};
 #[derive(Debug)]
 enum RecoveryResult {
     Verified(String),
-    Failed(String, Box<crate::nia87::configuration::Configuration>),
+    Failed(
+        String,
+        Box<byakko_protocol::nia87::configuration::Configuration>,
+    ),
     Unverified(String),
 }
 /// Capture all supported local configuration data without sending setters.
@@ -19,14 +22,14 @@ enum RecoveryResult {
 /// completed macro slots out of 50.
 pub fn capture_configuration(
     progress: impl FnMut(usize, usize),
-) -> Result<crate::nia87::configuration::Configuration> {
+) -> Result<byakko_protocol::nia87::configuration::Configuration> {
     capture_selected(Selection::Unique, progress)
 }
 
 pub(super) fn capture_selected(
     selection: Selection<'_>,
     progress: impl FnMut(usize, usize),
-) -> Result<crate::nia87::configuration::Configuration> {
+) -> Result<byakko_protocol::nia87::configuration::Configuration> {
     let session = Session::open_for(selection)?;
     capture_configuration_on_device(session.device(), progress)
 }
@@ -34,7 +37,7 @@ pub(super) fn capture_selected(
 fn capture_configuration_on_device(
     device: &HidDevice,
     mut progress: impl FnMut(usize, usize),
-) -> Result<crate::nia87::configuration::Configuration> {
+) -> Result<byakko_protocol::nia87::configuration::Configuration> {
     let keymaps = snapshot_on_device(device)?;
     if keymaps.firmware != 0x0100 || keymaps.profile != 0 {
         return Err("Configuration capture requires firmware 0x0100, profile 0".into());
@@ -47,14 +50,14 @@ fn capture_configuration_on_device(
         macros.push(read_macro_on_device(device, slot)?);
         progress(usize::from(slot) + 1, 50);
     }
-    let capture = crate::nia87::configuration::Configuration {
+    let capture = byakko_protocol::nia87::configuration::Configuration {
         keymaps,
         macros,
         lighting,
         picture,
         settings,
     };
-    crate::nia87::configuration::validate(&capture)?;
+    byakko_protocol::nia87::configuration::validate(&capture)?;
     Ok(capture)
 }
 
@@ -62,21 +65,21 @@ fn capture_configuration_on_device(
 /// The OS lock and HID handle remain owned through validation, backup, writes,
 /// complete verification and any recovery attempt. Host capture is never started.
 pub fn apply_configuration(
-    expected: &crate::nia87::configuration::Configuration,
-    target: &crate::nia87::configuration::Configuration,
+    expected: &byakko_protocol::nia87::configuration::Configuration,
+    target: &byakko_protocol::nia87::configuration::Configuration,
     backup_dir: &std::path::Path,
     progress: impl FnMut(&str),
-) -> ApplyResult<crate::nia87::configuration::Configuration> {
+) -> ApplyResult<byakko_protocol::nia87::configuration::Configuration> {
     apply_configuration_selected(Selection::Unique, expected, target, backup_dir, progress)
 }
 
 pub(super) fn apply_configuration_selected(
     selection: Selection<'_>,
-    expected: &crate::nia87::configuration::Configuration,
-    target: &crate::nia87::configuration::Configuration,
+    expected: &byakko_protocol::nia87::configuration::Configuration,
+    target: &byakko_protocol::nia87::configuration::Configuration,
     backup_dir: &std::path::Path,
     mut progress: impl FnMut(&str),
-) -> ApplyResult<crate::nia87::configuration::Configuration> {
+) -> ApplyResult<byakko_protocol::nia87::configuration::Configuration> {
     let plan = crate::nia87::configuration_plan::plan(expected, target).map_err(not_attempted)?;
     // Recovery must be representable before the first setter is sent.
     let reverse =
@@ -86,14 +89,14 @@ pub(super) fn apply_configuration_selected(
     }
     let session = Session::open_for(selection).map_err(not_attempted)?;
     let device = session.device();
-    let encoded = crate::nia87::configuration::encode(expected).map_err(not_attempted)?;
+    let encoded = byakko_protocol::nia87::configuration::encode(expected).map_err(not_attempted)?;
     let backup =
         save_encoded_backup(backup_dir, "configuration-before", &encoded).map_err(not_attempted)?;
     let stamp = backup.stamp();
     let path = backup.path();
     let mut setter_started = false;
     let mut mismatched_readback = None;
-    let result = (|| -> Result<crate::nia87::configuration::Configuration> {
+    let result = (|| -> Result<byakko_protocol::nia87::configuration::Configuration> {
         progress("Writing reviewed configuration changes");
         write_configuration_changes(device, expected, target, &plan, &mut setter_started)?;
         progress("Verifying complete configuration");
@@ -149,8 +152,8 @@ pub(super) fn apply_configuration_selected(
 fn recover_configuration(
     selection: Selection<'_>,
     device: &HidDevice,
-    attempted: &crate::nia87::configuration::Configuration,
-    original: &crate::nia87::configuration::Configuration,
+    attempted: &byakko_protocol::nia87::configuration::Configuration,
+    original: &byakko_protocol::nia87::configuration::Configuration,
     reverse: &crate::nia87::configuration_plan::ChangeSummary,
 ) -> RecoveryResult {
     let mut failures = Vec::new();
@@ -235,15 +238,18 @@ fn recover_configuration(
     }
     for &setting in &reverse.settings {
         let result = (|| -> Result<()> {
-            let report = if matches!(setting, crate::nia87::settings::Setting::Backlight(_)) {
-                crate::nia87::settings::backlight_write_report(
+            let report = if matches!(
+                setting,
+                byakko_protocol::nia87::settings::Setting::Backlight(_)
+            ) {
+                byakko_protocol::nia87::settings::backlight_write_report(
                     original
                         .settings
                         .raw_reply(0x86)
                         .expect("validated options"),
                 )?
             } else {
-                crate::nia87::settings::write_report(setting)?
+                byakko_protocol::nia87::settings::write_report(setting)?
             };
             let mut host = [0u8; 65];
             host[1..].copy_from_slice(&report);
@@ -292,7 +298,7 @@ fn recover_configuration(
 /// Best-effort evidence from an existing complete read; never perform device I/O.
 fn retain_readback(
     path: &std::path::Path,
-    actual: &crate::nia87::configuration::Configuration,
+    actual: &byakko_protocol::nia87::configuration::Configuration,
 ) -> String {
     match crate::nia87::configuration::save_new(path, actual) {
         Ok(()) => format!("mismatched readback saved to {}", path.display()),
@@ -305,8 +311,8 @@ fn retain_readback(
 
 fn write_configuration_changes(
     device: &HidDevice,
-    before: &crate::nia87::configuration::Configuration,
-    target: &crate::nia87::configuration::Configuration,
+    before: &byakko_protocol::nia87::configuration::Configuration,
+    target: &byakko_protocol::nia87::configuration::Configuration,
     plan: &crate::nia87::configuration_plan::ChangeSummary,
     setter_started: &mut bool,
 ) -> Result<()> {
@@ -346,12 +352,15 @@ fn write_configuration_changes(
         }
     }
     for &setting in &plan.settings {
-        let report = if matches!(setting, crate::nia87::settings::Setting::Backlight(_)) {
-            crate::nia87::settings::backlight_write_report(
+        let report = if matches!(
+            setting,
+            byakko_protocol::nia87::settings::Setting::Backlight(_)
+        ) {
+            byakko_protocol::nia87::settings::backlight_write_report(
                 target.settings.raw_reply(0x86).expect("validated options"),
             )?
         } else {
-            crate::nia87::settings::write_report(setting)?
+            byakko_protocol::nia87::settings::write_report(setting)?
         };
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&report);

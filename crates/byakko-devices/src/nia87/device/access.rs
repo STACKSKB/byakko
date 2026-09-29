@@ -50,7 +50,7 @@ impl Access {
         lighting::read_lighting_with(self.selection())
     }
 
-    pub fn read_settings(&self) -> Result<crate::nia87::settings::Settings> {
+    pub fn read_settings(&self) -> Result<byakko_protocol::nia87::settings::Settings> {
         settings::read_settings_with(self.selection())
     }
 
@@ -126,27 +126,27 @@ impl Access {
 
     pub fn apply_setting(
         &self,
-        expected: &crate::nia87::settings::Settings,
-        setting: crate::nia87::settings::Setting,
+        expected: &byakko_protocol::nia87::settings::Settings,
+        setting: byakko_protocol::nia87::settings::Setting,
         backup_dir: &std::path::Path,
-    ) -> ApplyResult<crate::nia87::settings::Settings> {
+    ) -> ApplyResult<byakko_protocol::nia87::settings::Settings> {
         settings::apply_setting_with(self.selection(), expected, setting, backup_dir)
     }
 
     pub fn capture_configuration(
         &self,
         progress: impl FnMut(usize, usize),
-    ) -> Result<crate::nia87::configuration::Configuration> {
+    ) -> Result<byakko_protocol::nia87::configuration::Configuration> {
         configuration::capture_selected(self.selection(), progress)
     }
 
     pub fn apply_configuration(
         &self,
-        expected: &crate::nia87::configuration::Configuration,
-        target: &crate::nia87::configuration::Configuration,
+        expected: &byakko_protocol::nia87::configuration::Configuration,
+        target: &byakko_protocol::nia87::configuration::Configuration,
         backup_dir: &std::path::Path,
         progress: impl FnMut(&str),
-    ) -> ApplyResult<crate::nia87::configuration::Configuration> {
+    ) -> ApplyResult<byakko_protocol::nia87::configuration::Configuration> {
         configuration::apply_configuration_selected(
             self.selection(),
             expected,

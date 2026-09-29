@@ -126,7 +126,7 @@ impl crate::Device for BoundNia87Adapter {
     }
 
     fn archive_capabilities(&self) -> Option<byakko_core::model::archive::ArchiveCapabilities> {
-        Some(crate::nia87::archive_adapter::capabilities())
+        Some(byakko_protocol::nia87::archive_adapter::capabilities())
     }
 
     fn capture_archive(&mut self) -> Result<byakko_core::model::archive::NativeArchive, String> {

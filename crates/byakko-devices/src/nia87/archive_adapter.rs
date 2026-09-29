@@ -1,40 +1,10 @@
 //! Capture and preflight review for complete native Nia87 configuration archives.
-use super::{
-    configuration::{self, Configuration},
-    device::Access,
-};
+use super::device::Access;
 use byakko_core::contract::{ApplyFailure, Recovery};
-use byakko_core::model::archive::{ArchiveCapabilities, NativeArchive, Review, SectionChange};
+use byakko_core::model::archive::{NativeArchive, Review, SectionChange};
+use byakko_protocol::nia87::archive_adapter::{decode, encode};
+use byakko_protocol::nia87::configuration::Configuration;
 use std::path::Path;
-
-const BACKEND_ID: &str = "nia87";
-
-pub fn capabilities() -> ArchiveCapabilities {
-    ArchiveCapabilities {
-        backend_id: BACKEND_ID.into(),
-        format_id: configuration::ARCHIVE_FORMAT_ID.into(),
-        max_bytes: configuration::MAX_ARCHIVE_BYTES,
-    }
-}
-
-fn encode(config: &Configuration) -> Result<NativeArchive, String> {
-    let bytes = configuration::encode(config).map_err(|error| error.to_string())?;
-    Ok(NativeArchive {
-        backend_id: BACKEND_ID.into(),
-        format_id: configuration::ARCHIVE_FORMAT_ID.into(),
-        bytes,
-    })
-}
-
-fn decode(archive: &NativeArchive) -> Result<Configuration, String> {
-    if archive.backend_id != BACKEND_ID || archive.format_id != configuration::ARCHIVE_FORMAT_ID {
-        return Err("Archive belongs to another backend or format".into());
-    }
-    if archive.bytes.len() > configuration::MAX_ARCHIVE_BYTES as usize {
-        return Err("Configuration archive is too large".into());
-    }
-    configuration::decode(&archive.bytes).map_err(|error| error.to_string())
-}
 
 pub(super) fn capture_with(access: &Access) -> Result<NativeArchive, String> {
     let config = access
@@ -147,9 +117,10 @@ fn add_count(changes: &mut Vec<SectionChange>, id: &str, label: &str, count: usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nia87::{configuration::Configuration, settings::Settings};
     use byakko_protocol::nia87::adapter::Snapshot;
+    use byakko_protocol::nia87::configuration::Configuration;
     use byakko_protocol::nia87::lighting::Lighting;
+    use byakko_protocol::nia87::settings::Settings;
 
     fn selected_access() -> Access {
         let candidate = crate::nia87::device::Candidate {

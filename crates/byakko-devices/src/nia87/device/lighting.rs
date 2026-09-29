@@ -2,6 +2,9 @@ use super::apply_error::{ApplyResult, lighting_apply_error, not_attempted};
 use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
 use super::*;
 use byakko_core::contract::{ApplyFailure, Recovery};
+use byakko_protocol::nia87::host_adapter::{
+    lighting_matches_report, lighting_restore_report, submitted_lighting,
+};
 
 /// Read one raw-preserving global-lighting response.
 pub fn read_lighting() -> Result<byakko_protocol::nia87::lighting::Lighting> {
@@ -76,7 +79,7 @@ impl HostLightingSession {
             return Err("Screen frame requires screen mode".into());
         }
         let mut host = [0u8; 65];
-        host[1..].copy_from_slice(&crate::nia87::host_lighting::screen_report(rgb));
+        host[1..].copy_from_slice(&byakko_protocol::nia87::host_lighting::screen_report(rgb));
         self.session.device().send_setter(&host)?;
         Ok(())
     }
@@ -86,7 +89,7 @@ impl HostLightingSession {
             return Err("Music frame requires music mode".into());
         }
         let mut host = [0u8; 65];
-        host[1..].copy_from_slice(&crate::nia87::host_lighting::music_report(bands));
+        host[1..].copy_from_slice(&byakko_protocol::nia87::host_lighting::music_report(bands));
         self.session.device().send_setter(&host)?;
         Ok(())
     }
@@ -140,36 +143,12 @@ pub(super) fn read_lighting_on_device(
     )?)
 }
 
-/// Rebuild only the global setting bytes exposed by PB's LED writer. The
-/// unknown response tail remains in the backup, but is not sent as an
-/// undocumented command payload during restoration.
-pub(super) fn lighting_restore_report(
-    original: &byakko_protocol::nia87::lighting::Lighting,
-) -> [u8; 64] {
-    let mut report = [0u8; 64];
-    report[0] = byakko_protocol::nia87::lighting::LED_WRITE_COMMAND;
-    report[1..8].copy_from_slice(&original.raw()[1..8]);
-    let sum = report[..8]
-        .iter()
-        .fold(0u8, |sum, byte| sum.wrapping_add(*byte));
-    report[8] = 0xffu8.wrapping_sub(sum);
-    report
-}
-
 pub(super) fn write_lighting_report(device: &HidDevice, report: &[u8; 64]) -> Result<()> {
     let mut host = [0u8; 65];
     host[1..].copy_from_slice(report);
     device.send_setter(&host)?;
     std::thread::sleep(pacing::LIGHTING_SETTER);
     Ok(())
-}
-
-pub(super) fn lighting_matches_report(
-    actual: &byakko_protocol::nia87::lighting::Lighting,
-    report: &[u8; 64],
-    original: &byakko_protocol::nia87::lighting::Lighting,
-) -> bool {
-    actual.raw()[1..8] == report[1..8] && actual.raw()[9..] == original.raw()[9..]
 }
 
 /// Submit ordinary global lighting with a durable raw backup. A successful
@@ -261,17 +240,6 @@ fn apply_lighting_on_device(
         || read_lighting_on_device(device),
         lighting_apply_error,
     )
-}
-
-fn submitted_lighting(
-    expected: &byakko_protocol::nia87::lighting::Lighting,
-    report: &[u8; 64],
-) -> Result<byakko_protocol::nia87::lighting::Lighting> {
-    let mut submitted = expected.raw().to_vec();
-    submitted[1..8].copy_from_slice(&report[1..8]);
-    Ok(byakko_protocol::nia87::lighting::Lighting::decode(
-        &submitted,
-    )?)
 }
 
 fn submit_lighting_report(

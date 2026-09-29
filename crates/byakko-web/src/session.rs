@@ -1,12 +1,20 @@
 //! Browser presentation boundary for the shared core session. The JSON protocol
 //! carries core-owned commands and completions without interpreting device bytes.
 use byakko_core::{
-    contract::{Command, Completion},
+    contract::{Command, Completion, DeviceChange},
     editor::{Editor, Feature, Status},
+    library::archive::CaptureStatus,
     model::macros,
     session::{Connection, Outcome, Session},
+    workflow::{
+        host::HostOutcome,
+        observation::{self, Observation},
+    },
 };
-use byakko_protocol::nia87::{adapter, lighting_adapter, macro_adapter, picture_adapter};
+use byakko_protocol::nia87::{
+    adapter, archive_adapter, lighting_adapter, macro_adapter, notifications, picture_adapter,
+    settings_adapter,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
@@ -14,6 +22,7 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 pub struct BrowserSession {
     session: Session,
+    observation: Observation,
 }
 
 #[wasm_bindgen]
@@ -24,8 +33,13 @@ impl BrowserSession {
             .and_then(|session| session.with_lighting(lighting_adapter::capabilities()))
             .and_then(|session| session.with_picture(picture_adapter::capabilities()))
             .and_then(|session| session.with_macros(macro_adapter::capabilities()))
+            .and_then(|session| session.with_settings(settings_adapter::capabilities()))
+            .and_then(|session| session.with_archive(archive_adapter::capabilities()))
             .map_err(|error| JsValue::from_str(&error))?;
-        Ok(Self { session })
+        Ok(Self {
+            session,
+            observation: Observation::default(),
+        })
     }
 
     /// Intent JSON uses {type, feature?, change?, slot?, layer?, key?, binding?}.
@@ -87,12 +101,14 @@ impl BrowserSession {
         let command = match kind {
             "connect" => {
                 let generation = self.session.connect()?;
+                self.observation = Observation::default();
                 return Ok(ResultValue::note(
                     json!({"kind": "connected", "generation": generation}),
                 ));
             }
             "disconnect" => {
                 self.session.disconnect()?;
+                self.observation = Observation::default();
                 return Ok(ResultValue::note(json!({"kind": "disconnected"})));
             }
             "refreshNext" => {
@@ -100,6 +116,81 @@ impl BrowserSession {
                     command: self.session.refresh_next()?,
                     outcome: None,
                 });
+            }
+            "notification" => {
+                let generation = required_u64(intent, "generation")?;
+                if self.session.connection() != &(Connection::Connected { generation }) {
+                    return Ok(ResultValue::note(json!({"kind": "ignored"})));
+                }
+                let report_id: u8 = parse_field(intent, "reportId")?;
+                let payload: Vec<u8> = parse_field(intent, "payload")?;
+                if let Some(change) = notifications::decode(report_id, &payload) {
+                    if change == DeviceChange::Configuration {
+                        self.session.configuration_changed();
+                    }
+                    self.observation
+                        .receive(change, required_u64(intent, "nowMs")?, &self.session);
+                    return Ok(ResultValue::note(
+                        json!({"kind": "deviceChanged", "cancelCatalog": change == DeviceChange::Configuration}),
+                    ));
+                }
+                return Ok(ResultValue::done());
+            }
+            "observeNext" => {
+                let now_ms = required_u64(intent, "nowMs")?;
+                return Ok(ResultValue {
+                    command: if self.observation.queued()
+                        && observation::can_observe(&self.session)
+                        && self.observation.ready(now_ms)
+                    {
+                        self.observation.next(&mut self.session)?
+                    } else {
+                        None
+                    },
+                    outcome: None,
+                });
+            }
+            "cancelCatalog" => {
+                self.session.cancel_catalog();
+                return Ok(ResultValue::note(
+                    json!({"kind": "catalogCancelled", "cancelCatalog": true}),
+                ));
+            }
+            "hostStart" => {
+                let start = self.session.start_host(
+                    required_str(intent, "mode")?,
+                    intent
+                        .get("setting")
+                        .filter(|value| !value.is_null())
+                        .cloned()
+                        .map(parse)
+                        .transpose()?,
+                )?;
+                return Ok(ResultValue::note(
+                    json!({"kind": "hostStart", "start": start}),
+                ));
+            }
+            "hostUpdate" => {
+                let update = self.session.update_host(parse_field(intent, "setting")?)?;
+                return Ok(ResultValue::note(
+                    json!({"kind": "hostUpdate", "update": update}),
+                ));
+            }
+            "hostStop" => {
+                return Ok(ResultValue::note(
+                    json!({"kind": "hostStop", "ticket": self.session.stop_host()}),
+                ));
+            }
+            "hostEvent" => {
+                let result = self.session.accept_host(parse_field(intent, "event")?);
+                let (kind, detail) = match result {
+                    HostOutcome::Ignored => ("ignored", Value::Null),
+                    HostOutcome::Started => ("hostStarted", Value::Null),
+                    HostOutcome::Stopping => ("hostStopping", Value::Null),
+                    HostOutcome::Finished => ("hostFinished", Value::Null),
+                    HostOutcome::Failed(failure) => ("hostFailed", json!(failure)),
+                };
+                return Ok(ResultValue::note(json!({"kind": kind, "detail": detail})));
             }
             "read" => match feature()? {
                 "keymap" => self.session.read()?,
@@ -159,6 +250,26 @@ impl BrowserSession {
                 return Ok(ResultValue::done());
             }
             "discoverMacros" => self.session.request_macro_catalog()?,
+            "captureArchive" => self.session.capture_archive()?,
+            "exportArchive" => {
+                if self.session.busy() || self.session.recording() || !self.session.host().is_idle()
+                {
+                    return Err("Wait for the current activity before exporting".into());
+                }
+                let capture = self
+                    .session
+                    .archive()
+                    .ok_or("Archive capture is not supported")?;
+                let archive = capture
+                    .captured()
+                    .ok_or("Capture a diagnostic archive before exporting")?;
+                archive_adapter::decode(archive)?;
+                let document = std::str::from_utf8(&archive.bytes)
+                    .map_err(|error| format!("Captured archive is not UTF-8: {error}"))?;
+                return Ok(ResultValue::note(
+                    json!({"kind": "archiveExported", "document": document}),
+                ));
+            }
             "macroCandidate" => {
                 return Ok(ResultValue::note(
                     json!({"kind": "macroCandidate", "slot": self.session.macro_candidate()?}),
@@ -276,7 +387,13 @@ impl BrowserSession {
             "busy": session.busy(),
             "blocksEditing": session.blocks_editing(),
             "recording": session.recording(),
+            "host": {"phase": format!("{:?}", session.host().phase()), "mode": session.host().mode_id(), "ticket": session.host().ticket()},
             "requiresManualRead": session.requires_manual_read(),
+            "observation": {
+                "queued": self.observation.queued(),
+                "dueMs": self.observation.due_ms(),
+                "canRead": observation::can_observe(session),
+            },
             "descriptor": session.descriptor(),
             "keymap": feature_value(session.keymap(), can_read, can_edit, idle),
             "lighting": session.lighting().map(|editor| json!({
@@ -288,7 +405,24 @@ impl BrowserSession {
                 "capabilities": editor.capabilities()
             })),
             "macros": macros,
-            "settings": session.settings().map(|editor| feature_value(editor, can_read, can_edit, idle)),
+            "settings": session.settings().map(|editor| json!({
+                "editor": feature_value(editor, can_read, can_edit, idle),
+                "capabilities": editor.capabilities(),
+            })),
+            "archive": session.archive().map(|capture| {
+                let status = match capture.status() {
+                    CaptureStatus::Empty => json!({"kind": "empty"}),
+                    CaptureStatus::Ready => json!({"kind": "ready"}),
+                    CaptureStatus::Failed(problem) => json!({"kind": "failed", "problem": format!("{problem:?}")}),
+                };
+                json!({
+                    "capabilities": capture.capabilities(),
+                    "status": status,
+                    "capturedBytes": capture.captured().map(|archive| archive.bytes.len()),
+                    "canCapture": can_read,
+                    "canExport": idle && capture.captured().is_some(),
+                })
+            }),
         })
     }
 }
@@ -404,6 +538,32 @@ mod tests {
         model::keymap::{self, Action, State},
     };
     use std::collections::BTreeMap;
+
+    fn archive_fixture() -> byakko_core::model::archive::NativeArchive {
+        use byakko_protocol::nia87::{
+            configuration::Configuration, lighting::Lighting, settings::Settings,
+        };
+        let mut lighting = [0; 64];
+        lighting[0] = 0x87;
+        let mut replies = [[0; 64]; 4];
+        for (reply, opcode) in replies.iter_mut().zip([0x91, 0x97, 0x92, 0x86]) {
+            reply[0] = opcode;
+        }
+        let config = Configuration {
+            keymaps: adapter::Snapshot {
+                format_version: 1,
+                firmware: 0x0100,
+                profile: 0,
+                base: vec![[0; 4]; 128],
+                function: vec![[0; 4]; 128],
+            },
+            macros: vec![vec![0; 256]; 50],
+            lighting: Lighting::decode(&lighting).unwrap(),
+            picture: vec![[0; 3]; 128],
+            settings: Settings::decode(&replies[0], &replies[1], &replies[2], &replies[3]).unwrap(),
+        };
+        archive_adapter::encode(&config).unwrap()
+    }
 
     fn send(browser: &mut BrowserSession, intent: Value) -> Value {
         serde_json::from_str(&browser.dispatch(&intent.to_string())).unwrap()
@@ -673,6 +833,108 @@ mod tests {
         assert_eq!(
             apply["command"]["payload"]["Lighting"]["Apply"]["desired"]["color"],
             json!({"Rgb": [1, 2, 3]})
+        );
+    }
+
+    #[test]
+    fn archive_capture_exports_exact_native_json_and_retains_dirty_edit() {
+        let mut browser = BrowserSession::new().unwrap();
+        assert_eq!(
+            send(&mut browser, json!({"type":"exportArchive"}))["ok"],
+            false
+        );
+        assert_eq!(load_keymap(&mut browser)["outcome"]["kind"], "loaded");
+        let descriptor = browser.session.descriptor();
+        let layer = descriptor.layers[0].id.clone();
+        let key = descriptor
+            .keys
+            .iter()
+            .find(|key| descriptor.key_is_writable(&layer, &key.id))
+            .unwrap()
+            .id
+            .clone();
+        let edited = send(
+            &mut browser,
+            json!({
+                "type":"edit", "feature":"keymap",
+                "change":{"layer":layer,"key":key,"action":{"Key":5}}
+            }),
+        );
+        assert_eq!(edited["view"]["keymap"]["dirty"], true);
+
+        let capture = send(&mut browser, json!({"type":"captureArchive"}));
+        assert_eq!(capture["ok"], true);
+        assert_eq!(capture["view"]["archive"]["canCapture"], false);
+        assert_eq!(capture["view"]["archive"]["canExport"], false);
+        assert_eq!(
+            send(&mut browser, json!({"type":"exportArchive"}))["ok"],
+            false
+        );
+        let command = &capture["command"];
+        let raw = archive_fixture();
+        let completion = json!({
+            "generation":command["generation"], "operation":command["operation"],
+            "payload":{"Archive":{"Read":{"Ok":raw}}}
+        });
+        let loaded: Value = serde_json::from_str(&browser.accept(&completion.to_string())).unwrap();
+        assert_eq!(loaded["outcome"]["kind"], "archiveCaptured");
+        assert_eq!(loaded["view"]["keymap"]["dirty"], true);
+        assert_eq!(loaded["view"]["archive"]["status"]["kind"], "ready");
+        assert_eq!(loaded["view"]["archive"]["canExport"], true);
+
+        let exported = send(&mut browser, json!({"type":"exportArchive"}));
+        assert_eq!(exported["outcome"]["kind"], "archiveExported");
+        let document = exported["outcome"]["document"].as_str().unwrap();
+        assert_eq!(document.as_bytes(), archive_fixture().bytes);
+        let value: Value = serde_json::from_str(document).unwrap();
+        assert_eq!(value["format"], "byakko-configuration");
+        assert_eq!(value["macros"].as_array().unwrap().len(), 50);
+    }
+
+    #[test]
+    fn archive_failed_new_capture_and_reconnect_retain_prior_export() {
+        let mut browser = BrowserSession::new().unwrap();
+        assert_eq!(send(&mut browser, json!({"type":"connect"}))["ok"], true);
+        let command = send(&mut browser, json!({"type":"captureArchive"}))["command"].clone();
+        let original = archive_fixture();
+        let result = json!({
+            "generation":command["generation"],"operation":command["operation"],
+            "payload":{"Archive":{"Read":{"Ok":original}}}
+        });
+        browser.accept(&result.to_string());
+        let retry = send(&mut browser, json!({"type":"captureArchive"}));
+        assert_eq!(retry["ok"], true);
+        let command = &retry["command"];
+        let failed = json!({
+            "generation":command["generation"],"operation":command["operation"],
+            "payload":{"Archive":{"Read":{"Err":"simulated read failure"}}}
+        });
+        let failed: Value = serde_json::from_str(&browser.accept(&failed.to_string())).unwrap();
+        assert_eq!(failed["outcome"]["kind"], "archiveCaptureFailed");
+        assert_eq!(failed["view"]["archive"]["status"]["kind"], "failed");
+        assert_eq!(failed["view"]["archive"]["canExport"], true);
+        assert_eq!(send(&mut browser, json!({"type":"disconnect"}))["ok"], true);
+        let offline = send(&mut browser, json!({"type":"exportArchive"}));
+        assert_eq!(offline["ok"], true);
+        assert_eq!(
+            offline["outcome"]["document"].as_str().unwrap().as_bytes(),
+            archive_fixture().bytes
+        );
+        assert_eq!(send(&mut browser, json!({"type":"connect"}))["ok"], true);
+        let pending = send(&mut browser, json!({"type":"captureArchive"}));
+        assert_eq!(pending["ok"], true);
+        assert_eq!(send(&mut browser, json!({"type":"disconnect"}))["ok"], true);
+        let stale = json!({
+            "generation":pending["command"]["generation"],
+            "operation":pending["command"]["operation"],
+            "payload":{"Archive":{"Read":{"Ok":archive_fixture()}}}
+        });
+        let ignored: Value = serde_json::from_str(&browser.accept(&stale.to_string())).unwrap();
+        assert_eq!(ignored["outcome"]["kind"], "ignored");
+        assert_eq!(ignored["view"]["archive"]["status"]["kind"], "failed");
+        assert_eq!(
+            send(&mut browser, json!({"type":"exportArchive"}))["ok"],
+            true
         );
     }
 }

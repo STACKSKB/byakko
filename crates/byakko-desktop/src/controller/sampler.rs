@@ -1,7 +1,7 @@
 //! OS capture stays on its worker thread; one pending frame keeps the latest sample.
 use byakko_core::model::lighting::{HostFrame, HostSource};
+use byakko_core::projection::audio::AudioBands;
 use byakko_devices::{
-    audio_bands::AudioBands,
     audio_sample::AudioSampler,
     screen_sample::{ScreenCapture, ScreenSampler},
 };

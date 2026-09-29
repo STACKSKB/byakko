@@ -32,10 +32,11 @@ use transport::{FeatureSetter, Session, read_payload, transaction_lock};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 use byakko_protocol::nia87::adapter::Snapshot;
 
-use keymaps::{snapshot_on_device, write_binding};
 #[cfg(test)]
-use lighting::lighting_matches_report;
-use lighting::{lighting_restore_report, read_lighting_on_device, write_lighting_report};
+use byakko_protocol::nia87::host_adapter::lighting_matches_report;
+use byakko_protocol::nia87::host_adapter::lighting_restore_report;
+use keymaps::{snapshot_on_device, write_binding};
+use lighting::{read_lighting_on_device, write_lighting_report};
 use macros::{read_macro_on_device, write_macro_bytes};
 use picture::read_picture_on_device;
 use settings::read_settings_on_device;

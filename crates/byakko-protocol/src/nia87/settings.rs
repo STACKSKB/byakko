@@ -28,7 +28,7 @@ pub struct Settings {
 }
 
 /// A complete, device-free decision for one guarded setting transaction.
-pub(crate) struct SettingPlan {
+pub struct SettingPlan {
     pub target: Settings,
     pub report: [u8; REPORT_LEN],
     pub restore_report: [u8; REPORT_LEN],
@@ -148,7 +148,7 @@ impl Settings {
 
     /// Preserve raw replies while preparing both forward and recovery reports.
     /// No transport should run until both directions can be encoded.
-    pub(crate) fn plan_change(&self, setting: Setting) -> Result<SettingPlan, String> {
+    pub fn plan_change(&self, setting: Setting) -> Result<SettingPlan, String> {
         let mut target = match setting {
             Setting::Backlight(enabled) => self.with_backlight(enabled),
             _ => self.clone(),
@@ -210,7 +210,7 @@ impl Settings {
 /// Four BIT7 read requests in the same order as `Settings::decode` arguments.
 pub fn read_requests() -> [[u8; REPORT_LEN]; 4] {
     [DEBOUNCE_READ, AUTO_OS_READ, SLEEP_READ, OPTIONS_READ]
-        .map(|opcode| byakko_protocol::nia87::protocol::read_request(opcode, 0, 0))
+        .map(|opcode| crate::nia87::protocol::read_request(opcode, 0, 0))
 }
 
 /// Encode validated Nia87 scalar settings. Sleep writes use the current

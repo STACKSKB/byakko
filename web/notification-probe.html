@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Byakko onboard notification probe</title>
+<style>body{font:16px system-ui;max-width:1000px;margin:40px auto;padding:20px}button{padding:12px;margin-right:12px}pre{white-space:pre-wrap;background:#eee;padding:16px}</style>
+<h1>Onboard notification probe</h1>
+<p>This diagnostic opens the selected keyboard's notification interface and records input reports. It sends no keyboard commands.</p>
+<button id="choose">Choose keyboard for notification probe</button><button id="close" disabled>Close listener</button>
+<p id="status">Disconnected</p><pre id="evidence">No reports captured.</pre>
+<script type="module" src="./notification-probe.mjs"></script></html>
