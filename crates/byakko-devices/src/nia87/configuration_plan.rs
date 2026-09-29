@@ -2,11 +2,11 @@
 //! A plan contains intent only; constructing one never contacts a device.
 
 use crate::nia87::{
-    actions, board,
     configuration::{self, Configuration},
-    macros, profiles,
+    profiles,
     settings::{self, Setting},
 };
+use byakko_protocol::nia87::{actions, board, macros};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeSummary {
@@ -183,7 +183,8 @@ pub fn plan(current: &Configuration, target: &Configuration) -> Result<ChangeSum
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nia87::{device::Snapshot, settings::Settings};
+    use crate::nia87::settings::Settings;
+    use byakko_protocol::nia87::adapter::Snapshot;
     use byakko_protocol::nia87::lighting::{Lighting, LightingSetting};
 
     fn fixture() -> Configuration {

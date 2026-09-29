@@ -1,8 +1,8 @@
 //! Read-only research probe for the official configurator's macro slot boundary.
 //! This does not advertise slot 50 or send a macro setter.
 mod support;
-use byakko_devices::{hid::HidDevice, nia87::device, rongyuan::yc500::macro_program};
-use byakko_protocol::nia87::protocol;
+use byakko_devices::{hid::HidDevice, nia87::device};
+use byakko_protocol::{nia87::protocol, rongyuan::yc500::macro_program};
 use std::{fs::OpenOptions, time::Duration};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Byakko browser interaction tests</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside style="padding:12px;background:#452f12;color:#fff">
+    Simulated keyboard — this page cannot access physical HID devices.
+    <button id="inspect">Inspect test effects and durable backups</button>
+    <pre id="evidence" style="max-height:200px;overflow:auto"></pre>
+  </aside>
+  <main id="app" aria-label="Byakko keyboard configurator"></main>
+  <script type="module" src="test-page.mjs"></script>
+</body>
+</html>

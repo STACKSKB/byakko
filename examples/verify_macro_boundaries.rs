@@ -1,9 +1,7 @@
 //! Reversible capacity/page/slot checks, restricted to empty unbound macros.
 mod support;
-use byakko_devices::nia87::{
-    device,
-    macros::{self, Macro, MacroEvent},
-};
+use byakko_devices::nia87::device;
+use byakko_protocol::nia87::macros::{self, Macro, MacroEvent};
 
 fn main() -> device::Result<()> {
     let directory = std::path::Path::new("Research/captures/backups");

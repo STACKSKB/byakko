@@ -66,7 +66,7 @@ pub(super) fn apply_picture_with(
             "Invalid picture size or reserved-slot modification",
         ));
     }
-    let physical_slots = crate::nia87::board::physical_slot_mask();
+    let physical_slots = byakko_protocol::nia87::board::physical_slot_mask();
     if (0..126).any(|slot| expected[slot] != desired[slot] && !physical_slots[slot]) {
         return Err(not_attempted(
             "Picture edit changes an unmapped matrix slot",
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn unmapped_picture_slot_is_rejected_before_device_access() {
-        let physical = crate::nia87::board::physical_slot_mask();
+        let physical = byakko_protocol::nia87::board::physical_slot_mask();
         let unmapped = (0..126).find(|&slot| !physical[slot]).unwrap();
         let expected = vec![[0; 3]; 128];
         let mut desired = expected.clone();

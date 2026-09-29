@@ -300,6 +300,7 @@ dependencies = [
 name = "byakko-protocol"
 version = "0.1.0"
 dependencies = [
+ "byakko-core",
  "serde",
  "serde_json",
 ]
@@ -308,7 +309,9 @@ dependencies = [
 name = "byakko-web"
 version = "0.1.0"
 dependencies = [
+ "byakko-core",
  "byakko-protocol",
+ "serde",
  "serde_json",
  "wasm-bindgen",
 ]

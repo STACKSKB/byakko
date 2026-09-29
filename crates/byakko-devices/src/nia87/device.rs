@@ -14,7 +14,6 @@ use crate::hid::HidDevice;
 use apply_error::ApplyResult;
 #[cfg(test)]
 use apply_error::keymap_apply_error;
-use serde::{Deserialize, Serialize};
 
 pub use access::Access;
 use access::Selection;
@@ -31,14 +30,7 @@ pub use transport::{
 use transport::{FeatureSetter, Session, read_payload, transaction_lock};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Snapshot {
-    pub format_version: u32,
-    pub firmware: u16,
-    pub profile: u8,
-    pub base: Vec<[u8; 4]>,
-    pub function: Vec<[u8; 4]>,
-}
+use byakko_protocol::nia87::adapter::Snapshot;
 
 use keymaps::{snapshot_on_device, write_binding};
 #[cfg(test)]

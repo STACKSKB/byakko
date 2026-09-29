@@ -1,6 +1,7 @@
 //! Bounded portable macro documents and legacy Nia87 import.
-use crate::nia87::{macro_adapter, macro_file as legacy, macros as native};
+use crate::nia87::macro_file as legacy;
 use byakko_core::model::macros::{Content, Document};
+use byakko_protocol::nia87::{macro_adapter, macros as native};
 use std::path::Path;
 
 pub const MAX_FILE_BYTES: usize = 64 * 1024;

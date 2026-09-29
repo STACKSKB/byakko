@@ -28,7 +28,7 @@ pub(super) fn read_macro_on_device(device: &HidDevice, slot: u8) -> Result<Vec<u
 }
 
 pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
-    for (page, report) in crate::nia87::macros::write_reports(slot, bytes)?
+    for (page, report) in byakko_protocol::nia87::macros::write_reports(slot, bytes)?
         .into_iter()
         .enumerate()
     {
@@ -46,7 +46,7 @@ pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> R
 pub fn apply_macro(
     slot: u8,
     expected: &[u8],
-    new_macro: &crate::nia87::macros::Macro,
+    new_macro: &byakko_protocol::nia87::macros::Macro,
     backup_dir: &std::path::Path,
 ) -> ApplyResult<Vec<u8>> {
     apply_macro_with(Selection::Unique, slot, expected, new_macro, backup_dir)
@@ -56,23 +56,23 @@ pub(super) fn apply_macro_with(
     selection: Selection<'_>,
     slot: u8,
     expected: &[u8],
-    new_macro: &crate::nia87::macros::Macro,
+    new_macro: &byakko_protocol::nia87::macros::Macro,
     backup_dir: &std::path::Path,
 ) -> ApplyResult<Vec<u8>> {
-    let before =
-        crate::nia87::macros::ValidatedBeforeImage::validate(expected).map_err(not_attempted)?;
+    let before = byakko_protocol::nia87::macros::ValidatedBeforeImage::validate(expected)
+        .map_err(not_attempted)?;
     apply_macro_validated_with(selection, slot, &before, new_macro, backup_dir)
 }
 
 pub(super) fn apply_macro_validated_with(
     selection: Selection<'_>,
     slot: u8,
-    before: &crate::nia87::macros::ValidatedBeforeImage,
-    new_macro: &crate::nia87::macros::Macro,
+    before: &byakko_protocol::nia87::macros::ValidatedBeforeImage,
+    new_macro: &byakko_protocol::nia87::macros::Macro,
     backup_dir: &std::path::Path,
 ) -> ApplyResult<Vec<u8>> {
     let _lock = transaction_lock().map_err(not_attempted)?;
-    let target = crate::nia87::macros::encode(new_macro).map_err(not_attempted)?;
+    let target = byakko_protocol::nia87::macros::encode(new_macro).map_err(not_attempted)?;
     let expected = before.as_bytes();
     if target == expected {
         return Ok(target);

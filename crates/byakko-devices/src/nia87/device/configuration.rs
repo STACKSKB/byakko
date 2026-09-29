@@ -189,7 +189,7 @@ fn recover_configuration(
                 snapshot.base.as_slice()
             }
         });
-        let slots = match crate::nia87::recovery_keymaps::slots_to_restore(
+        let slots = match byakko_protocol::nia87::recovery_keymaps::slots_to_restore(
             observed_map,
             attempted_map,
             wanted,

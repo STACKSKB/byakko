@@ -1,5 +1,10 @@
-//! Optional browser diagnostic boundary. No native effects or setter exports.
-//! Report IDs and asynchronous transport belong to the WebHID adapter.
+//! Optional browser boundary. Report IDs and asynchronous transport belong to
+//! the WebHID adapter; editor and workflow policy belong to byakko-core.
+
+mod executor;
+mod session;
+pub use executor::BrowserOperation;
+pub use session::BrowserSession;
 
 use byakko_protocol::nia87::{lighting, protocol};
 use serde_json::{Value, json};

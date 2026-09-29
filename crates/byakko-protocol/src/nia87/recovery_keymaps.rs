@@ -1,6 +1,6 @@
 //! Pure selection of matrix slots that need restoration after a keymap write.
 
-pub(crate) fn slots_to_restore(
+pub fn slots_to_restore(
     observed: Option<&[[u8; 4]]>,
     attempted: &[[u8; 4]],
     original: &[[u8; 4]],

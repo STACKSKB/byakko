@@ -1,10 +1,11 @@
 //! Device-neutral projection and one-field apply for Nia87 scalar settings.
-use super::{adapter, device, settings as native};
+use super::{device, settings as native};
 use byakko_core::validation;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
     model::settings::{Capabilities, Content, Edit, Field, Kind, Snapshot, Value},
 };
+use byakko_protocol::nia87::adapter;
 use std::path::Path;
 
 pub fn capabilities() -> Capabilities {

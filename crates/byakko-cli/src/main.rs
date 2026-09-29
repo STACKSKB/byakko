@@ -145,9 +145,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => None,
     };
     let memory = demo.then(byakko_devices::memory::demo).transpose()?;
-    let descriptor = memory
-        .as_ref()
-        .map_or_else(nia87::descriptor, |device| device.descriptor().clone());
+    let descriptor = if let Some(device) = memory.as_ref() {
+        device.descriptor().clone()
+    } else {
+        nia87::application::session()?.descriptor().clone()
+    };
     if command == Command::Describe {
         println!("{}", serde_json::to_string_pretty(&descriptor)?);
         return Ok(());

@@ -1,5 +1,5 @@
 //! One complete yc500-shaped macro read over a caller-owned report exchange.
-use super::macro_reports;
+use byakko_protocol::rongyuan::yc500::macro_reports;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 

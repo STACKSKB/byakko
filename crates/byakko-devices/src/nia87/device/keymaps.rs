@@ -102,7 +102,7 @@ pub(super) fn apply_keymaps_with(
     if expected.base[126..] != base[126..] || expected.function[126..] != function[126..] {
         return Err(not_attempted("Cannot modify reserved padding slots"));
     }
-    crate::nia87::keymap_policy::validate_changes(
+    byakko_protocol::nia87::keymap_policy::validate_changes(
         &expected.base,
         &expected.function,
         base,
@@ -184,7 +184,7 @@ pub(super) fn apply_keymaps_with(
                 });
                 // Without a trustworthy read, restore only planned changes.
                 // Complete readback below must still prove restoration.
-                let slots = crate::nia87::recovery_keymaps::slots_to_restore(
+                let slots = byakko_protocol::nia87::recovery_keymaps::slots_to_restore(
                     observed_map,
                     attempted,
                     original,

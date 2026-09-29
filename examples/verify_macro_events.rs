@@ -1,9 +1,7 @@
 //! Explicit hardware storage check. No binding or playback; restore an empty slot.
 mod support;
-use byakko_devices::nia87::{
-    device,
-    macros::{self, Macro, MacroEvent},
-};
+use byakko_devices::nia87::device;
+use byakko_protocol::nia87::macros::{self, Macro, MacroEvent};
 
 fn fixture() -> Macro {
     let mut events = Vec::new();

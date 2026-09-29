@@ -1,10 +1,10 @@
 //! Replay the independently captured Fn Pause transaction and always restore.
 mod support;
 use byakko_devices::nia87::device::{self, Result};
-use byakko_protocol::nia87::protocol;
+use byakko_protocol::nia87::{adapter::Snapshot, protocol};
 use std::{fs::OpenOptions, time::Duration};
 
-fn save(name: &str, value: &device::Snapshot) -> Result<()> {
+fn save(name: &str, value: &Snapshot) -> Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(name)?;
     serde_json::to_writer_pretty(&mut file, value)?;
     file.sync_all()?;

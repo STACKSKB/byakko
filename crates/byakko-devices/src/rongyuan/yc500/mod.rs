@@ -1,4 +1,2 @@
-//! Matrix operations for the yc500-shaped command family.
+//! Native yc500-shaped I/O. Codecs live in byakko-protocol.
 pub mod macro_io;
-pub mod macro_program;
-pub mod macro_reports;

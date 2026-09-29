@@ -166,7 +166,7 @@ fn compare(group: &[CapturedPage], assume_zero: bool) -> String {
         let len = PAGE_LEN.min(256 - start);
         logical[start..start + len].copy_from_slice(&page.payload[8..8 + len]);
     }
-    match byakko_devices::nia87::macros::decode(&logical) {
+    match byakko_protocol::nia87::macros::decode(&logical) {
         Ok(decoded) => lines.push(format!(
             "decoded under zero-padding assumption: {} event(s), repeat {}",
             decoded.events.len(),
@@ -179,7 +179,7 @@ fn compare(group: &[CapturedPage], assume_zero: bool) -> String {
             return lines.join("\n");
         }
     }
-    match byakko_devices::nia87::macros::write_reports(group[0].slot, &logical) {
+    match byakko_protocol::nia87::macros::write_reports(group[0].slot, &logical) {
         Ok(native) => {
             let match_data = group
                 .iter()

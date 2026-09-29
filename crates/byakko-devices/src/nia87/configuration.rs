@@ -16,7 +16,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::nia87::{device::Snapshot, settings::Settings};
+use crate::nia87::settings::Settings;
+use byakko_protocol::nia87::adapter::Snapshot;
 use byakko_protocol::nia87::lighting::Lighting;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;

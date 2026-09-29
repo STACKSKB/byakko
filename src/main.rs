@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
-use byakko_devices::nia87::{configuration, configuration_plan, device, macros, settings};
+use byakko_devices::nia87::{configuration, configuration_plan, device, settings};
+use byakko_protocol::nia87::{adapter::Snapshot, macros};
 
 fn run() -> device::Result<()> {
     let args: Vec<_> = std::env::args().skip(1).collect();
@@ -153,7 +154,7 @@ fn run() -> device::Result<()> {
         return Ok(());
     }
     if args.len() == 2 && args[0] == "restore-keymaps" {
-        let saved: device::Snapshot = serde_json::from_reader(std::fs::File::open(&args[1])?)?;
+        let saved: Snapshot = serde_json::from_reader(std::fs::File::open(&args[1])?)?;
         let access = selected_access()?;
         let current = access.snapshot()?;
         let restored = access.apply_keymaps(

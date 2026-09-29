@@ -2,25 +2,19 @@
 pub mod adapter;
 pub use adapter::*;
 
-pub mod actions;
 pub mod application;
 pub mod archive_adapter;
-pub mod board;
 pub mod configuration;
 pub mod configuration_plan;
 pub mod device;
 mod host_adapter;
 pub mod host_lighting;
-mod keymap_policy;
-pub mod layout;
 pub mod lighting_adapter;
 pub mod macro_adapter;
 pub mod macro_file;
-pub mod macros;
 pub mod notifications;
 pub mod picture_adapter;
 pub mod profiles;
-mod recovery_keymaps;
 mod recovery_verification;
 pub mod settings;
 pub mod settings_adapter;

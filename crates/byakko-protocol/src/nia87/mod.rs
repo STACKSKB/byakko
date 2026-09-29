@@ -1,2 +1,12 @@
+pub mod actions;
+pub mod adapter;
+pub mod board;
+pub mod keymap_policy;
+pub mod layout;
 pub mod lighting;
+pub mod lighting_adapter;
+pub mod macro_adapter;
+pub mod macros;
+pub mod picture_adapter;
 pub mod protocol;
+pub mod recovery_keymaps;

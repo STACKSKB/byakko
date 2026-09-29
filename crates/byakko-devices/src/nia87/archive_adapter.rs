@@ -147,7 +147,8 @@ fn add_count(changes: &mut Vec<SectionChange>, id: &str, label: &str, count: usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nia87::{configuration::Configuration, device::Snapshot, settings::Settings};
+    use crate::nia87::{configuration::Configuration, settings::Settings};
+    use byakko_protocol::nia87::adapter::Snapshot;
     use byakko_protocol::nia87::lighting::Lighting;
 
     fn selected_access() -> Access {

@@ -9,7 +9,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::nia87::{device::Snapshot, keymap_policy};
+use byakko_protocol::nia87::adapter::Snapshot;
+use byakko_protocol::nia87::keymap_policy;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 

@@ -1,5 +1,5 @@
 //! Bounded, versioned native macro JSON file format. No device I/O.
-use crate::nia87::macros::{self, Macro};
+use byakko_protocol::nia87::macros::{self, Macro};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
@@ -80,7 +80,7 @@ pub fn save_new(path: &Path, file: &MacroFile) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nia87::macros::MacroEvent;
+    use byakko_protocol::nia87::macros::MacroEvent;
 
     fn file() -> MacroFile {
         MacroFile {

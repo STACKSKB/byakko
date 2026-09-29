@@ -68,7 +68,7 @@ impl Access {
         &self,
         slot: u8,
         expected: &[u8],
-        new_macro: &crate::nia87::macros::Macro,
+        new_macro: &byakko_protocol::nia87::macros::Macro,
         backup_dir: &std::path::Path,
     ) -> ApplyResult<Vec<u8>> {
         macros::apply_macro_with(self.selection(), slot, expected, new_macro, backup_dir)
@@ -78,8 +78,8 @@ impl Access {
     pub fn apply_macro_validated(
         &self,
         slot: u8,
-        expected: &crate::nia87::macros::ValidatedBeforeImage,
-        new_macro: &crate::nia87::macros::Macro,
+        expected: &byakko_protocol::nia87::macros::ValidatedBeforeImage,
+        new_macro: &byakko_protocol::nia87::macros::Macro,
         backup_dir: &std::path::Path,
     ) -> ApplyResult<Vec<u8>> {
         macros::apply_macro_validated_with(self.selection(), slot, expected, new_macro, backup_dir)
