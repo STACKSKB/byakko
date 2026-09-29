@@ -57,6 +57,11 @@ records. It is not verification of rewritten code.
   client may use WebAssembly or a separate service adapter, but this does not
   authorize a web stack now. Browser HID permission and interface limits must
   be represented honestly.
+  The user's 2026-09-29 request authorizes the optional WebHID/browser client;
+  it does not add a web stack to the native product. Shared pure protocol codecs
+  now live in `byakko-protocol` as needed by both transports. The first browser
+  checkpoint is read-only; shared core editors and workflow semantics remain
+  required for the eventual configurator. See [browser integration](webhid-browser.md).
 - Use one owner for each device baseline and draft. Derive dirty state and
   rendered projections instead of synchronizing duplicate mutable copies.
   Model operation states and outcomes with enums and exhaustive matches;

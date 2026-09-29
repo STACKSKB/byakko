@@ -219,7 +219,7 @@ fn recover_configuration(
     for slot in 0..126 {
         if attempted.picture[slot] != original.picture[slot] {
             let result = (|| -> Result<()> {
-                let report = crate::nia87::lighting::per_key_color_report(
+                let report = byakko_protocol::nia87::lighting::per_key_color_report(
                     0,
                     slot as u8,
                     original.picture[slot],
@@ -332,7 +332,7 @@ fn write_configuration_changes(
     if plan.picture_keys > 0 {
         for slot in 0..126 {
             if before.picture[slot] != target.picture[slot] {
-                let report = crate::nia87::lighting::per_key_color_report(
+                let report = byakko_protocol::nia87::lighting::per_key_color_report(
                     0,
                     slot as u8,
                     target.picture[slot],

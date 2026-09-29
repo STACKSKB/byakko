@@ -1,5 +1,5 @@
 //! Conservative projection of Nia87 global lighting into shared values.
-use crate::nia87::{device, lighting as native};
+use crate::nia87::device;
 use byakko_core::validation;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
@@ -8,6 +8,7 @@ use byakko_core::{
         HostParameters, HostSource, Setting, Snapshot,
     },
 };
+use byakko_protocol::nia87::lighting as native;
 use std::path::Path;
 
 pub const BACKEND_ID: &str = "nia87";

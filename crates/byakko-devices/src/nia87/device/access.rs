@@ -46,7 +46,7 @@ impl Access {
         picture::read_picture_with_context(self.selection())
     }
 
-    pub fn read_lighting(&self) -> Result<crate::nia87::lighting::Lighting> {
+    pub fn read_lighting(&self) -> Result<byakko_protocol::nia87::lighting::Lighting> {
         lighting::read_lighting_with(self.selection())
     }
 
@@ -103,17 +103,17 @@ impl Access {
 
     pub fn apply_lighting(
         &self,
-        expected: &crate::nia87::lighting::Lighting,
-        setting: &crate::nia87::lighting::LightingSetting,
+        expected: &byakko_protocol::nia87::lighting::Lighting,
+        setting: &byakko_protocol::nia87::lighting::LightingSetting,
         backup_dir: &std::path::Path,
-    ) -> ApplyResult<crate::nia87::lighting::Lighting> {
+    ) -> ApplyResult<byakko_protocol::nia87::lighting::Lighting> {
         lighting::apply_lighting_with(self.selection(), expected, setting, backup_dir)
     }
 
     pub fn start_host_lighting(
         &self,
-        expected: &crate::nia87::lighting::Lighting,
-        setting: &crate::nia87::lighting::LightingSetting,
+        expected: &byakko_protocol::nia87::lighting::Lighting,
+        setting: &byakko_protocol::nia87::lighting::LightingSetting,
         backup_dir: &std::path::Path,
     ) -> ApplyResult<lighting::HostLightingSession> {
         lighting::HostLightingSession::start_mode_with(

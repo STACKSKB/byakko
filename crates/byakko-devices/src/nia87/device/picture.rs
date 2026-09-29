@@ -39,7 +39,9 @@ fn read_picture_pages(
     let pages = (0..6)
         .map(|page| exchange(0x8c, 0, page))
         .collect::<Result<Vec<_>>>()?;
-    Ok(crate::nia87::lighting::user_picture_from_pages(&pages)?)
+    Ok(byakko_protocol::nia87::lighting::user_picture_from_pages(
+        &pages,
+    )?)
 }
 /// Submit a complete custom picture from a cached before-image.
 /// A successful return means all seven USB reports were accepted, not that an
@@ -73,8 +75,8 @@ pub(super) fn apply_picture_with(
     if !(0..126).any(|slot| expected[slot] != desired[slot]) {
         return Ok(expected.to_vec());
     }
-    let reports =
-        crate::nia87::lighting::user_picture_write_reports(desired).map_err(not_attempted)?;
+    let reports = byakko_protocol::nia87::lighting::user_picture_write_reports(desired)
+        .map_err(not_attempted)?;
     let backup = save_json_backup(
         backup_dir,
         "picture-before",
@@ -127,7 +129,8 @@ mod tests {
     fn picture_upload_sends_seven_pages_and_stops_on_transport_failure() {
         let mut colors = vec![[0; 3]; 128];
         colors[28] = [215, 0, 0];
-        let reports = crate::nia87::lighting::user_picture_write_reports(&colors).unwrap();
+        let reports =
+            byakko_protocol::nia87::lighting::user_picture_write_reports(&colors).unwrap();
         let backup = std::path::Path::new("picture-before.json");
         let mut sent = Vec::new();
         let schedules = std::cell::Cell::new(0);
@@ -211,28 +214,28 @@ mod tests {
     #[test]
     fn picture_context_tracks_effect_and_option_but_not_brightness() {
         let mut reply = [0u8; 64];
-        reply[0] = crate::nia87::lighting::LED_READ_COMMAND;
+        reply[0] = byakko_protocol::nia87::lighting::LED_READ_COMMAND;
         reply[1] = 13;
         reply[4] = 0x10;
-        let option_two = crate::nia87::lighting::Lighting::decode(&reply).unwrap();
+        let option_two = byakko_protocol::nia87::lighting::Lighting::decode(&reply).unwrap();
         assert_eq!(option_two.picture_context(), [13, 1]);
         reply[3] = 2;
         assert_eq!(
-            crate::nia87::lighting::Lighting::decode(&reply)
+            byakko_protocol::nia87::lighting::Lighting::decode(&reply)
                 .unwrap()
                 .picture_context(),
             [13, 1]
         );
         reply[4] = 0x20;
         assert_eq!(
-            crate::nia87::lighting::Lighting::decode(&reply)
+            byakko_protocol::nia87::lighting::Lighting::decode(&reply)
                 .unwrap()
                 .picture_context(),
             [13, 2]
         );
         reply[1] = 1;
         assert_eq!(
-            crate::nia87::lighting::Lighting::decode(&reply)
+            byakko_protocol::nia87::lighting::Lighting::decode(&reply)
                 .unwrap()
                 .picture_context(),
             [1, 2]

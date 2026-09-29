@@ -183,11 +183,8 @@ pub fn plan(current: &Configuration, target: &Configuration) -> Result<ChangeSum
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nia87::{
-        device::Snapshot,
-        lighting::{Lighting, LightingSetting},
-        settings::Settings,
-    };
+    use crate::nia87::{device::Snapshot, settings::Settings};
+    use byakko_protocol::nia87::lighting::{Lighting, LightingSetting};
 
     fn fixture() -> Configuration {
         let mut replies = [[0u8; 64]; 4];
@@ -205,8 +202,8 @@ mod tests {
             rgb: Some([1, 2, 3]),
             dazzle: false,
         };
-        let mut raw = crate::nia87::lighting::write_report(&lighting_setting).unwrap();
-        raw[0] = crate::nia87::lighting::LED_READ_COMMAND;
+        let mut raw = byakko_protocol::nia87::lighting::write_report(&lighting_setting).unwrap();
+        raw[0] = byakko_protocol::nia87::lighting::LED_READ_COMMAND;
         Configuration {
             keymaps: Snapshot {
                 format_version: 1,

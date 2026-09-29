@@ -1,6 +1,6 @@
 //! Page-report construction for the observed yc500-shaped simple-macro store.
 use super::macro_program::decode;
-use crate::rongyuan::report::{REPORT_LEN, set_bit7_checksum};
+use byakko_protocol::rongyuan::report::{REPORT_LEN, set_bit7_checksum};
 
 const PAGE_DATA_LEN: usize = 56;
 /// Observed writable extent: a 26-byte final page preserved neighboring picture

@@ -65,7 +65,7 @@ pub(super) fn write_binding(
         return Err("The last two configuration slots are read-only padding".into());
     }
     let mut payload = [0u8; 65];
-    payload[1..].copy_from_slice(&crate::nia87::protocol::single_key_report(
+    payload[1..].copy_from_slice(&byakko_protocol::nia87::protocol::single_key_report(
         function, index, slot, binding,
     )?);
     device.send_setter(&payload)?;

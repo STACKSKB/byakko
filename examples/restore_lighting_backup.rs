@@ -1,6 +1,7 @@
 //! Restore a known lighting backup through the normal verified transaction.
 mod support;
-use byakko_devices::nia87::{device, lighting::Lighting};
+use byakko_devices::nia87::device;
+use byakko_protocol::nia87::lighting::Lighting;
 
 fn main() -> device::Result<()> {
     let path = std::env::args()

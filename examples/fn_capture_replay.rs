@@ -1,7 +1,7 @@
 //! Replay the independently captured Fn Pause transaction and always restore.
 mod support;
 use byakko_devices::nia87::device::{self, Result};
-use byakko_devices::nia87::protocol;
+use byakko_protocol::nia87::protocol;
 use std::{fs::OpenOptions, time::Duration};
 
 fn save(name: &str, value: &device::Snapshot) -> Result<()> {

@@ -1,6 +1,7 @@
 //! Reversible storage checks for onboard lighting parameter families.
 mod support;
-use byakko_devices::nia87::{device, lighting::LightingSetting};
+use byakko_devices::nia87::device;
+use byakko_protocol::nia87::lighting::LightingSetting;
 
 fn main() -> device::Result<()> {
     let access = support::access()?;
@@ -65,7 +66,8 @@ fn main() -> device::Result<()> {
     if std::env::args().any(|arg| arg == "remaining") {
         cases.clear();
         for id in [2, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 17, 18, 19] {
-            let effect = byakko_devices::nia87::lighting::effect_by_id(id).expect("catalog effect");
+            let effect =
+                byakko_protocol::nia87::lighting::effect_by_id(id).expect("catalog effect");
             cases.push(LightingSetting {
                 effect_id: id,
                 value: effect.value.then_some(2),

@@ -4,13 +4,13 @@ use super::*;
 use byakko_core::contract::{ApplyFailure, Recovery};
 
 /// Read one raw-preserving global-lighting response.
-pub fn read_lighting() -> Result<crate::nia87::lighting::Lighting> {
+pub fn read_lighting() -> Result<byakko_protocol::nia87::lighting::Lighting> {
     read_lighting_with(Selection::Unique)
 }
 
 pub(super) fn read_lighting_with(
     selection: Selection<'_>,
-) -> Result<crate::nia87::lighting::Lighting> {
+) -> Result<byakko_protocol::nia87::lighting::Lighting> {
     let session = Session::open_for(selection)?;
     read_lighting_on_device(session.device())
 }
@@ -19,8 +19,8 @@ pub(super) fn read_lighting_with(
 /// restoration. Explicit finish reports restoration errors to the caller.
 pub struct HostLightingSession {
     session: Session,
-    saved: crate::nia87::lighting::Lighting,
-    active: crate::nia87::lighting::Lighting,
+    saved: byakko_protocol::nia87::lighting::Lighting,
+    active: byakko_protocol::nia87::lighting::Lighting,
     backups: std::path::PathBuf,
     finished: bool,
 }
@@ -34,8 +34,8 @@ enum CompletionPolicy {
 impl HostLightingSession {
     pub(super) fn start_mode_with(
         selection: Selection<'_>,
-        expected: &crate::nia87::lighting::Lighting,
-        desired: &crate::nia87::lighting::LightingSetting,
+        expected: &byakko_protocol::nia87::lighting::Lighting,
+        desired: &byakko_protocol::nia87::lighting::LightingSetting,
         backups: &std::path::Path,
     ) -> ApplyResult<Self> {
         if !matches!(desired.effect_id, 20..=22) {
@@ -60,12 +60,12 @@ impl HostLightingSession {
 
     pub fn update_parameters(
         &mut self,
-        setting: &crate::nia87::lighting::LightingSetting,
+        setting: &byakko_protocol::nia87::lighting::LightingSetting,
     ) -> Result<()> {
         if setting.effect_id != self.active.effect_id() || !matches!(setting.effect_id, 20 | 22) {
             return Err("Parameter update must retain the active music mode".into());
         }
-        let report = crate::nia87::lighting::write_report(setting)?;
+        let report = byakko_protocol::nia87::lighting::write_report(setting)?;
         let submitted = submitted_lighting(&self.active, &report)?;
         write_lighting_report(self.session.device(), &report)?;
         self.active = submitted;
@@ -91,7 +91,7 @@ impl HostLightingSession {
         Ok(())
     }
 
-    fn restore(&mut self) -> ApplyResult<crate::nia87::lighting::Lighting> {
+    fn restore(&mut self) -> ApplyResult<byakko_protocol::nia87::lighting::Lighting> {
         let setting = self
             .saved
             .recognized_setting()
@@ -107,7 +107,7 @@ impl HostLightingSession {
         Ok(restored)
     }
 
-    pub fn finish(mut self) -> ApplyResult<crate::nia87::lighting::Lighting> {
+    pub fn finish(mut self) -> ApplyResult<byakko_protocol::nia87::lighting::Lighting> {
         let result = self.restore();
         // Do not silently repeat a failed write during Drop; report it to the UI.
         self.finished = true;
@@ -125,20 +125,29 @@ impl Drop for HostLightingSession {
 
 pub(super) fn read_lighting_on_device(
     device: &HidDevice,
-) -> Result<crate::nia87::lighting::Lighting> {
-    let response = read_payload(device, crate::nia87::lighting::LED_READ_COMMAND, 0, 0)?;
-    if response[0] != crate::nia87::lighting::LED_READ_COMMAND {
+) -> Result<byakko_protocol::nia87::lighting::Lighting> {
+    let response = read_payload(
+        device,
+        byakko_protocol::nia87::lighting::LED_READ_COMMAND,
+        0,
+        0,
+    )?;
+    if response[0] != byakko_protocol::nia87::lighting::LED_READ_COMMAND {
         return Err("Lighting read returned an unrelated opcode".into());
     }
-    Ok(crate::nia87::lighting::Lighting::decode(&response)?)
+    Ok(byakko_protocol::nia87::lighting::Lighting::decode(
+        &response,
+    )?)
 }
 
 /// Rebuild only the global setting bytes exposed by PB's LED writer. The
 /// unknown response tail remains in the backup, but is not sent as an
 /// undocumented command payload during restoration.
-pub(super) fn lighting_restore_report(original: &crate::nia87::lighting::Lighting) -> [u8; 64] {
+pub(super) fn lighting_restore_report(
+    original: &byakko_protocol::nia87::lighting::Lighting,
+) -> [u8; 64] {
     let mut report = [0u8; 64];
-    report[0] = crate::nia87::lighting::LED_WRITE_COMMAND;
+    report[0] = byakko_protocol::nia87::lighting::LED_WRITE_COMMAND;
     report[1..8].copy_from_slice(&original.raw()[1..8]);
     let sum = report[..8]
         .iter()
@@ -156,9 +165,9 @@ pub(super) fn write_lighting_report(device: &HidDevice, report: &[u8; 64]) -> Re
 }
 
 pub(super) fn lighting_matches_report(
-    actual: &crate::nia87::lighting::Lighting,
+    actual: &byakko_protocol::nia87::lighting::Lighting,
     report: &[u8; 64],
-    original: &crate::nia87::lighting::Lighting,
+    original: &byakko_protocol::nia87::lighting::Lighting,
 ) -> bool {
     actual.raw()[1..8] == report[1..8] && actual.raw()[9..] == original.raw()[9..]
 }
@@ -167,19 +176,19 @@ pub(super) fn lighting_matches_report(
 /// return means the transport accepted the setter, not that a getter verified
 /// firmware persistence. Host start and restore use the verified path below.
 pub fn apply_lighting(
-    expected: &crate::nia87::lighting::Lighting,
-    setting: &crate::nia87::lighting::LightingSetting,
+    expected: &byakko_protocol::nia87::lighting::Lighting,
+    setting: &byakko_protocol::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
-) -> ApplyResult<crate::nia87::lighting::Lighting> {
+) -> ApplyResult<byakko_protocol::nia87::lighting::Lighting> {
     apply_lighting_with(Selection::Unique, expected, setting, backup_dir)
 }
 
 pub(super) fn apply_lighting_with(
     selection: Selection<'_>,
-    expected: &crate::nia87::lighting::Lighting,
-    setting: &crate::nia87::lighting::LightingSetting,
+    expected: &byakko_protocol::nia87::lighting::Lighting,
+    setting: &byakko_protocol::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
-) -> ApplyResult<crate::nia87::lighting::Lighting> {
+) -> ApplyResult<byakko_protocol::nia87::lighting::Lighting> {
     let session = Session::open_for(selection).map_err(not_attempted)?;
     apply_lighting_on_device(
         session.device(),
@@ -192,19 +201,19 @@ pub(super) fn apply_lighting_with(
 
 fn apply_lighting_on_device(
     device: &HidDevice,
-    expected: &crate::nia87::lighting::Lighting,
-    setting: &crate::nia87::lighting::LightingSetting,
+    expected: &byakko_protocol::nia87::lighting::Lighting,
+    setting: &byakko_protocol::nia87::lighting::LightingSetting,
     backup_dir: &std::path::Path,
     policy: CompletionPolicy,
-) -> ApplyResult<crate::nia87::lighting::Lighting> {
-    if expected.raw()[0] != crate::nia87::lighting::LED_READ_COMMAND
+) -> ApplyResult<byakko_protocol::nia87::lighting::Lighting> {
+    if expected.raw()[0] != byakko_protocol::nia87::lighting::LED_READ_COMMAND
         || expected.recognized_setting().is_none()
     {
         return Err(not_attempted(
             "Lighting baseline is not a recognized Nia87 LED response",
         ));
     }
-    let target = crate::nia87::lighting::write_report(setting).map_err(not_attempted)?;
+    let target = byakko_protocol::nia87::lighting::write_report(setting).map_err(not_attempted)?;
     if lighting_matches_report(expected, &target, expected) {
         return Ok(expected.clone());
     }
@@ -237,14 +246,14 @@ fn apply_lighting_on_device(
         &backup,
         VerifiedStep {
             write: || write_lighting_report(device, &target),
-            matches: |actual: &crate::nia87::lighting::Lighting| {
+            matches: |actual: &byakko_protocol::nia87::lighting::Lighting| {
                 lighting_matches_report(actual, &target, expected)
             },
             mismatch: "Lighting readback differs in setting or reserved response bytes",
         },
         VerifiedStep {
             write: || write_lighting_report(device, &restore_report),
-            matches: |actual: &crate::nia87::lighting::Lighting| {
+            matches: |actual: &byakko_protocol::nia87::lighting::Lighting| {
                 lighting_matches_report(actual, &restore_report, expected)
             },
             mismatch: "Lighting restoration could not be verified",
@@ -255,12 +264,14 @@ fn apply_lighting_on_device(
 }
 
 fn submitted_lighting(
-    expected: &crate::nia87::lighting::Lighting,
+    expected: &byakko_protocol::nia87::lighting::Lighting,
     report: &[u8; 64],
-) -> Result<crate::nia87::lighting::Lighting> {
+) -> Result<byakko_protocol::nia87::lighting::Lighting> {
     let mut submitted = expected.raw().to_vec();
     submitted[1..8].copy_from_slice(&report[1..8]);
-    Ok(crate::nia87::lighting::Lighting::decode(&submitted)?)
+    Ok(byakko_protocol::nia87::lighting::Lighting::decode(
+        &submitted,
+    )?)
 }
 
 fn submit_lighting_report(
@@ -311,7 +322,7 @@ mod submission_tests {
     fn submitted_revision_changes_only_known_setting_bytes() {
         let mut original = [0xa5; 64];
         original[..8].copy_from_slice(&[0x87, 1, 4, 4, 7, 1, 2, 3]);
-        let expected = crate::nia87::lighting::Lighting::decode(&original).unwrap();
+        let expected = byakko_protocol::nia87::lighting::Lighting::decode(&original).unwrap();
         let mut report = [0; 64];
         report[..8].copy_from_slice(&[0x07, 2, 3, 2, 8, 9, 8, 7]);
         let submitted = submitted_lighting(&expected, &report).unwrap();

@@ -2,10 +2,10 @@
 mod support;
 use byakko_devices::nia87::{
     configuration, device,
-    lighting::Lighting,
     macros::{self, Macro, MacroEvent},
     settings::Settings,
 };
+use byakko_protocol::nia87::lighting::Lighting;
 
 fn main() -> device::Result<()> {
     let fault_opcode = match std::env::args().nth(2).as_deref() {

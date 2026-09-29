@@ -16,7 +16,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::nia87::{device::Snapshot, lighting::Lighting, settings::Settings};
+use crate::nia87::{device::Snapshot, settings::Settings};
+use byakko_protocol::nia87::lighting::Lighting;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
@@ -74,8 +75,8 @@ pub fn validate(config: &Configuration) -> Result<()> {
     {
         return Err("archive must contain 50 macro slots of 256 bytes each".into());
     }
-    if config.lighting.raw().len() != crate::nia87::lighting::REPORT_LEN
-        || config.lighting.raw()[0] != crate::nia87::lighting::LED_READ_COMMAND
+    if config.lighting.raw().len() != byakko_protocol::nia87::lighting::REPORT_LEN
+        || config.lighting.raw()[0] != byakko_protocol::nia87::lighting::LED_READ_COMMAND
     {
         return Err("lighting reply must contain 64 bytes and opcode 0x87".into());
     }
@@ -193,7 +194,7 @@ pub(crate) mod tests {
             macros,
             lighting: {
                 let mut raw = [0xa5; 64];
-                raw[0] = crate::nia87::lighting::LED_READ_COMMAND;
+                raw[0] = byakko_protocol::nia87::lighting::LED_READ_COMMAND;
                 Lighting::decode(&raw).unwrap()
             },
             picture: vec![[1, 2, 255]; PICTURE_LEN],

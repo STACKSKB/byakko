@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Byakko · WebHID preview</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <header><strong>BYAKKO</strong><span>WebHID preview · read only</span></header>
+    <h1>Your keyboard, in the browser.</h1>
+    <p>This first integration reads the Nia87 USB identity, profile and lighting state.
+      It does not change the keyboard configuration.</p>
+    <section aria-label="Connection">
+      <div class="actions">
+        <button id="connect" disabled>Choose keyboard</button>
+        <button id="read" disabled>Read keyboard</button>
+        <button id="disconnect" disabled>Disconnect</button>
+      </div>
+      <p id="status" role="status" aria-live="polite">Loading Rust protocol module…</p>
+      <p id="device">No keyboard selected.</p>
+    </section>
+    <section aria-labelledby="lighting-heading">
+      <h2 id="lighting-heading">Lighting observation</h2>
+      <p id="lighting">Read the selected keyboard to see its current lighting.</p>
+      <div id="color" hidden><span id="swatch"></span><span id="rgb"></span></div>
+    </section>
+    <details>
+      <summary>Raw diagnostic replies</summary>
+      <pre id="raw">No observation yet.</pre>
+    </details>
+    <p class="note">Use a browser with WebHID support, such as desktop Chrome or Edge.
+      Close other configurators before reading. Browser permissions and protected
+      interfaces can prevent access. Reads happen only when requested.</p>
+    <p class="note">Editing, automatic onboard synchronization, macros and host lighting
+      are not available in this preview.</p>
+  </main>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>

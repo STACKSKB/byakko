@@ -127,17 +127,17 @@ mod lighting_tests {
     #[test]
     fn restore_report_recreates_known_fields_without_sending_opaque_tail() {
         let mut response = [0u8; 64];
-        response[0] = crate::nia87::lighting::LED_READ_COMMAND;
+        response[0] = byakko_protocol::nia87::lighting::LED_READ_COMMAND;
         response[1..8].copy_from_slice(&[5, 2, 4, 7, 12, 34, 56]);
         response[9] = 0xa5;
-        let original = crate::nia87::lighting::Lighting::decode(&response).unwrap();
+        let original = byakko_protocol::nia87::lighting::Lighting::decode(&response).unwrap();
         let report = lighting_restore_report(&original);
         assert_eq!(&report[..9], &[7, 5, 2, 4, 7, 12, 34, 56, 0x80]);
         assert!(report[9..].iter().all(|byte| *byte == 0));
         assert!(lighting_matches_report(&original, &report, &original));
         let mut changed = response;
         changed[9] = 0;
-        let changed = crate::nia87::lighting::Lighting::decode(&changed).unwrap();
+        let changed = byakko_protocol::nia87::lighting::Lighting::decode(&changed).unwrap();
         assert!(!lighting_matches_report(&changed, &report, &original));
     }
 }

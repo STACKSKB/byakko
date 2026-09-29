@@ -317,7 +317,9 @@ pub(super) fn read_payload(
     page: u8,
 ) -> Result<[u8; 64]> {
     let mut request = [0u8; 65];
-    request[1..].copy_from_slice(&crate::nia87::protocol::read_request(opcode, index, page));
+    request[1..].copy_from_slice(&byakko_protocol::nia87::protocol::read_request(
+        opcode, index, page,
+    ));
     let exchange = |reply: &mut [u8; 65]| {
         feature_read_exchange(
             &request,

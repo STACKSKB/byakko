@@ -1,6 +1,7 @@
 //! Reversible steady-color camera check, using an explicitly supplied Python.
 mod support;
-use byakko_devices::nia87::{device, lighting::LightingSetting};
+use byakko_devices::nia87::device;
+use byakko_protocol::nia87::lighting::LightingSetting;
 
 fn main() -> device::Result<()> {
     let python = std::env::args()

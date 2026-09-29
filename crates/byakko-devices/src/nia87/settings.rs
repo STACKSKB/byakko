@@ -210,7 +210,7 @@ impl Settings {
 /// Four BIT7 read requests in the same order as `Settings::decode` arguments.
 pub fn read_requests() -> [[u8; REPORT_LEN]; 4] {
     [DEBOUNCE_READ, AUTO_OS_READ, SLEEP_READ, OPTIONS_READ]
-        .map(|opcode| crate::nia87::protocol::read_request(opcode, 0, 0))
+        .map(|opcode| byakko_protocol::nia87::protocol::read_request(opcode, 0, 0))
 }
 
 /// Encode validated Nia87 scalar settings. Sleep writes use the current

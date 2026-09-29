@@ -147,9 +147,8 @@ fn add_count(changes: &mut Vec<SectionChange>, id: &str, label: &str, count: usi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nia87::{
-        configuration::Configuration, device::Snapshot, lighting::Lighting, settings::Settings,
-    };
+    use crate::nia87::{configuration::Configuration, device::Snapshot, settings::Settings};
+    use byakko_protocol::nia87::lighting::Lighting;
 
     fn selected_access() -> Access {
         let candidate = crate::nia87::device::Candidate {
@@ -174,7 +173,7 @@ mod tests {
         replies[2][1..9].copy_from_slice(&[120, 0, 120, 0, 88, 2, 88, 2]);
         replies[3][2] = 0x10;
         let mut lighting = [0; 64];
-        lighting[0] = crate::nia87::lighting::LED_READ_COMMAND;
+        lighting[0] = byakko_protocol::nia87::lighting::LED_READ_COMMAND;
         Configuration {
             keymaps: Snapshot {
                 format_version: 1,

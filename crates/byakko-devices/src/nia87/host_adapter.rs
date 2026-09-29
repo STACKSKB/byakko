@@ -1,7 +1,7 @@
 //! Nia87 host-frame activity behind the portable device contract.
 use crate::{
     HostActivity, HostFrame,
-    nia87::{device, lighting as native, lighting_adapter},
+    nia87::{device, lighting_adapter},
 };
 use byakko_core::validation;
 use byakko_core::{
@@ -9,6 +9,7 @@ use byakko_core::{
     editor::{Feature, lighting::LightingRules},
     model::lighting::{self, Color, Content, HostMode, HostSource, Setting, Snapshot},
 };
+use byakko_protocol::nia87::lighting as native;
 use std::path::Path;
 
 struct NiaHostActivity {

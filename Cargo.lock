@@ -251,6 +251,7 @@ version = "0.1.0"
 dependencies = [
  "byakko-core",
  "byakko-devices",
+ "byakko-protocol",
  "libc",
  "serde",
  "serde_json",
@@ -288,10 +289,28 @@ name = "byakko-devices"
 version = "0.1.0"
 dependencies = [
  "byakko-core",
+ "byakko-protocol",
  "libc",
  "serde",
  "serde_json",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "byakko-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "byakko-web"
+version = "0.1.0"
+dependencies = [
+ "byakko-protocol",
+ "serde_json",
+ "wasm-bindgen",
 ]
 
 [[package]]
