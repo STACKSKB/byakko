@@ -108,6 +108,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   const macroNameDrafts = new Map();
   const bindingDrafts = new Map();
   const timers = new Map();
+  let pendingRender = false;
 
   root.replaceChildren();
   const appearance = createAppearance(doc, win);
@@ -168,7 +169,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
     });
   }
 
-  function handle(response) {
+  function handle(response, background = false) {
     view = response.view;
     executor?.setRecording(view.recording);
     if (response.outcome?.cancelCatalog) executor?.cancelCatalog();
@@ -197,7 +198,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       };
       if (saved[response.outcome?.kind]) notice = saved[response.outcome.kind];
     }
-    render();
+    render(background);
     scheduleObservation();
     maybeReadSettings();
     return response;
@@ -210,19 +211,23 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
     queueMicrotask(() => { if (device && !disposed) void intent({ type: "read", feature: "settings" }); });
   }
 
+  function focusedForm() {
+    const active = doc.activeElement;
+    return root.contains(active) && ["INPUT", "SELECT", "TEXTAREA"].includes(active?.tagName);
+  }
+
   function scheduleObservation() {
     win.clearTimeout(observationTimer);
     observationTimer = null;
     const observation = view.observation;
     if (!device || closing || disposed || !observation?.queued || !observation.canRead ||
         timers.size || view.recording || hostController?.busy) return;
-    const active = doc.activeElement;
-    if (root.contains(active) && ["INPUT", "SELECT", "TEXTAREA"].includes(active?.tagName)) return;
+    if (focusedForm()) return;
     const due = Math.max(observation.dueMs ?? 0, interactionUntil);
     observationTimer = win.setTimeout(() => {
       observationTimer = null;
       if (view.observation?.queued && view.observation.canRead && !timers.size && !view.recording && !hostController?.busy &&
-          !(root.contains(doc.activeElement) && ["INPUT", "SELECT", "TEXTAREA"].includes(doc.activeElement?.tagName))) {
+          !focusedForm()) {
         void intent({ type: "observeNext", nowMs: Math.round(now()) }, true);
       } else scheduleObservation();
     }, Math.max(0, due - now()));
@@ -234,23 +239,23 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       if (!executor) throw new Error("No selected keyboard is connected.");
       const write = Boolean(Object.values(command.payload)[0]?.Apply);
       if (write) writes++;
-      render();
+      render(true);
       try {
         const completion = await executor.run(command);
         if (disposed) { command = null; continue; }
-        const result = handle(JSON.parse(session.accept(JSON.stringify(completion))));
+        const result = handle(JSON.parse(session.accept(JSON.stringify(completion))), true);
         last = result;
         command = result.command;
       } finally {
         if (write) writes--;
-        render();
+        render(true);
       }
     }
     return last;
   }
 
   async function intent(input, background = false) {
-    const result = handle(JSON.parse(session.dispatch(JSON.stringify(input))));
+    const result = handle(JSON.parse(session.dispatch(JSON.stringify(input))), background);
     if (result.ok && !result.command) {
       const messages = {
         edit: "Draft updated. Save to keyboard when ready.",
@@ -265,7 +270,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
     if (result.command) {
       const running = execute(result.command).catch(error => {
         notice = text(error);
-        render();
+        render(true);
         return { ok: false, error: notice, view };
       });
       inflight.add(running);
@@ -334,7 +339,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
           if (state.problem) notice = `Host lighting: ${state.problem}`;
           else if (state.phase === "Active") notice = `Host lighting active from ${state.source}. Stop to restore the original onboard lighting.`;
           else if (state.phase === "Idle" && view.host?.phase === "Idle") notice = "Host lighting stopped. Original onboard lighting restored.";
-          render();
+          render(true);
           scheduleObservation();
         },
         prepare: prepareHost, environment: win,
@@ -347,7 +352,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
           if (disposed || device !== selectedDevice || generation !== selectedGeneration) return;
           handle(JSON.parse(session.dispatch(JSON.stringify({
             type: "notification", generation: selectedGeneration, reportId, payload: [...payload], nowMs: Math.round(now()),
-          }))));
+          }))), true);
         });
         await listener.open();
         if (disposed || device !== selectedDevice) return;
@@ -360,10 +365,13 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       if (disposed || device !== selectedDevice) return;
       const selected = device;
       void storage.macroNames?.(selected)?.then(names => {
-        if (device !== selected) return;
+        if (!sameConnection(selected, selectedGeneration)) return;
         macroNames = names;
-        render();
-      }).catch(error => { notice = `Local macro names could not be read: ${text(error)}`; render(); });
+        render(true);
+      }).catch(error => {
+        if (!sameConnection(selected, selectedGeneration)) return;
+        notice = `Local macro names could not be read: ${text(error)}`; render(true);
+      });
       notice = `Reading ${device.productName || "Nia87"}…`;
       render();
       await intent({ type: "read", feature: "keymap" });
@@ -479,7 +487,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       if (!sameConnection(selectedDevice, selectedGeneration)) return;
       notice = `Local macro name was not saved: ${text(error)}`;
     }
-    render();
+    render(true);
   }
 
   async function stopRecording() {
@@ -1194,11 +1202,16 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
     panel.append(layout);
   }
 
-  function render() {
+  function render(background = false) {
     if (disposed) return;
-    renderConnection(); renderSidebar(); renderKeyboard();
+    renderConnection();
     status.textContent = notice;
     status.classList.toggle("error", /failed|could not|error|conflict/i.test(notice));
+    // Keep the real input node, unfinished value and focus until the user commits
+    // or leaves the form. Notifications must not erase their own observation gate.
+    if (background && focusedForm()) { pendingRender = true; return; }
+    pendingRender = false;
+    renderSidebar(); renderKeyboard();
     panel.replaceChildren();
     if (tab === "keymap") renderKeymap();
     else if (tab === "macros") renderMacros();
@@ -1260,7 +1273,10 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       render();
     }
   };
-  const focusOut = () => { win.setTimeout(scheduleObservation, 0); };
+  const focusOut = () => { win.setTimeout(() => {
+    if (pendingRender && !focusedForm()) render();
+    scheduleObservation();
+  }, 0); };
   const unloading = event => {
     if (writes || hostController?.busy || view.host?.phase !== "Idle" ||
         [view.keymap, view.lighting?.editor, view.picture?.editor, view.macros?.editor, view.settings?.editor].some(item => item?.dirty)) {

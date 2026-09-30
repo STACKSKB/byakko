@@ -33,8 +33,13 @@ async function harness(run) {
   const storage = new TestStore();
   storage.macroNames = async () => ({});
   storage.saveMacroName = async () => {};
+  const notifications = Object.assign(new EventTarget(), {
+    vendorId: device.vendorId, productId: device.productId, opened: false,
+    collections: [{usagePage:0xffff, usage:1, children:[], inputReports:[{reportId:5, items:[{reportSize:8,reportCount:3}]}]}],
+    async open() { this.opened = true; }, async close() { this.opened = false; },
+  });
   const hid = new EventTarget();
-  hid.requestDevice = async () => [device];
+  hid.requestDevice = async () => [device, notifications];
   const app = mount(root, {codec, hid, storage, wait: async () => {}});
   async function connect() {
     await app.connect();
@@ -42,7 +47,10 @@ async function harness(run) {
     await app.intent({type:"read", feature:"macro"});
     button(root, "Macros").click();
   }
-  try { await connect(); await run({root, app, device, storage, connect}); }
+  const notify = () => notifications.dispatchEvent(Object.assign(new Event("inputreport"), {
+    device:notifications, reportId:5, data:new DataView(Uint8Array.from([6,3,0]).buffer),
+  }));
+  try { await connect(); await run({root, app, device, storage, connect, notify}); }
   finally { await app.destroy(); }
 }
 async function documentFor(app) {
@@ -104,6 +112,35 @@ const tests = [
     pending.reject(new Error("old write failed")); await tick();
     assert(h.root.querySelector('.status').textContent === notice, "Old error replaced the current notice");
   }],
+  ["onboard notifications retain unfinished numeric edits and defer reads", async h => {
+    button(h.root, "Lighting").click();
+    const input = h.root.querySelector('input[type="number"]');
+    input.focus(); input.value = "2";
+    const reads = () => h.device.calls.filter(call => call.kind === "send" && call.report[0] === 0x87).length;
+    const before = reads();
+    h.notify();
+    assert(input.isConnected && document.activeElement === input && input.value === "2", "Notification replaced the active edit");
+    await new Promise(resolve => setTimeout(resolve, 600));
+    assert(reads() === before && h.app.view.observation.queued, "Notification bypassed the editing gate");
+    input.dispatchEvent(new Event("change", {bubbles:true}));
+    assert(h.app.view.lighting.editor.draft.brightness === 2, "Retained input could not commit");
+    await until(() => !h.app.view.observation.queued && !h.app.view.busy && !h.app.view.lighting.editor.dirty);
+    assert(reads() > before, "Observation did not resume after editing");
+  }],
+  ["background read completion retains input focus and flushes after leaving", async h => {
+    const pending = deferred(); let entered = false;
+    h.device.beforeReceive = request => {
+      if (request[0] === 0x87) { entered = true; return pending.promise; }
+    };
+    const input = nameInput(h.root, "Unfinished name"); input.focus();
+    await h.app.intent({type:"read", feature:"lighting"}, true);
+    await until(() => entered);
+    pending.resolve(); await until(() => !h.app.view.busy);
+    assert(input.isConnected && document.activeElement === input && input.value === "Unfinished name", "Completion replaced the active edit");
+    document.getElementById("heading").focus();
+    await tick();
+    assert(!input.isConnected && nameInput(h.root).value === "Unfinished name", "Deferred render did not flush with the draft intact");
+  }],
 ];
 
 document.getElementById("run").addEventListener("click", async event => {
@@ -118,3 +155,5 @@ document.getElementById("run").addEventListener("click", async event => {
   output.textContent += `${passed}/${tests.length} passed`;
   event.target.disabled = false;
 });
+document.getElementById("results").textContent = "Ready";
+document.getElementById("run").disabled = false;

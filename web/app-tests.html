@@ -7,10 +7,10 @@
   <link rel="stylesheet" href="style.css?v=palettes-1">
 </head>
 <body>
-  <h1>Browser form regression tests</h1>
+  <h1 id="heading" tabindex="-1">Browser form regression tests</h1>
   <p>Simulated devices only. This page never requests WebHID access.</p>
-  <button id="run">Run tests</button>
-  <pre id="results" role="status">Ready</pre>
+  <button id="run" disabled>Run tests</button>
+  <pre id="results" role="status">Loading WASM…</pre>
   <div id="fixture"></div>
   <script type="module" src="app-tests.mjs"></script>
 </body>
