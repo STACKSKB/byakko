@@ -458,17 +458,27 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
     return macroNameDrafts.get(slot) ?? macroNames[slot] ?? "";
   }
 
+  function sameConnection(selectedDevice, selectedGeneration) {
+    return !disposed && device === selectedDevice && generation === selectedGeneration;
+  }
+
   async function saveMacroName(slot) {
     if (!device) return;
+    const selectedDevice = device;
+    const selectedGeneration = generation;
     const name = nameFor(slot);
     try {
       if (typeof storage.saveMacroName !== "function") throw new Error("Local name storage is unavailable.");
-      await storage.saveMacroName(device, slot, name);
+      await storage.saveMacroName(selectedDevice, slot, name);
+      if (!sameConnection(selectedDevice, selectedGeneration)) return;
       if (name.trim()) macroNames[slot] = name;
       else delete macroNames[slot];
-      macroNameDrafts.delete(slot);
+      if (macroNameDrafts.get(slot) === name) macroNameDrafts.delete(slot);
       notice = "Local macro name saved. Keyboard configuration is unchanged.";
-    } catch (error) { notice = `Local macro name was not saved: ${text(error)}`; }
+    } catch (error) {
+      if (!sameConnection(selectedDevice, selectedGeneration)) return;
+      notice = `Local macro name was not saved: ${text(error)}`;
+    }
     render();
   }
 
@@ -1146,11 +1156,17 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       const file = node(doc, "input"); file.type = "file"; file.accept = "application/json,.json";
       file.disabled = view.recording;
       file.addEventListener("change", async () => {
+        const selectedDevice = device;
+        const selectedGeneration = generation;
+        const selectedSlot = state.slot;
+        const currentTarget = () => sameConnection(selectedDevice, selectedGeneration) && view.macros?.slot === selectedSlot;
         try {
           if (!file.files?.[0]) return;
           if (file.files[0].size > 64 * 1024) throw new Error("Macro JSON exceeds the 64 KiB import limit.");
           const contents = JSON.parse(await file.files[0].text());
+          if (!currentTarget()) return;
           const result = await intent({ type: "importMacroDocument", document: contents });
+          if (!currentTarget()) return;
           if (result.ok) {
             macroNameDrafts.set(state.slot, result.outcome.name);
             if (contents.backend_id === view.descriptor.backend_id && caps.bindings.some(binding => binding.slot === state.slot && binding.id === result.outcome.binding)) {
@@ -1162,7 +1178,10 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
             render();
           }
         }
-        catch (error) { notice = `Could not read macro file: ${text(error)}`; render(); }
+        catch (error) {
+          if (!currentTarget()) return;
+          notice = `Could not read macro file: ${text(error)}`; render();
+        }
       });
       documents.append(file);
       documents.append(button(doc, "Export macro", async () => {
