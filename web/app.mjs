@@ -14,6 +14,11 @@ const rgb = color => [1, 3, 5].map(at => Number.parseInt(color.slice(at, at + 2)
 const range = value => value ? [value.start, value.end] : [0, 0];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const editable = entry => entry?.editor ?? entry;
+// The Nia87's stock ivory/indigo keycap grouping, independent of RGB values.
+const indigoKeys = new Set(["Esc", "F5", "F6", "F7", "F8", "PrtSc", "ScrLk", "Pause",
+  "Tab", "Caps", "LShift", "RShift", "LCtrl", "RCtrl", "LWin", "RWin", "LAlt", "RAlt",
+  "Fn", "Menu", "Backspace", "Enter", "Insert", "Home", "PgUp", "Delete", "End", "PgDn",
+  "Left", "Down", "Up", "Right"]);
 
 function node(doc, tag, label, className) {
   const element = doc.createElement(tag);
@@ -107,7 +112,9 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   const shell = node(doc, "div", undefined, "shell");
   const header = node(doc, "header", undefined, "topbar");
   const brand = node(doc, "div", undefined, "brand");
-  brand.append(node(doc, "strong", "BYAKKO"), node(doc, "small", "NIA87 · WEBHID"));
+  const mark = node(doc, "img", undefined, "brand-mark");
+  mark.src = "assets/byakko.svg"; mark.alt = "";
+  brand.append(mark, node(doc, "strong", "Byakko"), node(doc, "small", "Keyboard configurator"));
   const connection = node(doc, "div", undefined, "connection");
   const workspace = node(doc, "div", undefined, "workspace");
   const sidebar = node(doc, "nav", undefined, "sidebar");
@@ -533,9 +540,13 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
 
   function renderConnection() {
     connection.replaceChildren();
-    connection.append(node(doc, "span", device ? `${device.productName || "Nia87"} · ${device.vendorId.toString(16)}:${device.productId.toString(16)}` : "No keyboard selected", "device-name"));
-    if (device) connection.append(node(doc, "span", notificationStatus, listener ? "live-status" : "live-status unavailable"));
-    connection.append(button(doc, device ? "Connected" : "Choose keyboard", connect, Boolean(device || connecting || closing), "primary"));
+    const identity = node(doc, "span", device ? "Nia87 · USB connected" : "No keyboard connected", device ? "device-name connected" : "device-name");
+    if (device) identity.title = `${device.productName || "Nia87"} · ${device.vendorId.toString(16)}:${device.productId.toString(16)}`;
+    connection.append(identity);
+    if (device) {
+      const live = node(doc, "span", listener ? "Live updates" : notificationStatus || "Use Read to refresh", listener ? "live-status" : "live-status unavailable");
+      live.title = notificationStatus; connection.append(live);
+    } else connection.append(button(doc, connecting ? "Connecting…" : "Choose keyboard", connect, Boolean(connecting || closing), "primary"));
     if (hostController?.busy) {
       const stop = button(doc, hostController.state.phase === "Stopping" ? "Restoring…" : "Stop host lighting", () => void stopHost(), closing || hostController.state.phase === "Stopping", "host-stop");
       stop.dataset.hostStop = "true";
@@ -545,7 +556,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   }
 
   function renderSidebar() {
-    sidebar.replaceChildren(node(doc, "p", "WORKSPACE", "eyebrow"));
+    sidebar.replaceChildren(node(doc, "p", "Configure", "eyebrow"));
     for (const [id, label] of [["keymap", "Keymap"], ["macros", "Macros"], ["lighting", "Lighting"], ["settings", "Settings"], ["diagnostics", "Diagnostics"]]) {
       const dirty = editable(view[id])?.dirty;
       const item = button(doc, `${label}${dirty ? " •" : ""}`, () => {
@@ -631,18 +642,25 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       const mapped = (tab === "keymap" || tab === "macros") && view.keymap.draft?.[layer]?.[item.id]
         ? bindingLabel(view.descriptor, view.keymap.draft[layer][item.id], layer, item.id, macroNames) : null;
       const changed = mapped && !same(view.keymap.baseline?.bindings?.[layer]?.[item.id], view.keymap.draft[layer][item.id]);
-      const element = button(doc, mapped?.compact ?? item.label, () => {
+      const element = button(doc, undefined, () => {
         key = item.id;
         if (tab === "lighting" && pictureMode && paintReady && view.picture?.editor?.canEdit && view.picture.capabilities.keys.includes(key)) {
           void edit("picture", { Color: { key, color: rgb(paintColor) } }, true);
         } else render();
-      }, false, `key ${key === item.id ? "selected" : ""} ${changed ? "changed" : ""} ${view.descriptor.layers.find(entry => entry.id === layer)?.read_only_keys.includes(item.id) || !item.writable ? "protected" : ""}`);
-      element.title = mapped?.full ?? item.label;
+      }, false, `key ${indigoKeys.has(item.label) ? "indigo" : "ivory"} ${key === item.id ? "selected" : ""} ${changed ? "changed" : ""} ${view.descriptor.layers.find(entry => entry.id === layer)?.read_only_keys.includes(item.id) || !item.writable ? "protected" : ""}`);
+      element.append(node(doc, "span", item.label, "key-legend"));
+      if (mapped && mapped.compact !== item.label) element.append(node(doc, "span", mapped.compact, "key-binding"));
+      element.title = mapped ? `${item.label} · ${mapped.full}` : item.label;
+      element.setAttribute("aria-label", mapped && mapped.compact !== item.label ? `${item.label} · ${mapped.full}` : item.label);
+      element.setAttribute("aria-pressed", String(key === item.id));
       element.style.left = `${item.x * 43 + 7}px`;
       element.style.top = `${item.y * 43 + 7}px`;
       element.style.width = `${item.width * 43 - 4}px`;
       element.style.height = `${item.height * 43 - 4}px`;
-      if (tab === "lighting" && pictureMode && colors[item.id]) element.style.setProperty("--key-color", hex(colors[item.id]));
+      if (tab === "lighting" && pictureMode && colors[item.id]) {
+        element.classList.add("has-color");
+        element.style.setProperty("--key-color", hex(colors[item.id]));
+      }
       board.append(element);
     }
     scroll.append(board);
