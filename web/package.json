@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build:static": "node build-static.mjs",
+    "build:wordpress": "node build-wordpress.mjs",
     "test": "node --test *.test.mjs"
   },
   "devDependencies": {
