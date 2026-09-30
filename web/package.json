@@ -1,0 +1,12 @@
+{
+  "name": "byakko-web-build",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:static": "node build-static.mjs",
+    "test": "node --test *.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}
