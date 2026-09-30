@@ -7,6 +7,8 @@ test("appearance preferences reject unknown persisted values and follow system o
   assert.deepEqual(preference(null), {mode:"system",palette:"indigo"});
   assert.deepEqual(preference({mode:"invalid",palette:"invalid"}), {mode:"system",palette:"indigo"});
   assert.deepEqual(preference({mode:"dark",palette:"forest"}), {mode:"dark",palette:"forest"});
+  assert.deepEqual(preference({mode:"invalid",palette:"invalid"}, {mode:"light",palette:"embed"}), {mode:"light",palette:"embed"});
+  assert.deepEqual(preference({mode:"dark",palette:"embed"}), {mode:"dark",palette:"embed"});
   assert.equal(resolvedTheme("system", true), "dark");
   assert.equal(resolvedTheme("system", false), "light");
   assert.equal(resolvedTheme("light", true), "light");

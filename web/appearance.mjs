@@ -2,12 +2,12 @@
 // Browser appearance only; never enters the device session or backup store.
 const storageKey = "byakko-appearance";
 export const modes = [["system", "System"], ["light", "Light"], ["dark", "Dark"]];
-export const palettes = [["indigo", "Indigo"], ["slate", "Slate"], ["forest", "Forest"]];
+export const palettes = [["indigo", "Indigo"], ["slate", "Slate"], ["forest", "Forest"], ["embed", "hosting site"]];
 
-export function preference(value) {
+export function preference(value, defaults = { mode: "system", palette: "indigo" }) {
   return {
-    mode: modes.some(([id]) => id === value?.mode) ? value.mode : "system",
-    palette: palettes.some(([id]) => id === value?.palette) ? value.palette : "indigo",
+    mode: modes.some(([id]) => id === value?.mode) ? value.mode : defaults.mode,
+    palette: palettes.some(([id]) => id === value?.palette) ? value.palette : defaults.palette,
   };
 }
 
@@ -16,9 +16,11 @@ export function resolvedTheme(mode, prefersDark) {
 }
 
 export function createAppearance(doc, environment) {
+  const embedded = doc.documentElement.dataset.embed === "wordpress";
+  const preferenceKey = embedded ? "byakko-wordpress-appearance" : storageKey;
   let saved;
-  try { saved = JSON.parse(environment.localStorage.getItem(storageKey)); } catch { /* Use defaults. */ }
-  let current = preference(saved);
+  try { saved = JSON.parse(environment.localStorage.getItem(preferenceKey)); } catch { /* Use defaults. */ }
+  let current = preference(saved, embedded ? { mode: "light", palette: "embed" } : undefined);
   const media = environment.matchMedia("(prefers-color-scheme: dark)");
   const dialog = doc.createElement("dialog");
   dialog.className = "appearance-dialog";
@@ -39,7 +41,8 @@ export function createAppearance(doc, environment) {
     const meta = doc.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = environment.getComputedStyle(doc.documentElement).getPropertyValue("--canvas").trim();
   }
-  for (const [key, title, options] of [["mode", "Theme", modes], ["palette", "Colour palette", palettes]]) {
+  const choices = palettes.filter(([id]) => embedded || id !== "embed");
+  for (const [key, title, options] of [["mode", "Theme", modes], ["palette", "Colour palette", choices]]) {
     const label = doc.createElement("label");
     label.className = "field";
     const caption = doc.createElement("span");
@@ -55,7 +58,7 @@ export function createAppearance(doc, environment) {
       current = { ...current, [key]: select.value };
       apply();
       try {
-        environment.localStorage.setItem(storageKey, JSON.stringify(current));
+        environment.localStorage.setItem(preferenceKey, JSON.stringify(current));
         status.textContent = "Saved in this browser. Keyboard lighting is unchanged.";
       } catch {
         status.textContent = "Applied for this visit. This browser could not save the preference.";

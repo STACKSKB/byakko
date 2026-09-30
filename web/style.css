@@ -201,3 +201,31 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
 .appearance-dialog .actions { justify-content: flex-end; margin-top: 20px; }
 .sidebar-tools { display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 750px) { .sidebar-tools { flex-direction: row; flex-wrap: wrap; } }
+
+/* WordPress owns page scrolling; the same app has an intrinsic document height. */
+:root[data-embed="wordpress"] { font-family: var(--embed-font, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif); }
+:root[data-embed="wordpress"] .shell,
+:root[data-embed="wordpress"] .workspace { min-height: 0; }
+:root[data-embed="wordpress"] .topbar { position: static; }
+:root[data-embed="wordpress"] .sidebar { position: static; height: auto; }
+:root[data-embed="wordpress"] .sidebar-tools { margin-top: 24px; }
+:root[data-embed="wordpress"] .brand-mark,
+:root[data-embed="wordpress"] .brand strong { display: none; }
+:root[data-embed="wordpress"] .brand small {
+  display: block; border: 0; padding: 0; margin: 0; font-size: 18px; color: var(--ink); font-weight: 600;
+}
+:root[data-embed="wordpress"][data-palette="embed"] button.primary {
+  background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+}
+:root[data-embed="wordpress"][data-palette="embed"] button.primary:hover:not(:disabled) { background: var(--primary-hover); }
+:root[data-embed="wordpress"][data-palette="embed"] button.primary:disabled {
+  background: var(--disabled-primary); border-color: var(--disabled-border); color: var(--disabled-ink);
+}
+:root[data-embed="wordpress"] dialog {
+  inset-block: var(--embed-dialog-center, 50%) auto; margin-block: 0;
+  transform: translateY(-50%); max-height: calc(var(--embed-visible-height, 100vh) - 32px); overflow: auto;
+}
+:root[data-embed="wordpress"] .backup-dialog textarea { height: min(calc(var(--embed-visible-height, 100vh) * .45), 520px); }
+@media (max-width: 750px) {
+  :root[data-embed="wordpress"] .sidebar-tools { margin-top: 0; }
+}

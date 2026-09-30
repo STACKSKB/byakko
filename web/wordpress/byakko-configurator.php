@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Byakko Configurator
  * Description: Embed the self-contained Byakko keyboard configurator with a shortcode.
- * Version: 0.1.0
+ * Version: 0.1.1
  * License: GPL-3.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
  * Text Domain: byakko-configurator
@@ -22,13 +22,15 @@ function byakko_configurator_shortcode() {
             $url = add_query_arg( 'v', (string) $modified, $url );
         }
     }
+    $embed_url = esc_url( add_query_arg( 'embed', 'wordpress', $url ) );
     $url = esc_url( $url );
+    wp_enqueue_script( 'byakko-configurator-embed', plugins_url( 'embed.js', __FILE__ ), array(), '0.1.1', true );
 
-    return '<p><a href="' . $url . '" target="_blank" rel="noopener noreferrer">'
-        . esc_html( 'Open configurator in a new tab' ) . '</a></p>'
-        . '<iframe src="' . $url . '" title="'
+    return '<div class="byakko-configurator-embed"><iframe data-byakko-configurator src="' . $embed_url . '" title="'
         . esc_attr( 'Byakko keyboard configurator' )
-        . '" allow="hid; display-capture" style="display:block;width:100%;height:85vh;min-height:600px;border:0"></iframe>';
+        . '" allow="hid; display-capture" style="display:block;width:100%;height:85vh;border:0"></iframe>'
+        . '<p style="margin:8px 22px;font-size:12px"><a href="' . $url . '" target="_blank" rel="noopener noreferrer">'
+        . esc_html( 'Open configurator in a new tab' ) . '</a></p></div>';
 }
 
 add_shortcode( 'byakko_configurator', 'byakko_configurator_shortcode' );

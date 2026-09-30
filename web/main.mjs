@@ -3,6 +3,9 @@ import { mount } from "./app.mjs";
 import { BackupStore } from "./storage.mjs";
 
 const root = document.getElementById("app");
+if (new URLSearchParams(location.search).get("embed") === "wordpress") {
+  document.documentElement.dataset.embed = "wordpress";
+}
 if (!globalThis.isSecureContext || !("hid" in navigator)) {
   root.textContent = "WebHID needs a secure context and a supported desktop browser. Open this page on HTTPS or localhost in Chrome or Edge.";
 } else {
