@@ -97,6 +97,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   let interactionUntil = 0;
   let settingsAutoRead = false;
   let hostController = null, hostMode = null, hostSetting = null, hostUpdateTimer = null;
+  let showHostLighting = false;
   let screenSampling = "average", screenX = 500, screenY = 500;
   const macroNameDrafts = new Map();
   const bindingDrafts = new Map();
@@ -592,7 +593,27 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   function renderKeyboard() {
     keyboard.replaceChildren();
     const heading = node(doc, "div", undefined, "keyboard-heading");
-    heading.append(node(doc, "div", `${view.descriptor.device_name} · ${tab === "lighting" ? "Per-key colors" : tab === "macros" ? "Assignment target" : tab === "keymap" ? "Key bindings" : "Keyboard overview"}`));
+    const lighting = view.lighting;
+    const pictureMode = !showHostLighting && lighting?.editor.draft?.effect === view.picture?.capabilities?.lighting_effect;
+    const modeLabel = showHostLighting ? selectedHostMode()?.label : lighting?.capabilities.effects.find(effect => effect.id === lighting.editor.draft?.effect)?.label;
+    heading.append(node(doc, "div", `${view.descriptor.device_name} · ${tab === "lighting" ? modeLabel ?? "Lighting" : tab === "macros" ? "Assignment target" : tab === "keymap" ? "Key bindings" : "Keyboard overview"}`));
+    if (tab === "lighting" && lighting) {
+      const caps = lighting.capabilities;
+      const choices = [
+        ...caps.effects.map(effect => [`onboard:${effect.id}`, effect.label]),
+        ...caps.host_modes.map(mode => [`host:${mode.id}`, mode.label]),
+      ];
+      const selected = showHostLighting ? `host:${selectedHostMode()?.id}` : lighting.editor.draft ? `onboard:${lighting.editor.draft.effect}` : "";
+      field(doc, heading, "Lighting mode", choice(doc, choices, selected, async value => {
+        if (value.startsWith("host:")) {
+          showHostLighting = true; hostMode = value.slice(5); hostSetting = null; paintReady = false;
+          render();
+        } else {
+          const result = await edit("lighting", { Effect: value.slice(8) }, true);
+          if (result?.ok) { showHostLighting = false; paintReady = false; render(); }
+        }
+      }, !lighting.editor.canSelectEffect || Boolean(hostController?.busy)));
+    }
     if (tab === "keymap" || tab === "macros") {
       const layers = node(doc, "div", undefined, "layer-tabs");
       for (const entry of view.descriptor.layers) layers.append(button(doc, entry.label, () => { layer = entry.id; render(); }, false, entry.id === layer ? "active" : ""));
@@ -612,7 +633,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       const changed = mapped && !same(view.keymap.baseline?.bindings?.[layer]?.[item.id], view.keymap.draft[layer][item.id]);
       const element = button(doc, mapped?.compact ?? item.label, () => {
         key = item.id;
-        if (tab === "lighting" && paintReady && view.picture?.editor?.canEdit && view.picture.capabilities.keys.includes(key)) {
+        if (tab === "lighting" && pictureMode && paintReady && view.picture?.editor?.canEdit && view.picture.capabilities.keys.includes(key)) {
           void edit("picture", { Color: { key, color: rgb(paintColor) } }, true);
         } else render();
       }, false, `key ${key === item.id ? "selected" : ""} ${changed ? "changed" : ""} ${view.descriptor.layers.find(entry => entry.id === layer)?.read_only_keys.includes(item.id) || !item.writable ? "protected" : ""}`);
@@ -621,7 +642,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       element.style.top = `${item.y * 43 + 7}px`;
       element.style.width = `${item.width * 43 - 4}px`;
       element.style.height = `${item.height * 43 - 4}px`;
-      if (tab === "lighting" && colors[item.id]) element.style.setProperty("--key-color", hex(colors[item.id]));
+      if (tab === "lighting" && pictureMode && colors[item.id]) element.style.setProperty("--key-color", hex(colors[item.id]));
       board.append(element);
     }
     scroll.append(board);
@@ -703,12 +724,18 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
     if (!state) return;
     const editor = state.editor, draft = editor.draft, caps = state.capabilities;
     panel.append(actions(editor, "lighting", true));
-    renderHost();
-    if (!draft) { panel.append(node(doc, "p", "Read lighting to edit it.", "muted")); return; }
+    if (showHostLighting) { renderHost(); return; }
+    if (!draft) {
+      const content = editor.baseline?.content;
+      panel.append(node(doc, "p", content?.HostActive
+        ? "A host lighting mode is stored on the keyboard. Select an onboard lighting mode above to replace it."
+        : content?.Opaque?.reason ?? "Read lighting to edit it.", "muted"));
+      return;
+    }
     const effect = caps.effects.find(item => item.id === draft.effect);
     const card = node(doc, "div", undefined, "card form-grid");
-    field(doc, card, "Effect", choice(doc, caps.effects.map(item => [item.id, item.label]), draft.effect, value => void edit("lighting", { Effect: value }, true), !editor.canEdit));
-    if (effect?.options.length) field(doc, card, "Option / per-key layer", choice(doc, effect.options.map(item => [item.id, item.label]), draft.option, value => void edit("lighting", { Option: value }, true), !editor.canEdit));
+    card.append(node(doc, "h3", effect?.label ?? "Onboard lighting"));
+    if (effect?.options.length) field(doc, card, draft.effect === view.picture?.capabilities?.lighting_effect ? "Layer" : "Style / direction", choice(doc, effect.options.map(item => [item.id, item.label]), draft.option, value => void edit("lighting", { Option: value }, true), !editor.canEdit));
     for (const [name, property] of [["Brightness", "brightness"], ["Speed", "speed"]]) {
       if (!effect?.[property]) continue;
       const [min, max] = range(effect[property]);
@@ -765,9 +792,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
     const card = node(doc, "div", undefined, "card host-card");
     card.append(node(doc, "h3", "Host lighting"));
     card.append(node(doc, "p", "Capture stays local to this browser. Samples are sent only to the selected keyboard. Stop to restore its original onboard lighting.", "muted"));
-    field(doc, card, "Mode", choice(doc, modes.map(item => [item.id, item.label]), mode.id, value => {
-      hostMode = value; hostSetting = null; render();
-    }, host.phase !== "Idle"));
+    card.append(node(doc, "h3", mode.label));
     if (mode.source === "ScreenAverage") {
       field(doc, card, "Screen sample", choice(doc, [["average", "Average color"], ["point", "Selected point"]], screenSampling,
         value => { screenSampling = value; render(); }, host.phase !== "Idle"));

@@ -397,7 +397,7 @@ impl BrowserSession {
             "descriptor": session.descriptor(),
             "keymap": feature_value(session.keymap(), can_read, can_edit, idle),
             "lighting": session.lighting().map(|editor| json!({
-                "editor": feature_value(editor, can_read, can_edit, idle),
+                "editor": lighting_value(editor, can_read, can_edit, idle),
                 "capabilities": editor.capabilities()
             })),
             "picture": session.picture().map(|editor| json!({
@@ -451,6 +451,26 @@ where
         "canApply": ready && editor.dirty() && can_read && !applying,
         "canRevert": editor.baseline().is_some() && !applying && idle,
     })
+}
+
+fn lighting_value(
+    editor: &Editor<byakko_core::editor::lighting::LightingRules>,
+    can_read: bool,
+    can_edit: bool,
+    idle: bool,
+) -> Value {
+    use byakko_core::model::lighting::Content;
+
+    let can_select_effect = editor.status() == &Status::Ready
+        && can_edit
+        && (editor.draft().is_some()
+            || matches!(
+                editor.baseline().map(|snapshot| &snapshot.content),
+                Some(Content::HostActive { .. })
+            ));
+    let mut value = feature_value(editor, can_read, can_edit, idle);
+    value["canSelectEffect"] = json!(can_select_effect);
+    value
 }
 
 fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
@@ -834,6 +854,84 @@ mod tests {
             apply["command"]["payload"]["Lighting"]["Apply"]["desired"]["color"],
             json!({"Rgb": [1, 2, 3]})
         );
+    }
+
+    #[test]
+    fn stored_host_lighting_can_select_an_onboard_effect_without_a_draft() {
+        let mut browser = BrowserSession::new().unwrap();
+        let _ = send(&mut browser, json!({"type": "connect"}));
+        let read = send(&mut browser, json!({"type": "read", "feature": "lighting"}));
+        let command = &read["command"];
+        let mut raw = [0u8; 64];
+        raw[..8].copy_from_slice(&[0x87, 21, 0, 0, 7, 0, 0, 0]);
+        let snapshot = lighting_adapter::from_bytes(&raw).unwrap();
+        assert_eq!(
+            snapshot.content,
+            byakko_core::model::lighting::Content::HostActive {
+                mode_id: "screen-average".into()
+            }
+        );
+        let completion = json!({
+            "generation": command["generation"], "operation": command["operation"],
+            "payload": {"Lighting": {"Read": {"Ok": snapshot}}}
+        });
+        let loaded: Value = serde_json::from_str(&browser.accept(&completion.to_string())).unwrap();
+        let editor = &loaded["view"]["lighting"]["editor"];
+        assert!(editor["draft"].is_null());
+        assert_eq!(editor["canEdit"], false);
+        assert_eq!(editor["canSelectEffect"], true);
+
+        let rejected = send(
+            &mut browser,
+            json!({
+                "type": "edit", "feature": "lighting", "change": {"Brightness": 2}
+            }),
+        );
+        assert_eq!(rejected["ok"], false);
+        let selected = send(
+            &mut browser,
+            json!({
+                "type": "edit", "feature": "lighting", "change": {"Effect": "1"}
+            }),
+        );
+        assert_eq!(selected["ok"], true);
+        assert_eq!(
+            selected["view"]["lighting"]["editor"]["draft"]["effect"],
+            "1"
+        );
+        assert_eq!(selected["view"]["lighting"]["editor"]["canEdit"], true);
+        assert_eq!(
+            selected["view"]["lighting"]["editor"]["canSelectEffect"],
+            true
+        );
+    }
+
+    #[test]
+    fn opaque_lighting_cannot_select_an_effect() {
+        let mut browser = BrowserSession::new().unwrap();
+        let _ = send(&mut browser, json!({"type": "connect"}));
+        let read = send(&mut browser, json!({"type": "read", "feature": "lighting"}));
+        let command = &read["command"];
+        let mut raw = [0u8; 64];
+        raw[0] = 0x87;
+        raw[1] = 255;
+        let snapshot = lighting_adapter::from_bytes(&raw).unwrap();
+        let completion = json!({
+            "generation": command["generation"], "operation": command["operation"],
+            "payload": {"Lighting": {"Read": {"Ok": snapshot}}}
+        });
+        let loaded: Value = serde_json::from_str(&browser.accept(&completion.to_string())).unwrap();
+        let editor = &loaded["view"]["lighting"]["editor"];
+        assert!(editor["draft"].is_null());
+        assert_eq!(editor["canEdit"], false);
+        assert_eq!(editor["canSelectEffect"], false);
+        let rejected = send(
+            &mut browser,
+            json!({
+                "type": "edit", "feature": "lighting", "change": {"Effect": "1"}
+            }),
+        );
+        assert_eq!(rejected["ok"], false);
     }
 
     #[test]

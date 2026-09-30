@@ -204,3 +204,45 @@ test("disconnect rejects a delayed feature completion without reopening the sele
   assert.equal(h.device.calls.filter(call => call.kind === "open").length, 1);
   assert.equal(h.device.calls.at(-1).kind, "close");
 });
+
+test("every onboard lighting mode and advertised option saves through WebHID with native pacing", async () => {
+  const h = harness();
+  try {
+    await h.send({type:"connect"});
+    await h.send({type:"read",feature:"lighting"});
+    const caps = h.view().lighting.capabilities;
+    assert.deepEqual(caps.effects.map(effect => Number(effect.id)), Array.from({length:20}, (_, id) => id));
+    assert.deepEqual(caps.host_modes.map(mode => mode.id).sort(), ["music-follow-2","music-follow-3","screen-average"]);
+    for (const effect of caps.effects) {
+      assert.equal((await h.send({type:"edit",feature:"lighting",change:{Effect:effect.id}})).ok, true, effect.label);
+      if (effect.brightness) await h.send({type:"edit",feature:"lighting",change:{Brightness:1}});
+      if (effect.speed) await h.send({type:"edit",feature:"lighting",change:{Speed:2}});
+      if (effect.color) await h.send({type:"edit",feature:"lighting",change:{Color:{Rgb:[10,20,30]}}});
+      for (const option of effect.options.length ? effect.options : [null]) {
+        if (option) await h.send({type:"edit",feature:"lighting",change:{Option:option.id}});
+        h.device.calls.length = 0;
+        const result = await h.send({type:"apply",feature:"lighting"});
+        assert.equal(result.ok, true, `${effect.label} ${option?.id ?? ""}`);
+        assert.equal(result.outcome.kind, "lightingSaved");
+        assert.equal(h.device.calls[0].kind, "backup");
+        assert.equal(writes(h.device).length, 1);
+        assert.equal(reads(h.device).length, 0);
+        const report = writes(h.device)[0].report;
+        assert.equal(report[1], Number(effect.id));
+        if (effect.brightness) assert.equal(report[3], 1);
+        if (effect.speed) assert.equal(report[2], 2);
+        if (option) assert.equal(report[4] >> 4, effect.options.indexOf(option));
+        if (effect.color) assert.deepEqual(report.slice(5,8), [10,20,30]);
+        assert(h.device.calls.some(call => call.kind === "wait" && call.ms === 500));
+      }
+      if (effect.color === "FixedOrRainbow") {
+        await h.send({type:"edit",feature:"lighting",change:{Color:"Rainbow"}});
+        h.device.calls.length = 0;
+        const result = await h.send({type:"apply",feature:"lighting"});
+        assert.equal(result.outcome.kind, "lightingSaved");
+        assert.equal(writes(h.device)[0].report[4] & 15, 8);
+        assert.equal(reads(h.device).length, 0);
+      }
+    }
+  } finally { await h.executor.close(); h.session.free(); }
+});
