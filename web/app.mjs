@@ -7,6 +7,7 @@ import { recordedKey, recordedPointer, recordingPolicy } from "./input.mjs";
 import { librarySlots } from "./macro_view.mjs";
 import { bindingLabel, bindingChanges } from "./keymap_view.mjs";
 import { pendingField, numberKind, needsInitialRead } from "./settings_view.mjs";
+import { createAppearance } from "./appearance.mjs";
 
 const text = error => String(error?.message ?? error);
 const hex = rgb => `#${rgb.map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -109,6 +110,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   const timers = new Map();
 
   root.replaceChildren();
+  const appearance = createAppearance(doc, win);
   const shell = node(doc, "div", undefined, "shell");
   const header = node(doc, "header", undefined, "topbar");
   const brand = node(doc, "div", undefined, "brand");
@@ -151,7 +153,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   header.append(brand, connection);
   main.append(status, keyboard, panel);
   workspace.append(sidebar, main);
-  shell.append(header, workspace, dialog, backupDialog, archiveDialog);
+  shell.append(header, workspace, dialog, backupDialog, archiveDialog, appearance.dialog);
   root.append(shell);
 
   function confirmDiscard() {
@@ -556,6 +558,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
   }
 
   function renderSidebar() {
+    appearance.button.disabled = view.recording;
     sidebar.replaceChildren(node(doc, "p", "Configure", "eyebrow"));
     for (const [id, label] of [["keymap", "Keymap"], ["macros", "Macros"], ["lighting", "Lighting"], ["settings", "Settings"], ["diagnostics", "Diagnostics"]]) {
       const dirty = editable(view[id])?.dirty;
@@ -567,6 +570,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       sidebar.append(item);
     }
     const tools = node(doc, "div", undefined, "sidebar-tools");
+    tools.append(appearance.button);
     tools.append(button(doc, "View backups", async () => {
       try {
         const data = await storage.all();
@@ -1278,6 +1282,7 @@ export function mount(root, { codec, hid, storage, now = () => performance.now()
       win.removeEventListener("beforeunload", unloading);
       hid.removeEventListener("disconnect", unplugged);
       root.replaceChildren();
+      appearance.destroy();
       destroying = (async () => {
         if (connectTask) await Promise.allSettled([connectTask]);
         await disconnect(true);

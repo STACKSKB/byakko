@@ -1,0 +1,58 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Semantic interface colours. Add palettes here, without changing layout rules. */
+:root {
+  color-scheme: light;
+  --canvas: #f4f3ef; --paper: #ffffff; --ink: #272823; --muted: #686962;
+  --rule: #d8d8d0; --control-border: #bdbfb5; --border-hover: #818477;
+  --hover: #f0f0eb; --disabled-ink: #989b91; --disabled-surface: #f8f8f5;
+  --disabled-border: #e0e1da; --disabled-primary: #e9eae4;
+  --primary-hover: #45473f; --on-primary: #ffffff;
+  --nav-selected: #e7e7df; --nav-hover: #ebebe5;
+  --accent: #565b8f; --selected: #eeedf6; --on-accent: #ffffff;
+  --error: #a4382c; --error-border: #c68980; --warning: #8a651f;
+  --success: #5c7455; --pending: #956217;
+  --capture-border: #a3a698; --capture-surface: #fafaf7;
+  --dialog-border: #a5a89a; --dialog-shadow: #27282324; --backdrop: #27282366;
+  /* Physical Nia87 keycaps are independent of interface theme and device RGB. */
+  --case: #e4e3db; --case-border: #c3c2b8; --case-edge: #cecec3; --case-shadow: #b5b7aa;
+  --keycap: #fafaf5; --key-ink: #4b4e49; --key-border: #c8c9bf; --key-edge: #e0e1d6;
+  --indigo: #626991; --indigo-ink: #ffffff; --indigo-border: #555c81; --indigo-edge: #4c527a;
+  --key-hover: #eeeee5; --key-border-hover: #767b6e; --indigo-hover: #757ca5; --indigo-border-hover: #454c75;
+  --key-selected: #272823; --key-changed: #ad6814; --swatch-border: #00000033;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --canvas: #20211f; --paper: #292b28; --ink: #e5e6df; --muted: #adb0a6;
+  --rule: #40443b; --control-border: #686d61; --border-hover: #9ca38f;
+  --hover: #34372f; --disabled-ink: #81877a; --disabled-surface: #252722;
+  --disabled-border: #41463a; --disabled-primary: #373b32;
+  --primary-hover: #c8cec0; --on-primary: #20211f;
+  --nav-selected: #35392f; --nav-hover: #2e312a;
+  --accent: #b5b9ec; --selected: #383b54; --on-accent: #202238;
+  --error: #f1a79d; --error-border: #b6786f; --warning: #e1c486;
+  --success: #a5bd99; --pending: #e5c78e;
+  --capture-border: #6b7460; --capture-surface: #262923;
+  --dialog-border: #697360; --dialog-shadow: #00000066; --backdrop: #00000099;
+}
+:root[data-palette="slate"] {
+  --canvas: #f0f2f3; --paper: #ffffff; --ink: #252b31; --muted: #626d77;
+  --rule: #d3d9de; --accent: #48657b; --selected: #e0eaf1;
+  --nav-selected: #dde4e9; --nav-hover: #e5eaee;
+}
+:root[data-palette="slate"][data-theme="dark"] {
+  --canvas: #1d2228; --paper: #272e35; --ink: #e1e7ec; --muted: #a9b5c0;
+  --rule: #3e4953; --accent: #a7cce7; --selected: #304a60;
+  --nav-selected: #323f4b; --nav-hover: #29353f;
+  --hover: #34414c; --control-border: #637582; --on-primary: #1d2228; --on-accent: #1c3040;
+}
+:root[data-palette="forest"] {
+  --canvas: #f1f3ed; --paper: #ffffff; --ink: #283024; --muted: #65705c;
+  --rule: #d2d9ca; --accent: #4d6b48; --selected: #e1eadb;
+  --nav-selected: #dfe6d8; --nav-hover: #e7ecdf;
+}
+:root[data-palette="forest"][data-theme="dark"] {
+  --canvas: #1d241e; --paper: #272f27; --ink: #e3e9df; --muted: #b0bca8;
+  --rule: #414f3e; --accent: #b3d09e; --selected: #354c30;
+  --nav-selected: #33412e; --nav-hover: #2b3827;
+  --hover: #374632; --control-border: #6a7c60; --on-primary: #1d241e; --on-accent: #23351d;
+}
