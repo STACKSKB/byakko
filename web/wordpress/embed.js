@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Same-origin presentation only. Device access remains inside the static client.
 (() => {
+  const linux = /Linux/i.test(navigator.userAgent) && !/Android|CrOS/i.test(navigator.userAgent);
+  for (const notice of document.querySelectorAll("[data-byakko-linux-requirements]")) notice.hidden = !linux;
   for (const frame of document.querySelectorAll("iframe[data-byakko-configurator]")) {
     let dispose;
     function attach() {

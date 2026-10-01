@@ -13,7 +13,7 @@ export async function buildWordpress({
   const plugin = resolve(destination, "byakko-configurator");
   await mkdir(plugin, { recursive: true });
   await copyFile(bundle, resolve(plugin, "index.html"));
-  for (const filename of ["byakko-configurator.php", "embed.js", "README.txt"]) {
+  for (const filename of ["byakko-configurator.php", "embed.js", "linux-requirements.html", "README.txt"]) {
     await copyFile(resolve(webRoot, "wordpress", filename), resolve(plugin, filename));
   }
   await copyFile(resolve(webRoot, "../LICENSE"), resolve(plugin, "LICENSE"));

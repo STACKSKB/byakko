@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linux WebHID requirements — Byakko</title>
+<style>body { margin:32px auto; padding:0 20px; max-width:720px; font:16px/1.6 system-ui,sans-serif; color:#272823; background:#fff } a { color:#7839af }</style>
+<main>
+<h1>Linux WebHID requirements</h1>
+<p>Use a browser supporting WebHID, such as Chrome or Chromium, and open the configurator over HTTPS. Select your Nia87 in the browser's permission prompt.</p>
+<p>Linux must also grant your desktop user read/write access to the keyboard's configuration <code>/dev/hidraw</code> device. Browser permission alone cannot grant this access. If your system already grants it, no additional udev rule is needed.</p>
+<p>Byakko provides a device-specific udev rule and permission helper. Follow the <a href="https://github.com/STACKSKB/byakko/blob/master/docs/linux-install.md">Linux installation instructions</a> to build and install the helper and rule, reload udev rules, and reconnect the keyboard. The native desktop application itself is not required for WebHID.</p>
+<p>The current rule covers the observed Nia87 configuration collection for USB <code>3151:4015</code>. It does not cover PID <code>4011</code> or the separate onboard-change notification interface. Do not grant access to all hidraw devices to work around a mismatch.</p>
+<p>Linux browser connection, writes and restoration remain unverified. The current rule does not establish automatic onboard synchronization on Linux.</p>
+<p><a href="https://developer.chrome.com/docs/capabilities/hid">Chrome WebHID documentation</a></p>
+</main>
+</html>
