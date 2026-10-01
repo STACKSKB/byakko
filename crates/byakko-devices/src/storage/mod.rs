@@ -11,6 +11,7 @@ use std::{ffi::OsString, io, path::PathBuf};
 pub enum Platform {
     Windows,
     Linux,
+    MacOS,
 }
 
 fn absolute_for(platform: Platform, value: &str) -> bool {
@@ -30,6 +31,7 @@ fn absolute_for(platform: Platform, value: &str) -> bool {
             drive_absolute || unc_absolute
         }
         Platform::Linux => value.starts_with('/'),
+        Platform::MacOS => value.starts_with('/'),
     }
 }
 
@@ -48,6 +50,7 @@ pub fn resolve_with(
             ("XDG_DATA_HOME", &["byakko"]),
             ("HOME", &[".local", "share", "byakko"]),
         ],
+        Platform::MacOS => &[("HOME", &["Library", "Application Support", "Byakko"])],
     };
     for (variable, suffix) in candidates {
         let Some(value) = get(variable) else { continue };
@@ -64,6 +67,7 @@ pub fn resolve_with(
     let candidates = match platform {
         Platform::Windows => "LOCALAPPDATA or USERPROFILE",
         Platform::Linux => "XDG_DATA_HOME or HOME",
+        Platform::MacOS => "HOME",
     };
     Err(format!(
         "No absolute per-user Byakko data directory is available; set {candidates} to an absolute path"
@@ -75,9 +79,9 @@ pub fn user_data_dir() -> Result<PathBuf, String> {
     let platform = Platform::Windows;
     #[cfg(target_os = "linux")]
     let platform = Platform::Linux;
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    return Err("No supported per-user Byakko data directory on this platform".into());
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    let platform = Platform::MacOS;
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
     resolve_with(platform, |name| std::env::var_os(name))
 }
 
@@ -160,5 +164,15 @@ mod tests {
             "/home/me/.local/share/byakko"
         );
         assert!(resolve_with(Platform::Linux, env(&[("HOME", "relative")])).is_err());
+    }
+
+    #[test]
+    fn macos_uses_application_support_under_absolute_home() {
+        let path = resolve_with(Platform::MacOS, env(&[("HOME", "/Users/me")])).unwrap();
+        assert_eq!(
+            path.to_string_lossy(),
+            "/Users/me/Library/Application Support/Byakko"
+        );
+        assert!(resolve_with(Platform::MacOS, env(&[("HOME", "relative")])).is_err());
     }
 }

@@ -288,6 +288,7 @@ name = "byakko-devices"
 version = "0.1.0"
 dependencies = [
  "byakko-core",
+ "core-graphics",
  "libc",
  "serde",
  "serde_json",

@@ -11,11 +11,15 @@ records. It is not verification of rewritten code.
 
 ## Product and delivery
 
-- Build an original native Windows and Linux desktop application in Rust with
+- Build an original native Windows, macOS and Linux desktop application in Rust with
   Iced. Do not put JavaScript, Electron, a webview, QML, a vendor helper, a web
   server, or a Node.js runtime in the desktop product or its build. USB Nia87
   stock firmware over USB is first; do not flash firmware. QMK/VIA and 2.4 GHz
   are later independent capabilities.
+- macOS device access uses IOKit, display capture uses CoreGraphics, and user
+  data is stored under `~/Library/Application Support/Byakko`. Music-follow is
+  unavailable until a native system-audio sampler is implemented. Physical HID
+  and Screen Recording permission acceptance remain open.
 - Preserve full configurator parity as the destination, including keymap,
   macros, lighting, per-key colors, settings, discovery, and the workflows
   users need to work with those features. Keep the user's accepted persistent

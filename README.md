@@ -1,8 +1,8 @@
 # Byakko — PRE-ALPHA
 
-A native Windows and Linux configurator for the **Menel Nia87 over USB**, built
-with Rust and Iced. It uses the keyboard's stock firmware and direct HID access;
-no vendor software, browser, or background service is needed.
+A native Windows, macOS and Linux configurator for the **Menel Nia87 over USB**,
+built with Rust and Iced. It uses the keyboard's stock firmware and direct HID
+access; no vendor software, browser, or background service is needed.
 
 **This is experimental pre-alpha software.** Hardware validation is still in
 progress, and recovery from every failed write is not guaranteed. The current
@@ -15,7 +15,8 @@ Download portable builds from the [Releases page](https://github.com/STACKSKB/by
 - Record and edit macros, name them locally, and import/export portable macro files.
 - Choose onboard lighting effects or edit per-key RGB in layers 1, 2 and 3
   (Fn+Z, Fn+X and Fn+C).
-- Run screen-following and music-following lighting, with live music controls.
+- Run screen-following lighting and, on supported platforms, music-following
+  lighting with live music controls.
 - Edit supported keyboard settings and export diagnostic captures.
 - Refresh affected features when the keyboard sends onboard-change events,
   while retaining unfinished edits.
@@ -26,7 +27,7 @@ for its commands.
 
 ## Getting started
 
-See [Build from source](docs/source-build.md) for Windows and Linux prerequisites,
+See [Build from source](docs/source-build.md) for platform prerequisites,
 commands and output locations. To try the interface without a keyboard:
 
 ```sh
@@ -35,6 +36,9 @@ cargo run --release --locked -p byakko-desktop -- --demo
 
 Omit `--demo` to use a connected Nia87. Connect by USB and close other keyboard
 configurators before starting.
+
+On macOS, screen-following requires Screen Recording access, and music-following
+is not available yet.
 
 **Linux requires the Byakko udev rule and permission helper.** Follow
 [Linux installation](docs/linux-install.md) to install

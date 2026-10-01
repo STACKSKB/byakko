@@ -4,6 +4,7 @@
 
 use std::ffi::{CStr, CString};
 
+mod descriptor;
 pub mod selection;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -16,8 +17,10 @@ use windows as backend;
 mod linux;
 #[cfg(target_os = "linux")]
 use linux as backend;
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
-compile_error!("The original HID backend currently supports Windows and Linux only");
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos as backend;
 
 pub use backend::Device as HidDevice;
 pub(crate) use backend::InputDevice;

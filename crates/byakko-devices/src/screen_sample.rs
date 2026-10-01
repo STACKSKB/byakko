@@ -67,7 +67,7 @@ fn mean_rgb(samples: impl IntoIterator<Item = [u8; 3]>) -> Result<[u8; 3], Strin
     Ok(totals.map(|sum| (sum / count) as u8))
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 fn grid_coordinate(index: i32, divisions: i32, extent: i32) -> i32 {
     (((index as i64 * 2 + 1) * extent as i64) / (divisions as i64 * 2)) as i32
 }
@@ -383,6 +383,172 @@ mod platform {
                     .iter()
                     .map(|pixel| [pixel[2], pixel[1], pixel[0]]),
             )
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::{
+        COLS, DisplaySource, ROWS, ScreenCapture, ScreenSampling, grid_coordinate, mean_rgb,
+        point_coordinate, select_display,
+    };
+    use core_graphics::{
+        display::{CGDirectDisplayID, CGDisplay},
+        geometry::{CGPoint, CGRect, CGSize},
+    };
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGGetActiveDisplayList(
+            max_displays: u32,
+            displays: *mut CGDirectDisplayID,
+            display_count: *mut u32,
+        ) -> i32;
+        fn CGMainDisplayID() -> CGDirectDisplayID;
+    }
+
+    fn active_displays() -> Result<Vec<CGDirectDisplayID>, String> {
+        let mut count = 0;
+        if unsafe { CGGetActiveDisplayList(0, std::ptr::null_mut(), &mut count) } != 0 {
+            return Err("Cannot enumerate active displays".into());
+        }
+        let mut ids = vec![0; count as usize];
+        if unsafe { CGGetActiveDisplayList(count, ids.as_mut_ptr(), &mut count) } != 0 {
+            return Err("Cannot enumerate active displays".into());
+        }
+        ids.truncate(count as usize);
+        Ok(ids)
+    }
+
+    fn display_sources() -> Result<Vec<(DisplaySource, CGDirectDisplayID, bool)>, String> {
+        let primary = unsafe { CGMainDisplayID() };
+        Ok(active_displays()?
+            .into_iter()
+            .map(|id| {
+                let text = id.to_string();
+                (
+                    DisplaySource {
+                        id: text.clone(),
+                        label: format!("Display {text}"),
+                    },
+                    id,
+                    id == primary,
+                )
+            })
+            .collect())
+    }
+
+    pub fn displays() -> Result<Vec<DisplaySource>, String> {
+        Ok(display_sources()?
+            .into_iter()
+            .map(|(source, _, _)| source)
+            .collect())
+    }
+
+    fn selected_display(
+        id: Option<&str>,
+    ) -> Result<(DisplaySource, CGDirectDisplayID, bool), String> {
+        let displays = display_sources()?;
+        select_display(&displays, id, |(source, _, primary)| (&source.id, *primary))
+            .cloned()
+            .ok_or_else(|| {
+                if id.is_some() {
+                    "Selected display is no longer available".into()
+                } else {
+                    "Primary display is unavailable".into()
+                }
+            })
+    }
+
+    fn rgb_at(display: CGDisplay, x: i32, y: i32) -> Result<[u8; 3], String> {
+        let image = display
+            .image_for_rect(CGRect::new(
+                &CGPoint::new(x as f64, y as f64),
+                &CGSize::new(1.0, 1.0),
+            ))
+            .ok_or("Screen capture unavailable; allow Byakko in Screen Recording settings")?;
+        if image.bits_per_pixel() != 32 || image.bits_per_component() != 8 {
+            return Err("macOS display returned an unsupported pixel format".into());
+        }
+        let data = image.data();
+        if data.len() < 4 {
+            return Err("macOS returned an incomplete screen pixel".into());
+        }
+        Ok([data[2], data[1], data[0]])
+    }
+
+    fn rgb_row(display: CGDisplay, width: i32, y: i32) -> Result<Vec<[u8; 3]>, String> {
+        let image = display
+            .image_for_rect(CGRect::new(
+                &CGPoint::new(0.0, y as f64),
+                &CGSize::new(width as f64, 1.0),
+            ))
+            .ok_or("Screen capture unavailable; allow Byakko in Screen Recording settings")?;
+        if image.bits_per_pixel() != 32 || image.bits_per_component() != 8 {
+            return Err("macOS display returned an unsupported pixel format".into());
+        }
+        let data = image.data();
+        let row_bytes = image.bytes_per_row();
+        if image.width() < width as usize
+            || row_bytes < width as usize * 4
+            || (data.len() as usize) < row_bytes
+        {
+            return Err("macOS returned an incomplete screen scanline".into());
+        }
+        Ok((0..COLS)
+            .map(|col| {
+                let offset = grid_coordinate(col, COLS, width) as usize * 4;
+                [data[offset + 2], data[offset + 1], data[offset]]
+            })
+            .collect())
+    }
+
+    pub struct ScreenSampler {
+        capture: ScreenCapture,
+    }
+
+    impl ScreenSampler {
+        pub fn new() -> Result<Self, String> {
+            Self::with_capture(ScreenCapture::default())
+        }
+
+        pub fn with_capture(capture: ScreenCapture) -> Result<Self, String> {
+            let (_, id, _) = selected_display(capture.display_id.as_deref())?;
+            let display = CGDisplay::new(id);
+            let width = display.pixels_wide() as i32;
+            let height = display.pixels_high() as i32;
+            if width <= 0 || height <= 0 {
+                return Err("Selected display is unavailable".into());
+            }
+            if let ScreenSampling::Point { x, y } = capture.sampling {
+                point_coordinate(x, width)?;
+                point_coordinate(y, height)?;
+            }
+            Ok(Self { capture })
+        }
+
+        pub fn sample(&mut self) -> Result<[u8; 3], String> {
+            let (_, id, _) = selected_display(self.capture.display_id.as_deref())?;
+            let display = CGDisplay::new(id);
+            let width = display.pixels_wide() as i32;
+            let height = display.pixels_high() as i32;
+            if width <= 0 || height <= 0 {
+                return Err("Selected display is unavailable".into());
+            }
+            if let ScreenSampling::Point { x, y } = self.capture.sampling {
+                return rgb_at(
+                    display,
+                    point_coordinate(x, width)?,
+                    point_coordinate(y, height)?,
+                );
+            }
+            let mut colors = Vec::with_capacity((COLS * ROWS) as usize);
+            for row in 0..ROWS {
+                let y = grid_coordinate(row, ROWS, height);
+                colors.extend(rgb_row(display, width, y)?);
+            }
+            mean_rgb(colors)
         }
     }
 }

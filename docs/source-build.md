@@ -33,6 +33,14 @@ PulseAudio compatibility service. `ldd` does not check these dynamically loaded
 libraries. Wayland can display the GUI, but **screen-following supports X11
 only**.
 
+### macOS
+
+Use the Apple Silicon or Intel Rust target that matches the Mac and install
+Xcode Command Line Tools (`xcode-select --install`). HID access uses IOKit and
+screen-following uses CoreGraphics. Screen capture requires granting Byakko
+Screen Recording access in System Settings. Music-follow is not available on
+macOS yet.
+
 ## Checkout and build
 
 ```sh
@@ -66,6 +74,17 @@ The last command builds the Linux permission helper at
 using [Linux installation](linux-install.md) before accessing hardware. Reload
 the rules and reconnect the keyboard. Run the application as your normal
 desktop user, not root.
+
+### macOS output
+
+```sh
+./target/release/byakko-desktop --demo
+./target/release/byakko-cli --help
+```
+
+The current macOS backend has compile and unit-test coverage, but physical
+discovery, report reads/writes, and screen-capture permission behavior still
+need device acceptance.
 
 Demo mode uses an in-memory keyboard. Omit `--demo` for the attached Nia87.
 Close other configurator sessions first. These CLI commands only discover or

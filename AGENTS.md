@@ -80,10 +80,13 @@ language at the expense of readable Rust.
 
 ## Product and device constraints
 
-Native Windows/Linux Rust + Iced. Byakko-owned work is GPL-3.0-or-later; preserve
+Native Windows/macOS/Linux Rust + Iced. Byakko-owned work is GPL-3.0-or-later; preserve
 third-party notices. No JavaScript, Electron, webview, QML, vendor helper or local
 server in the native product/build. Keep core suitable for a future browser.
 Stock USB Nia87 first; no flashing. No unrelated UX redesign during the rewrite.
+macOS uses IOKit for HID and CoreGraphics for screen capture; music-follow is
+not available until native system-audio capture is implemented. Physical HID
+and screen-permission acceptance remain open.
 
 The approved screenshots and workflow remain the UI/UX contract. Rewriting source
 does not authorize changing navigation, feature placement or interaction flows.

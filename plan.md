@@ -25,6 +25,14 @@ it is not evidence that new frontend paths work.
 
 ## Architectural decisions
 
+2026-10-01 macOS support: the device layer now has an IOKit HID backend with
+shared report-descriptor validation, selected-keyboard notification input,
+CoreGraphics display sampling, and Application Support storage. Native macOS
+compilation and device-crate tests pass. Music-follow remains unavailable until
+a system-audio sampler is implemented. Physical HID, Screen Recording
+permission, and complete UI acceptance remain open; no hardware writes were
+performed.
+
 2026-09-27 event-driven follow-up supersedes the periodic observation decisions
 below. Native Nia87 input reports wake the desktop through a bounded mailbox;
 there is no idle feature-read timer or connected inventory scan while listening.
