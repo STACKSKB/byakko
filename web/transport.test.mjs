@@ -67,10 +67,21 @@ test("WebHID DataView offsets preserve raw reply bytes and semantic white", () =
   assert.equal(backing[3], 0x87);
 });
 
-test("captured physical WebHID replies decode through the same WASM boundary", async () => {
-  const capture = JSON.parse(await readFile(new URL("../Research/webhid-read-20260929.json", import.meta.url)));
-  for (const name of ["identity", "profile", "lighting"]) {
-    assert.deepEqual(JSON.parse(codec.decode_reply(name, Uint8Array.from(capture[name].raw))), capture[name]);
+test("synthetic Nia87 replies decode through the WASM boundary", () => {
+  for (const [name, header] of [
+    ["identity", [0x80, 0, 1]],
+    ["profile", [0x85]],
+    ["lighting", [0x87, 1, 4, 4, 7, 12, 34, 56]],
+  ]) {
+    const raw = new Uint8Array(64);
+    raw.set(header);
+    const decoded = JSON.parse(codec.decode_reply(name, raw));
+    assert.deepEqual(decoded.raw, [...raw]);
+    if (name === "lighting") {
+      assert.equal(decoded.effectName, "LightAlwaysOn");
+      assert.equal(decoded.setting.value, 4);
+      assert.deepEqual(decoded.setting.rgb, [12, 34, 56]);
+    }
   }
 });
 

@@ -57,7 +57,7 @@
   --hover: #374632; --control-border: #6a7c60; --on-primary: #1d241e; --on-accent: #23351d;
 }
 
-/* hosting site's white surfaces, neutral ink and observed #565b8f accent. */
+/* Neutral embedded palette with white surfaces and the application accent. */
 :root[data-palette="embed"] {
   --canvas: #ffffff; --paper: #ffffff; --ink: #1a202c; --muted: #505050;
   --rule: #ededed; --control-border: #d3d3d3; --border-hover: #808080;

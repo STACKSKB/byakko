@@ -2,7 +2,7 @@
 // Browser appearance only; never enters the device session or backup store.
 const storageKey = "byakko-appearance";
 export const modes = [["system", "System"], ["light", "Light"], ["dark", "Dark"]];
-export const palettes = [["indigo", "Indigo"], ["slate", "Slate"], ["forest", "Forest"], ["embed", "hosting site"]];
+export const palettes = [["indigo", "Indigo"], ["slate", "Slate"], ["forest", "Forest"], ["embed", "Neutral"]];
 
 export function preference(value, defaults = { mode: "system", palette: "indigo" }) {
   return {

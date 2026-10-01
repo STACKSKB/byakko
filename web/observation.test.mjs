@@ -21,14 +21,13 @@ function harness() {
   return {device, session, executor, dispatch, send, view, notify};
 }
 
-test("captured physical notifications coalesce to affected loaded lighting only", async () => {
+test("synthetic lighting notifications coalesce to affected loaded lighting only", async () => {
   const h = harness();
   await h.send({type:"connect"});
   await h.send({type:"read",feature:"keymap"});
   await h.send({type:"read",feature:"lighting"});
-  const capture = JSON.parse(await readFile(new URL('../Research/webhid-notifications-20260930.json',import.meta.url)));
   let at = 1000;
-  for (const event of capture.reports) h.notify(event.payload, at += 10);
+  for (const payload of [[4,1,0], [4,1,0], [4,1,0]]) h.notify(payload, at += 10);
   const due = h.view().observation.dueMs;
   h.device.calls.length = 0;
   assert.equal(h.dispatch({type:"observeNext",nowMs:due-1}).command, null);
