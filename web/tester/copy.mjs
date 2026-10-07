@@ -7,6 +7,5 @@ export const copy = {
   down: "Pressed", up: "Released", repeating: "repeating", outside: "Outside selected layout",
   unavailable: "No physical code received",
   locations: ["Standard", "Left", "Right", "Numpad"],
-  focus: "Keyboard input test. Press keys to test them. Press Tab to leave.",
   fn: "Fn · usually handled by keyboard firmware; no independent browser event",
 };

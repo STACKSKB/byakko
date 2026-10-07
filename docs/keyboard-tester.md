@@ -17,7 +17,10 @@ printed legend changes the illustration, not the operating-system layout.
 
 The tester shows pressed and previously tested keys, a tested-key count,
 simultaneous input, recent event details, and a reset control. It responds
-while the tester has focus. Browser and operating-system shortcuts can be
+automatically while the page is focused; ordinary form fields remain usable
+and their text input is ignored. If a page contains multiple testers, the first
+receives input initially; clicking or focusing another makes it active. Reset
+test is at the top right and clears the active test immediately. Browser and operating-system shortcuts can be
 reserved, and Fn usually has no independent browser event. The tester can
 show which events arrived in the browser; it cannot prove that a missing event
 means a hardware fault. Keystrokes stay in the browser and are not sent to a

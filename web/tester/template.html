@@ -1,29 +1,28 @@
 <section class="byakko-tester" data-byakko-tester aria-label="Keyboard tester">
   <header class="bt-heading">
     <h2 class="bt-title">Keyboard tester</h2>
+    <button type="button" data-action="reset">Reset test</button>
   </header>
   <div class="bt-controls">
     <label>Physical layout<select data-choice="standard"><option value="ansi">ANSI</option><option value="iso">ISO</option><option value="jis">JIS</option></select></label>
     <label>Keyboard size<select data-choice="size"><option value="full">Full-size</option><option value="tkl">TKL</option><option value="75">75%</option><option value="65">65%</option><option value="60">60%</option></select></label>
     <label>Key legends<select data-choice="legends"><option value="qwerty">QWERTY (US / UK)</option><option value="qwertz">QWERTZ (German)</option><option value="azerty">AZERTY (French)</option><option value="japanese">Japanese (JIS)</option></select></label>
-    <button type="button" data-action="start">Start testing</button>
   </div>
-  <p class="bt-status" data-status role="status">Ready</p>
-  <div class="bt-surface" tabindex="0" role="group" aria-label="Keyboard input test. Press keys to test them. Press Tab to leave." data-surface>
+  <p class="bt-status" data-status role="status">Listening</p>
+  <div class="bt-surface" tabindex="0" role="group" aria-label="Keyboard input test" data-surface>
     <div class="bt-board" data-board><!-- INITIAL_BOARD --></div>
   </div>
   <div class="bt-summary">
     <p><strong data-tested>0 / 104</strong> tested</p>
     <p><strong data-held-count>0</strong> held</p>
     <p><strong data-peak>0</strong> most held at once</p>
-    <button type="button" data-action="reset">Reset test</button>
   </div>
   <p class="bt-held"><strong>Held:</strong> <span data-held>None</span></p>
   <div class="bt-event" data-event hidden></div>
   <p class="bt-legend"><span class="bt-swatch bt-swatch-tested"></span> Tested <span class="bt-swatch bt-swatch-held"></span> Held <span class="bt-swatch bt-swatch-unavailable"></span> Firmware key</p>
   <details class="bt-help">
     <summary>How to use this keyboard tester</summary>
-    <p>Choose a layout, click Start testing and press keys. Tab exits; Reset test clears results.<br>Fn and system shortcuts may not reach the browser.</p>
+    <p>Choose a layout and press keys. Reset test clears results.<br>Fn and system shortcuts may not reach the browser.</p>
   </details>
   <noscript><p>Enable JavaScript to test keyboard input.</p></noscript>
 </section>

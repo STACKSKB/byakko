@@ -4,6 +4,7 @@ import { usageForCode } from "../input.mjs";
 import { defaultLayout, layoutFor } from "./layouts.mjs";
 import { emptyTest, updateTest, coverage } from "./state.mjs";
 import { copy } from "./copy.mjs";
+import { connectPageInput } from "./page-input.mjs";
 
 export function mountTester(root) {
   if (root.dataset.mounted) return;
@@ -87,30 +88,15 @@ export function mountTester(root) {
       renderLayout();
     });
   }
-  root.querySelector('[data-action="start"]').addEventListener("click", () => surface.focus({ preventScroll: true }));
-  root.querySelector('[data-action="reset"]').addEventListener("click", () => apply({ type: "reset" }));
+  root.querySelector('[data-action="reset"]').addEventListener("click", () => {
+    apply({ type: "reset" });
+    surface.focus({ preventScroll: true });
+  });
   surface.addEventListener("pointerdown", () => surface.focus({ preventScroll: true }));
-  surface.addEventListener("focus", () => { status.textContent = copy.active; });
-  surface.addEventListener("blur", pause);
   surface.addEventListener("contextmenu", event => event.preventDefault());
-  for (const [eventName, pressed] of [["keydown", true], ["keyup", false]]) {
-    surface.addEventListener(eventName, event => {
-      // Only this focused surface captures input. Native Tab remains the exit path.
-      if (event.code !== "Tab" && event.key !== "Tab") event.preventDefault();
-      event.stopPropagation();
-      apply({ type: "key", pressed, code: event.code, key: event.key,
-        location: event.location, repeat: event.repeat });
-    });
-  }
-  doc.defaultView.addEventListener("blur", pause);
-  doc.defaultView.addEventListener("focus", () => {
-    if (doc.activeElement === surface) status.textContent = copy.active;
-  });
-  doc.addEventListener("visibilitychange", () => {
-    if (doc.hidden) pause();
-    else if (doc.activeElement === surface) status.textContent = copy.active;
-  });
   renderLayout();
+  connectPageInput(root, { input: apply, pause,
+    resume: () => { status.textContent = copy.active; } });
 }
 
 for (const root of document.querySelectorAll("[data-byakko-tester]")) mountTester(root);

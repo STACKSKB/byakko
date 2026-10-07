@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Byakko Keyboard Tester
  * Description: A lightweight keyboard input tester for WordPress pages.
- * Version: 0.1.0
+ * Version: 0.1.1
  * License: GPL-3.0-or-later
  * License URI: https://www.gnu.org/licenses/gpl-3.0.html
  * Text Domain: byakko-keyboard-tester
@@ -24,13 +24,13 @@ function byakko_keyboard_tester_enqueue_for_page() {
         'byakko-keyboard-tester',
         plugins_url( 'tester.css', __FILE__ ),
         array(),
-        '0.1.0'
+        '0.1.1'
     );
     wp_enqueue_script(
         'byakko-keyboard-tester',
         plugins_url( 'tester.js', __FILE__ ),
         array(),
-        '0.1.0',
+        '0.1.1',
         true
     );
 }

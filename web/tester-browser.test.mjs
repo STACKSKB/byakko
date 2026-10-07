@@ -70,7 +70,7 @@ async function launchBrowser() {
   return { send, close };
 }
 
-test("standalone tester captures focused browser input across layouts", browserOptions, async () => {
+test("standalone tester starts automatically and captures browser input across layouts", browserOptions, async () => {
   await readFile(artifact, "utf8").catch(() => {
     throw new Error("Build the browser tester first: npm --prefix web run build:tester");
   });
@@ -104,12 +104,13 @@ test("standalone tester captures focused browser input across layouts", browserO
     assert.equal(await evaluate("performance.getEntriesByType('resource').length"), 0);
     const firstTotal = await evaluate("document.querySelector('[data-tested]').textContent");
     assert.match(firstTotal, /^0 \/ \d+$/);
+    assert.equal(await evaluate("document.querySelector('[data-action=start]')"), null);
+    assert.equal(await evaluate("document.querySelector('.bt-heading').contains(document.querySelector('[data-action=reset]'))"), true);
+    const desktopHeader = await evaluate("(() => { const h=document.querySelector('.bt-heading').getBoundingClientRect(), r=document.querySelector('[data-action=reset]').getBoundingClientRect(); return {headerRight:h.right, resetRight:r.right, resetLeft:r.left, headerMid:h.left+h.width/2}; })()");
+    assert.ok(Math.abs(desktopHeader.headerRight - desktopHeader.resetRight) <= 3, JSON.stringify(desktopHeader));
+    assert.ok(desktopHeader.resetLeft > desktopHeader.headerMid, JSON.stringify(desktopHeader));
 
-    // No capture until the test area owns focus.
-    await down("KeyA", "a", 65); await up("KeyA", "a", 65);
-    assert.equal(await evaluate("document.querySelector('[data-tested]').textContent"), firstTotal);
-    await evaluate("document.querySelector('[data-action=start]').click()");
-    assert.equal(await evaluate("document.activeElement.matches('[data-surface]')"), true);
+    // The first key is counted without clicking or focusing the board.
     await down("KeyA", "a", 65);
     assert.equal(await evaluate("document.querySelector('[data-code=KeyA]').classList.contains('bt-held')"), true);
     await down("KeyA", "a", 65, 0, true);
@@ -147,24 +148,39 @@ test("standalone tester captures focused browser input across layouts", browserO
     assert.equal(await evaluate("document.querySelector('[data-choice=legends]').value"), "qwerty");
     await screenshot("iso");
 
-    // Leaving via Tab releases held keys but retains the tested marks.
-    await down("KeyB", "b", 66);
+    // Native control keys still work. Tab remains normal page navigation.
+    await evaluate("document.querySelector('[data-choice=size]').focus()");
+    const priorSize = await evaluate("document.querySelector('[data-choice=size]').value");
+    await down("ArrowDown", "ArrowDown", 40); await up("ArrowDown", "ArrowDown", 40);
+    assert.notEqual(await evaluate("document.querySelector('[data-choice=size]').value"), priorSize);
+    await evaluate("document.querySelector('[data-surface]').focus()");
     await down("Tab", "Tab", 9); await up("Tab", "Tab", 9);
     assert.equal(await evaluate("document.activeElement.matches('[data-surface]')"), false);
-    assert.equal(await evaluate("document.querySelector('[data-held-count]').textContent"), "0");
-    assert.equal(await evaluate("document.querySelector('[data-code=KeyB]').classList.contains('bt-tested')"), true);
+
+    // An editable field outside the tester receives text without changing its history.
+    const beforeExternal = await evaluate("document.querySelector('[data-tested]').textContent");
+    await evaluate("(() => { const input=document.createElement('input'); input.id='outside-tester'; document.body.append(input); input.focus(); })()");
+    await send("Input.dispatchKeyEvent", { type: "keyDown", code: "KeyZ", key: "z", text: "z", unmodifiedText: "z", windowsVirtualKeyCode: 90 });
+    await up("KeyZ", "z", 90);
+    assert.equal(await evaluate("document.querySelector('#outside-tester').value"), "z");
+    assert.equal(await evaluate("document.querySelector('[data-tested]').textContent"), beforeExternal);
+
+    // Reset moves focus to the board, ready for another key without a start action.
     await evaluate("document.querySelector('[data-action=reset]').click()");
     assert.equal(await evaluate("document.querySelector('[data-tested]').textContent.startsWith('0 /')"), true);
     assert.equal(await evaluate("document.querySelector('[data-peak]').textContent"), "0");
+    assert.equal(await evaluate("document.activeElement.matches('[data-surface]')"), true);
+    await down("KeyB", "b", 66); await up("KeyB", "b", 66);
+    assert.equal(await evaluate("document.querySelector('[data-tested]').textContent.startsWith('1 /')"), true);
 
     // Focus and visibility loss must clear apparent held keys.
-    await evaluate("document.querySelector('[data-action=start]').click()");
     await down("KeyC", "c", 67);
     await evaluate("window.dispatchEvent(new Event('blur'))");
     assert.equal(await evaluate("document.querySelector('[data-held-count]').textContent"), "0");
     await down("KeyD", "d", 68);
     await evaluate("Object.defineProperty(document, 'hidden', { configurable:true, get:()=>true }); document.dispatchEvent(new Event('visibilitychange'))");
     assert.equal(await evaluate("document.querySelector('[data-held-count]').textContent"), "0");
+    assert.equal(await evaluate("document.querySelector('[data-code=KeyB]').classList.contains('bt-tested')"), true);
   } finally {
     await browser.close();
   }
@@ -180,18 +196,37 @@ test("two shortcode roots are isolated and the mobile page does not overflow", b
   const browser = await launchBrowser();
   const { send } = browser;
   const evaluate = async expression => (await send("Runtime.evaluate", { expression, returnByValue: true })).result.value;
+  const press = async (code, key, virtualKeyCode) => {
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", code, key, windowsVirtualKeyCode: virtualKeyCode });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", code, key, windowsVirtualKeyCode: virtualKeyCode });
+  };
   try {
     await send("Page.enable"); await send("Runtime.enable");
     await send("Page.navigate", { url: pathToFileURL(page).href });
     await waitFor(() => evaluate("document.querySelectorAll('[data-mounted=true]').length === 2"));
-    await evaluate("document.querySelectorAll('[data-action=start]')[0].click()");
-    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", code: "KeyA", key: "a", windowsVirtualKeyCode: 65 });
+    await press("KeyA", "a", 65);
     assert.equal(await evaluate("document.querySelectorAll('[data-tested]')[0].textContent.startsWith('1 /')"), true);
     assert.equal(await evaluate("document.querySelectorAll('[data-tested]')[1].textContent.startsWith('0 /')"), true);
+    await evaluate("document.querySelectorAll('[data-surface]')[1].dispatchEvent(new PointerEvent('pointerdown', { bubbles:true }))");
+    await press("KeyB", "b", 66);
+    assert.equal(await evaluate("document.querySelectorAll('[data-tested]')[0].textContent.startsWith('1 /')"), true);
+    assert.equal(await evaluate("document.querySelectorAll('[data-tested]')[1].textContent.startsWith('1 /')"), true);
+    await evaluate("document.querySelectorAll('[data-choice=standard]')[0].focus()");
+    await press("KeyC", "c", 67);
+    assert.equal(await evaluate("document.querySelectorAll('[data-tested]')[0].textContent.startsWith('2 /')"), true);
+    assert.equal(await evaluate("document.querySelectorAll('[data-tested]')[1].textContent.startsWith('1 /')"), true);
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     const dimensions = await evaluate("({body:document.body.scrollWidth, viewport:innerWidth, scroller:document.querySelector('[data-surface]').scrollWidth})");
     assert.ok(dimensions.body <= dimensions.viewport, JSON.stringify(dimensions));
     assert.ok(dimensions.scroller > dimensions.viewport);
+    const mobileHeader = await evaluate("(() => { const h=document.querySelector('.bt-heading').getBoundingClientRect(), r=document.querySelector('[data-action=reset]').getBoundingClientRect(); return {headerRight:h.right, resetRight:r.right, resetLeft:r.left, headerMid:h.left+h.width/2}; })()");
+    assert.ok(Math.abs(mobileHeader.headerRight - mobileHeader.resetRight) <= 3, JSON.stringify(mobileHeader));
+    assert.ok(mobileHeader.resetLeft > mobileHeader.headerMid, JSON.stringify(mobileHeader));
+    if (screenshotDirectory) {
+      await mkdir(screenshotDirectory, { recursive: true });
+      const capture = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+      await writeFile(resolve(screenshotDirectory, "byakko-tester-mobile.png"), Buffer.from(capture.data, "base64"));
+    }
   } finally {
     await browser.close();
   }
