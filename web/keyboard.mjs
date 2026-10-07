@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { node, button, same, hex } from "./widgets.mjs";
 import { bindingLabel } from "./keymap_view.mjs";
+import { boardBounds, keyRectangle } from "./key-geometry.mjs";
 // The Nia87's stock ivory/indigo keycap grouping, independent of RGB values.
 const indigoKeys = new Set(["Esc", "F5", "F6", "F7", "F8", "PrtSc", "ScrLk", "Pause",
   "Tab", "Caps", "LShift", "RShift", "LCtrl", "RCtrl", "LWin", "RWin", "LAlt", "RAlt",
@@ -22,8 +23,7 @@ export function createKeyboard({ doc, selectLayer, selectKey, redraw }) {
     const scroll = node(doc, "div", undefined, "keyboard-scroll");
     const board = node(doc, "div", undefined, "keyboard");
     const keys = view.descriptor.keys.filter(item => item.visible);
-    const width = Math.max(...keys.map(item => item.x + item.width), 1);
-    const height = Math.max(...keys.map(item => item.y + item.height), 1);
+    const { width, height } = boardBounds(keys);
     board.style.width = `${width * 43 + 14}px`;
     board.style.height = `${height * 43 + 14}px`;
     const colors = view.picture?.editor?.draft ?? {};
@@ -40,10 +40,9 @@ export function createKeyboard({ doc, selectLayer, selectKey, redraw }) {
       element.title = mapped ? `${item.label} · ${mapped.full}` : item.label;
       element.setAttribute("aria-label", mapped && mapped.compact !== item.label ? `${item.label} · ${mapped.full}` : item.label);
       element.setAttribute("aria-pressed", String(key === item.id));
-      element.style.left = `${item.x * 43 + 7}px`;
-      element.style.top = `${item.y * 43 + 7}px`;
-      element.style.width = `${item.width * 43 - 4}px`;
-      element.style.height = `${item.height * 43 - 4}px`;
+      for (const [property, value] of Object.entries(keyRectangle(item))) {
+        element.style[property] = `${value}px`;
+      }
       if (tab === "lighting" && pictureMode && colors[item.id]) {
         element.classList.add("has-color");
         element.style.setProperty("--key-color", hex(colors[item.id]));

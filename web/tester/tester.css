@@ -1,0 +1,50 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.byakko-tester {
+  --bt-ink: #272823; --bt-muted: #62635d; --bt-rule: #d8d8d0;
+  --bt-surface: #fff; --bt-key: #f4f3ef; --bt-accent: #565b8f;
+  --bt-tested: #e5e8f7; --bt-held: #343963;
+  color: var(--bt-ink); background: var(--bt-surface); font: 16px/1.5 system-ui, sans-serif;
+  font-family: inherit; max-width: 1140px; margin: 0 auto; padding: 24px; text-align: left;
+  border: 1px solid var(--bt-rule); border-radius: 6px; box-sizing: border-box;
+}
+.byakko-tester *, .byakko-tester *::before, .byakko-tester *::after { box-sizing: border-box; }
+.byakko-tester .bt-title { font: inherit; font-size: 1.6em; font-weight: 700; margin: 0 0 4px; color: var(--bt-ink); }
+.byakko-tester p { margin: 0 0 14px; }
+.byakko-tester .bt-heading p, .byakko-tester .bt-status { color: var(--bt-muted); }
+.byakko-tester .bt-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 20px 0 14px; }
+.byakko-tester label { display: flex; flex-direction: column; gap: 4px; font-size: .875em; font-weight: 600; margin: 0; }
+.byakko-tester select, .byakko-tester button { font: inherit; font-size: 14px; color: var(--bt-ink); border: 1px solid var(--bt-rule); background: white; border-radius: 4px; min-height: 40px; padding: 7px 12px; margin: 0; width: auto; max-width: 100%; box-shadow: none; line-height: 1.5; text-transform: none; letter-spacing: normal; }
+.byakko-tester button { cursor: pointer; }
+.byakko-tester button[data-action="start"] { color: white; background: var(--bt-accent); border-color: var(--bt-accent); }
+.byakko-tester button:hover { border-color: var(--bt-accent); }
+.byakko-tester :is(button, select, summary):focus-visible { outline: 3px solid var(--bt-accent); outline-offset: 3px; }
+.byakko-tester .bt-surface { overflow-x: auto; padding: 8px; border: 2px solid var(--bt-rule); border-radius: 5px; cursor: pointer; }
+.byakko-tester .bt-surface:focus { outline: none; border-color: var(--bt-accent); }
+.byakko-tester .bt-board { position: relative; margin: auto; min-width: 0; }
+.byakko-tester .bt-key { position: absolute; display: flex; align-items: center; justify-content: center; background: var(--bt-key); border: 1px solid #bfc0b8; border-bottom-width: 3px; border-radius: 4px; font-size: 12px; font-weight: 600; line-height: 1.1; text-align: center; white-space: nowrap; user-select: none; color: var(--bt-ink); }
+.byakko-tester .bt-key.bt-tested { background: var(--bt-tested); border-color: var(--bt-accent); }
+.byakko-tester .bt-key.bt-tested::after { content: "✓"; position: absolute; top: 1px; right: 2px; font-size: 9px; }
+.byakko-tester .bt-key.bt-held { background: var(--bt-held); color: white; border-color: var(--bt-held); }
+.byakko-tester .bt-key.bt-unavailable { border-style: dashed; color: var(--bt-muted); }
+.byakko-tester .bt-key[data-shape="iso-enter"] { clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 100%, 50% 50%, 0 50%); align-items: start; justify-content: center; padding-top: 12px; }
+.byakko-tester .bt-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin: 18px 0 10px; }
+.byakko-tester .bt-summary p { margin: 0; font-size: .875em; }
+.byakko-tester .bt-summary strong { font-size: 1.25em; }
+.byakko-tester .bt-summary button { margin-left: auto; }
+.byakko-tester .bt-held, .byakko-tester .bt-event { font-size: .875em; overflow-wrap: anywhere; min-height: 1.5em; }
+.byakko-tester .bt-event { padding: 12px; background: var(--bt-key); border-left: 3px solid var(--bt-accent); font-family: ui-monospace, monospace; }
+.byakko-tester .bt-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .875em; color: var(--bt-muted); margin: 16px 0; }
+.byakko-tester .bt-swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--bt-accent); margin-left: 10px; }
+.byakko-tester .bt-swatch:first-child { margin-left: 0; }
+.byakko-tester .bt-swatch-tested { background: var(--bt-tested); }
+.byakko-tester .bt-swatch-held { background: var(--bt-held); }
+.byakko-tester .bt-swatch-unavailable { border-style: dashed; }
+.byakko-tester .bt-help { border-top: 1px solid var(--bt-rule); padding-top: 14px; font-size: .875em; }
+.byakko-tester summary { cursor: pointer; font-weight: 600; margin-bottom: 10px; }
+@media (max-width: 600px) {
+  .byakko-tester { padding: 16px; }
+  .byakko-tester .bt-controls label { flex: 1 1 120px; }
+  .byakko-tester .bt-controls button { width: 100%; }
+  .byakko-tester .bt-summary { gap: 12px; }
+  .byakko-tester .bt-summary button { margin-left: 0; }
+}

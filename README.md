@@ -29,6 +29,11 @@ same core editing workflows through a self-contained static page. It runs HID
 operations and storage locally in a compatible browser; see its documented
 hardware acceptance limits before relying on a write.
 
+The independent [keyboard tester](docs/keyboard-tester.md) checks ordinary
+browser key input across ANSI, ISO and JIS presets. It builds into a lightweight
+standalone HTML page or an uploadable WordPress shortcode plugin, without loading
+the configurator or requesting device access.
+
 ## Getting started
 
 See [Build from source](docs/source-build.md) for Windows and Linux prerequisites,

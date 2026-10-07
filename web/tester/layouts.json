@@ -1,0 +1,51 @@
+{
+  "license": "GPL-3.0-or-later",
+  "standards": {
+    "ansi": {
+      "label": "ANSI",
+      "rows": [
+        ["Backquote", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal", ["Backspace", 2]],
+        [["Tab", 1.5], "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight", ["Backslash", 1.5]],
+        [["CapsLock", 1.75], "KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon", "Quote", ["Enter", 2.25]],
+        [["ShiftLeft", 2.25], "KeyZ", "KeyX", "KeyC", "KeyV", "KeyB", "KeyN", "KeyM", "Comma", "Period", "Slash", ["ShiftRight", 2.75]],
+        [["ControlLeft", 1.25], ["MetaLeft", 1.25], ["AltLeft", 1.25], ["Space", 6.25], ["AltRight", 1.25], ["MetaRight", 1.25], ["ContextMenu", 1.25], ["ControlRight", 1.25]]
+      ]
+    },
+    "iso": {
+      "label": "ISO",
+      "rows": [
+        ["Backquote", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal", ["Backspace", 2]],
+        [["Tab", 1.5], "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight", ["Enter", 1.5, 2, "iso-enter"]],
+        [["CapsLock", 1.75], "KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon", "Quote", ["Backslash", 1.5]],
+        [["ShiftLeft", 1.25], "IntlBackslash", "KeyZ", "KeyX", "KeyC", "KeyV", "KeyB", "KeyN", "KeyM", "Comma", "Period", "Slash", ["ShiftRight", 2.75]],
+        [["ControlLeft", 1.25], ["MetaLeft", 1.25], ["AltLeft", 1.25], ["Space", 6.25], ["AltRight", 1.25], ["MetaRight", 1.25], ["ContextMenu", 1.25], ["ControlRight", 1.25]]
+      ]
+    },
+    "jis": {
+      "label": "JIS",
+      "rows": [
+        ["Backquote", "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal", "IntlYen", "Backspace"],
+        [["Tab", 1.5], "KeyQ", "KeyW", "KeyE", "KeyR", "KeyT", "KeyY", "KeyU", "KeyI", "KeyO", "KeyP", "BracketLeft", "BracketRight", ["Enter", 1.5, 2, "iso-enter"]],
+        [["CapsLock", 1.75], "KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK", "KeyL", "Semicolon", "Quote", ["Backslash", 1.5]],
+        [["ShiftLeft", 2.25], "KeyZ", "KeyX", "KeyC", "KeyV", "KeyB", "KeyN", "KeyM", "Comma", "Period", "Slash", "IntlRo", ["ShiftRight", 1.75]],
+        [["ControlLeft", 1.25], ["MetaLeft", 1.25], ["AltLeft", 1.25], ["NonConvert", 1.25], ["Space", 2.5], ["Convert", 1.25], ["KanaMode", 1.25], ["AltRight", 1.25], ["MetaRight", 1.25], ["ContextMenu", 1.25], ["ControlRight", 1.25]]
+      ]
+    }
+  },
+  "sizes": {
+    "full": { "label": "Full-size", "functionRow": "spaced", "navigation": "tkl", "numpad": true },
+    "tkl": { "label": "TKL", "functionRow": "spaced", "navigation": "tkl" },
+    "75": { "label": "75%", "functionRow": "compact", "navigation": "compact" },
+    "65": { "label": "65%", "navigation": "compact" },
+    "60": { "label": "60%" }
+  },
+  "labels": {
+    "Escape": "Esc", "Backquote": "`", "Minus": "−", "Equal": "=", "Backspace": "Backspace", "Tab": "Tab", "BracketLeft": "[", "BracketRight": "]", "Backslash": "\\", "CapsLock": "Caps", "Semicolon": ";", "Quote": "'", "Enter": "Enter", "ShiftLeft": "Shift", "ShiftRight": "Shift", "IntlBackslash": "\\", "Comma": ",", "Period": ".", "Slash": "/", "ControlLeft": "Ctrl", "ControlRight": "Ctrl", "MetaLeft": "Win", "MetaRight": "Win", "AltLeft": "Alt", "AltRight": "Alt", "ContextMenu": "Menu", "Space": "Space", "PrintScreen": "PrtSc", "ScrollLock": "ScrLk", "Pause": "Pause", "Insert": "Ins", "Home": "Home", "PageUp": "PgUp", "Delete": "Del", "End": "End", "PageDown": "PgDn", "ArrowLeft": "←", "ArrowRight": "→", "ArrowUp": "↑", "ArrowDown": "↓", "NumLock": "Num", "NumpadDivide": "/", "NumpadMultiply": "×", "NumpadSubtract": "−", "NumpadAdd": "+", "NumpadEnter": "Enter", "NumpadDecimal": ".", "IntlYen": "¥", "IntlRo": "\\ ろ", "NonConvert": "無変換", "Convert": "変換", "KanaMode": "かな"
+  },
+  "legends": {
+    "qwerty": { "label": "QWERTY (US / UK)", "keys": {}, "iso": { "Backslash": "#", "AltRight": "AltGr" } },
+    "qwertz": { "label": "QWERTZ (German)", "keys": { "KeyY": "Z", "KeyZ": "Y", "Minus": "ß", "Equal": "´", "BracketLeft": "Ü", "BracketRight": "+", "Backslash": "#", "Semicolon": "Ö", "Quote": "Ä", "Backquote": "^", "Slash": "−", "IntlBackslash": "<", "AltRight": "AltGr" } },
+    "azerty": { "label": "AZERTY (French)", "keys": { "KeyQ": "A", "KeyW": "Z", "KeyA": "Q", "KeyZ": "W", "KeyM": ",", "Semicolon": "M", "Comma": ";", "Period": ":", "Slash": "!", "Backquote": "²", "Digit1": "&", "Digit2": "é", "Digit3": "\"", "Digit4": "'", "Digit5": "(", "Digit6": "−", "Digit7": "è", "Digit8": "_", "Digit9": "ç", "Digit0": "à", "Minus": ")", "Equal": "=", "BracketLeft": "^", "BracketRight": "$", "Backslash": "*", "Quote": "ù", "IntlBackslash": "<", "AltRight": "AltGr" } },
+    "japanese": { "label": "Japanese (JIS)", "keys": { "Backquote": "半角", "Equal": "^", "BracketLeft": "@", "BracketRight": "[", "Quote": ":", "Backslash": "]" } }
+  }
+}
