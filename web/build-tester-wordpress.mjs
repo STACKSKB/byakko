@@ -38,7 +38,7 @@ with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as arch
         archive.writestr(info, path.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
 `;
   return new Promise((accept, reject) => {
-    const child = spawn("python3", ["-c", script, destination, resolve(destination, "byakko-keyboard-tester.zip"), ...files.map(file => relative(destination, file))], { stdio: "inherit" });
+    const child = spawn(process.env.PYTHON || "python3", ["-c", script, destination, resolve(destination, "byakko-keyboard-tester.zip"), ...files.map(file => relative(destination, file))], { stdio: "inherit" });
     child.once("error", reject);
     child.once("exit", code => code === 0 ? accept() : reject(new Error(`ZIP creation exited ${code}`)));
   });

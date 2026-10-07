@@ -62,6 +62,8 @@ npm run test:tester
 ```
 
 The build machine needs Node.js, npm, and Python 3 (for the reproducible ZIP).
+If Python 3 is installed under another command or path, set the `PYTHON`
+environment variable to that executable before building or running tests.
 The WordPress server needs only PHP and the uploaded files. To check the
 WordPress plugin behavior locally, `php` must be available on the test machine.
 No device is required for the build or tests.

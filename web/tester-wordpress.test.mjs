@@ -13,7 +13,7 @@ const run = promisify(execFile);
 test("tester ZIP contains the standalone build, WordPress wrapper, and editable source", async () => {
   const scratch = await mkdtemp(join(tmpdir(), "byakko-tester-wp-"));
   const { plugin, zip } = await buildTesterWordpress({ destination: scratch });
-  const { stdout } = await run("python3", ["-c", `
+  const { stdout } = await run(process.env.PYTHON || "python3", ["-c", `
 import json, sys, zipfile
 with zipfile.ZipFile(sys.argv[1]) as archive:
     print(json.dumps(sorted(archive.namelist())))
