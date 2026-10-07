@@ -33,7 +33,8 @@ export function mountTester(root) {
     root.querySelector("[data-held]").textContent = [...state.held].join(" + ") || copy.none;
     const last = state.last;
     const details = root.querySelector("[data-event]");
-    if (!last) details.textContent = copy.noEvent;
+    details.hidden = !last;
+    if (!last) details.textContent = "";
     else {
       const usage = usageForCode(last.code);
       details.textContent = `${last.pressed ? copy.down : copy.up} · code: ${last.code || copy.unavailable} · key: ${JSON.stringify(last.key)} · ${copy.locations[last.location] ?? last.location}${last.repeat ? ` · ${copy.repeating}` : ""}${usage !== null ? ` · USB usage: 0x${usage.toString(16).padStart(2, "0")}` : ""}${!elements.has(last.code) ? ` · ${copy.outside}` : ""}`;

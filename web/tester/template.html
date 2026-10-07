@@ -1,7 +1,6 @@
 <section class="byakko-tester" data-byakko-tester aria-label="Keyboard tester">
   <header class="bt-heading">
     <h2 class="bt-title">Keyboard tester</h2>
-    <p>Press each key to check the input your browser receives.</p>
   </header>
   <div class="bt-controls">
     <label>Physical layout<select data-choice="standard"><option value="ansi">ANSI</option><option value="iso">ISO</option><option value="jis">JIS</option></select></label>
@@ -9,7 +8,7 @@
     <label>Key legends<select data-choice="legends"><option value="qwerty">QWERTY (US / UK)</option><option value="qwertz">QWERTZ (German)</option><option value="azerty">AZERTY (French)</option><option value="japanese">Japanese (JIS)</option></select></label>
     <button type="button" data-action="start">Start testing</button>
   </div>
-  <p class="bt-status" data-status role="status">Click the keyboard or Start testing, then press keys. Tab leaves the test area.</p>
+  <p class="bt-status" data-status role="status">Ready</p>
   <div class="bt-surface" tabindex="0" role="group" aria-label="Keyboard input test. Press keys to test them. Press Tab to leave." data-surface>
     <div class="bt-board" data-board><!-- INITIAL_BOARD --></div>
   </div>
@@ -20,14 +19,11 @@
     <button type="button" data-action="reset">Reset test</button>
   </div>
   <p class="bt-held"><strong>Held:</strong> <span data-held>None</span></p>
-  <div class="bt-event" data-event>Press a key to see its browser event.</div>
+  <div class="bt-event" data-event hidden></div>
   <p class="bt-legend"><span class="bt-swatch bt-swatch-tested"></span> Tested <span class="bt-swatch bt-swatch-held"></span> Held <span class="bt-swatch bt-swatch-unavailable"></span> Firmware key</p>
   <details class="bt-help">
     <summary>How to use this keyboard tester</summary>
-    <p>Choose your keyboard’s physical layout, size and printed legends. Click the keyboard or Start testing, then press keys. A tested key keeps a check mark after you release it. Hold several keys to see which arrive together. Tab moves focus out of the test; use Reset test to start again.</p>
-    <p>Compact keyboards use representative arrangements. Keys from another layer still appear in the event display even when they are absent from the picture. Legend choices change the picture; they do not change your operating system’s keyboard layout. Numpad and left/right modifier keys are tracked separately.</p>
-    <p>This checks events delivered to a focused browser page, not switches directly. Fn usually works inside the keyboard and sends no independent event. Your OS, browser or input method may intercept shortcuts or keys, including Print Screen and media keys. A missing event alone does not prove a faulty key. The simultaneous-key count describes this session’s received events, not a certified rollover limit.</p>
-    <p>The tester does not send or save your keystrokes. Its state stays in this page’s memory and disappears when you reload. No USB connection permission is needed.</p>
+    <p>Choose a layout, click Start testing and press keys. Tab exits; Reset test clears results.<br>Fn and system shortcuts may not reach the browser.</p>
   </details>
-  <noscript><p>Enable JavaScript to test keyboard input. The keyboard picture and instructions remain available without it.</p></noscript>
+  <noscript><p>Enable JavaScript to test keyboard input.</p></noscript>
 </section>
