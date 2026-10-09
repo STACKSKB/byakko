@@ -68,9 +68,9 @@ export function mountTester(root) {
     state = updateTest(state, event);
     renderState();
   }
-  function pause() {
+  function pause(reason) {
     apply({ type: "release-all" });
-    status.textContent = copy.paused;
+    status.textContent = reason === "navigation" ? copy.navigation : copy.paused;
   }
   for (const select of root.querySelectorAll("[data-choice]")) {
     select.value = choices[select.dataset.choice];
@@ -88,15 +88,19 @@ export function mountTester(root) {
       renderLayout();
     });
   }
+  renderLayout();
+  const activate = connectPageInput(root, { input: apply, pause,
+    resume: () => { status.textContent = copy.active; } });
   root.querySelector('[data-action="reset"]').addEventListener("click", () => {
     apply({ type: "reset" });
     surface.focus({ preventScroll: true });
+    activate();
   });
-  surface.addEventListener("pointerdown", () => surface.focus({ preventScroll: true }));
+  surface.addEventListener("pointerdown", () => {
+    surface.focus({ preventScroll: true });
+    activate();
+  });
   surface.addEventListener("contextmenu", event => event.preventDefault());
-  renderLayout();
-  connectPageInput(root, { input: apply, pause,
-    resume: () => { status.textContent = copy.active; } });
 }
 
 for (const root of document.querySelectorAll("[data-byakko-tester]")) mountTester(root);

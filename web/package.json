@@ -8,7 +8,7 @@
     "test": "node --test *.test.mjs",
     "build:tester": "node build-tester.mjs",
     "build:tester:wordpress": "node build-tester-wordpress.mjs",
-    "test:tester": "node --test tester.test.mjs tester-build.test.mjs tester-wordpress.test.mjs",
+    "test:tester": "node --test tester.test.mjs tester-input.test.mjs tester-build.test.mjs tester-wordpress.test.mjs",
     "test:tester:browser": "node --test tester-browser.test.mjs"
   },
   "devDependencies": {

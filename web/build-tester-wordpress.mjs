@@ -70,7 +70,7 @@ export async function buildTesterWordpress({ destination = resolve(webRoot, "dis
   for (const file of await sourceFiles(resolve(webRoot, "tester"))) {
     await include(file, resolve(source, "web", relative(webRoot, file)));
   }
-  for (const file of ["build-tester.mjs", "build-tester-wordpress.mjs", "input.mjs", "key-geometry.mjs", "package.json", "package-lock.json", "tester.test.mjs", "tester-build.test.mjs", "tester-browser.test.mjs", "tester-wordpress.test.mjs"]) {
+  for (const file of ["build-tester.mjs", "build-tester-wordpress.mjs", "input.mjs", "key-geometry.mjs", "package.json", "package-lock.json", "tester.test.mjs", "tester-input.test.mjs", "tester-build.test.mjs", "tester-browser.test.mjs", "tester-wordpress.test.mjs"]) {
     await include(resolve(webRoot, file), resolve(source, "web", file));
   }
   await include(resolve(repoRoot, "docs/keyboard-tester.md"), resolve(source, "docs/keyboard-tester.md"));

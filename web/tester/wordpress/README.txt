@@ -23,6 +23,11 @@ The tester reports what reaches the browser; Fn and system-reserved shortcuts
 may not produce browser events. A key that does not light up is not by itself
 proof of a faulty keyboard.
 
+Tab tests the Tab key while capture is active. Shift+Tab stops testing and
+moves focus backward so ordinary page navigation can continue. Click the
+keyboard, or focus it and press Enter or Space, to resume testing. Reset test
+clears results and resumes capture.
+
 index.html is the same self-contained tester for standalone hosting. The
 source/ directory contains the corresponding editable source and build files.
 The plugin and Byakko-owned assets are GPL-3.0-or-later; see LICENSE.

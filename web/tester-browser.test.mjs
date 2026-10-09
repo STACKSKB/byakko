@@ -81,9 +81,9 @@ test("standalone tester starts automatically and captures browser input across l
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.text);
     return result.result.value;
   };
-  const down = (code, key, virtualKeyCode, location = 0, autoRepeat = false) => send("Input.dispatchKeyEvent", {
+  const down = (code, key, virtualKeyCode, location = 0, autoRepeat = false, modifiers = 0) => send("Input.dispatchKeyEvent", {
     type: "rawKeyDown", code, key, windowsVirtualKeyCode: virtualKeyCode,
-    nativeVirtualKeyCode: virtualKeyCode, location, isKeypad: location === 3, autoRepeat,
+    nativeVirtualKeyCode: virtualKeyCode, location, isKeypad: location === 3, autoRepeat, modifiers,
   });
   const up = (code, key, virtualKeyCode, location = 0) => send("Input.dispatchKeyEvent", {
     type: "keyUp", code, key, windowsVirtualKeyCode: virtualKeyCode,
@@ -148,14 +148,26 @@ test("standalone tester starts automatically and captures browser input across l
     assert.equal(await evaluate("document.querySelector('[data-choice=legends]').value"), "qwerty");
     await screenshot("iso");
 
-    // Native control keys still work. Tab remains normal page navigation.
+    // Native control keys still work; Tab is captured until Shift+Tab exits.
     await evaluate("document.querySelector('[data-choice=size]').focus()");
     const priorSize = await evaluate("document.querySelector('[data-choice=size]').value");
     await down("ArrowDown", "ArrowDown", 40); await up("ArrowDown", "ArrowDown", 40);
     assert.notEqual(await evaluate("document.querySelector('[data-choice=size]').value"), priorSize);
     await evaluate("document.querySelector('[data-surface]').focus()");
     await down("Tab", "Tab", 9); await up("Tab", "Tab", 9);
+    assert.equal(await evaluate("document.activeElement.matches('[data-surface]')"), true);
+    assert.equal(await evaluate("document.querySelector('[data-code=Tab]').classList.contains('bt-tested')"), true);
+    await down("Tab", "Tab", 9, 0, false, 8); await up("Tab", "Tab", 9);
     assert.equal(await evaluate("document.activeElement.matches('[data-surface]')"), false);
+    assert.match(await evaluate("document.querySelector('[data-status]').textContent"), /^Keyboard navigation/);
+    await evaluate("document.querySelector('[data-surface]').focus()");
+    await down("Tab", "Tab", 9); await up("Tab", "Tab", 9);
+    assert.equal(await evaluate("document.activeElement.matches('[data-surface]')"), false);
+    await evaluate("document.querySelector('[data-surface]').focus()");
+    const beforeResume = await evaluate("document.querySelector('[data-tested]').textContent");
+    await down("Enter", "Enter", 13); await up("Enter", "Enter", 13);
+    assert.equal(await evaluate("document.querySelector('[data-tested]').textContent"), beforeResume);
+    assert.match(await evaluate("document.querySelector('[data-status]').textContent"), /^Listening/);
 
     // An editable field outside the tester receives text without changing its history.
     const beforeExternal = await evaluate("document.querySelector('[data-tested]').textContent");

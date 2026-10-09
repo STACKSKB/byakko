@@ -8,7 +8,7 @@ export function connectPageInput(root, handlers) {
   const doc = root.ownerDocument;
   let page = pages.get(doc);
   if (!page) {
-    page = { testers: new Map(), active: root };
+    page = { testers: new Map(), active: root, captureEnabled: true, resumeKey: null };
     pages.set(doc, page);
 
     function select(target) {
@@ -25,7 +25,8 @@ export function connectPageInput(root, handlers) {
 
     function sync(target = doc.activeElement) {
       const selected = select(target);
-      if (selected.ignored || doc.hidden || !doc.hasFocus()) selected.handlers?.pause();
+      if (!page.captureEnabled) selected.handlers?.pause("navigation");
+      else if (selected.ignored || doc.hidden || !doc.hasFocus()) selected.handlers?.pause();
       else selected.handlers?.resume();
     }
     page.sync = sync;
@@ -35,9 +36,38 @@ export function connectPageInput(root, handlers) {
     for (const [name, pressed] of [["keydown", true], ["keyup", false]]) {
       doc.addEventListener(name, event => {
         const selected = select(event.target);
+        const code = event.code || event.key;
+        if (code === page.resumeKey) {
+          // The key used to resume is an activation gesture, not a test sample.
+          if (!pressed) page.resumeKey = null;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (!selected.handlers || doc.hidden || selected.ignored) return;
-        // Leave controls and Tab navigation usable; the rest of the page is the test area.
-        if (!selected.control && event.code !== "Tab" && event.key !== "Tab") {
+        // Enter clicks Reset on keydown. Ignore its later keyup after Reset rearms.
+        if (pressed && event.key === "Enter" && selected.control &&
+            selected.control === page.active.querySelector('[data-action="reset"]')) page.resumeKey = code;
+        const tab = event.code === "Tab" || event.key === "Tab";
+        if (page.captureEnabled && pressed && tab && event.shiftKey &&
+            !event.ctrlKey && !event.altKey && !event.metaKey) {
+          page.captureEnabled = false;
+          selected.handlers.pause("navigation");
+          // Native Shift+Tab moves focus back; subsequent Tab navigation stays free.
+          return;
+        }
+        if (!page.captureEnabled) {
+          const surface = page.active.querySelector("[data-surface]");
+          if (!pressed || event.target !== surface || (event.key !== "Enter" && event.key !== " ")) return;
+          page.captureEnabled = true;
+          page.resumeKey = code;
+          event.preventDefault();
+          event.stopPropagation();
+          selected.handlers.resume();
+          return;
+        }
+        // Tab is a test key during capture; other native control actions still work.
+        if (!selected.control || tab) {
           event.preventDefault();
           event.stopPropagation();
         }
@@ -47,15 +77,25 @@ export function connectPageInput(root, handlers) {
       });
     }
     doc.defaultView.addEventListener("blur", () => {
-      for (const tester of page.testers.values()) tester.pause();
+      page.resumeKey = null;
+      for (const tester of page.testers.values()) tester.pause(page.captureEnabled ? undefined : "navigation");
     });
     doc.defaultView.addEventListener("focus", () => sync());
     doc.addEventListener("visibilitychange", () => {
-      if (doc.hidden) for (const tester of page.testers.values()) tester.pause();
+      if (doc.hidden) {
+        page.resumeKey = null;
+        for (const tester of page.testers.values()) tester.pause(page.captureEnabled ? undefined : "navigation");
+      }
       else sync();
     });
   }
   page.testers.set(root, handlers);
   if (page.active !== root) handlers.pause();
   page.sync();
+  return () => {
+    if (page.active !== root) page.testers.get(page.active)?.pause();
+    page.active = root;
+    page.captureEnabled = true;
+    page.sync();
+  };
 }

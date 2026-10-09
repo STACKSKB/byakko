@@ -24,7 +24,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     "tester.html", "tester.js", "tester.css", "source/web/build-tester.mjs",
     "source/web/build-tester-wordpress.mjs", "source/web/input.mjs",
     "source/web/key-geometry.mjs", "source/web/tester/layouts.json",
-    "source/web/tester.test.mjs", "source/web/tester-build.test.mjs", "source/web/tester-browser.test.mjs",
+    "source/web/tester.test.mjs", "source/web/tester-input.test.mjs", "source/web/tester-build.test.mjs", "source/web/tester-browser.test.mjs",
     "source/web/tester-wordpress.test.mjs", "source/docs/keyboard-tester.md",
     "source/LICENSE",
   ]) {

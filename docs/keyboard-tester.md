@@ -20,7 +20,14 @@ simultaneous input, recent event details, and a reset control. It responds
 automatically while the page is focused; ordinary form fields remain usable
 and their text input is ignored. If a page contains multiple testers, the first
 receives input initially; clicking or focusing another makes it active. Reset
-test is at the top right and clears the active test immediately. Browser and operating-system shortcuts can be
+test is at the top right and clears the active test immediately.
+
+Tab registers as a test key while capture is active. Shift+Tab stops capture,
+releases held keys and moves focus backward for ordinary page navigation.
+Navigation remains available when focus returns to the tester or the page.
+Click the keyboard, or focus it and press Enter or Space, to resume testing;
+the activation key does not count as a test sample. Reset test also resumes
+capture. Browser and operating-system shortcuts can be
 reserved, and Fn usually has no independent browser event. The tester can
 show which events arrived in the browser; it cannot prove that a missing event
 means a hardware fault. Keystrokes stay in the browser and are not sent to a
