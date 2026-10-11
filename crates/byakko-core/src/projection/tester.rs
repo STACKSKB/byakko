@@ -541,7 +541,13 @@ fn label(id: u16, choice: LayoutSelection) -> String {
     let common = match id {
         0x28 => "Enter",
         0x29 => "Esc",
-        0x2a => "Backspace",
+        0x2a => {
+            if choice.standard == Standard::Jis {
+                "Bksp"
+            } else {
+                "Backspace"
+            }
+        }
         0x2b => "Tab",
         0x2c => "Space",
         0x2d => "−",
@@ -774,6 +780,7 @@ mod tests {
             ..Default::default()
         };
         for (usage, expected) in [
+            (0x2a, "Bksp"),
             (0x35, "半角"),
             (0x2e, "^"),
             (0x2f, "@"),

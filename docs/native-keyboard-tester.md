@@ -90,9 +90,33 @@ interrupt endpoints, the interval is expressed in powers of two microframes:
 `2^(bInterval - 1)` × 125 microseconds. Full-speed interrupt intervals use
 1 ms frames. This is a declared scheduling opportunity, not evidence that a
 transaction occurred at every opportunity, nor a measurement of actual device
-polling. Byakko does not currently report a polling interval when it cannot
-inspect the descriptor. Even an inspected descriptor would not establish the
-observed bus transaction cadence.
+polling. The tester inspects a descriptor snapshot when you explicitly choose a
+native input source. Linux follows that event device's exact sysfs USB interface
+ancestor, active configuration and alternate setting. Windows resolves the exact
+Raw Input device-interface path to its USB ancestor, then requires its driver
+key to match one hub port before issuing standard descriptor GET requests.
+Neither path matches another keyboard by vendor/product ID or changes USB
+configuration. Unsupported, inaccessible or ambiguous sources show the reason
+that descriptor metadata is unavailable.
+
+Each interrupt IN endpoint on that HID interface is shown separately with the
+USB speed, interface, alternate setting, endpoint address and raw `bInterval`.
+This is interface metadata; multiple HID collections can share the endpoint.
+Windows declines interfaces with multiple alternate settings when the active
+setting cannot be established. Metadata inspection is independent of Start and
+retained while testing is paused; choosing the source again requests a fresh
+snapshot. There is no periodic descriptor polling. Stale or duplicate results
+are rejected, and a removed source invalidates its snapshot.
+
+The Windows inventory and descriptor sizes are bounded. Hub requests currently
+use synchronous OS calls on the task executor: a stalled driver can retain that
+worker because these calls have no per-request timeout. Physical hub access
+and Linux sysfs behavior require platform acceptance testing.
+
+Host scheduling can differ from the descriptor's declared period. A USB radio
+receiver's descriptor describes the receiver's host endpoint, not the wireless
+link to its keyboard. Even a successfully inspected descriptor does not
+establish observed bus transaction cadence or physical actuation latency.
 
 ## Chatter candidates
 
@@ -135,6 +159,8 @@ bus analyzer that captures those transactions.
 
 ## References
 
+- [Microsoft: USBView descriptor and hub query sample](https://learn.microsoft.com/en-us/samples/microsoft/windows-driver-samples/usbview-sample-application/)
+- [Linux kernel: USB sysfs ABI](https://github.com/torvalds/linux/blob/master/Documentation/ABI/testing/sysfs-bus-usb)
 - [Microsoft: Raw Input Overview](https://learn.microsoft.com/en-us/windows/win32/inputdev/about-raw-input)
 - [Linux kernel: Input event codes](https://docs.kernel.org/input/event-codes.html)
 - [Linux kernel UAPI: EVIOCSCLOCKID](https://github.com/torvalds/linux/blob/master/include/uapi/linux/input.h)

@@ -105,9 +105,47 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
             byakko_core::projection::tester::Standard::Jis,
             byakko_core::projection::tester::Size::Full,
         ),
+        (
+            "tester-usb-snapshot-fixture",
+            1360,
+            1300,
+            byakko_core::projection::tester::Standard::Ansi,
+            byakko_core::projection::tester::Size::Tkl,
+        ),
     ] {
         app.tester.update(tester_form::Message::Standard(standard));
         app.tester.layout.size = board_size;
+        let usb_fixture = name == "tester-usb-snapshot-fixture";
+        if usb_fixture {
+            use byakko_devices::{
+                tester_input::InputDevice,
+                tester_usb::{Endpoint, Metadata, Speed},
+            };
+            let device = InputDevice {
+                id: "fixture://keyboard-input".into(),
+                identity: "fixture-identity".into(),
+                label: "Fixture keyboard".into(),
+            };
+            app.tester
+                .update(tester_form::Message::Source(tester_form::Source::Device(
+                    device.clone(),
+                )));
+            app.tester.update(tester_form::Message::Usb {
+                request: app.tester.usb_request(),
+                device,
+                result: Ok(Metadata {
+                    source: "Descriptor fixture (no hardware observation)".into(),
+                    speed: Speed::High,
+                    endpoints: vec![Endpoint {
+                        interface: 3,
+                        alternate: 0,
+                        address: 0x81,
+                        b_interval: 4,
+                        interval_us: 1_000,
+                    }],
+                }),
+            });
+        }
         app.tester.test.resume();
         app.tester.test.accept(Input {
             usage: 4,
@@ -148,6 +186,18 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
         assert!(texts.0.iter().any(|(text, _)| {
             text.contains("Firmware remapping prevents identifying the actuated switch")
         }));
+        if usb_fixture {
+            assert!(texts.0.iter().any(|(text, _)| {
+                text.contains("Declared interrupt IN service interval")
+                    && text.contains("1.000 ms (bInterval 4)")
+            }));
+            assert!(
+                texts
+                    .0
+                    .iter()
+                    .any(|(text, _)| text.contains("Actual USB polling: not measured"))
+            );
+        }
         let start = texts
             .0
             .iter()
@@ -217,8 +267,10 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
         std::fs::create_dir_all(&path).unwrap();
         pixmap.save_png(path.join(format!("{name}.png"))).unwrap();
         drop(element);
-        let _ = app.update(messages.remove(0));
-        assert!(app.tester.active());
+        if !usb_fixture {
+            let _ = app.update(messages.remove(0));
+            assert!(app.tester.active());
+        }
         app.tester.pause();
     }
 }
@@ -429,4 +481,94 @@ fn jis_choice_and_window_input_preserve_japanese_host_usages() {
         Standard::Ansi,
     )));
     assert_eq!(app.tester.layout.legends, Legends::Qwerty);
+}
+
+#[test]
+fn usb_snapshots_reject_old_duplicate_and_disappeared_source_completions() {
+    use byakko_devices::{
+        tester_input::InputDevice,
+        tester_usb::{Endpoint, Metadata, Speed, Unavailable},
+    };
+    use tester_form::Source;
+    let device = InputDevice {
+        id: "fixture-input".into(),
+        identity: "fixture-identity".into(),
+        label: "Fixture keyboard".into(),
+    };
+    let metadata = Metadata {
+        source: "Fixture descriptor".into(),
+        speed: Speed::High,
+        endpoints: vec![Endpoint {
+            interface: 3,
+            alternate: 0,
+            address: 0x81,
+            b_interval: 4,
+            interval_us: 1000,
+        }],
+    };
+    let mut form = tester_form::Form::default();
+    form.update(tester_form::Message::Source(Source::Device(device.clone())));
+    let old = form.usb_request();
+    form.update(tester_form::Message::Source(Source::Window));
+    form.update(tester_form::Message::Source(Source::Device(device.clone())));
+    let current = form.usb_request();
+    form.update(tester_form::Message::Usb {
+        request: old,
+        device: device.clone(),
+        result: Ok(metadata.clone()),
+    });
+    assert!(form.usb.is_none());
+    form.update(tester_form::Message::Usb {
+        request: current,
+        device: device.clone(),
+        result: Ok(metadata.clone()),
+    });
+    assert_eq!(form.usb, Some(Ok(metadata.clone())));
+    form.update(tester_form::Message::Usb {
+        request: current,
+        device: device.clone(),
+        result: Err(Unavailable("Duplicate".into())),
+    });
+    assert_eq!(form.usb, Some(Ok(metadata.clone())));
+    form.update(tester_form::Message::Sources(Ok(Vec::new())));
+    assert!(form.usb.as_ref().unwrap().is_err());
+    form.update(tester_form::Message::Usb {
+        request: current,
+        device: device.clone(),
+        result: Ok(metadata.clone()),
+    });
+    assert!(form.usb.as_ref().unwrap().is_err());
+    form.update(tester_form::Message::Source(Source::Device(device.clone())));
+    let in_flight = form.usb_request();
+    form.update(tester_form::Message::Sources(Ok(Vec::new())));
+    form.update(tester_form::Message::Usb {
+        request: in_flight,
+        device,
+        result: Ok(metadata),
+    });
+    assert!(form.usb.as_ref().unwrap().is_err());
+}
+
+#[test]
+fn usb_completion_retains_snapshot_after_leaving_tester_page() {
+    use byakko_devices::{tester_input::InputDevice, tester_usb::Unavailable};
+    let (mut app, _) = app(false);
+    let device = InputDevice {
+        id: "fixture-input".into(),
+        identity: "fixture-identity".into(),
+        label: "Fixture keyboard".into(),
+    };
+    app.tester
+        .update(tester_form::Message::Source(tester_form::Source::Device(
+            device.clone(),
+        )));
+    let request = app.tester.usb_request();
+    assert_ne!(app.page, Page::Tester);
+    let _ = app.update(Message::Tester(tester_form::Message::Usb {
+        request,
+        device,
+        result: Err(Unavailable("Fixture source has no USB endpoint".into())),
+    }));
+    assert!(app.tester.usb.as_ref().unwrap().is_err());
+    assert!(!app.tester.active());
 }
