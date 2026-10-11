@@ -14,6 +14,7 @@ pub mod macros;
 pub mod notifications;
 pub mod picture_adapter;
 pub mod protocol;
+pub mod receiver;
 pub mod recovery_keymaps;
 pub mod settings;
 pub mod settings_adapter;
