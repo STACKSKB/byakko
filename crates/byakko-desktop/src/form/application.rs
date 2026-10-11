@@ -1,5 +1,5 @@
 //! Window-level intents, navigation and close presentation state.
-use super::{files, host, keymap, lighting, macros, picture, recording, settings};
+use super::{files, host, keymap, lighting, macros, picture, recording, settings, tester};
 use iced::Event;
 use std::time::Instant;
 #[derive(Clone, Debug)]
@@ -14,6 +14,7 @@ pub enum Message {
     Settings(settings::Message),
     Record(recording::Message),
     RecordingInput(Event, Instant),
+    Tester(tester::Message),
     Page(Page),
     Read,
     Save,
@@ -35,6 +36,7 @@ pub enum Page {
     Picture,
     Settings,
     Archive,
+    Tester,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

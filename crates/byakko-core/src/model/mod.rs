@@ -14,3 +14,4 @@ pub enum SnapshotEvidence {
     /// The device accepted a write, but a later read is needed to observe it.
     TransportAccepted,
 }
+pub mod tester;

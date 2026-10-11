@@ -10,3 +10,7 @@ description = "Iced desktop adapter for the portable Byakko application model"
 byakko-core = { path = "../byakko-core" }
 byakko-devices = { path = "../byakko-devices" }
 iced = { version = "=0.14.0", default-features = false, features = ["tiny-skia", "smol", "x11", "wayland", "advanced"] }
+
+[dev-dependencies]
+iced_renderer = { version = "=0.14.0", default-features = false, features = ["tiny-skia"] }
+tiny-skia = "0.11"

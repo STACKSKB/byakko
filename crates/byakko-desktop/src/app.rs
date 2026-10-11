@@ -9,7 +9,7 @@ use crate::{
     controller::recording::Controller as Recording,
     form::{
         application::{Closing, Message, Page},
-        catalog, files, host, keymap, lighting, macros, picture, recording, settings,
+        catalog, files, host, keymap, lighting, macros, picture, recording, settings, tester,
     },
     input, view,
     view::status::problem_text,
@@ -35,6 +35,7 @@ struct App {
     keys: keymap::Form,
     macros: macros::Form,
     recording: Recording,
+    tester: tester::Form,
     lighting: lighting::Form,
     host: Host,
     host_form: host::Form,
@@ -107,6 +108,7 @@ impl App {
             keys: keymap::Form::new(session.descriptor()),
             macros: macros::Form::default(),
             recording: Recording::default(),
+            tester: tester::Form::default(),
             lighting: lighting::Form::default(),
             host: Host::default(),
             host_form: host::Form::default(),
@@ -132,6 +134,10 @@ impl App {
     }
 
     fn reduce(&mut self, message: Message) -> Task<Message> {
+        if matches!(&message, Message::Tester(tester::Message::Input(event, _)) if input::tester::pauses(event))
+        {
+            self.tester.pause();
+        }
         if let Message::DeviceEvent(event) = message {
             if self.session.connection()
                 != &(Connection::Connected {
@@ -221,7 +227,25 @@ impl App {
                 let result = self.recording.input(&event, at, &mut self.session);
                 self.recording_notice(result, was_recording);
             }
+            Message::Tester(message) => {
+                if self.page != Page::Tester && !matches!(message, tester::Message::Sources(_)) {
+                    return Task::none();
+                }
+                if matches!(message, tester::Message::Refresh) {
+                    self.tester.pause();
+                    self.tester.refreshing = true;
+                    return Task::perform(
+                        async {
+                            byakko_devices::tester_input::devices()
+                                .map_err(|error| error.to_string())
+                        },
+                        |result| Message::Tester(tester::Message::Sources(result)),
+                    );
+                }
+                self.tester.update(message);
+            }
             Message::Page(page) => {
+                self.tester.pause();
                 self.keys.catalog.input = catalog::InputMode::Browse;
                 self.page = page;
                 if self.session.busy() {
@@ -1155,6 +1179,7 @@ impl App {
     }
 
     fn close(&mut self) -> Task<Message> {
+        self.tester.pause();
         self.keys.catalog.input = catalog::InputMode::Browse;
         self.link.invalidate_discovery();
         if self.host.busy() || !self.session.host().is_idle() {
@@ -1270,6 +1295,20 @@ impl App {
             };
             subscriptions.push(iced::time::every(cadence).map(|_| Message::Scan));
         }
+        if self.page == Page::Tester && self.tester.active() {
+            subscriptions.push(iced::event::listen_with(|event, _, _| {
+                Some(Message::Tester(tester::Message::Input(
+                    event,
+                    Instant::now(),
+                )))
+            }));
+            if self.tester.native() {
+                subscriptions.push(
+                    iced::time::every(Duration::from_millis(10))
+                        .map(|_| Message::Tester(tester::Message::Drain)),
+                );
+            }
+        }
         Subscription::batch(subscriptions)
     }
 
@@ -1286,6 +1325,7 @@ impl App {
             files: &self.files.form,
             files_busy: self.files.busy(),
             names_available: self.files.can_save_labels(),
+            tester: &self.tester,
             recording_options: self.recording.options(),
             recording_pending: self.recording.pending(),
             page: self.page,

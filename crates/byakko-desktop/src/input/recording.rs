@@ -54,7 +54,7 @@ fn button_usage(button: mouse::Button) -> Option<u16> {
     })
 }
 
-fn key_usage(code: Code) -> Option<u16> {
+pub(super) fn key_usage(code: Code) -> Option<u16> {
     KEY_USAGES
         .iter()
         .find_map(|(physical, usage)| (*physical == code).then_some(*usage))
@@ -174,7 +174,10 @@ const KEY_USAGES: &[(Code, u16)] = &{
         (F23, 0x72),
         (F24, 0x73),
         (IntlRo, 0x87),
+        (KanaMode, 0x88),
         (IntlYen, 0x89),
+        (Convert, 0x8a),
+        (NonConvert, 0x8b),
         (ControlLeft, 0xe0),
         (ShiftLeft, 0xe1),
         (AltLeft, 0xe2),
