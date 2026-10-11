@@ -163,16 +163,12 @@ impl Executor {
                             });
                             continue;
                         }
-                        let macro_write = matches!(
-                            &command.payload,
-                            CommandPayload::Macro(FeatureCommand::Apply { .. })
-                        );
                         let completion = execute(&mut device, &command, &backup_dir);
-                        let failed_write = failed_write(&completion.payload);
+                        let invalidate_catalog = invalidates_catalog(&completion.payload);
                         if responses.send(completion).is_err() {
                             break;
                         }
-                        if (macro_write || failed_write)
+                        if invalidate_catalog
                             && let Some(previous) = catalog.take()
                             && responses
                                 .send(
@@ -466,19 +462,22 @@ impl DeviceCall<'_> {
     }
 }
 
-fn failed_write(payload: &CompletionPayload) -> bool {
+fn invalidates_catalog(payload: &CompletionPayload) -> bool {
     match payload {
-        CompletionPayload::Keymap(result) => result.failed_write(),
-        CompletionPayload::Macro { result, .. } => result.failed_write(),
-        CompletionPayload::Lighting(result) => result.failed_write(),
-        CompletionPayload::Picture(result) => result.failed_write(),
-        CompletionPayload::Settings(result) => result.failed_write(),
-        CompletionPayload::Archive(result) => result.failed_write(),
+        // A successful macro write changes a scanned slot. A rejected macro
+        // apply leaves the catalog intact, like every other pre-command reject.
+        CompletionPayload::Macro { result, .. } => result.setter_may_have_run(),
+        CompletionPayload::Keymap(result) => result.failed_write_may_have_run(),
+        CompletionPayload::Lighting(result) => result.failed_write_may_have_run(),
+        CompletionPayload::Picture(result) => result.failed_write_may_have_run(),
+        CompletionPayload::Settings(result) => result.failed_write_may_have_run(),
+        CompletionPayload::Archive(result) => result.failed_write_may_have_run(),
         CompletionPayload::ReadMacroCatalog { .. } | CompletionPayload::ReviewArchive { .. } => {
             false
         }
     }
 }
+
 fn failure(command: &Command, message: String, recovery: Recovery) -> Completion {
     DeviceCall::Rejected(ApplyFailure { message, recovery }).dispatch(command)
 }

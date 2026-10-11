@@ -319,7 +319,7 @@ struct CatalogProbe {
     entered: mpsc::SyncSender<String>,
     release: mpsc::Receiver<()>,
     reads: Arc<AtomicUsize>,
-    fail_apply: bool,
+    apply_failure: Option<Recovery>,
 }
 impl Device for CatalogProbe {
     fn read(&mut self) -> Result<State, String> {
@@ -330,16 +330,30 @@ impl Device for CatalogProbe {
         })
     }
     fn apply(&mut self, _: &State, _: &[Change], _: &Path) -> Result<State, ApplyFailure> {
-        if self.fail_apply {
+        if let Some(recovery) = self.apply_failure.clone() {
             return Err(ApplyFailure {
                 message: "Write failed".into(),
-                recovery: Recovery::Failed,
+                recovery,
             });
         }
         self.read().map_err(|message| ApplyFailure {
             message,
             recovery: Recovery::Unverified,
         })
+    }
+    fn apply_macro(
+        &mut self,
+        expected: &byakko_core::model::macros::Snapshot,
+        _: &byakko_core::model::macros::Program,
+        _: &Path,
+    ) -> Result<byakko_core::model::macros::Snapshot, ApplyFailure> {
+        match self.apply_failure.clone() {
+            Some(recovery) => Err(ApplyFailure {
+                message: "Macro write failed".into(),
+                recovery,
+            }),
+            None => Ok(expected.clone()),
+        }
     }
     fn read_macro(&mut self, slot: &str) -> Result<byakko_core::model::macros::Snapshot, String> {
         self.reads.fetch_add(1, Ordering::SeqCst);
@@ -366,6 +380,17 @@ fn catalog_probe(
     mpsc::SyncSender<()>,
     Arc<AtomicUsize>,
 ) {
+    catalog_probe_with_failure(fail_apply.then_some(Recovery::Failed))
+}
+
+fn catalog_probe_with_failure(
+    apply_failure: Option<Recovery>,
+) -> (
+    Executor,
+    mpsc::Receiver<String>,
+    mpsc::SyncSender<()>,
+    Arc<AtomicUsize>,
+) {
     let (entered, events) = mpsc::sync_channel(4);
     let (release, resumed) = mpsc::sync_channel(1);
     let reads = Arc::new(AtomicUsize::new(0));
@@ -374,7 +399,7 @@ fn catalog_probe(
             entered,
             release: resumed,
             reads: Arc::clone(&reads),
-            fail_apply,
+            apply_failure,
         },
         PathBuf::new(),
     )
@@ -490,6 +515,119 @@ fn failed_foreground_write_stops_catalog_without_reading_next_slot() {
     assert_eq!(cancelled.operation, 1);
     assert!(matches!(
         cancelled.payload,
+        CompletionPayload::ReadMacroCatalog { result: Err(_) }
+    ));
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn not_attempted_apply_keeps_passive_catalog_for_keymap_and_macro() {
+    for macro_apply in [false, true] {
+        let (worker, events, release, reads) =
+            catalog_probe_with_failure(Some(Recovery::NotAttempted));
+        let payload = if macro_apply {
+            CommandPayload::Macro(FeatureCommand::Apply {
+                expected: byakko_core::model::macros::Snapshot {
+                    backend_id: "probe".into(),
+                    slot: "first".into(),
+                    revision: vec![1],
+                    content: byakko_core::model::macros::Content::Editable(
+                        byakko_core::model::macros::Program {
+                            repeat_count: 1,
+                            events: vec![],
+                        },
+                    ),
+                },
+                desired: byakko_core::model::macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            })
+        } else {
+            CommandPayload::Keymap(FeatureCommand::Apply {
+                expected: State {
+                    revision: vec![1],
+                    bindings: BTreeMap::new(),
+                },
+                desired: Vec::new(),
+            })
+        };
+        worker
+            .try_submit(Command {
+                generation: 1,
+                operation: 2,
+                payload,
+            })
+            .unwrap();
+        release.send(()).unwrap();
+        let write = worker.receive(Some(Duration::from_secs(2))).unwrap();
+        assert_eq!(write.operation, 2);
+        let recovery = match write.payload {
+            CompletionPayload::Keymap(FeatureResult::Apply(Err(failure)))
+            | CompletionPayload::Macro {
+                result: FeatureResult::Apply(Err(failure)),
+                ..
+            } => failure.recovery,
+            other => panic!("unexpected apply completion: {other:?}"),
+        };
+        assert_eq!(recovery, Recovery::NotAttempted);
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            "second"
+        );
+        release.send(()).unwrap();
+        let catalog = worker.receive(Some(Duration::from_secs(2))).unwrap();
+        assert_eq!(catalog.operation, 1);
+        assert!(matches!(
+            catalog.payload,
+            CompletionPayload::ReadMacroCatalog { result: Ok(snapshots) } if snapshots.len() == 2
+        ));
+        assert_eq!(reads.load(Ordering::SeqCst), 2);
+    }
+}
+
+#[test]
+fn uncertain_macro_apply_still_invalidates_passive_catalog() {
+    let (worker, _events, release, reads) = catalog_probe_with_failure(Some(Recovery::Unverified));
+    let expected = byakko_core::model::macros::Snapshot {
+        backend_id: "probe".into(),
+        slot: "first".into(),
+        revision: vec![1],
+        content: byakko_core::model::macros::Content::Editable(
+            byakko_core::model::macros::Program {
+                repeat_count: 1,
+                events: vec![],
+            },
+        ),
+    };
+    worker
+        .try_submit(Command {
+            generation: 1,
+            operation: 2,
+            payload: CommandPayload::Macro(FeatureCommand::Apply {
+                expected,
+                desired: byakko_core::model::macros::Program {
+                    repeat_count: 1,
+                    events: vec![],
+                },
+            }),
+        })
+        .unwrap();
+    release.send(()).unwrap();
+    let write = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert!(matches!(
+        write.payload,
+        CompletionPayload::Macro {
+            result: FeatureResult::Apply(Err(ApplyFailure {
+                recovery: Recovery::Unverified,
+                ..
+            })),
+            ..
+        }
+    ));
+    let catalog = worker.receive(Some(Duration::from_secs(2))).unwrap();
+    assert!(matches!(
+        catalog.payload,
         CompletionPayload::ReadMacroCatalog { result: Err(_) }
     ));
     assert_eq!(reads.load(Ordering::SeqCst), 1);

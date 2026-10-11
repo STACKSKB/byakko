@@ -57,8 +57,22 @@ impl<S> FeatureResult<S> {
         }
     }
 
-    pub fn failed_write(&self) -> bool {
-        matches!(self, Self::Apply(Err(_)))
+    /// Completion evidence for effects that may have reached the device.
+    pub fn setter_may_have_run(&self) -> bool {
+        match self {
+            Self::Read(_)
+            | Self::Apply(Err(ApplyFailure {
+                recovery: Recovery::NotAttempted,
+                ..
+            })) => false,
+            Self::Apply(Ok(_) | Err(_)) => true,
+        }
+    }
+
+    /// Failed writes can invalidate passive observations only when a setter
+    /// may have run. A pre-command rejection preserves the observed catalog.
+    pub fn failed_write_may_have_run(&self) -> bool {
+        matches!(self, Self::Apply(Err(_))) && self.setter_may_have_run()
     }
 }
 
