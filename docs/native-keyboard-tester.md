@@ -110,8 +110,10 @@ are rejected, and a removed source invalidates its snapshot.
 
 The Windows inventory and descriptor sizes are bounded. Hub requests currently
 use synchronous OS calls on the task executor: a stalled driver can retain that
-worker because these calls have no per-request timeout. Physical hub access
-and Linux sysfs behavior require platform acceptance testing.
+worker because these calls have no per-request timeout. A Windows Nia87 2.4 GHz
+receiver check resolved the selected keyboard input to full-speed interface 0,
+alternate 0, interrupt IN endpoint 0x81, with bInterval 1: a declared 1.000 ms
+service interval. Linux sysfs behavior remains to be verified on hardware.
 
 Host scheduling can differ from the descriptor's declared period. A USB radio
 receiver's descriptor describes the receiver's host endpoint, not the wireless

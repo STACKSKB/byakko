@@ -156,7 +156,7 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             text(format!("Timestamp source: {}", form.timing_source())),
             text(timing),
             text("Observed OS event spacing includes your tapping, keyboard processing, and OS delivery. It does not measure USB polling or switch-to-host latency.").size(12),
-                        usb_metadata(form),
+            usb_metadata(form),
             text("Actual USB polling: not measured. Physical latency: requires an actuation reference.").size(12),
         ].spacing(style.spacing.s).into()));
     panels::vertical_scroll(style, body).height(Fill).into()
