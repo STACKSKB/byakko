@@ -1,7 +1,11 @@
 //! Macro widgets project the shared editor, library and unsubmitted form.
 use crate::{
     form::macros::{self, Composer, Form, Kind, Message},
-    widget::panels::{self, UiStyle},
+    widget::{
+        focus_button::button,
+        focus_control,
+        panels::{self, UiStyle},
+    },
 };
 use byakko_core::{
     editor::{Editor, Status, macros::MacroRules},
@@ -13,7 +17,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, checkbox, column, pick_list, row, text, text_input},
+    widget::{checkbox, column, pick_list, row, text, text_input},
 };
 pub struct View<'a> {
     pub form: &'a Form,
@@ -117,6 +121,15 @@ pub fn view<'a, M: Clone + 'a>(
     let library: Element<'a, Message> = slots.width(Fill).into();
     let library = panels::panel(style, "Library", library.map(on_message));
     let mut detail = column![].spacing(style.spacing.s).width(Fill);
+    if let Some(explanation) = super::status::editor_attention(editor.status()) {
+        detail = detail
+            .push(text(explanation))
+            .push(button("Retry read").on_press_maybe(idle.then_some(on_message(Message::Read))));
+    } else if selected && editor.status() != &Status::Ready {
+        detail = detail
+            .push(text("Slot needs attention; read it again to continue."))
+            .push(button("Retry read").on_press_maybe(idle.then_some(on_message(Message::Read))));
+    }
     if selected {
         detail = detail.push(name_controls).push(recording_controls);
     } else {
@@ -179,8 +192,7 @@ pub fn view<'a, M: Clone + 'a>(
                 .into()
             }))
             .spacing(style.spacing.xs);
-            let events: Element<'a, Message> =
-                panels::vertical_scroll(style, events).height(Fill).into();
+            let events: Element<'a, Message> = events.into();
             detail = detail.push(events.map(on_message));
         }
     } else if let Some(snapshot) = editor.baseline()
@@ -188,12 +200,7 @@ pub fn view<'a, M: Clone + 'a>(
     {
         detail = detail.push(text(format!("Preserved as read-only: {reason}")));
     }
-    if selected && editor.status() != &Status::Ready {
-        detail = detail
-            .push(text("Slot needs attention; read it again to continue."))
-            .push(button("Retry read").on_press_maybe(idle.then_some(on_message(Message::Read))));
-    }
-    let detail = panels::panel(style, "Macro editor", detail.height(Fill).into());
+    let detail = panels::panel(style, "Macro editor", detail.into());
     let binding = form.selected_binding(editor, bound_action);
     let modes = row(editor
         .capabilities()
@@ -278,8 +285,9 @@ pub fn view<'a, M: Clone + 'a>(
         return column![
             keyboard,
             row![
-                iced::widget::container(detail)
-                    .width(iced::Length::FillPortion(style.panes.detail)),
+                panels::vertical_scroll(style, detail)
+                    .width(iced::Length::FillPortion(style.panes.detail))
+                    .height(Fill),
                 iced::widget::container(panels::vertical_scroll(
                     style,
                     column![library, playback].spacing(style.spacing.m)
@@ -295,10 +303,13 @@ pub fn view<'a, M: Clone + 'a>(
         .into();
     }
     row![
-        column![keyboard, detail]
-            .spacing(style.spacing.m)
-            .width(Fill)
-            .height(Fill),
+        column![
+            keyboard,
+            panels::vertical_scroll(style, detail).height(Fill)
+        ]
+        .spacing(style.spacing.m)
+        .width(Fill)
+        .height(Fill),
         panels::vertical_scroll(style, column![library, playback].spacing(style.spacing.m))
             .width(style.key_sidebar_width)
             .height(Fill),
@@ -360,10 +371,18 @@ fn composer<'a>(
     let caps = editor.capabilities();
     let mut fields = row![].spacing(style.spacing.s);
     if editable {
-        fields = fields.push(
-            pick_list(macros::kinds(caps), form.kind.clone(), Message::Kind)
-                .placeholder("Choose an event type"),
-        );
+        let kinds = macros::kinds(caps);
+        let selected_index = form
+            .kind
+            .as_ref()
+            .and_then(|kind| kinds.iter().position(|choice| choice == kind));
+        let key_options = kinds.iter().cloned().map(Message::Kind).collect();
+        fields = fields.push(focus_control::select(
+            pick_list(kinds, form.kind.clone(), Message::Kind).placeholder("Choose an event type"),
+            key_options,
+            selected_index,
+            true,
+        ));
     } else {
         fields = fields.push(text(
             form.kind
@@ -379,12 +398,22 @@ fn composer<'a>(
                 .parse::<u16>()
                 .ok()
                 .and_then(|usage| choices.iter().find(|choice| choice.usage == usage).cloned());
-            fields = fields.push(
+            let selected_index = selected
+                .as_ref()
+                .and_then(|selected| choices.iter().position(|choice| choice == selected));
+            let key_options = choices
+                .iter()
+                .map(|choice| Message::Value(choice.usage.to_string()))
+                .collect();
+            fields = fields.push(focus_control::select(
                 pick_list(choices, selected, |choice: KeyChoice| {
                     Message::Value(choice.usage.to_string())
                 })
                 .placeholder("Choose a key"),
-            );
+                key_options,
+                selected_index,
+                true,
+            ));
         }
         Some(Kind::Movement) => {
             fields = fields
@@ -402,11 +431,13 @@ fn composer<'a>(
         _ => {}
     }
     if form.kind.is_some() && !matches!(form.kind, Some(Kind::Movement)) {
-        fields = fields.push(
+        fields = fields.push(focus_control::toggle(
             checkbox(form.pressed)
                 .label("Pressed / flag set")
                 .on_toggle_maybe(editable.then_some(Message::Pressed)),
-        );
+            Message::Pressed(!form.pressed),
+            editable,
+        ));
     }
     let mut content = column![
         text(match form.composer {

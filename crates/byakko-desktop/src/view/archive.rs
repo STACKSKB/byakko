@@ -1,4 +1,5 @@
 //! The public archive workflow is diagnostic capture and export only.
+use crate::widget::focus_button::button;
 use crate::{
     form::files::{Form, Message, Operation},
     widget::panels::UiStyle,
@@ -6,7 +7,7 @@ use crate::{
 use byakko_core::library::archive::{Capture, CaptureProblem, CaptureStatus};
 use iced::{
     Element,
-    widget::{button, column, row, text, text_input},
+    widget::{column, row, text, text_input},
 };
 
 pub fn view<'a>(

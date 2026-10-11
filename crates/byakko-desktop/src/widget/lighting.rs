@@ -1,6 +1,6 @@
 //! Compact native color picker beside the effect's advertised controls.
 use super::{
-    color_picker,
+    color_picker, focus_control,
     panels::{self, UiStyle},
 };
 use byakko_core::{
@@ -55,13 +55,23 @@ pub(crate) fn parameters<'a, M: Clone + 'static>(
                 .spacing(style.spacing.s)
                 .align_y(Alignment::Center);
                 if editable && range.start() != range.end() {
-                    controls = controls.push(
+                    let first = u32::from(*range.start());
+                    let last = u32::from(*range.end());
+                    controls = controls.push(focus_control::number(
                         slider(range, value, move |value| {
                             edit_message(edit.edit(value).expect("projected lighting range"))
                         })
                         .step(1u16)
                         .width(style.fields.regular),
-                    );
+                        u32::from(value),
+                        first,
+                        last,
+                        1,
+                        editable,
+                        move |value| {
+                            edit_message(edit.edit(value as u16).expect("projected lighting range"))
+                        },
+                    ));
                 }
                 controls.into()
             }

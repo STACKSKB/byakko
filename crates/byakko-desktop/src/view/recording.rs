@@ -1,11 +1,12 @@
 //! Local recording controls; no device state or clocks live in the view.
+use crate::widget::focus_button::button;
 use crate::{
     form::recording::{Message, Options},
-    widget::panels::{self, UiStyle},
+    widget::{focus_control, panels::UiStyle},
 };
 use iced::{
-    Element, Fill,
-    widget::{button, checkbox, column, row, text, text_input},
+    Element,
+    widget::{checkbox, column, row, text, text_input},
 };
 
 pub enum Phase {
@@ -20,20 +21,16 @@ pub fn preview<'a>(
     caps: &'a byakko_core::model::macros::Capabilities,
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
-    panels::vertical_scroll(
-        style,
-        column(program.events.iter().enumerate().map(|(index, event)| {
-            text(format!(
-                "{}: {} · {} ms",
-                index + 1,
-                super::macros::action_label(&event.action, descriptor, caps),
-                event.delay_ms
-            ))
-            .into()
-        }))
-        .spacing(style.spacing.s),
-    )
-    .height(Fill)
+    column(program.events.iter().enumerate().map(|(index, event)| {
+        text(format!(
+            "{}: {} · {} ms",
+            index + 1,
+            super::macros::action_label(&event.action, descriptor, caps),
+            event.delay_ms
+        ))
+        .into()
+    }))
+    .spacing(style.spacing.s)
     .into()
 }
 
@@ -62,9 +59,13 @@ pub fn controls<'a>(
         .into(),
         Phase::Idle { editable } => row![
             button("Record").on_press_maybe(editable.then_some(Message::Start)),
-            checkbox(options.fixed)
-                .label("Fixed wait")
-                .on_toggle_maybe(editable.then_some(Message::Fixed)),
+            focus_control::toggle(
+                checkbox(options.fixed)
+                    .label("Fixed wait")
+                    .on_toggle_maybe(editable.then_some(Message::Fixed)),
+                Message::Fixed(!options.fixed),
+                editable,
+            ),
             text_input("Wait (ms)", &options.delay)
                 .width(style.fields.compact)
                 .on_input_maybe((editable && options.fixed).then_some(Message::Delay)),

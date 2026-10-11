@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Compact local keyboard observations with optional device details.
+use crate::widget::focus_button::button;
 use crate::{
     form::tester::{Form, Message, Source},
-    widget::panels::{self, UiStyle},
+    widget::{
+        focus_control,
+        panels::{self, UiStyle},
+    },
 };
 use byakko_core::projection::tester::{self, Legends, Size, Standard};
+use iced::widget::button as button_style;
 use iced::{
     Color, Element, Fill,
-    widget::{
-        button, column, container, pick_list, pin, responsive, row, scrollable, space, stack, text,
-    },
+    widget::{column, container, pick_list, pin, responsive, row, scrollable, space, stack, text},
 };
 use std::fmt;
 
@@ -98,12 +101,22 @@ fn controls<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     responsive(move |size| {
         let layout = form.layout;
         let choices: Vec<_> = form.sources.iter().map(SourceChoice).collect();
-        let source = pick_list(choices, Some(SourceChoice(&form.source)), |choice| {
-            Message::Source(choice.0.clone())
-        })
-        .on_open(Message::Pause)
-        .text_size(13)
-        .width(Fill);
+        let source_index = choices.iter().position(|choice| choice.0 == &form.source);
+        let source_keys = choices
+            .iter()
+            .map(|choice| Message::Source(choice.0.clone()))
+            .collect();
+        let source = focus_control::select(
+            pick_list(choices, Some(SourceChoice(&form.source)), |choice| {
+                Message::Source(choice.0.clone())
+            })
+            .on_open(Message::Pause)
+            .text_size(13)
+            .width(Fill),
+            source_keys,
+            source_index,
+            true,
+        );
         let input_label = text("Input").size(12);
         let refresh = button(if form.refreshing {
             "Refreshing…"
@@ -111,19 +124,44 @@ fn controls<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             "Refresh"
         })
         .on_press_maybe((!form.refreshing).then_some(Message::Refresh));
-        let standard = pick_list(Standard::ALL, Some(layout.standard), Message::Standard)
+        let standard = focus_control::select(
+            pick_list(Standard::ALL, Some(layout.standard), Message::Standard)
+                .on_open(Message::Pause)
+                .text_size(13),
+            Standard::ALL.into_iter().map(Message::Standard).collect(),
+            Standard::ALL
+                .iter()
+                .position(|choice| *choice == layout.standard),
+            true,
+        );
+        let board_size = focus_control::select(
+            pick_list(Size::ALL, Some(layout.size), move |size| {
+                Message::Layout(tester::LayoutSelection { size, ..layout })
+            })
             .on_open(Message::Pause)
-            .text_size(13);
-        let board_size = pick_list(Size::ALL, Some(layout.size), move |size| {
-            Message::Layout(tester::LayoutSelection { size, ..layout })
-        })
-        .on_open(Message::Pause)
-        .text_size(13);
-        let legends = pick_list(Legends::ALL, Some(layout.legends), move |legends| {
-            Message::Layout(tester::LayoutSelection { legends, ..layout })
-        })
-        .on_open(Message::Pause)
-        .text_size(13);
+            .text_size(13),
+            Size::ALL
+                .into_iter()
+                .map(|size| Message::Layout(tester::LayoutSelection { size, ..layout }))
+                .collect(),
+            Size::ALL.iter().position(|choice| *choice == layout.size),
+            true,
+        );
+        let legends = focus_control::select(
+            pick_list(Legends::ALL, Some(layout.legends), move |legends| {
+                Message::Layout(tester::LayoutSelection { legends, ..layout })
+            })
+            .on_open(Message::Pause)
+            .text_size(13),
+            Legends::ALL
+                .into_iter()
+                .map(|legends| Message::Layout(tester::LayoutSelection { legends, ..layout }))
+                .collect(),
+            Legends::ALL
+                .iter()
+                .position(|choice| *choice == layout.legends),
+            true,
+        );
         let layout_label = text("Layout").size(12);
         let start =
             button(if form.active() { "Pause" } else { "Start" }).on_press(if form.active() {
@@ -217,11 +255,21 @@ fn chatter<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
         .size(style.type_scale.section_title),
         space::horizontal(),
         text("Threshold").size(12),
-        pick_list([5_u64, 10, 20, 30, 50], Some(threshold), |ms| {
-            Message::Threshold(ms * 1_000)
-        })
-        .on_open(Message::Pause)
-        .text_size(12),
+        focus_control::select(
+            pick_list([5_u64, 10, 20, 30, 50], Some(threshold), |ms| {
+                Message::Threshold(ms * 1_000)
+            })
+            .on_open(Message::Pause)
+            .text_size(12),
+            [5_u64, 10, 20, 30, 50]
+                .into_iter()
+                .map(|ms| Message::Threshold(ms * 1_000))
+                .collect(),
+            [5_u64, 10, 20, 30, 50]
+                .iter()
+                .position(|choice| *choice == threshold),
+            true,
+        ),
         text("ms").size(12),
     ]
     .spacing(style.spacing.s)
@@ -284,7 +332,7 @@ fn timing<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             .size(12)
         )
         .on_press(Message::ToggleDetails)
-        .style(button::secondary),
+        .style(button_style::secondary),
     ]
     .align_y(iced::Alignment::Center);
     let mut body =
@@ -389,7 +437,7 @@ fn board<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             .padding(0)
             .on_press_maybe(key.usage.map(Message::Inspect))
             .style(move |theme, status| {
-                let mut appearance = button::secondary(theme, status);
+                let mut appearance = button_style::secondary(theme, status);
                 if is_held {
                     appearance.background = Some(Color::from_rgb8(35, 112, 70).into());
                     appearance.text_color = Color::WHITE;

@@ -1,5 +1,17 @@
 //! User-facing explanations preserve the distinction between recovery outcomes.
 use byakko_core::contract::{ApplyFailure, Problem, Recovery};
+use byakko_core::editor::Status;
+
+/// Keep unresolved feature problems visible independently of transient notices.
+pub fn editor_attention<S>(status: &Status<S>) -> Option<String> {
+    match status {
+        Status::Ready | Status::Unloaded => None,
+        Status::Conflict { .. } => Some(
+            "The keyboard changed while you were editing. Your edits are kept. To load the keyboard's changes, revert your edits, then read this feature again.".into(),
+        ),
+        Status::Unverified { problem } => Some(problem_text(problem)),
+    }
+}
 
 pub fn apply_failure(action: &str, failure: &ApplyFailure) -> String {
     let recovery = match failure.recovery {

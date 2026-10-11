@@ -1,4 +1,5 @@
 //! Device-described shortcut choices; composing them has no device effects.
+use crate::widget::focus_button::button;
 use crate::{
     form::shortcut::{Form, Message},
     widget::panels::{self, UiStyle},
@@ -6,7 +7,7 @@ use crate::{
 use byakko_core::model::keymap::ShortcutCapabilities;
 use iced::{
     Element, Fill, Length,
-    widget::{button, column, container, row, text, text_input},
+    widget::{column, container, row, text, text_input},
 };
 
 pub fn view<'a>(

@@ -1,4 +1,5 @@
 //! Portable macro documents and local names, separate from device save controls.
+use crate::widget::focus_button::button;
 use crate::{
     form::files::{Form, Message, Operation},
     widget::panels::UiStyle,
@@ -6,7 +7,7 @@ use crate::{
 use byakko_core::editor::{Editor, Status, macros::MacroRules};
 use iced::{
     Element,
-    widget::{button, column, row, text, text_input},
+    widget::{column, row, text, text_input},
 };
 
 pub fn name_controls<'a>(

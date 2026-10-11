@@ -205,7 +205,7 @@ fn board_view<'a, Message: Clone + 'a>(
             if let Some(rgb) = appearance.colors.get(&key.id) {
                 let [r, g, b] = *rgb;
                 let selected = selected.as_deref() == Some(key.id.as_str());
-                key_button = iced::widget::button(
+                key_button = crate::widget::focus_button::button(
                     iced::widget::text(label.to_owned())
                         .size(style.board.key_label_size)
                         .wrapping(iced::widget::text::Wrapping::WordOrGlyph)

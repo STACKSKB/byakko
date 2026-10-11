@@ -1,7 +1,8 @@
 //! Compact onboard controls and the shared lighting mode dropdown.
+use crate::widget::focus_button::button;
 use crate::{
     form::lighting::{Form, Message, Mode},
-    widget::panels::UiStyle,
+    widget::{focus_control, panels::UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Status, lighting::LightingRules, picture::PictureRules},
@@ -10,7 +11,7 @@ use byakko_core::{
 };
 use iced::{
     Element,
-    widget::{button, column, pick_list, text},
+    widget::{column, pick_list, text},
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -69,13 +70,25 @@ pub fn mode_selector<'a>(
     if !enabled {
         choices.retain(|choice| Some(choice) == selected.as_ref());
     }
+    let selected_index = selected
+        .as_ref()
+        .and_then(|selected| choices.iter().position(|choice| choice == selected));
+    let key_options = choices
+        .iter()
+        .map(|choice| Message::Mode(choice.mode.clone()))
+        .collect();
     column![
         text("Lighting mode"),
-        pick_list(choices, selected, |choice: ModeChoice| Message::Mode(
-            choice.mode
-        ))
-        .placeholder("Select lighting mode")
-        .width(style.fields.regular)
+        focus_control::select(
+            pick_list(choices, selected, |choice: ModeChoice| Message::Mode(
+                choice.mode
+            ))
+            .placeholder("Select lighting mode")
+            .width(style.fields.regular),
+            key_options,
+            selected_index,
+            enabled,
+        )
     ]
     .spacing(style.spacing.xs)
     .into()
@@ -89,7 +102,10 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     if !matches!(editor.status(), Status::Ready) {
         let mut content = column![
-            text("Lighting needs to be read before editing."),
+            text(
+                super::status::editor_attention(editor.status())
+                    .unwrap_or_else(|| "Lighting needs to be read before editing.".into())
+            ),
             button("Retry lighting read").on_press_maybe(idle.then_some(Message::Read))
         ]
         .spacing(style.spacing.s);

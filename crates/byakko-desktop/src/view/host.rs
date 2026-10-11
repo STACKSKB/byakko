@@ -1,7 +1,8 @@
 //! Advertised host modes, local source choices, and explicit start/stop.
+use crate::widget::focus_button::button;
 use crate::{
     form::host::{Displays, Form, Message},
-    widget::{lighting, panels::UiStyle},
+    widget::{focus_control, lighting, panels::UiStyle},
 };
 use byakko_core::{
     editor::{Editor, Status, lighting::LightingRules},
@@ -12,7 +13,7 @@ use byakko_core::{
 use byakko_devices::screen_sample::ScreenSampling;
 use iced::{
     Element,
-    widget::{button, column, pick_list, row, slider, text},
+    widget::{column, pick_list, row, slider, text},
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,14 +106,26 @@ fn screen<'a>(form: &'a Form, editable: bool, style: &'a UiStyle) -> Element<'a,
         .iter()
         .find(|choice| choice.id == form.screen.display_id)
         .cloned();
+    let selected_index = selected
+        .as_ref()
+        .and_then(|selected| choices.iter().position(|choice| choice == selected));
+    let key_options = choices
+        .iter()
+        .map(|choice| Message::Display(choice.id.clone()))
+        .collect();
     let mut controls = column![].spacing(style.spacing.s);
     if editable {
         controls = controls.push(
             row![
-                pick_list(choices, selected, |choice: DisplayChoice| Message::Display(
-                    choice.id
-                ))
-                .placeholder("Select display"),
+                focus_control::select(
+                    pick_list(choices, selected, |choice: DisplayChoice| Message::Display(
+                        choice.id
+                    ))
+                    .placeholder("Select display"),
+                    key_options,
+                    selected_index,
+                    true,
+                ),
                 button("Refresh displays").on_press_maybe(
                     (!matches!(form.displays, Displays::Loading))
                         .then_some(Message::RefreshDisplays)
@@ -135,12 +148,28 @@ fn screen<'a>(form: &'a Form, editable: bool, style: &'a UiStyle) -> Element<'a,
         controls = controls.push(text(format!("Screen point: {x}, {y} (0–1000)")));
         if editable {
             controls = controls
-                .push(slider(0..=1000, x, move |x| {
-                    Message::Sampling(ScreenSampling::Point { x, y })
-                }))
-                .push(slider(0..=1000, y, move |y| {
-                    Message::Sampling(ScreenSampling::Point { x, y })
-                }));
+                .push(focus_control::number(
+                    slider(0..=1000, x, move |x| {
+                        Message::Sampling(ScreenSampling::Point { x, y })
+                    }),
+                    u32::from(x),
+                    0,
+                    1000,
+                    1,
+                    true,
+                    move |x| Message::Sampling(ScreenSampling::Point { x: x as u16, y }),
+                ))
+                .push(focus_control::number(
+                    slider(0..=1000, y, move |y| {
+                        Message::Sampling(ScreenSampling::Point { x, y })
+                    }),
+                    u32::from(y),
+                    0,
+                    1000,
+                    1,
+                    true,
+                    move |y| Message::Sampling(ScreenSampling::Point { x, y: y as u16 }),
+                ));
         }
     }
     controls.into()

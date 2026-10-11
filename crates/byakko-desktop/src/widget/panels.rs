@@ -1,5 +1,6 @@
 //! Small, reusable layout primitives shared by desktop views.
 
+use super::focus_button;
 use iced::widget::{button, column, container, scrollable, text};
 use iced::{Background, Color, Element, Fill, Length, Theme};
 
@@ -233,7 +234,7 @@ fn selectable_button_inner<'a, Message: Clone + 'a>(
     layout: ButtonLayout,
 ) -> Element<'a, Message> {
     let palette = style.palette;
-    button(
+    focus_button::button(
         text(label.into())
             .size(layout.label_size)
             .wrapping(iced::widget::text::Wrapping::WordOrGlyph)

@@ -1,7 +1,11 @@
 //! Compact settings grid; each accepted slider or toggle edit uses the core draft.
+use crate::widget::focus_button::button;
 use crate::{
     form::settings::Message,
-    widget::panels::{self, UiStyle},
+    widget::{
+        focus_control,
+        panels::{self, UiStyle},
+    },
 };
 use byakko_core::{
     editor::{Editor, Feature, Status, settings::SettingsRules},
@@ -9,7 +13,7 @@ use byakko_core::{
 };
 use iced::{
     Alignment, Element, Fill,
-    widget::{button, checkbox, column, container, row, slider, text},
+    widget::{checkbox, column, container, row, slider, text},
 };
 
 pub fn view<'a>(
@@ -29,6 +33,9 @@ pub fn view<'a>(
     });
     let pending = submitted.or_else(|| changes.first().map(|edit| edit.id.as_str()));
     let mut content = column![].spacing(style.spacing.s);
+    if let Some(explanation) = super::status::editor_attention(editor.status()) {
+        content = content.push(text(explanation));
+    }
     if !matches!(editor.status(), Status::Ready) {
         let mut actions = row![].spacing(style.spacing.s);
         if editor.dirty() {
@@ -87,15 +94,21 @@ fn control<'a>(
     match (&field.kind, value) {
         (Kind::Toggle, Value::Toggle(current)) => {
             let id = field.id.clone();
-            checkbox(*current)
-                .label(if *current { "Enabled" } else { "Disabled" })
-                .on_toggle_maybe(editable.then_some(move |enabled| {
-                    Message::Edit(Edit {
-                        id: id.clone(),
-                        value: Value::Toggle(enabled),
-                    })
-                }))
-                .into()
+            focus_control::toggle(
+                checkbox(*current)
+                    .label(if *current { "Enabled" } else { "Disabled" })
+                    .on_toggle_maybe(editable.then_some(move |enabled| {
+                        Message::Edit(Edit {
+                            id: id.clone(),
+                            value: Value::Toggle(enabled),
+                        })
+                    })),
+                Message::Edit(Edit {
+                    id: field.id.clone(),
+                    value: Value::Toggle(!*current),
+                }),
+                editable,
+            )
         }
         (
             Kind::Number {
@@ -119,32 +132,42 @@ fn control<'a>(
                 let id = field.id.clone();
                 let max_value = u32::from(*max);
                 let disabled_position = max_value + u32::from(*step);
-                controls = controls.push(
-                    slider(
-                        u32::from(*min)..=if *disabled_zero {
-                            disabled_position
-                        } else {
-                            max_value
-                        },
-                        if *disabled_zero && *current == 0 {
-                            disabled_position
-                        } else {
-                            u32::from(*current)
-                        },
-                        move |number| {
-                            Message::Edit(Edit {
-                                id: id.clone(),
-                                value: Value::Number(if number > max_value {
-                                    0
-                                } else {
-                                    number as u16
-                                }),
-                            })
-                        },
-                    )
-                    .step(u32::from(*step))
-                    .width(style.fields.regular),
-                );
+                let range_end = if *disabled_zero {
+                    disabled_position
+                } else {
+                    max_value
+                };
+                let position = if *disabled_zero && *current == 0 {
+                    disabled_position
+                } else {
+                    u32::from(*current)
+                };
+                let slider = slider(u32::from(*min)..=range_end, position, move |number| {
+                    Message::Edit(Edit {
+                        id: id.clone(),
+                        value: Value::Number(if number > max_value { 0 } else { number as u16 }),
+                    })
+                })
+                .step(u32::from(*step))
+                .width(style.fields.regular);
+                controls = controls.push(focus_control::number(
+                    slider,
+                    position,
+                    u32::from(*min),
+                    range_end,
+                    u32::from(*step),
+                    true,
+                    |number| {
+                        Message::Edit(Edit {
+                            id: field.id.clone(),
+                            value: Value::Number(if number > max_value {
+                                0
+                            } else {
+                                number as u16
+                            }),
+                        })
+                    },
+                ));
             }
             controls.into()
         }

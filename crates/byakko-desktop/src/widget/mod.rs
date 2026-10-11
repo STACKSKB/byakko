@@ -1,5 +1,9 @@
 pub mod catalog;
 pub mod color_picker;
+pub mod focus_button;
+pub mod focus_control;
+pub mod focus_navigation;
+pub mod inert;
 pub mod keyboard;
 pub mod lighting;
 pub mod panels;

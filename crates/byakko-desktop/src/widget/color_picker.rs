@@ -4,9 +4,9 @@ use iced::{
     Background, Border, Color, Element, Event, Length, Rectangle, Size, Theme,
     advanced::{
         Clipboard, Layout, Shell, Widget, layout, renderer,
-        widget::{Tree, tree},
+        widget::{Operation, Tree, operation::focusable::Focusable, tree},
     },
-    gradient, mouse,
+    gradient, keyboard, mouse,
     widget::{button, column, container, mouse_area, row},
 };
 use std::rc::Rc;
@@ -85,6 +85,21 @@ struct State {
     dragging: Option<Area>,
     preview: Option<[u8; 3]>,
     hue: f32,
+    focus_color: bool,
+    focus_hue: bool,
+}
+
+struct FocusFlag<'a>(&'a mut bool);
+impl Focusable for FocusFlag<'_> {
+    fn is_focused(&self) -> bool {
+        *self.0
+    }
+    fn focus(&mut self) {
+        *self.0 = true;
+    }
+    fn unfocus(&mut self) {
+        *self.0 = false;
+    }
 }
 
 impl State {
@@ -94,6 +109,8 @@ impl State {
             self.dragging = None;
             self.preview = None;
             self.hue = 0.0;
+            self.focus_color = false;
+            self.focus_hue = false;
         }
     }
 
@@ -156,6 +173,21 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Picker<Message> {
     ) -> layout::Node {
         layout::atomic(limits, self.size.width, self.size.height)
     }
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        _: &iced::Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        if self.on_change.is_none() {
+            return;
+        }
+        let (color, hue) = self.areas(layout.bounds());
+        let state = tree.state.downcast_mut::<State>();
+        operation.focusable(None, color, &mut FocusFlag(&mut state.focus_color));
+        operation.focusable(None, hue, &mut FocusFlag(&mut state.focus_hue));
+    }
     fn update(
         &mut self,
         tree: &mut Tree,
@@ -175,6 +207,31 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Picker<Message> {
             return;
         };
         let (color, hue) = self.areas(layout.bounds());
+        if let Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(key),
+            modifiers,
+            ..
+        }) = event
+            && !modifiers.control()
+            && !modifiers.alt()
+            && !modifiers.logo()
+        {
+            let area = if state.focus_color {
+                Some(Area::Color)
+            } else if state.focus_hue {
+                Some(Area::Hue)
+            } else {
+                None
+            };
+            if let Some((rgb, hue)) = area.and_then(|area| adjust(self.rgb, state.hue, area, *key))
+            {
+                state.hue = hue;
+                shell.publish(on_change(rgb));
+                shell.capture_event();
+                shell.request_redraw();
+                return;
+            }
+        }
         match event {
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
             | Event::Window(iced::window::Event::Unfocused) => {
@@ -199,6 +256,8 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Picker<Message> {
                 };
                 state.begin(area);
                 if area.is_some() {
+                    state.focus_color = matches!(area, Some(Area::Color));
+                    state.focus_hue = matches!(area, Some(Area::Hue));
                     shell.publish((self.on_interaction)(Interaction::Started));
                 }
             }
@@ -225,7 +284,7 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Picker<Message> {
         &self,
         tree: &Tree,
         renderer: &mut iced::Renderer,
-        _: &Theme,
+        theme: &Theme,
         _: &renderer::Style,
         layout: Layout<'_>,
         _: mouse::Cursor,
@@ -303,6 +362,27 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Picker<Message> {
             },
             Color::WHITE,
         );
+        let focus_border = Border {
+            width: 2.0,
+            color: theme.extended_palette().primary.strong.color,
+            radius: 4.0.into(),
+        };
+        for bounds in [
+            state.focus_color.then_some(color),
+            state.focus_hue.then_some(hue),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    border: focus_border,
+                    ..Default::default()
+                },
+                Color::TRANSPARENT,
+            );
+        }
     }
     fn mouse_interaction(
         &self,
@@ -353,6 +433,26 @@ fn from_hsv(h: f32, s: f32, v: f32) -> [u8; 3] {
     rgb.map(|channel| ((channel + v - chroma) * 255.0).round() as u8)
 }
 
+fn adjust(
+    rgb: [u8; 3],
+    remembered_hue: f32,
+    area: Area,
+    key: keyboard::key::Named,
+) -> Option<([u8; 3], f32)> {
+    use keyboard::key::Named;
+    let (mut h, mut s, mut v) = to_hsv(rgb, remembered_hue);
+    match (area, key) {
+        (Area::Color, Named::ArrowLeft) => s = (s - 0.05).max(0.0),
+        (Area::Color, Named::ArrowRight) => s = (s + 0.05).min(1.0),
+        (Area::Color, Named::ArrowUp) => v = (v + 0.05).min(1.0),
+        (Area::Color, Named::ArrowDown) => v = (v - 0.05).max(0.0),
+        (Area::Hue, Named::ArrowUp | Named::ArrowLeft) => h = (h - 1.0 / 24.0).max(0.0),
+        (Area::Hue, Named::ArrowDown | Named::ArrowRight) => h = (h + 1.0 / 24.0).min(1.0),
+        _ => return None,
+    }
+    Some((from_hsv(h, s, v), h))
+}
+
 fn color_presets<Message: Clone + 'static>(
     style: &UiStyle,
     selected: [u8; 3],
@@ -378,7 +478,7 @@ fn color_presets<Message: Clone + 'static>(
         } else {
             iced::Color::WHITE
         };
-        let swatch = button(iced::widget::space())
+        let swatch = crate::widget::focus_button::button(iced::widget::space())
             .width(style.color_hue_width)
             .height(style.color_hue_width)
             .padding(0)
@@ -403,6 +503,122 @@ fn color_presets<Message: Clone + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Message {
+        Color([u8; 3]),
+        Interaction,
+    }
+
+    struct FocusIndex {
+        target: usize,
+        current: usize,
+    }
+    impl Operation for FocusIndex {
+        fn traverse(&mut self, visit: &mut dyn FnMut(&mut dyn Operation)) {
+            visit(self);
+        }
+        fn focusable(
+            &mut self,
+            _: Option<&iced::advanced::widget::Id>,
+            _: Rectangle,
+            state: &mut dyn Focusable,
+        ) {
+            if self.current == self.target {
+                state.focus();
+            } else {
+                state.unfocus();
+            }
+            self.current += 1;
+        }
+    }
+
+    fn key(named: keyboard::key::Named) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(named),
+            modified_key: keyboard::Key::Named(named),
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::default(),
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn keyboard_focus_edits_color_and_hue_without_dragging() {
+        for (target, rgb, named) in [
+            (0, [128, 64, 64], keyboard::key::Named::ArrowRight),
+            (1, [255, 0, 0], keyboard::key::Named::ArrowDown),
+        ] {
+            let mut element: Element<'_, Message> = Element::new(Picker {
+                on_interaction: |_| Message::Interaction,
+                rgb,
+                identity: "selected".into(),
+                on_change: Some(Rc::new(Message::Color)),
+                size: Size::new(160.0, 100.0),
+                hue_width: 16.0,
+                gap: 8.0,
+            });
+            let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
+            let mut tree = Tree::new(&element);
+            element.as_widget().diff(&mut tree);
+            let viewport = Rectangle::with_size(Size::new(160.0, 100.0));
+            let node = element.as_widget_mut().layout(
+                &mut tree,
+                &renderer,
+                &layout::Limits::new(Size::ZERO, viewport.size()),
+            );
+            element.as_widget_mut().operate(
+                &mut tree,
+                Layout::new(&node),
+                &renderer,
+                &mut FocusIndex { target, current: 0 },
+            );
+            let mut messages = Vec::new();
+            let mut shell = Shell::new(&mut messages);
+            element.as_widget_mut().update(
+                &mut tree,
+                &key(named),
+                Layout::new(&node),
+                mouse::Cursor::Unavailable,
+                &renderer,
+                &mut iced::advanced::clipboard::Null,
+                &mut shell,
+                &viewport,
+            );
+            assert!(shell.is_event_captured());
+            assert!(matches!(messages.as_slice(), [Message::Color(changed)] if *changed != rgb));
+        }
+    }
+
+    #[test]
+    fn disabled_picker_has_no_keyboard_targets() {
+        let mut picker = Picker::<Message> {
+            on_interaction: |_| Message::Interaction,
+            rgb: [128, 64, 64],
+            identity: "selected".into(),
+            on_change: None,
+            size: Size::new(160.0, 100.0),
+            hue_width: 16.0,
+            gap: 8.0,
+        };
+        let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
+        let mut tree = Tree::new(&picker as &dyn Widget<Message, Theme, iced::Renderer>);
+        let node = picker.layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, Size::new(160.0, 100.0)),
+        );
+        let mut operation = FocusIndex {
+            target: 0,
+            current: 0,
+        };
+        picker.operate(&mut tree, Layout::new(&node), &renderer, &mut operation);
+        assert_eq!(operation.current, 0);
+    }
 
     #[test]
     fn drag_publishes_only_on_finish_and_never_twice() {

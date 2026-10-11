@@ -1338,27 +1338,33 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        view::application::view(view::application::View {
-            session: &self.session,
-            presence: self.link.presence(),
-            keys: &self.keys,
-            macros: &self.macros,
-            lighting: &self.lighting,
-            host: &self.host_form,
-            host_preparing: self.host.preparing(),
-            picture: &self.picture,
-            files: &self.files.form,
-            files_busy: self.files.busy(),
-            names_available: self.files.can_save_labels(),
-            tester: &self.tester,
-            recording_options: self.recording.options(),
-            recording_pending: self.recording.pending(),
-            page: self.page,
-            closing: self.closing,
-            notice: &self.notice,
-            live_updates_unavailable: self.observation.unavailable,
-            style: &self.style,
-        })
+        crate::widget::focus_navigation::navigate(
+            view::application::view(view::application::View {
+                session: &self.session,
+                presence: self.link.presence(),
+                keys: &self.keys,
+                macros: &self.macros,
+                lighting: &self.lighting,
+                host: &self.host_form,
+                host_preparing: self.host.preparing(),
+                picture: &self.picture,
+                files: &self.files.form,
+                files_busy: self.files.busy(),
+                names_available: self.files.can_save_labels(),
+                tester: &self.tester,
+                recording_options: self.recording.options(),
+                recording_pending: self.recording.pending(),
+                page: self.page,
+                closing: self.closing,
+                notice: &self.notice,
+                live_updates_unavailable: self.observation.unavailable,
+                style: &self.style,
+            }),
+            !self.session.recording() && !self.recording.pending(),
+            (self.page == Page::Keys && self.keys.catalog.input == catalog::InputMode::Capture)
+                || self.session.recording()
+                || self.recording.pending(),
+        )
     }
 }
 

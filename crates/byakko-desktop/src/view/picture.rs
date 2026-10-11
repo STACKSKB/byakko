@@ -1,4 +1,5 @@
 //! The lighting workspace owns the board; per-key mode owns this compact brush picker.
+use crate::widget::focus_button::button;
 use crate::{
     form::picture::{Form, Message},
     widget::{color_picker, keyboard, panels::UiStyle},
@@ -9,7 +10,7 @@ use byakko_core::{
 };
 use iced::{
     Element,
-    widget::{button, column, text},
+    widget::{column, text},
 };
 use std::collections::BTreeMap;
 
@@ -45,7 +46,10 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     if !matches!(editor.status(), Status::Ready) {
         let mut content = column![
-            text("Stored colors need to be read before editing."),
+            text(
+                super::status::editor_attention(editor.status())
+                    .unwrap_or_else(|| "Stored colors need to be read before editing.".into())
+            ),
             button("Retry color read").on_press_maybe(idle.then_some(Message::Read))
         ]
         .spacing(style.spacing.s);

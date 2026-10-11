@@ -1,4 +1,5 @@
 //! The persistent keyboard workspace composes the approved feature layouts.
+use crate::widget::focus_button::button;
 use crate::{
     controller::discovery::Availability,
     form::{
@@ -17,7 +18,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{button, column, container, responsive, row, space, text},
+    widget::{column, container, responsive, row, space, text},
 };
 
 #[derive(Clone, Copy)]
@@ -145,7 +146,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
     .padding(input.style.spacing.page_padding)
     .style(container::bordered_box);
     iced::widget::stack![
-        base,
+        crate::widget::inert::backdrop(base),
         container(iced::widget::opaque(dialog))
             .center_x(Fill)
             .center_y(Fill)
@@ -450,6 +451,15 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
         .map(Message::Lighting)
     ]
     .spacing(input.style.spacing.m);
+    if matches!(mode, Some(lighting::Mode::PerKey | lighting::Mode::Host(_)))
+        && let Some(editor) = input.session.lighting()
+        && editor.status() != &Status::Ready
+    {
+        controls = controls.push(
+            view::lighting::view(input.lighting, editor, editable, idle, input.style)
+                .map(Message::Lighting),
+        );
+    }
     let detail = match mode {
         Some(lighting::Mode::PerKey) => input.session.picture().map(|editor| {
             let mut detail = column![].spacing(input.style.spacing.m);

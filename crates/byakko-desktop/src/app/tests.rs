@@ -1,4 +1,5 @@
 use super::*;
+mod navigation;
 mod picture_layers;
 use crate::controller::discovery::Availability;
 use crate::view::application::picture_is_displayed;
