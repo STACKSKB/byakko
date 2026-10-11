@@ -3,7 +3,9 @@ use crate::hid::{
     HidApi, HidDevice,
     selection::{self, Identity},
 };
+use byakko_protocol::nia87::receiver::{self, RelayError, Status};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 // OS-held lock survives neither crashes nor process exit. The empty lock file
 // stays on disk; existence alone never means that a transaction is active.
@@ -64,6 +66,10 @@ pub struct Target {
 }
 
 impl Target {
+    pub fn product_id(&self) -> u16 {
+        self.inner.identity().product_id
+    }
+
     pub fn from_candidate(
         candidate: &Candidate,
     ) -> std::result::Result<Self, TargetSelectionError> {
@@ -218,24 +224,13 @@ pub fn inspect() -> Result<serde_json::Value> {
     let (candidate, device) = open_unique()?;
     let mut replies = Vec::new();
     for opcode in [0x80u8, 0x85] {
-        let mut request = [0u8; 65];
-        request[1] = opcode;
-        // BIT7 framing hypothesis: complement of bytes 0..6 at payload offset 7.
-        // Restricted to known read-only opcodes until verified against the device.
-        request[8] = !opcode;
-        device.send_feature_report(&request)?;
-        std::thread::sleep(std::time::Duration::from_millis(30));
-        let mut reply = [0u8; 65];
-        let n = device.get_feature_report(&mut reply)?;
-        if n != 65 || reply[0] != 0 || reply[1] != opcode {
-            return Err(format!(
-                "Unexpected response to {opcode:02x}: length={n} bytes={:02x?}",
-                &reply[..n]
-            )
-            .into());
+        let request = byakko_protocol::nia87::protocol::read_request(opcode, 0, 0);
+        let reply = read_payload(&device, opcode, 0, 0)?;
+        if reply[0] != opcode {
+            return Err(format!("Unexpected response to {opcode:02x}: {:02x?}", &reply[..]).into());
         }
         replies.push(
-            serde_json::json!({"opcode":opcode,"payload":&reply[1..],"request":&request[1..]}),
+            serde_json::json!({"opcode":opcode,"payload":reply.as_slice(),"request":request.as_slice()}),
         );
     }
     Ok(serde_json::json!({"candidate":candidate,"replies":replies}))
@@ -294,12 +289,102 @@ fn feature_read_exchange(
     })
 }
 
+// The receiver is a command relay. Its status and target selection are part
+// of each exchange, while the ordinary Nia87 command and its pacing stay intact.
+fn host_report(payload: [u8; 64]) -> [u8; 65] {
+    let mut report = [0; 65];
+    report[1..].copy_from_slice(&payload);
+    report
+}
+
+fn receive_report(receive: &mut impl FnMut(&mut [u8; 65]) -> Result<usize>) -> Result<[u8; 65]> {
+    let mut report = [0; 65];
+    let length = receive(&mut report)?;
+    if length != report.len() || report[0] != 0 {
+        return Err(format!("Invalid receiver HID response length/prefix: {length}").into());
+    }
+    Ok(report)
+}
+
+fn receiver_status(
+    send: &mut impl FnMut(&[u8; 65]) -> Result<()>,
+    receive: &mut impl FnMut(&mut [u8; 65]) -> Result<usize>,
+    wait: &mut impl FnMut(Duration),
+) -> Result<Status> {
+    send(&host_report(receiver::status_request()))?;
+    wait(Duration::from_millis(receiver::STATUS_SETTLE_MS));
+    let report = receive_report(receive)?;
+    Ok(Status::decode(&report[1..])?)
+}
+
+fn receiver_exchange(
+    command: &[u8; 65],
+    expects_reply: bool,
+    mut send: impl FnMut(&[u8; 65]) -> Result<()>,
+    mut receive: impl FnMut(&mut [u8; 65]) -> Result<usize>,
+    mut wait: impl FnMut(Duration),
+) -> Result<Option<[u8; 65]>> {
+    for poll in 0..receiver::MAX_POLLS {
+        let status = receiver_status(&mut send, &mut receive, &mut wait)?;
+        status.before_command()?;
+        if status.command_ready {
+            break;
+        }
+        if poll + 1 == receiver::MAX_POLLS {
+            return Err(RelayError::CommandTimeout.into());
+        }
+        wait(Duration::from_millis(receiver::POLL_INTERVAL_MS));
+    }
+
+    send(&host_report(receiver::select_keyboard_request()))?;
+    send(command)?;
+    if !expects_reply {
+        return Ok(None);
+    }
+
+    for poll in 0..receiver::MAX_POLLS {
+        let status = receiver_status(&mut send, &mut receive, &mut wait)?;
+        if !status.keyboard_online {
+            return Err(RelayError::KeyboardOffline.into());
+        }
+        if status.reply_ready {
+            send(&host_report(receiver::release_reply_request()))?;
+            return Ok(Some(receive_report(&mut receive)?));
+        }
+        if poll + 1 == receiver::MAX_POLLS {
+            return Err(RelayError::ReplyTimeout.into());
+        }
+        wait(Duration::from_millis(receiver::POLL_INTERVAL_MS));
+    }
+    unreachable!("receiver poll count is nonzero")
+}
+
 impl FeatureSetter for HidDevice {
     fn send_setter(&self, report: &[u8]) -> Result<()> {
+        let submit = || {
+            if self.product_id() == 0x4011 {
+                let command: &[u8; 65] = report
+                    .try_into()
+                    .map_err(|_| "Nia87 feature report must be 65 bytes")?;
+                if command[0] != 0 {
+                    return Err("Nia87 feature report must have report ID zero".into());
+                }
+                receiver_exchange(
+                    command,
+                    false,
+                    |report| self.send_feature_report(report),
+                    |reply| self.get_feature_report(reply),
+                    std::thread::sleep,
+                )?;
+                Ok(())
+            } else {
+                self.send_feature_report(report)
+            }
+        };
         #[cfg(feature = "research-tools")]
-        let result = crate::research_fault::send(report, || self.send_feature_report(report));
+        let result = crate::research_fault::send(report, submit);
         #[cfg(not(feature = "research-tools"))]
-        let result = self.send_feature_report(report);
+        let result = submit();
         // An error does not prove that the firmware did not receive the setter.
         // Callers normally sleep only after success; retain the longest known
         // setter interval before any recovery request on an uncertain result.
@@ -321,12 +406,24 @@ pub(super) fn read_payload(
         opcode, index, page,
     ));
     let exchange = |reply: &mut [u8; 65]| {
-        feature_read_exchange(
-            &request,
-            reply,
-            |request| device.send_feature_report(request),
-            |reply| device.get_feature_report(reply),
-        )
+        if device.product_id() == 0x4011 {
+            *reply = receiver_exchange(
+                &request,
+                true,
+                |report| device.send_feature_report(report),
+                |report| device.get_feature_report(report),
+                std::thread::sleep,
+            )?
+            .expect("receiver read requests a reply");
+            Ok(65)
+        } else {
+            feature_read_exchange(
+                &request,
+                reply,
+                |request| device.send_feature_report(request),
+                |reply| device.get_feature_report(reply),
+            )
+        }
     };
     #[cfg(feature = "research-tools")]
     let (n, reply) = crate::research_trace::read(&request, exchange)?;
@@ -514,6 +611,196 @@ mod tests {
                 lock_file(&path).is_ok(),
                 "failed open must release the transaction"
             );
+        }
+    }
+
+    fn receiver_status_report(reply_ready: bool, online: bool, command_ready: bool) -> [u8; 65] {
+        let mut report = [0; 65];
+        report[1] = u8::from(reply_ready);
+        report[4] = u8::from(!online);
+        report[6] = u8::from(command_ready);
+        report[7] = 1;
+        report
+    }
+
+    #[test]
+    fn receiver_read_selects_keyboard_and_releases_only_its_new_reply() {
+        use std::{cell::RefCell, collections::VecDeque, time::Duration};
+        let request =
+            super::host_report(byakko_protocol::nia87::protocol::read_request(0x80, 0, 0));
+        let mut keyboard_reply = [0; 65];
+        keyboard_reply[1..4].copy_from_slice(&[0x80, 0x00, 0x01]);
+        let responses = RefCell::new(VecDeque::from([
+            receiver_status_report(false, true, true),
+            receiver_status_report(false, true, false),
+            receiver_status_report(true, true, false),
+            keyboard_reply,
+        ]));
+        let sent = RefCell::new(Vec::new());
+        let waits = RefCell::new(Vec::new());
+        let result = super::receiver_exchange(
+            &request,
+            true,
+            |report| {
+                sent.borrow_mut().push(*report);
+                Ok(())
+            },
+            |reply| {
+                *reply = responses
+                    .borrow_mut()
+                    .pop_front()
+                    .expect("scripted response");
+                Ok(65)
+            },
+            |duration| waits.borrow_mut().push(duration),
+        )
+        .unwrap();
+        assert_eq!(result, Some(keyboard_reply));
+        assert!(responses.borrow().is_empty());
+        assert_eq!(
+            *sent.borrow(),
+            vec![
+                super::host_report(byakko_protocol::nia87::receiver::status_request()),
+                super::host_report(byakko_protocol::nia87::receiver::select_keyboard_request()),
+                request,
+                super::host_report(byakko_protocol::nia87::receiver::status_request()),
+                super::host_report(byakko_protocol::nia87::receiver::status_request()),
+                super::host_report(byakko_protocol::nia87::receiver::release_reply_request()),
+            ]
+        );
+        assert_eq!(
+            *waits.borrow(),
+            vec![
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+                Duration::from_millis(100),
+                Duration::from_millis(10),
+            ]
+        );
+    }
+
+    #[test]
+    fn receiver_rejects_stale_reply_or_sleep_before_keyboard_command() {
+        use std::cell::RefCell;
+        let request =
+            super::host_report(byakko_protocol::nia87::protocol::read_request(0x80, 0, 0));
+        for (status, expected) in [
+            (
+                receiver_status_report(true, true, true),
+                byakko_protocol::nia87::receiver::RelayError::PendingReply,
+            ),
+            (
+                receiver_status_report(false, false, true),
+                byakko_protocol::nia87::receiver::RelayError::KeyboardOffline,
+            ),
+        ] {
+            let sent = RefCell::new(Vec::new());
+            let error = super::receiver_exchange(
+                &request,
+                true,
+                |report| {
+                    sent.borrow_mut().push(*report);
+                    Ok(())
+                },
+                |reply| {
+                    *reply = status;
+                    Ok(65)
+                },
+                |_| {},
+            )
+            .unwrap_err();
+            assert_eq!(error.downcast_ref(), Some(&expected));
+            assert_eq!(
+                *sent.borrow(),
+                vec![super::host_report(
+                    byakko_protocol::nia87::receiver::status_request()
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn receiver_setter_waits_for_ready_then_returns_without_getting_keyboard_reply() {
+        use std::cell::RefCell;
+        let command = super::host_report([0x07; 64]);
+        let sent = RefCell::new(Vec::new());
+        let reads = RefCell::new(0);
+        let result = super::receiver_exchange(
+            &command,
+            false,
+            |report| {
+                sent.borrow_mut().push(*report);
+                Ok(())
+            },
+            |reply| {
+                *reads.borrow_mut() += 1;
+                *reply = receiver_status_report(false, true, true);
+                Ok(65)
+            },
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(result, None);
+        assert_eq!(*reads.borrow(), 1);
+        assert_eq!(
+            *sent.borrow(),
+            vec![
+                super::host_report(byakko_protocol::nia87::receiver::status_request()),
+                super::host_report(byakko_protocol::nia87::receiver::select_keyboard_request()),
+                command,
+            ]
+        );
+    }
+
+    #[test]
+    fn receiver_poll_limits_stop_without_unrelated_reports() {
+        use std::cell::RefCell;
+        let request =
+            super::host_report(byakko_protocol::nia87::protocol::read_request(0x80, 0, 0));
+        for (ready, expected) in [
+            (
+                false,
+                byakko_protocol::nia87::receiver::RelayError::CommandTimeout,
+            ),
+            (
+                true,
+                byakko_protocol::nia87::receiver::RelayError::ReplyTimeout,
+            ),
+        ] {
+            let sent = RefCell::new(Vec::new());
+            let reads = RefCell::new(0usize);
+            let error = super::receiver_exchange(
+                &request,
+                true,
+                |report| {
+                    sent.borrow_mut().push(*report);
+                    Ok(())
+                },
+                |reply| {
+                    let mut count = reads.borrow_mut();
+                    *count += 1;
+                    *reply = receiver_status_report(false, true, ready && *count == 1);
+                    Ok(65)
+                },
+                |_| {},
+            )
+            .unwrap_err();
+            assert_eq!(error.downcast_ref(), Some(&expected));
+            let expected_reads = if ready {
+                1 + byakko_protocol::nia87::receiver::MAX_POLLS
+            } else {
+                byakko_protocol::nia87::receiver::MAX_POLLS
+            };
+            assert_eq!(*reads.borrow(), expected_reads);
+            let sent = sent.borrow();
+            assert_eq!(sent.len(), expected_reads + if ready { 2 } else { 0 });
+            assert_eq!(
+                sent[0],
+                super::host_report(byakko_protocol::nia87::receiver::status_request())
+            );
+            assert!(!sent.contains(&super::host_report(
+                byakko_protocol::nia87::receiver::release_reply_request()
+            )));
         }
     }
 
