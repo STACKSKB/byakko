@@ -47,9 +47,14 @@ struct RawInfo {
 
 pub struct Device {
     file: File,
+    product_id: u16,
 }
 
 impl Device {
+    pub(crate) fn product_id(&self) -> u16 {
+        self.product_id
+    }
+
     pub fn send_feature_report(&self, report: &[u8]) -> Result<()> {
         if report.len() != HOST_REPORT_LEN || report[0] != 0 {
             return Err("Nia87 feature report must be 65 bytes with report ID zero".into());
@@ -147,7 +152,10 @@ pub fn open(path: &CStr) -> Result<Device> {
     if parsed.target_feature_count != 1 || !parsed.target_feature_shape_valid {
         return Err("Nia87 collection must have one unnumbered 64-byte feature report".into());
     }
-    Ok(Device { file })
+    Ok(Device {
+        file,
+        product_id: info.product as u16,
+    })
 }
 
 pub fn enumerate() -> Result<Vec<DeviceInfo>> {

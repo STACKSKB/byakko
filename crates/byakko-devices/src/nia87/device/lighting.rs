@@ -45,6 +45,11 @@ impl HostLightingSession {
             return Err(not_attempted("Host lighting requires screen or music mode"));
         }
         let session = Session::open_for(selection).map_err(not_attempted)?;
+        if session.device().product_id() == 0x4011 {
+            return Err(not_attempted(
+                "Host lighting over the Nia87 receiver is not verified",
+            ));
+        }
         let active = apply_lighting_on_device(
             session.device(),
             expected,

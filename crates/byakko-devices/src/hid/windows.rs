@@ -48,6 +48,7 @@ impl Drop for InfoSet {
 
 pub struct Device {
     handle: HANDLE,
+    product_id: u16,
 }
 
 // A Windows HANDLE can be used from the worker thread that owns a Device.
@@ -101,7 +102,10 @@ fn open_handle(path: &CStr, access: u32) -> Result<Device> {
     if handle == INVALID_HANDLE_VALUE {
         Err(error("Could not open HID collection"))
     } else {
-        Ok(Device { handle })
+        Ok(Device {
+            handle,
+            product_id: 0,
+        })
     }
 }
 
@@ -336,10 +340,17 @@ pub fn open(path: &CStr) -> Result<Device> {
     {
         return Err("Opened HID path is not the expected Nia87 65-byte vendor collection".into());
     }
-    Ok(device)
+    Ok(Device {
+        product_id: attr.ProductID,
+        ..device
+    })
 }
 
 impl Device {
+    pub(crate) fn product_id(&self) -> u16 {
+        self.product_id
+    }
+
     pub fn send_feature_report(&self, data: &[u8]) -> Result<()> {
         if data.len() != HOST_REPORT_LEN || data[0] != 0 {
             return Err("Nia87 feature report must be 65 bytes with report ID zero".into());

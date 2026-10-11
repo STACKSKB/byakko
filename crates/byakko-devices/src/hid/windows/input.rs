@@ -59,7 +59,10 @@ impl InputDevice {
         if handle == INVALID_HANDLE_VALUE {
             return Err(error("Could not open keyboard notifications"));
         }
-        let device = Device { handle };
+        let device = Device {
+            handle,
+            product_id: 0,
+        };
         let attr = attributes(handle)?;
         let caps = capabilities(handle)?;
         if attr.VendorID != 0x3151
