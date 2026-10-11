@@ -486,7 +486,7 @@ fn run() -> device::Result<()> {
     Ok(())
 }
 
-/// Resolve once per command without sending a feature report. Every subsequent
+/// Resolve once per command and validate receiver identity. Every subsequent
 /// feature operation, including restoration, stays bound to this collection.
 fn selected_access() -> device::Result<device::Access> {
     let candidates = device::candidates()?;
@@ -497,9 +497,7 @@ fn selected_access() -> device::Result<device::Access> {
             return Err(device::TargetSelectionError::Ambiguous(candidates.len()).into());
         }
     };
-    Ok(device::Access::bound(device::Target::from_candidate(
-        candidate,
-    )?))
+    device::Access::connect(device::Target::from_candidate(candidate)?)
 }
 
 fn apply_failure(

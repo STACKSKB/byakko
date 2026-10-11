@@ -88,6 +88,7 @@ pub enum TargetSelectionError {
     Ambiguous(usize),
     Changed,
     Unsupported,
+    ReceiverSelectionRequired,
 }
 
 impl std::fmt::Display for TargetSelectionError {
@@ -103,6 +104,9 @@ impl std::fmt::Display for TargetSelectionError {
             Self::Changed => {
                 f.write_str("The keyboard connection changed. Choose Read / reconnect.")
             }
+            Self::ReceiverSelectionRequired => f.write_str(
+                "Receiver operations require a selected, board-validated Access connection.",
+            ),
             Self::Unsupported => {
                 f.write_str("This keyboard connection cannot be configured by Byakko.")
             }

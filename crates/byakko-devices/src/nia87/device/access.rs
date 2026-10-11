@@ -8,10 +8,19 @@ pub(super) enum Selection<'a> {
 
 impl Selection<'_> {
     pub(super) fn open(self) -> Result<(Candidate, HidDevice)> {
-        match self {
+        let opened = match self {
             Self::Unique => open_unique(),
             Self::Expected(target) => open_expected(target),
+        }?;
+        self.validate_product(opened.0.pid)?;
+        Ok(opened)
+    }
+
+    fn validate_product(self, product_id: u16) -> Result<()> {
+        if matches!(self, Self::Unique) && product_id == 0x4011 {
+            return Err(TargetSelectionError::ReceiverSelectionRequired.into());
         }
+        Ok(())
     }
 }
 
@@ -22,8 +31,17 @@ pub struct Access {
 }
 
 impl Access {
-    pub fn bound(target: Target) -> Self {
+    pub(crate) fn bound(target: Target) -> Self {
         Self { target }
+    }
+
+    /// Explicit synchronous connection for native research clients. Receiver
+    /// board identity is checked once before this selected access is returned.
+    /// Desktop clients use BoundNia87Adapter to perform this on their worker.
+    pub fn connect(target: Target) -> Result<Self> {
+        let access = Self::bound(target);
+        access.validate_connection()?;
+        Ok(access)
     }
 
     fn selection(&self) -> Selection<'_> {
@@ -165,5 +183,36 @@ impl Access {
             backup_dir,
             progress,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unbound_receiver_access_requires_explicit_board_validation() {
+        let error = Selection::Unique.validate_product(0x4011).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<TargetSelectionError>(),
+            Some(&TargetSelectionError::ReceiverSelectionRequired)
+        );
+        assert!(Selection::Unique.validate_product(0x4015).is_ok());
+        let target = Target::from_candidate(&Candidate {
+            path: "selected-receiver".into(),
+            vid: 0x3151,
+            pid: 0x4011,
+            interface: 2,
+            usage_page: 0xffff,
+            usage: 2,
+            manufacturer: None,
+            product: None,
+        })
+        .unwrap();
+        assert!(
+            Selection::Expected(&target)
+                .validate_product(0x4011)
+                .is_ok()
+        );
     }
 }

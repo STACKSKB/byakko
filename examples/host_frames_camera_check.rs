@@ -7,7 +7,7 @@ use byakko_protocol::nia87::lighting::LightingSetting;
 fn main() -> device::Result<()> {
     let python = std::env::args().nth(1).ok_or("Supply Python executable")?;
     let target = support::target()?;
-    let access = device::Access::bound(target.clone());
+    let access = device::Access::connect(target.clone())?;
     let original = access.read_lighting()?;
     let restore = original
         .recognized_setting()

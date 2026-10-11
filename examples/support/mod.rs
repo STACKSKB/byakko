@@ -15,7 +15,7 @@ pub fn target() -> device::Result<device::Target> {
 
 #[allow(dead_code)] // Each example compiles this shared module independently.
 pub fn access() -> device::Result<device::Access> {
-    Ok(device::Access::bound(target()?))
+    device::Access::connect(target()?)
 }
 
 #[allow(dead_code)] // Only archive research examples need the typed recovery conversion.

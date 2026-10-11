@@ -38,7 +38,7 @@ fn complete(device: &HidDevice, slot: u8) -> Result<Vec<u8>> {
 
 fn main() -> Result<()> {
     let target = support::target()?;
-    let access = device::Access::bound(target.clone());
+    let access = device::Access::connect(target.clone())?;
     let maps_before = access.snapshot()?;
     if maps_before.firmware != 0x0100 || maps_before.profile != 0 {
         return Err("Unverified Nia87 firmware or profile".into());

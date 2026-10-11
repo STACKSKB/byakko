@@ -45,7 +45,7 @@ fn main() -> Result<()> {
         _ => return Err("Expected no argument, f24 or mixed-response".into()),
     };
     let target = support::target()?;
-    let access = device::Access::bound(target.clone());
+    let access = device::Access::connect(target.clone())?;
     let before = access.snapshot()?;
     if before.firmware != 0x100
         || before.profile != 0

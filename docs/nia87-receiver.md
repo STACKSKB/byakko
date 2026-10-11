@@ -71,3 +71,12 @@ checks do not establish physical receiver access or a working udev grant.
 See [pre-alpha support](pre-alpha-support.md), the
 [acceptance ledger](parity-status.md), and the
 [browser transport notes](webhid-browser.md) for the wider product limits.
+
+## Native research clients
+
+`BoundNia87Adapter` binds without I/O and establishes receiver board identity on
+its selected executor worker. Low-level clients may instead call the explicit
+synchronous `device::Access::connect(target)` once, then reuse that immutable
+access. Unbound convenience feature functions require the wired transport;
+receiver operations must use selected, board-validated access. Raw HID research
+APIs remain available for protocol diagnostics.

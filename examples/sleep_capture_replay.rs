@@ -28,7 +28,7 @@ fn save(path: &str, settings: &Settings) -> Result<()> {
 
 fn main() -> Result<()> {
     let target = support::target()?;
-    let access = device::Access::bound(target.clone());
+    let access = device::Access::connect(target.clone())?;
     let maps = access.snapshot()?;
     if maps.firmware != 0x100 || maps.profile != 0 {
         return Err("Unvalidated firmware/profile".into());
