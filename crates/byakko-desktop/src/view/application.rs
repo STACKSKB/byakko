@@ -66,7 +66,6 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
     let mut navigation = row![].spacing(input.style.spacing.s);
     for (label, page, available) in [
         ("Keys", Page::Keys, true),
-        ("Keyboard tester", Page::Tester, true),
         ("Macros", Page::Macros, input.session.macros().is_some()),
         (
             "Lighting",
@@ -83,6 +82,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
             Page::Archive,
             input.session.archive().is_some(),
         ),
+        ("Keyboard tester", Page::Tester, true),
     ] {
         if available {
             navigation = navigation.push(panels::selectable_button(

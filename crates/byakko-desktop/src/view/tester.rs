@@ -338,23 +338,7 @@ fn board<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
                 }
                 appearance
             });
-            let description = key.usage.map_or_else(
-                || "Firmware Fn · usually no independent host input".into(),
-                |usage| {
-                    format!(
-                        "{} · HID {usage:02X} · reported host usage · click for counts",
-                        key.label
-                    )
-                },
-            );
-            board.push(
-                pin(tooltip(
-                    key_button,
-                    text(description),
-                    tooltip::Position::Top,
-                ))
-                .position([key.x * unit, key.y * unit]),
-            )
+            board.push(pin(key_button).position([key.x * unit, key.y * unit]))
         });
         scrollable(board)
             .direction(scrollable::Direction::Horizontal(
