@@ -27,7 +27,7 @@ impl BrowserAudioBands {
     }
 }
 
-use byakko_protocol::nia87::{lighting, protocol};
+use byakko_protocol::nia87::{lighting, protocol, receiver};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
@@ -81,6 +81,53 @@ impl Read {
             _ => Ok(json!({ "raw": payload })),
         }
     }
+}
+
+#[wasm_bindgen]
+pub fn receiver_request(name: &str) -> Result<Vec<u8>, JsValue> {
+    let report = match name {
+        "status" => receiver::status_request(),
+        "select_keyboard" => receiver::select_keyboard_request(),
+        "release_reply" => receiver::release_reply_request(),
+        "board_identity" => receiver::board_identity_request(),
+        _ => return Err(JsValue::from_str("Unknown Nia87 receiver control")),
+    };
+    Ok(report.to_vec())
+}
+
+#[wasm_bindgen]
+pub fn decode_receiver_status(payload: &[u8]) -> Result<String, JsValue> {
+    receiver::Status::decode(payload)
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+        .and_then(|status| {
+            serde_json::to_string(&status).map_err(|error| JsValue::from_str(&error.to_string()))
+        })
+}
+
+#[wasm_bindgen]
+pub fn validate_receiver_command_status(payload: &[u8]) -> Result<String, JsValue> {
+    let status =
+        receiver::Status::decode(payload).map_err(|error| JsValue::from_str(&error.to_string()))?;
+    status
+        .before_command()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    serde_json::to_string(&status).map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn validate_receiver_identity(payload: &[u8]) -> Result<(), JsValue> {
+    receiver::validate_board_identity(payload)
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn receiver_limits() -> String {
+    json!({
+        "status_settle_ms": receiver::STATUS_SETTLE_MS,
+        "poll_interval_ms": receiver::POLL_INTERVAL_MS,
+        "max_polls": receiver::MAX_POLLS,
+    })
+    .to_string()
 }
 
 #[wasm_bindgen]

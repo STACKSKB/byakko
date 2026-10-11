@@ -6,7 +6,7 @@ export function createHostForm({ doc, win, runtime, redraw, navigate }) {
   let screenSampling = "average", screenX = 500, screenY = 500;
 
   function selectedMode(view) {
-    const modes = view.lighting?.capabilities?.host_modes ?? [];
+    const modes = runtime.hostModesAvailable ? view.lighting?.capabilities?.host_modes ?? [] : [];
     return modes.find(mode => mode.id === hostMode) ?? modes[0];
   }
 
@@ -47,7 +47,7 @@ export function createHostForm({ doc, win, runtime, redraw, navigate }) {
 
   async function start() {
     const mode = selectedMode(runtime.view);
-    if (!mode) return;
+    if (!mode || !runtime.hostModesAvailable) return;
     const setting = currentSetting(mode);
     const options = mode.source === "ScreenAverage"
       ? { sampling: screenSampling, x: screenX, y: screenY } : {};
@@ -61,7 +61,7 @@ export function createHostForm({ doc, win, runtime, redraw, navigate }) {
   }
 
   function render(panel, view) {
-    const modes = view.lighting?.capabilities?.host_modes ?? [];
+    const modes = runtime.hostModesAvailable ? view.lighting?.capabilities?.host_modes ?? [] : [];
     if (!modes.length) return;
     const mode = selectedMode(view);
     const host = runtime.host;

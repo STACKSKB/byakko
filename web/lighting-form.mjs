@@ -8,9 +8,10 @@ export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
 
   function keyboardState(view) {
     const lighting = view.lighting;
+    const showingHost = showHostLighting && runtime.hostModesAvailable;
     return {
-      pictureMode: !showHostLighting && lighting?.editor.draft?.effect === view.picture?.capabilities?.lighting_effect,
-      modeLabel: showHostLighting ? host.selectedMode(view)?.label :
+      pictureMode: !showingHost && lighting?.editor.draft?.effect === view.picture?.capabilities?.lighting_effect,
+      modeLabel: showingHost ? host.selectedMode(view)?.label :
         lighting?.capabilities.effects.find(effect => effect.id === lighting.editor.draft?.effect)?.label,
     };
   }
@@ -21,9 +22,9 @@ export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
     const caps = lighting.capabilities;
     const choices = [
       ...caps.effects.map(effect => [`onboard:${effect.id}`, effect.label]),
-      ...caps.host_modes.map(mode => [`host:${mode.id}`, mode.label]),
+      ...(runtime.hostModesAvailable ? caps.host_modes.map(mode => [`host:${mode.id}`, mode.label]) : []),
     ];
-    const selected = showHostLighting ? `host:${host.selectedMode(view)?.id}` :
+    const selected = showHostLighting && runtime.hostModesAvailable ? `host:${host.selectedMode(view)?.id}` :
       lighting.editor.draft ? `onboard:${lighting.editor.draft.effect}` : "";
     field(doc, heading, "Lighting mode", choice(doc, choices, selected, async value => {
       if (value.startsWith("host:")) {
@@ -50,7 +51,7 @@ export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
     if (!state) return;
     const editor = state.editor, draft = editor.draft, caps = state.capabilities;
     panel.append(actions(doc, editor, "lighting", input => runtime.intent(input), { auto: true }));
-    if (showHostLighting) { host.render(panel, view); return; }
+    if (showHostLighting && runtime.hostModesAvailable) { host.render(panel, view); return; }
     if (!draft) {
       const content = editor.baseline?.content;
       panel.append(node(doc, "p", content?.HostActive
