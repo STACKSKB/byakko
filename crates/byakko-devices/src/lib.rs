@@ -17,3 +17,4 @@ pub mod research_trace;
 pub mod rongyuan;
 pub mod screen_sample;
 pub mod storage;
+pub mod tester_input;
