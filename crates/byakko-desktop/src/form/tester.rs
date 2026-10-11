@@ -44,6 +44,7 @@ pub enum Message {
     Input(Event, Instant),
     Drain,
     Inspect(u16),
+    ToggleDetails,
 }
 
 pub struct Form {
@@ -54,6 +55,7 @@ pub struct Form {
     pub notice: String,
     pub refreshing: bool,
     pub inspected: Option<u16>,
+    pub show_details: bool,
     pub usb: Option<Result<Metadata, Unavailable>>,
     usb_request: u64,
     sampler: Option<Sampler>,
@@ -71,6 +73,7 @@ impl Default for Form {
             notice: String::new(),
             refreshing: false,
             inspected: None,
+            show_details: false,
             usb: None,
             usb_request: 0,
             sampler: None,
@@ -207,6 +210,7 @@ impl Form {
                 }
             }
             Message::Inspect(usage) => self.inspected = Some(usage),
+            Message::ToggleDetails => self.show_details = !self.show_details,
             Message::Refresh | Message::Input(..) => {}
         }
     }

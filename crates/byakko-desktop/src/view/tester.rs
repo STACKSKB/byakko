@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Compact local keyboard observations; technical evidence stays in tooltips.
+//! Compact local keyboard observations with optional device details.
 use crate::{
     form::tester::{Form, Message, Source},
     widget::panels::{self, UiStyle},
@@ -9,7 +9,6 @@ use iced::{
     Color, Element, Fill,
     widget::{
         button, column, container, pick_list, pin, responsive, row, scrollable, space, stack, text,
-        tooltip,
     },
 };
 use std::fmt;
@@ -43,11 +42,19 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
         },
     );
     let counters = row![
-        help(text(coverage), "Counts describe reported host keys. Green means held; blue means observed. Firmware remapping can change the reported key, so a highlight cannot identify the actuated switch. Fn usually has no independent host event."),
-        text(format!("Press {}   Release {}   Repeat {}", form.test.total_presses(), form.test.total_releases(), form.test.total_repeats())).size(12),
+        text(coverage),
+        text(format!(
+            "Press {}   Release {}   Repeat {}",
+            form.test.total_presses(),
+            form.test.total_releases(),
+            form.test.total_repeats()
+        ))
+        .size(12),
         space::horizontal(),
         text(last).size(12),
-    ].spacing(style.spacing.m).align_y(iced::Alignment::Center);
+    ]
+    .spacing(style.spacing.m)
+    .align_y(iced::Alignment::Center);
     let mut body =
         column![controls(form, style), board(form, style), counters].spacing(style.spacing.s);
     if !form.notice.is_empty() {
@@ -55,11 +62,20 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     }
     if let Some(usage) = form.inspected {
         let stats = form.test.stats().get(&usage).copied().unwrap_or_default();
-        body = body.push(help(text(format!(
-            "{} · press {} / release {} / repeat {} · chatter {} · hold {}",
-            key_label(form,usage), stats.presses, stats.releases, stats.repeats, stats.chatter_candidates,
-            stats.last_hold_us.map_or_else(|| "—".into(), |us| format!("{:.3} ms", ms(us)))
-        )).size(12), format!("Reported HID usage 0x{usage:02X}. Click another displayed key to inspect its counts.")));
+        body = body.push(
+            text(format!(
+                "{} · press {} / release {} / repeat {} · chatter candidates {} · hold {}",
+                key_label(form, usage),
+                stats.presses,
+                stats.releases,
+                stats.repeats,
+                stats.chatter_candidates,
+                stats
+                    .last_hold_us
+                    .map_or_else(|| "—".into(), |us| format!("{:.3} ms", ms(us)))
+            ))
+            .size(12),
+        );
     }
     body = body.push(responsive(move |size| {
         if size.width >= 950.0 {
@@ -88,29 +104,65 @@ fn controls<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
         .on_open(Message::Pause)
         .text_size(13)
         .width(Fill);
-        let input_label = help(text("Input").size(12), match &form.source {
-            Source::Window => "Keys delivered to the focused app window, combined across keyboards; no device identity.".into(),
-            Source::Device(device) => format!("Selected OS input device:\n{}", device.id),
-        });
-        let refresh = button(if form.refreshing { "Refreshing…" } else { "Refresh" }).on_press_maybe((!form.refreshing).then_some(Message::Refresh));
+        let input_label = text("Input").size(12);
+        let refresh = button(if form.refreshing {
+            "Refreshing…"
+        } else {
+            "Refresh"
+        })
+        .on_press_maybe((!form.refreshing).then_some(Message::Refresh));
         let standard = pick_list(Standard::ALL, Some(layout.standard), Message::Standard)
-            .on_open(Message::Pause).text_size(13);
-        let board_size = pick_list(Size::ALL,Some(layout.size),move |size| Message::Layout(tester::LayoutSelection {size,..layout})).on_open(Message::Pause).text_size(13);
-        let legends = pick_list(Legends::ALL,Some(layout.legends),move |legends| Message::Layout(tester::LayoutSelection {legends,..layout})).on_open(Message::Pause).text_size(13);
-        let layout_label = help(text("Layout").size(12), "Representative physical geometry; the display follows host key usages. Legends only change the display, not the operating-system layout or keyboard configuration.");
-        let start = button(if form.active() { "Pause" } else { "Start" }).on_press(if form.active() { Message::Pause } else { Message::Start });
+            .on_open(Message::Pause)
+            .text_size(13);
+        let board_size = pick_list(Size::ALL, Some(layout.size), move |size| {
+            Message::Layout(tester::LayoutSelection { size, ..layout })
+        })
+        .on_open(Message::Pause)
+        .text_size(13);
+        let legends = pick_list(Legends::ALL, Some(layout.legends), move |legends| {
+            Message::Layout(tester::LayoutSelection { legends, ..layout })
+        })
+        .on_open(Message::Pause)
+        .text_size(13);
+        let layout_label = text("Layout").size(12);
+        let start =
+            button(if form.active() { "Pause" } else { "Start" }).on_press(if form.active() {
+                Message::Pause
+            } else {
+                Message::Start
+            });
         let reset = button("Reset").on_press(Message::Reset);
-        let status = help(text(if form.active() { "Listening" } else { "Paused" }).size(12), "Shift+Tab pauses and moves focus backward. Capture also stops on focus loss, page changes and close. Start resumes explicitly.");
-        let info = help(text("Info").size(12), "Results stay in memory; no input is saved or sent. Native sources observe one selected OS input endpoint independently of the configurator. Linux requires normal read permission for the input device.");
+        let status = text(if form.active() { "Listening" } else { "Paused" }).size(12);
         if size.width >= 1100.0 {
-            row![input_label, source, refresh, layout_label, standard, board_size, legends, start, reset, status, info].spacing(style.spacing.s).align_y(iced::Alignment::Center).into()
+            row![
+                input_label,
+                source,
+                refresh,
+                layout_label,
+                standard,
+                board_size,
+                legends,
+                start,
+                reset,
+                status
+            ]
+            .spacing(style.spacing.s)
+            .align_y(iced::Alignment::Center)
+            .into()
         } else {
             column![
-                row![input_label,source,refresh,start,reset,status].spacing(style.spacing.s).align_y(iced::Alignment::Center),
-                row![layout_label,standard,board_size,legends,space::horizontal(),info].spacing(style.spacing.s).align_y(iced::Alignment::Center),
-            ].spacing(style.spacing.s).into()
+                row![input_label, source, refresh, start, reset, status]
+                    .spacing(style.spacing.s)
+                    .align_y(iced::Alignment::Center),
+                row![layout_label, standard, board_size, legends]
+                    .spacing(style.spacing.s)
+                    .align_y(iced::Alignment::Center),
+            ]
+            .spacing(style.spacing.s)
+            .into()
         }
-    }).into()
+    })
+    .into()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -158,10 +210,22 @@ fn short_label(value: &str, max: usize) -> String {
 fn chatter<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     let threshold = form.test.chatter_threshold_us() / 1_000;
     let header = row![
-        help(text(format!("Chatter: {}",form.test.candidate_count())).size(style.type_scale.section_title), "Candidates are a release followed by the same reported key's press within this threshold. Autorepeat is excluded. Intentional rapid taps can look identical; a candidate does not diagnose a switch fault."),
-        space::horizontal(), text("Threshold").size(12),
-        pick_list([5_u64,10,20,30,50],Some(threshold),|ms| Message::Threshold(ms*1_000)).on_open(Message::Pause).text_size(12), text("ms").size(12),
-    ].spacing(style.spacing.s).align_y(iced::Alignment::Center);
+        text(format!(
+            "Chatter candidates: {}",
+            form.test.candidate_count()
+        ))
+        .size(style.type_scale.section_title),
+        space::horizontal(),
+        text("Threshold").size(12),
+        pick_list([5_u64, 10, 20, 30, 50], Some(threshold), |ms| {
+            Message::Threshold(ms * 1_000)
+        })
+        .on_open(Message::Pause)
+        .text_size(12),
+        text("ms").size(12),
+    ]
+    .spacing(style.spacing.s)
+    .align_y(iced::Alignment::Center);
     let entries: Element<'_, Message> = if form.test.recent_candidates().is_empty() {
         text("No candidates").size(12).into()
     } else {
@@ -208,36 +272,50 @@ fn timing<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
         )
     };
     let (usb, usb_details) = usb_summary(form);
-    let title = help(
+    let title = row![
         text("Timing").size(style.type_scale.section_title),
-        format!(
-            "Timestamp source: {}. Event spacing includes actuation timing, keyboard processing and OS delivery. It measures neither physical latency nor actual USB polling. Physical latency needs an actuation reference; actual bus cadence needs bus-level observation.",
-            form.timing_source()
-        ),
-    );
-    container(
-        column![
-            title,
-            text(spacing).size(12),
-            help(text(usb).size(12), usb_details)
-        ]
-        .spacing(style.spacing.s),
-    )
-    .padding(10)
-    .width(Fill)
-    .style(container::rounded_box)
-    .into()
+        space::horizontal(),
+        button(
+            text(if form.show_details {
+                "Hide details"
+            } else {
+                "Details"
+            })
+            .size(12)
+        )
+        .on_press(Message::ToggleDetails)
+        .style(button::secondary),
+    ]
+    .align_y(iced::Alignment::Center);
+    let mut body =
+        column![title, text(spacing).size(12), text(usb).size(12)].spacing(style.spacing.s);
+    if form.show_details {
+        if let Source::Device(device) = &form.source {
+            body = body.push(
+                text(&device.id)
+                    .size(12)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            );
+        }
+        body = body.push(text(format!("Timestamps · {}", form.timing_source())).size(12));
+        if !usb_details.is_empty() {
+            body = body.push(
+                text(usb_details)
+                    .size(12)
+                    .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
+            );
+        }
+    }
+    container(body)
+        .padding(10)
+        .width(Fill)
+        .style(container::rounded_box)
+        .into()
 }
 fn usb_summary(form: &Form) -> (String, String) {
     match (&form.source, &form.usb) {
-        (Source::Window, _) => (
-            "USB declared: —".into(),
-            "Combined window input has no selected USB endpoint to inspect.".into(),
-        ),
-        (Source::Device(_), None) => (
-            "USB declared: checking…".into(),
-            "Inspecting the selected input's USB descriptor snapshot.".into(),
-        ),
+        (Source::Window, _) => ("USB declared: —".into(), String::new()),
+        (Source::Device(_), None) => ("USB declared: checking…".into(), String::new()),
         (_, Some(Err(reason))) => ("USB declared: unavailable".into(), reason.to_string()),
         (_, Some(Ok(metadata))) => {
             let values: Vec<_> = metadata
@@ -264,26 +342,9 @@ fn usb_summary(form: &Form) -> (String, String) {
                     ep.b_interval
                 ));
             }
-            details.push_str("\nA declared service interval is a scheduling opportunity, not measured polling, report rate, physical latency or receiver radio timing.");
             (summary, details)
         }
     }
-}
-fn help<'a>(
-    content: impl Into<Element<'a, Message>>,
-    explanation: impl Into<String>,
-) -> Element<'a, Message> {
-    tooltip(
-        content,
-        text(explanation.into())
-            .size(12)
-            .width(420)
-            .wrapping(iced::widget::text::Wrapping::WordOrGlyph),
-        tooltip::Position::Bottom,
-    )
-    .gap(4)
-    .padding(8)
-    .into()
 }
 fn median_ms(sorted: &[u64]) -> f64 {
     let middle = sorted.len() / 2;

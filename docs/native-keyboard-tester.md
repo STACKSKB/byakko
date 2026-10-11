@@ -9,7 +9,7 @@ the tester does not save or export them.
 
 Use **Refresh** to update the available native input devices, then
 choose a source from the source dropdown. The source is independent of the
-keyboard selected for configuration. Hover **Input** for the full selected
+keyboard selected for configuration. Open **Details** for the full selected
 device identifier; compact source labels retain an endpoint or instance suffix.
 
 - **App window · all keyboards** receives physical key codes delivered to
@@ -68,8 +68,8 @@ lifecycle; it does not prove race-free restoration under every future caller.
 ## Understand the timing
 
 Intervals are differences between received event timestamps. They are not the
-USB polling rate, switch travel time, or end-to-end physical latency. Hover
-**Timing** for the timestamp source and measurement limits.
+USB polling rate, switch travel time, or end-to-end physical latency. Open
+**Details** for the timestamp source.
 
 On Windows, **Instant** means the time Byakko dequeues the native Raw Input
 message (or receives an Iced event in window-input mode), captured with a
@@ -101,7 +101,7 @@ Neither path matches another keyboard by vendor/product ID or changes USB
 configuration. Unsupported, inaccessible or ambiguous sources show the reason
 that descriptor metadata is unavailable.
 
-Hover **USB declared** to see each interrupt IN endpoint separately with the
+Open **Details** to see each interrupt IN endpoint separately with the
 USB speed, interface, alternate setting, endpoint address and raw `bInterval`.
 This is interface metadata; multiple HID collections can share the endpoint.
 Windows declines interfaces with multiple alternate settings when the active

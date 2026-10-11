@@ -222,7 +222,7 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
             if label == "Timing"
                 || label.starts_with("Event spacing")
                 || label.starts_with("USB declared")
-                || label.starts_with("Chatter:")
+                || label.starts_with("Chatter candidates:")
                 || label.starts_with("Last ")
             {
                 assert!(
@@ -323,8 +323,66 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tester-ui");
         std::fs::create_dir_all(&path).unwrap();
         pixmap.save_png(path.join(format!("{name}.png"))).unwrap();
+        if usb_fixture {
+            let details = texts
+                .0
+                .iter()
+                .find(|(text, _)| text == "Details")
+                .unwrap()
+                .1;
+            for event in [
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ] {
+                element.as_widget_mut().update(
+                    &mut tree,
+                    &event,
+                    layout,
+                    mouse::Cursor::Available(Point::new(details.center_x(), details.center_y())),
+                    &renderer,
+                    &mut iced::advanced::clipboard::Null,
+                    &mut iced::advanced::Shell::new(&mut messages),
+                    &viewport,
+                );
+            }
+        }
         drop(element);
-        if !usb_fixture {
+        if usb_fixture {
+            let message = messages
+                .into_iter()
+                .find(|message| {
+                    matches!(
+                        message,
+                        Message::Tester(tester_form::Message::ToggleDetails)
+                    )
+                })
+                .expect("actual Details button emits its message");
+            let _ = app.update(message);
+            assert!(app.tester.show_details);
+            let mut element = app.view();
+            let mut tree = Tree::new(&element);
+            let node = element.as_widget_mut().layout(
+                &mut tree,
+                &renderer,
+                &layout::Limits::new(Size::ZERO, viewport.size()),
+            );
+            let mut texts = TextBounds::default();
+            element
+                .as_widget_mut()
+                .operate(&mut tree, Layout::new(&node), &renderer, &mut texts);
+            assert!(texts.0.iter().any(
+                |(text, _)| text.contains("Descriptor fixture") && text.contains("bInterval 4")
+            ));
+            assert!(
+                texts
+                    .0
+                    .iter()
+                    .any(|(text, _)| text.contains("VID_3151&PID_4011&MI_00#fixture"))
+            );
+            drop(element);
+            let _ = app.update(Message::Tester(tester_form::Message::ToggleDetails));
+            assert!(!app.tester.show_details);
+        } else {
             let _ = app.update(messages.remove(0));
             assert_eq!(app.tester.active(), !listening);
         }
@@ -350,12 +408,17 @@ fn active_capture_consumes_keyboard_navigation_without_triggering_controls() {
     element
         .as_widget_mut()
         .operate(&mut tree, Layout::new(&node), &renderer, &mut texts);
-    let info = texts.0.iter().find(|(label, _)| label == "Info").unwrap().1;
-    let cursor = mouse::Cursor::Available(Point::new(info.center_x(), info.center_y()));
+    let label = texts
+        .0
+        .iter()
+        .find(|(label, _)| label == "Layout")
+        .unwrap()
+        .1;
+    let cursor = mouse::Cursor::Available(Point::new(label.center_x(), label.center_y()));
     element.as_widget_mut().update(
         &mut tree,
         &Event::Mouse(mouse::Event::CursorMoved {
-            position: Point::new(info.center_x(), info.center_y()),
+            position: Point::new(label.center_x(), label.center_y()),
         }),
         Layout::new(&node),
         cursor,
@@ -365,13 +428,8 @@ fn active_capture_consumes_keyboard_navigation_without_triggering_controls() {
         &viewport,
     );
     let mut messages = Vec::new();
-    let event = key(
-        keyboard::key::Code::Space,
-        false,
-        keyboard::Modifiers::empty(),
-    );
-    {
-        let mut overlay = element
+    assert!(
+        element
             .as_widget_mut()
             .overlay(
                 &mut tree,
@@ -380,23 +438,9 @@ fn active_capture_consumes_keyboard_navigation_without_triggering_controls() {
                 &viewport,
                 iced::Vector::ZERO,
             )
-            .expect("passive help remains available while listening");
-        let overlay_node = overlay.as_overlay_mut().layout(&renderer, viewport.size());
-        let mut shell = iced::advanced::Shell::new(&mut messages);
-        overlay.as_overlay_mut().update(
-            &event,
-            Layout::new(&overlay_node),
-            cursor,
-            &renderer,
-            &mut iced::advanced::clipboard::Null,
-            &mut shell,
-        );
-        assert!(
-            !shell.is_event_captured(),
-            "passive help must pass keys to capture"
-        );
-    }
-    assert!(messages.is_empty());
+            .is_none(),
+        "hovering Layout must not open a popup"
+    );
     let mut shell = iced::advanced::Shell::new(&mut messages);
     element.as_widget_mut().update(
         &mut tree,
