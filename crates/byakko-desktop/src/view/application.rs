@@ -3,7 +3,7 @@ use crate::{
     controller::discovery::Availability,
     form::{
         application::{Closing, Message, Page},
-        files, host, keymap, lighting, macros, picture, recording,
+        files, host, keymap, lighting, macros, picture, recording, tester,
     },
     view,
     widget::{
@@ -33,6 +33,7 @@ pub struct View<'a> {
     pub files: &'a files::Form,
     pub files_busy: bool,
     pub names_available: bool,
+    pub tester: &'a tester::Form,
     pub recording_options: &'a recording::Options,
     pub recording_pending: bool,
     pub page: Page,
@@ -65,6 +66,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
     let mut navigation = row![].spacing(input.style.spacing.s);
     for (label, page, available) in [
         ("Keys", Page::Keys, true),
+        ("Keyboard tester", Page::Tester, true),
         ("Macros", Page::Macros, input.session.macros().is_some()),
         (
             "Lighting",
@@ -122,7 +124,10 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         .height(Fill)
         .into();
     if input.closing != Closing::ConfirmDiscard {
-        return base;
+        return crate::widget::tester_capture::capture(
+            base,
+            input.page == Page::Tester && input.tester.active(),
+        );
     }
     let dialog = container(
         column![
@@ -149,6 +154,9 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
 
 fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     let idle = input.idle();
+    if input.page == Page::Tester {
+        return view::tester::view(input.tester, input.style).map(Message::Tester);
+    }
     if input.page == Page::Macros {
         return macro_workspace(input, wide);
     }
@@ -230,7 +238,7 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
             .map(Message::Files),
             None => text("Diagnostic capture is unavailable for this keyboard.").into(),
         },
-        Page::Keys | Page::Macros => unreachable!("handled workspace"),
+        Page::Keys | Page::Macros | Page::Tester => unreachable!("handled workspace"),
     });
     let board = if wide {
         row![

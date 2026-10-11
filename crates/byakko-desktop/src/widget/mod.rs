@@ -3,3 +3,4 @@ pub mod color_picker;
 pub mod keyboard;
 pub mod lighting;
 pub mod panels;
+pub mod tester_capture;

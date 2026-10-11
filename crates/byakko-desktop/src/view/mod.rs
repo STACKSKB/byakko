@@ -11,3 +11,4 @@ pub mod recording;
 pub mod settings;
 pub mod shortcut;
 pub mod status;
+pub mod tester;

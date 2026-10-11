@@ -2250,3 +2250,4 @@ fn device_work_cancels_key_capture_instead_of_rearming_it_after_completion() {
     assert_eq!(app.session.keymap().draft(), Some(&saved));
     assert!(!app.session.keymap().dirty());
 }
+mod tester;
