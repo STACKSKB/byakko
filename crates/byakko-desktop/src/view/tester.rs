@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Native keyboard tester: physical coverage, input edges, and honest timing evidence.
+//! Native keyboard tester: reported host keys, input edges, and timing evidence.
 use crate::{
     form::tester::{Form, Message},
     widget::panels::{self, UiStyle},
@@ -65,7 +65,7 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             text(if form.active() {
                 "Listening · Shift+Tab for navigation"
             } else {
-                "Paused · controls accept keyboard navigation"
+                "Paused · keyboard input is available to controls"
             }),
         ]
         .spacing(style.spacing.m)
@@ -87,13 +87,13 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     let outside = form.test.tested().difference(&observable).count();
 
     body = body.push(board(form, style)).push(text(format!(
-        "Held: {}    Tested: {tested}/{}    Most held at once: {}    Outside layout: {outside}",
+        "Reported host keys · held: {}    Observed: {tested}/{}    Most held at once: {}    Outside layout: {outside}",
         form.test.held().count(),
         observable.len(),
         form.test.peak_held()
     )));
     body = body.push(text(format!("Presses: {}    Releases: {}    Repeats: {}", form.test.total_presses(), form.test.total_releases(), form.test.total_repeats())))
-        .push(text("Green: held · Blue: tested · Fn is usually handled by firmware and has no independent key event.").size(12));
+        .push(text("Green: held host key · Blue: observed host key. Firmware remapping prevents identifying the actuated switch. Fn usually has no independent host event.").size(12));
     if let Some(input) = form.test.last_input() {
         body = body.push(text(format!(
             "Last input: {} · {:?} · HID {:02X}",
@@ -112,7 +112,7 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             stats.repeats
         )));
         body = body.push(text(format!(
-            "Chatter candidates for this key: {} · last observed hold: {}",
+            "Chatter candidates for this host key: {} · last observed hold: {}",
             stats.chatter_candidates,
             stats
                 .last_hold_us
@@ -217,7 +217,12 @@ fn board<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             });
             let description = key.usage.map_or_else(
                 || "Firmware Fn · usually no independent host input".into(),
-                |usage| format!("{} · HID {usage:02X} · click for counts", key.label),
+                |usage| {
+                    format!(
+                        "{} · HID {usage:02X} · reported host usage · click for counts",
+                        key.label
+                    )
+                },
             );
             board.push(
                 pin(tooltip(

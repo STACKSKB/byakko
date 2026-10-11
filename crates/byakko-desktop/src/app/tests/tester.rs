@@ -132,6 +132,15 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
         element
             .as_widget_mut()
             .operate(&mut tree, layout, &renderer, &mut texts);
+        assert!(
+            texts
+                .0
+                .iter()
+                .any(|(text, _)| text.starts_with("Reported host keys"))
+        );
+        assert!(texts.0.iter().any(|(text, _)| {
+            text.contains("Firmware remapping prevents identifying the actuated switch")
+        }));
         let start = texts
             .0
             .iter()
@@ -301,4 +310,87 @@ fn opening_a_layout_menu_pauses_capture_and_exposes_the_menu() {
             )
             .is_some()
     );
+}
+
+#[test]
+fn first_shift_tab_pauses_and_moves_real_iced_focus_backward() {
+    use iced::advanced::widget::{
+        Id,
+        operation::{self, Focusable},
+    };
+    struct Focused(Vec<Id>);
+    impl Operation for Focused {
+        fn traverse(&mut self, visit: &mut dyn FnMut(&mut dyn Operation)) {
+            visit(self);
+        }
+        fn focusable(&mut self, id: Option<&Id>, _: Rectangle, state: &mut dyn Focusable) {
+            if state.is_focused() {
+                self.0.extend(id.cloned());
+            }
+        }
+    }
+    let (mut app, _) = app(false);
+    let _ = app.update(Message::Page(Page::Tester));
+    let _ = app.update(Message::Tester(tester_form::Message::Start));
+    let first = Id::new("tester-first");
+    let second = Id::new("tester-second");
+    let controls = iced::widget::column![
+        iced::widget::text_input("First", "")
+            .id(first.clone())
+            .on_input(|_| Message::Tester(tester_form::Message::Reset)),
+        iced::widget::text_input("Second", "")
+            .id(second.clone())
+            .on_input(|_| Message::Tester(tester_form::Message::Reset)),
+    ]
+    .into();
+    let mut element = crate::widget::tester_capture::capture(
+        controls,
+        true,
+        Message::Tester(tester_form::Message::Pause),
+    );
+    let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
+    let mut tree = Tree::new(&element);
+    let viewport = Rectangle::with_size(Size::new(600.0, 300.0));
+    let node = element.as_widget_mut().layout(
+        &mut tree,
+        &renderer,
+        &layout::Limits::new(Size::ZERO, viewport.size()),
+    );
+    element.as_widget_mut().operate(
+        &mut tree,
+        Layout::new(&node),
+        &renderer,
+        &mut operation::focusable::focus::<()>(second.clone()),
+    );
+    let mut focused = Focused(Vec::new());
+    element
+        .as_widget_mut()
+        .operate(&mut tree, Layout::new(&node), &renderer, &mut focused);
+    assert_eq!(focused.0, vec![second]);
+    let mut messages = Vec::new();
+    let mut shell = iced::advanced::Shell::new(&mut messages);
+    element.as_widget_mut().update(
+        &mut tree,
+        &key(keyboard::key::Code::Tab, false, keyboard::Modifiers::SHIFT),
+        Layout::new(&node),
+        mouse::Cursor::Unavailable,
+        &renderer,
+        &mut iced::advanced::clipboard::Null,
+        &mut shell,
+        &viewport,
+    );
+    assert!(shell.is_event_captured());
+    let mut focused = Focused(Vec::new());
+    element
+        .as_widget_mut()
+        .operate(&mut tree, Layout::new(&node), &renderer, &mut focused);
+    assert_eq!(focused.0, vec![first]);
+    assert_eq!(messages.len(), 1);
+    assert!(matches!(
+        messages[0],
+        Message::Tester(tester_form::Message::Pause)
+    ));
+    let _ = app.update(messages.remove(0));
+    assert!(!app.tester.active());
+    assert_eq!(app.tester.test.total_presses(), 0);
 }

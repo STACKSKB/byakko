@@ -1,120 +1,96 @@
-# Keyboard tester
+# Standalone keyboard tester
 
-The keyboard tester shows key presses and releases received by Byakko. It is a
-local input diagnostic: it does not configure the keyboard, write to it, or
-send input over the network. Results are held in memory for the current run;
-the tester does not save or export them.
+The keyboard tester is a separate browser page from the Byakko configurator.
+It uses ordinary keyboard events, so it does not request WebHID permission,
+connect to a device, or change keyboard settings. Its WordPress shortcode
+renders useful page text as HTML before JavaScript runs. WordPress loads the
+tester stylesheet and script only on a page containing that shortcode.
 
-## Choose an input source
+The tester offers common physical presets: full-size, TKL, 75%, 65%, and 60%
+boards, with ANSI, ISO, and JIS variants. Printed legend choices include
+QWERTY, QWERTZ, AZERTY, and Japanese JIS legends. Selecting JIS geometry
+also selects the Japanese legends initially. Compact boards do not have one
+universal physical arrangement; their geometry is representative. The physical
+key highlight follows `KeyboardEvent.code`, while the event details show `KeyboardEvent.key`
+as delivered by the visitor's active operating-system layout. Selecting a
+printed legend changes the illustration, not the operating-system layout.
 
-Use **Refresh keyboards** to update the available native input devices, then
-choose a source from the source dropdown. The source is independent of the
-keyboard selected for configuration.
+The tester shows pressed and previously tested keys, a tested-key count,
+simultaneous input, recent event details, and a reset control. It responds
+automatically while the page is focused; ordinary form fields remain usable
+and their text input is ignored. If a page contains multiple testers, the first
+receives input initially; clicking or focusing another makes it active. Reset
+test is at the top right and clears the active test immediately.
 
-- **Window input (all keyboards)** receives physical key codes delivered to
-  Byakko's window. Events have no keyboard identity, so this mode cannot tell
-  which attached keyboard produced a key.
-- A **native keyboard source** listens to the selected operating-system input
-  device and provides source-specific events. On Linux, the account
-  must have read access to that input device. Configure normal system device
-  permissions for the account; Byakko does not require running the whole app
-  with `sudo` and does not grab the device exclusively.
+Tab registers as a test key while capture is active. Shift+Tab stops capture,
+releases held keys and moves focus backward for ordinary page navigation.
+Navigation remains available when focus returns to the tester or the page.
+Click the keyboard, or focus it and press Enter or Space, to resume testing;
+the activation key does not count as a test sample. Reset test also resumes
+capture. Browser and operating-system shortcuts can be
+reserved, and Fn usually has no independent browser event. The tester can
+show which events arrived in the browser; it cannot prove that a missing event
+means a hardware fault. Keystrokes stay in the browser and are not sent to a
+server or stored for later visits.
 
-The tester starts paused. Choose a source and select **Start test** to begin.
-**Pause** ends the current capture. Capture also stops when the window loses
-focus, the user leaves the tester, closes the window, or presses Shift+Tab.
-Start it again explicitly; it does not resume automatically. **Reset results**
-clears the current in-memory results and pauses the test. The tester retains
-up to 128 recent edge
-interval samples and 32 recent chatter candidates. It also keeps the total
-candidate count for the run until results are reset.
+## WordPress installation
 
+Build `web/dist/wordpress-tester/byakko-keyboard-tester.zip`, upload it under
+**Plugins → Add New → Upload Plugin**, and activate it. Create a dedicated page
+such as `/keyboard-tester/` and insert a Shortcode block containing:
 
-Release held keys before starting a test. Windows conservatively suppresses
-keys already held when capture starts, using global OS key state; it cannot
-attribute that initial held state to one keyboard.
+```text
+[byakko_keyboard_tester]
+```
 
-Collection stops when Byakko loses focus, so the tester does not continue
-observing input in the background. Window input receives events delivered to
-Byakko's window; a native keyboard source receives events only while the tester
-is focused and the test is running. Neither source records input to disk.
+Give the WordPress page its own title, description, and permalink. The tester
+heading and instructions are in the shortcode's HTML, so the page is useful
+to readers and search engines before its script runs. The tester CSS is scoped
+to `.byakko-tester`; it can appear more than once on a page. The plugin does
+not change the separate Byakko configurator shortcode.
+Place the shortcode in the page's saved content (a Shortcode block works);
+that lets WordPress detect it before printing the page head and load the CSS
+there. A shortcode emitted only by a late theme template or page builder is
+outside this loading path.
 
-## Understand the timing
+`index.html` inside the plugin ZIP is also a self-contained standalone build.
+It can be hosted as a static HTML file without WordPress or a Node.js server.
+The ZIP contains the editable source under `source/` and the GPL license.
 
-Intervals are differences between received event timestamps. They are not the
-USB polling rate, switch travel time, or end-to-end physical latency.
+## Reproducible local build
 
-On Windows, **Instant** means the time Byakko dequeues the native Raw Input
-message (or receives an Iced event in window-input mode), captured with a
-monotonic application clock. Raw Input delivers
-`WM_INPUT` messages to a registered application; it does not give this tester a
-hardware switch-edge timestamp. The value therefore includes time between
-device reporting, operating-system delivery, and application receipt.
+From the repository root:
 
-On Linux native input, Byakko requests CLOCK_MONOTONIC timestamps from evdev
-with EVIOCSCLOCKID; if that request fails, the source cannot start. This
-explicit clock selection matters because evdev's default event clock is not
-guaranteed to be monotonic. EV_KEY values distinguish press (1), release (0),
-and autorepeat (2). The timestamps are kernel event timestamps, but they do
-not timestamp the physical switch contact or USB bus transaction. Window input
-is an application-receipt measurement, not an evdev timestamp.
+```sh
+cd web
+npm ci
+npm run build:tester:wordpress
+npm run test:tester
+```
 
-A USB interrupt endpoint's `bInterval` descriptor declares its requested
-service interval, interpreted according to USB speed. For USB 2.0 high-speed
-interrupt endpoints, the interval is expressed in powers of two microframes:
-`2^(bInterval - 1)` × 125 microseconds. Full-speed interrupt intervals use
-1 ms frames. This is a declared scheduling opportunity, not evidence that a
-transaction occurred at every opportunity, nor a measurement of actual device
-polling. Byakko does not currently report a polling interval when it cannot
-inspect the descriptor. Even an inspected descriptor would not establish the
-observed bus transaction cadence.
+The build machine needs Node.js, npm, and Python 3 (for the reproducible ZIP).
+If Python 3 is installed under another command or path, set the `PYTHON`
+environment variable to that executable before building or running tests.
+The WordPress server needs only PHP and the uploaded files. To check the
+WordPress plugin behavior locally, `php` must be available on the test machine.
+No device is required for the build or tests.
+The optional browser interaction checks use an installed Chromium executable:
 
-## Chatter candidates
+```sh
+npm run build:tester
+CHROMIUM_BIN=/usr/bin/chromium npm run test:tester:browser
+```
 
-The default chatter threshold is **20 ms** and can be adjusted in the tester.
-A candidate requires a release followed by a press of the same key within the
-threshold. Changing the threshold affects future observations; use Reset
-results for a fresh comparison. Autorepeat events are excluded; they are not
-switch release/press
-cycles. A candidate is only a timing pattern: deliberate rapid tapping and
-switch chatter can look identical in the event stream. Confirm a suspected
-switch issue with a physical test before drawing a hardware conclusion.
+Set `CHROMIUM_BIN` to the executable's location on your machine. Browser tests
+are skipped when this variable is absent; the model, build and WordPress checks
+run independently of Chromium and the configurator's WASM build.
 
-Software-generated key hammering, operating-system typematic repeat, and
-macro replay can exercise event handling, but none is a physical actuation
-reference. A tester run alone cannot establish switch debounce quality,
-physical actuation latency, or a device's USB polling rate.
+The tester reuses the browser configurator's key geometry functions and physical
+code-to-USB-usage mapping. Its declarative layout catalog and input state are
+independent of device sessions. Both the standalone and WordPress builds use
+the same tester source. The build rejects JavaScript and CSS exceeding a combined
+30 KiB gzip budget. No framework, WASM, font download or background polling is
+included in the tester.
 
-## Physical latency measurement
-
-For a physical actuation-to-report measurement, record both the physical switch
-reference and the corresponding USB input report on a shared analyzer clock.
-Define the physical reference before collecting data, for example as the
-electrical contact edge, an optical beam crossing at a stated position, or a
-force sensor crossing a stated threshold. Match each reference edge to its
-reported key transition. If clocks differ, calibrate their offset and drift
-over the measurement period and include the residual synchronization error.
-
-Record the device, connection, operating conditions, reference definition,
-measurement tools, timestamp sources, clock calibration, and uncertainty. Use
-enough repeated actuations to show the distribution, and report the sample
-count, median, 95th percentile, range, and measurement error budget. Do not
-present the result as universal device latency: it applies to the tested
-device, setup, and operating conditions.
-
-Software USB captures such as USBPcap and Linux usbmon observe host-stack
-transfers/URBs rather than every USB packet and transaction. They can help
-correlate completed reports, but absence of a report does not show whether an
-empty poll or NAK occurred. Measuring actual bus transactions requires a USB
-bus analyzer that captures those transactions.
-
-## References
-
-- [Microsoft: Raw Input Overview](https://learn.microsoft.com/en-us/windows/win32/inputdev/about-raw-input)
-- [Linux kernel: Input event codes](https://docs.kernel.org/input/event-codes.html)
-- [Linux kernel UAPI: EVIOCSCLOCKID](https://github.com/torvalds/linux/blob/master/include/uapi/linux/input.h)
-- [Linux kernel: Input event interface and timestamps](https://docs.kernel.org/input/input_uapi.html)
-- [USB-IF: USB 2.0 Specification](https://www.usb.org/document-library/usb-20-specification)
-- [Wireshark: USB capture setup and software URB capture limits](https://wiki.wireshark.org/CaptureSetup/USB)
-
-This Byakko-owned documentation is licensed under GPL-3.0-or-later.
+The "most held at once" display counts the keydown events that reached this
+page during the current test. It does not certify a keyboard's rollover limit.

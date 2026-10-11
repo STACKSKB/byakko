@@ -2,21 +2,30 @@
 //! While testing, keyboard keys belong to the board instead of focused controls.
 use iced::advanced::{
     Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
-    widget::{Operation, Tree},
+    widget::{
+        Operation, Tree,
+        operation::{self, Outcome},
+    },
 };
 use iced::{Element, Event, Length, Rectangle, Size, Theme, Vector, mouse};
 
-pub fn capture<'a, Message: 'a>(
+pub fn capture<'a, Message: Clone + 'a>(
     content: Element<'a, Message>,
     active: bool,
+    on_escape: Message,
 ) -> Element<'a, Message> {
-    Element::new(Capture { content, active })
+    Element::new(Capture {
+        content,
+        active,
+        on_escape,
+    })
 }
 struct Capture<'a, Message> {
     content: Element<'a, Message>,
     active: bool,
+    on_escape: Message,
 }
-impl<Message> Widget<Message, Theme, iced::Renderer> for Capture<'_, Message> {
+impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for Capture<'_, Message> {
     fn children(&self) -> Vec<Tree> {
         vec![Tree::new(&self.content)]
     }
@@ -59,8 +68,27 @@ impl<Message> Widget<Message, Theme, iced::Renderer> for Capture<'_, Message> {
         viewport: &Rectangle,
     ) {
         if self.active && matches!(event, Event::Keyboard(_)) {
-            // The window subscription still sees this captured event. Tab and
-            // Space therefore test switches without moving/activating controls.
+            if crate::input::tester::pauses(event) {
+                shell.publish(self.on_escape.clone());
+                // Run Iced's real focus operation on this first chord. Its
+                // count pass chains into the pass that moves focus backward.
+                let mut operation: Box<dyn Operation> =
+                    Box::new(operation::focusable::focus_previous());
+                loop {
+                    self.content.as_widget_mut().operate(
+                        &mut tree.children[0],
+                        layout,
+                        renderer,
+                        operation.as_mut(),
+                    );
+                    match operation.finish() {
+                        Outcome::Chain(next) => operation = next,
+                        Outcome::None | Outcome::Some(()) => break,
+                    }
+                }
+            }
+            // The subscription still observes captured test keys; controls do
+            // not activate while listening. Shift+Tab performs navigation here.
             shell.capture_event();
             return;
         }

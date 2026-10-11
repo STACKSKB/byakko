@@ -25,6 +25,9 @@ const SYN_DROPPED: u16 = 3;
 // Linux input.h: _IOW('E', 0xa0, int). A failed request is explicit because
 // default evdev timestamps may use a different clock.
 const EVIOCSCLOCKID: libc::c_ulong = 0x4004_45a0;
+// Linux input.h: EVIOCGKEY(32). Projected codes are below 256.
+const KEY_BYTES: usize = 32;
+const EVIOCGKEY: libc::c_ulong = 0x8020_4518;
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -141,9 +144,12 @@ impl Worker {
         if unsafe { libc::ioctl(file.as_raw_fd(), EVIOCSCLOCKID, &clock) } < 0 {
             return Err(io_error(io::Error::last_os_error()));
         }
+        let held_on_arm = held_keys(&file).map_err(io_error)?;
         let stop = Arc::new(AtomicBool::new(false));
         let cancellation = Arc::clone(&stop);
-        let thread = spawn("tester-evdev", move || run(file, sender, cancellation))?;
+        let thread = spawn("tester-evdev", move || {
+            run(file, sender, cancellation, held_on_arm)
+        })?;
         Ok(Self {
             stop,
             thread: Some(thread),
@@ -159,7 +165,36 @@ impl Drop for Worker {
     }
 }
 
-fn run(mut file: File, sender: SyncSender<Sample>, stop: Arc<AtomicBool>) {
+fn held_keys(file: &File) -> io::Result<[u8; KEY_BYTES]> {
+    let mut bits = [0u8; KEY_BYTES];
+    // SAFETY: live evdev descriptor and a writable fixed bitmap for this ioctl.
+    if unsafe { libc::ioctl(file.as_raw_fd(), EVIOCGKEY, bits.as_mut_ptr()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(bits)
+}
+
+fn suppress_initial(bits: &mut [u8; KEY_BYTES], code: u16, value: i32) -> bool {
+    let index = usize::from(code) / 8;
+    let Some(byte) = bits.get_mut(index) else {
+        return false;
+    };
+    let mask = 1u8 << (code % 8);
+    if *byte & mask == 0 {
+        return false;
+    }
+    if value == 0 {
+        *byte &= !mask;
+    }
+    true
+}
+
+fn run(
+    mut file: File,
+    sender: SyncSender<Sample>,
+    stop: Arc<AtomicBool>,
+    mut held_on_arm: [u8; KEY_BYTES],
+) {
     let mut sink = Sink::new(sender);
     let mut dropped = false;
     while !stop.load(Ordering::Acquire) {
@@ -200,12 +235,20 @@ fn run(mut file: File, sender: SyncSender<Sample>, stop: Arc<AtomicBool>) {
                     }
                 } else if dropped {
                     if event.kind == EV_SYN && event.code == SYN_REPORT {
-                        dropped = false
+                        match held_keys(&file) {
+                            Ok(bits) => held_on_arm = bits,
+                            Err(error) => {
+                                sink.send(Sample::Error(io_error(error)));
+                                break;
+                            }
+                        }
+                        dropped = false;
                     }
-                } else if let Some(input) = decode(event) {
-                    if !sink.send(Sample::Input(input)) {
-                        break;
-                    }
+                } else if let Some(input) = decode(event)
+                    && !suppress_initial(&mut held_on_arm, event.code, event.value)
+                    && !sink.send(Sample::Input(input))
+                {
+                    break;
                 }
             }
             Ok(0) => {
@@ -352,6 +395,15 @@ fn hid_usage(code: u16) -> Option<u16> {
         86 => 0x64,
         87 => 0x44,
         88 => 0x45,
+        // Linux HID input table maps these Japanese keys to evdev codes.
+        89 => 0x87,
+        93 => 0x88,
+        124 => 0x89,
+        92 => 0x8a,
+        94 => 0x8b,
+        95 => 0x8c,
+        90 => 0x92,
+        91 => 0x93,
         96 => 0x58,
         97 => 0xe4,
         98 => 0x54,
@@ -404,6 +456,31 @@ mod tests {
         event.value = 1;
         event.time.tv_usec = 1_000_000;
         assert!(decode(event).is_none());
+    }
+    #[test]
+    fn held_before_start_waits_for_release() {
+        let mut bits = [0u8; KEY_BYTES];
+        bits[30 / 8] |= 1 << (30 % 8);
+        assert!(suppress_initial(&mut bits, 30, 2));
+        assert!(suppress_initial(&mut bits, 30, 1));
+        assert!(suppress_initial(&mut bits, 30, 0));
+        assert!(!suppress_initial(&mut bits, 30, 1));
+        assert!(!suppress_initial(&mut bits, 300, 1));
+    }
+    #[test]
+    fn jis_evdev_codes_match_usb_keyboard_usages() {
+        for (code, usage) in [
+            (89, 0x87),
+            (93, 0x88),
+            (124, 0x89),
+            (92, 0x8a),
+            (94, 0x8b),
+            (95, 0x8c),
+            (90, 0x92),
+            (91, 0x93),
+        ] {
+            assert_eq!(hid_usage(code), Some(usage), "evdev code {code}");
+        }
     }
     #[test]
     fn bitmap_uses_highest_word_first() {

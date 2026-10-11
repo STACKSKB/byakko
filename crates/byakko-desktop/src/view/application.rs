@@ -127,6 +127,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         return crate::widget::tester_capture::capture(
             base,
             input.page == Page::Tester && input.tester.active(),
+            Message::Tester(crate::form::tester::Message::Pause),
         );
     }
     let dialog = container(

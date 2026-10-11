@@ -164,8 +164,9 @@ struct Registration {
 }
 impl Drop for Registration {
     fn drop(&mut self) {
-        // The toolkit may re-register on focus change. Never overwrite a newer
-        // owner; only restore when our hidden window still owns the keyboard.
+        // Restore if our hidden window still owns registration. A concurrent
+        // winit registration between this check and RegisterRawInputDevices
+        // can still race; Win32 has no compare-and-swap operation.
         if registered_keyboard()
             .ok()
             .flatten()
@@ -203,8 +204,17 @@ impl Worker {
                 let _ = ready_sender.send(Err(initialized.err().unwrap()));
                 return;
             };
+            let epoch = Instant::now();
+            let held_on_arm = snapshot_held();
             let _ = ready_sender.send(Ok(()));
-            run(selected as HANDLE, sender, cancellation, registration);
+            run(
+                selected as HANDLE,
+                sender,
+                cancellation,
+                registration,
+                epoch,
+                held_on_arm,
+            );
         })?;
         ready_receiver
             .recv()
@@ -270,44 +280,50 @@ fn foreground_is_this_process() -> bool {
     pid != 0 && pid == unsafe { GetCurrentProcessId() }
 }
 
+fn snapshot_held() -> [bool; 256] {
+    // GetAsyncKeyState is global to the input desktop, so this errs toward suppressing a key
+    // held on another keyboard rather than claiming a fresh physical press.
+    let mut held = [false; 256];
+    for (key, pressed) in held.iter_mut().enumerate() {
+        *pressed = unsafe { GetAsyncKeyState(key as i32) } < 0;
+    }
+    held
+}
+
 fn run(
     selected: HANDLE,
     sender: SyncSender<Sample>,
     stop: Arc<AtomicBool>,
     registration: Registration,
+    epoch: Instant,
+    mut held_on_arm: [bool; 256],
 ) {
     let mut sink = Sink::new(sender);
-    let epoch = Instant::now();
     let mut was_foreground = foreground_is_this_process();
-    // Snapshot global virtual-key state. A key held before arming cannot be
-    // attributed to this keyboard; suppress its makes until the first break.
-    let mut held_on_arm = [false; 256];
-    for (key, held) in held_on_arm.iter_mut().enumerate() {
-        *held = unsafe { GetAsyncKeyState(key as i32) } < 0;
-    }
     while !stop.load(Ordering::Acquire) {
         let mut message = MSG::default();
-        // SAFETY: owner thread pumps only its own message queue.
-        while unsafe { PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) } != 0 {
+        // Dispatch every dequeued WM_INPUT, including when the consumer closes.
+        // Default processing releases the foreground raw-input handle.
+        while !stop.load(Ordering::Acquire)
+            && unsafe { PeekMessageW(&mut message, null_mut(), 0, 0, PM_REMOVE) } != 0
+        {
+            let mut alive = true;
             if message.message == WM_INPUT_DEVICE_CHANGE
                 && message.wParam as u32 == GIDC_REMOVAL
                 && selected == message.lParam as HANDLE
             {
-                sink.send(Sample::Error(InputError::DeviceUnavailable));
-                return;
-            }
-            if message.message == WM_INPUT {
+                let _ = sink.send(Sample::Error(InputError::DeviceUnavailable));
+                alive = false;
+            } else if message.message == WM_INPUT {
                 let foreground = foreground_is_this_process();
-                if !foreground {
-                    if was_foreground && !sink.send(Sample::Discontinuity) {
-                        return;
+                if foreground != was_foreground {
+                    alive = sink.send(Sample::Discontinuity);
+                    if foreground {
+                        held_on_arm = snapshot_held();
                     }
-                    was_foreground = false;
-                } else {
-                    if !was_foreground && !sink.send(Sample::Discontinuity) {
-                        return;
-                    }
-                    was_foreground = true;
+                    was_foreground = foreground;
+                }
+                if alive && foreground {
                     let at_us = epoch.elapsed().as_micros().min(u128::from(u64::MAX)) as u64;
                     if let Some((input, vkey)) = read_input(message.lParam, selected, at_us) {
                         let suppress = held_on_arm.get_mut(vkey as usize).is_some_and(|held| {
@@ -319,17 +335,21 @@ fn run(
                             }
                             true
                         });
-                        if !suppress && !sink.send(Sample::Input(input)) {
-                            return;
+                        if !suppress {
+                            alive = sink.send(Sample::Input(input));
                         }
                     }
                 }
             }
-            // SAFETY: default processing frees foreground raw input handles.
+            // SAFETY: the message was removed from this thread's queue and is
+            // passed to its owning window's default procedure.
             unsafe {
                 TranslateMessage(&message);
-                DispatchMessageW(&message)
-            };
+                DispatchMessageW(&message);
+            }
+            if !alive || stop.load(Ordering::Acquire) {
+                return;
+            }
         }
         if !sink.flush_gap() {
             break;
@@ -345,11 +365,10 @@ fn run(
                 break;
             }
         }
-        // Wake as soon as input arrives; the timeout also bounds Drop latency.
+        // Wake on input; timeout bounds Drop latency and checks registration.
         unsafe { MsgWaitForMultipleObjectsEx(0, null(), 50, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
     }
 }
-
 fn read_input(raw_handle: isize, selected: HANDLE, at_us: u64) -> Option<(Input, u16)> {
     let mut size = size_of::<RAWINPUT>() as u32;
     let mut data = RAWINPUT::default();
@@ -504,6 +523,15 @@ fn hid_usage(key: RAWKEYBOARD) -> Option<u16> {
         0x56 => 0x64,
         0x57 => 0x44,
         0x58 => 0x45,
+        // Microsoft scan-1/Japanese keyboard table: HID International1-5
+        // and LANG3/4. These are physical positions, independent of IME text.
+        0x73 => 0x87,
+        0x70 => 0x88,
+        0x7d => 0x89,
+        0x79 => 0x8a,
+        0x7b => 0x8b,
+        0x78 => 0x92,
+        0x77 => 0x93,
         _ => return None,
     })
 }
@@ -545,5 +573,26 @@ mod tests {
             }),
             None
         );
+    }
+    #[test]
+    fn jis_scan_codes_match_usb_keyboard_usages() {
+        for (scan, usage) in [
+            (0x73, 0x87),
+            (0x70, 0x88),
+            (0x7d, 0x89),
+            (0x79, 0x8a),
+            (0x7b, 0x8b),
+            (0x78, 0x92),
+            (0x77, 0x93),
+        ] {
+            assert_eq!(
+                hid_usage(RAWKEYBOARD {
+                    MakeCode: scan,
+                    ..Default::default()
+                }),
+                Some(usage),
+                "scan {scan:#x}"
+            );
+        }
     }
 }
