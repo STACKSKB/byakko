@@ -42,7 +42,9 @@ impl Engine {
             return;
         }
 
-        let clip_mask = (!physical_bounds.is_within(&clip_bounds))
+        // Antialiasing and borders can touch pixels outside the geometric
+        // quad. Keep full and partial redraws consistent at scroll clips.
+        let clip_mask = (!physical_bounds.expand(1.0).is_within(&clip_bounds))
             .then_some(clip_mask as &_);
 
         let transform = into_transform(transformation);

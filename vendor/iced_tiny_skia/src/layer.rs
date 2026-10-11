@@ -203,7 +203,10 @@ impl Layer {
 
     pub fn damage(previous: &Self, current: &Self) -> Vec<Rectangle> {
         if previous.bounds != current.bounds {
-            return vec![previous.bounds, current.bounds];
+            // Antialiased fills and borders can touch the pixel just outside
+            // a layer's geometric clip. Include that fringe when a scroll
+            // clip moves, just as changed quads below already do.
+            return vec![previous.bounds.expand(1.0), current.bounds.expand(1.0)];
         }
 
         let mut damage = damage::list(
@@ -212,7 +215,7 @@ impl Layer {
             |(quad, _)| {
                 quad.bounds
                     .expand(1.0)
-                    .intersection(&current.bounds)
+                    .intersection(&current.bounds.expand(1.0))
                     .into_iter()
                     .collect()
             },
@@ -513,6 +516,271 @@ mod tests {
                     "stale label: {before} -> {after} at {scale}x"
                 );
             }
+        }
+    }
+
+    fn bordered_clip(x: f32, y: f32) -> crate::Renderer {
+        use crate::core::Renderer as _;
+
+        let mut renderer = crate::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        let bounds = Rectangle {
+            x,
+            y,
+            width: 44.0,
+            height: 44.0,
+        };
+        renderer.start_layer(bounds);
+        renderer.fill_quad(
+            core::renderer::Quad {
+                bounds,
+                border: core::Border {
+                    color: Color::from_rgb8(102, 104, 109),
+                    width: 1.0,
+                    radius: 2.0.into(),
+                },
+                ..Default::default()
+            },
+            Color::from_rgb8(136, 138, 144),
+        );
+        renderer.end_layer();
+        renderer
+    }
+
+    fn empty_clip(x: f32, y: f32) -> crate::Renderer {
+        use crate::core::Renderer as _;
+
+        let mut renderer = crate::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        renderer.start_layer(Rectangle {
+            x,
+            y,
+            width: 44.0,
+            height: 44.0,
+        });
+        renderer.end_layer();
+        renderer
+    }
+
+    #[test]
+    fn moving_bordered_scroll_clip_matches_a_fresh_frame() {
+        // Switching between the tester and configurator moves bordered keys
+        // between scroll clips. Compare the incremental window buffer with a
+        // fresh frame; antialiasing can paint a pixel outside a clip boundary.
+        for scale in [1.0, 1.25] {
+            for (before, after) in [((40.5, 70.5), (70.5, 30.5)), ((70.5, 30.5), (40.5, 70.5))] {
+                let logical_size = Size::new(180.0, 160.0);
+                let size = Size::new(
+                    (logical_size.width * scale) as u32,
+                    (logical_size.height * scale) as u32,
+                );
+                let viewport = Viewport::with_physical_size(size, scale);
+                let full = Rectangle::with_size(logical_size);
+                let mut pixels = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+                let mut mask = tiny_skia::Mask::new(size.width, size.height).unwrap();
+                let mut previous = bordered_clip(before.0, before.1);
+                previous.draw(
+                    &mut pixels.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &[full],
+                    Color::BLACK,
+                );
+
+                let mut current = bordered_clip(after.0, after.1);
+                let damage = graphics::damage::diff(
+                    previous.layers(),
+                    current.layers(),
+                    |layer| vec![layer.bounds],
+                    Layer::damage,
+                );
+                let damage = graphics::damage::group(damage, full);
+                current.draw(
+                    &mut pixels.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &damage,
+                    Color::BLACK,
+                );
+
+                let mut fresh = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+                current.draw(
+                    &mut fresh.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &[full],
+                    Color::BLACK,
+                );
+                let differing_pixels = pixels
+                    .data()
+                    .chunks_exact(4)
+                    .zip(fresh.data().chunks_exact(4))
+                    .filter(|(incremental, full)| incremental != full)
+                    .count();
+                assert_eq!(differing_pixels, 0, "stale bordered key at {scale}x");
+            }
+        }
+    }
+
+    #[test]
+    fn removed_border_at_unchanged_clip_matches_a_fresh_frame() {
+        for scale in [1.0, 1.25] {
+            for offset in [0.1, 0.25, 0.5, 0.75, 0.9] {
+                let logical_size = Size::new(180.0, 160.0);
+                let size = Size::new(
+                    (logical_size.width * scale) as u32,
+                    (logical_size.height * scale) as u32,
+                );
+                let viewport = Viewport::with_physical_size(size, scale);
+                let full = Rectangle::with_size(logical_size);
+                let mut pixels = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+                let mut mask = tiny_skia::Mask::new(size.width, size.height).unwrap();
+                let mut previous = bordered_clip(40.0 + offset, 70.0 + offset);
+                previous.draw(
+                    &mut pixels.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &[full],
+                    Color::BLACK,
+                );
+
+                let mut current = empty_clip(40.0 + offset, 70.0 + offset);
+                let damage = graphics::damage::diff(
+                    previous.layers(),
+                    current.layers(),
+                    |layer| vec![layer.bounds],
+                    Layer::damage,
+                );
+                let damage = graphics::damage::group(damage, full);
+                current.draw(
+                    &mut pixels.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &damage,
+                    Color::BLACK,
+                );
+
+                let mut fresh = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+                current.draw(
+                    &mut fresh.as_mut(),
+                    &mut mask,
+                    &viewport,
+                    &[full],
+                    Color::BLACK,
+                );
+                let differing_pixels = pixels
+                    .data()
+                    .chunks_exact(4)
+                    .zip(fresh.data().chunks_exact(4))
+                    .filter(|(incremental, full)| incremental != full)
+                    .count();
+                assert_eq!(
+                    differing_pixels, 0,
+                    "stale removed key at {scale}x offset {offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn border_touching_clip_matches_with_partial_damage() {
+        for scale in [1.0, 1.25] {
+            let logical_size = Size::new(180.0, 160.0);
+            let size = Size::new(
+                (logical_size.width * scale) as u32,
+                (logical_size.height * scale) as u32,
+            );
+            let viewport = Viewport::with_physical_size(size, scale);
+            let full = Rectangle::with_size(logical_size);
+            let damage = Rectangle {
+                x: 45.0,
+                y: 60.0,
+                width: 40.0,
+                height: 60.0,
+            };
+            let mut mask = tiny_skia::Mask::new(size.width, size.height).unwrap();
+            let mut renderer = bordered_clip(40.6, 70.6);
+            let mut incremental = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+            incremental.fill(tiny_skia::Color::BLACK);
+            renderer.draw(
+                &mut incremental.as_mut(),
+                &mut mask,
+                &viewport,
+                &[damage],
+                Color::BLACK,
+            );
+            let mut fresh = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+            renderer.draw(
+                &mut fresh.as_mut(),
+                &mut mask,
+                &viewport,
+                &[full],
+                Color::BLACK,
+            );
+            let min_x = (damage.x * scale) as usize;
+            let max_x = ((damage.x + damage.width) * scale) as usize;
+            let min_y = (damage.y * scale) as usize;
+            let max_y = ((damage.y + damage.height) * scale) as usize;
+            let mut differing_pixels = 0;
+            for y in min_y..max_y {
+                for x in min_x..max_x {
+                    let offset = (y * size.width as usize + x) * 4;
+                    if incremental.data()[offset..offset + 4] != fresh.data()[offset..offset + 4] {
+                        differing_pixels += 1;
+                    }
+                }
+            }
+            assert_eq!(differing_pixels, 0, "inconsistent clip at {scale}x");
+        }
+    }
+
+    #[test]
+    fn fractional_damage_replays_complete_pixels() {
+        for scale in [1.0, 1.25] {
+            let logical_size = Size::new(180.0, 160.0);
+            let size = Size::new(
+                (logical_size.width * scale) as u32,
+                (logical_size.height * scale) as u32,
+            );
+            let viewport = Viewport::with_physical_size(size, scale);
+            let full = Rectangle::with_size(logical_size);
+            let damage = Rectangle {
+                x: 45.8,
+                y: 75.8,
+                width: 29.3,
+                height: 20.3,
+            };
+            let mut mask = tiny_skia::Mask::new(size.width, size.height).unwrap();
+            let mut renderer = bordered_clip(40.6, 70.6);
+            let mut incremental = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+            incremental.fill(tiny_skia::Color::BLACK);
+            renderer.draw(
+                &mut incremental.as_mut(),
+                &mut mask,
+                &viewport,
+                &[damage],
+                Color::BLACK,
+            );
+            let mut fresh = tiny_skia::Pixmap::new(size.width, size.height).unwrap();
+            renderer.draw(
+                &mut fresh.as_mut(),
+                &mut mask,
+                &viewport,
+                &[full],
+                Color::BLACK,
+            );
+            let left = (damage.x * scale).floor() as usize;
+            let top = (damage.y * scale).floor() as usize;
+            let right = ((damage.x + damage.width) * scale).ceil() as usize;
+            let bottom = ((damage.y + damage.height) * scale).ceil() as usize;
+            let mut differing_pixels = 0;
+            for y in top..bottom {
+                for x in left..right {
+                    let offset = (y * size.width as usize + x) * 4;
+                    if incremental.data()[offset..offset + 4] != fresh.data()[offset..offset + 4] {
+                        differing_pixels += 1;
+                    }
+                }
+            }
+            assert_eq!(differing_pixels, 0, "fractional damage at {scale}x");
         }
     }
 }

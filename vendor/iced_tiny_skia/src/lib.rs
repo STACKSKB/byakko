@@ -78,6 +78,27 @@ impl Renderer {
 
         for &damage_bounds in damage {
             let damage_bounds = damage_bounds * scale_factor;
+            let physical_size = viewport.physical_size();
+            let left = damage_bounds.x.floor().max(0.0);
+            let top = damage_bounds.y.floor().max(0.0);
+            let right = (damage_bounds.x + damage_bounds.width)
+                .ceil()
+                .min(physical_size.width as f32);
+            let bottom = (damage_bounds.y + damage_bounds.height)
+                .ceil()
+                .min(physical_size.height as f32);
+            if left >= right || top >= bottom {
+                continue;
+            }
+            // Damage is a set of pixels. Clear and replay whole pixels so a
+            // fractional region cannot clip a quad's antialiased edge on one
+            // path while leaving it intact on a full repaint.
+            let damage_bounds = Rectangle {
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top,
+            };
 
             let path = tiny_skia::PathBuilder::from_rect(
                 tiny_skia::Rect::from_xywh(
