@@ -2054,7 +2054,7 @@ fn refreshing_a_picture_page_without_macros_never_activates_lighting() {
 }
 
 #[test]
-fn a_failed_connection_read_can_retry_on_the_same_inventory() {
+fn failed_connection_read_requires_explicit_retry_on_the_same_inventory() {
     struct FirstReadFails {
         memory: MemoryDevice,
         reads: Arc<AtomicUsize>,
@@ -2094,8 +2094,15 @@ fn a_failed_connection_read_can_retry_on_the_same_inventory() {
             ))
         }),
     );
-    app.link
-        .monitor(Discovery::spawn(|| Availability::Ready { id: "demo".into() }).unwrap());
+    let scans = Arc::new(AtomicUsize::new(0));
+    let inventory_reads = scans.clone();
+    app.link.monitor(
+        Discovery::spawn(move || {
+            inventory_reads.fetch_add(1, Ordering::SeqCst);
+            Availability::Ready { id: "demo".into() }
+        })
+        .unwrap(),
+    );
     let _ = app.update(Message::Read);
     drain(&mut app);
     assert!(matches!(
@@ -2106,12 +2113,25 @@ fn a_failed_connection_read_can_retry_on_the_same_inventory() {
     ));
     assert!(!app.session.requires_manual_read());
     let deadline = Instant::now() + Duration::from_secs(2);
-    while app.session.keymap().status() != &Status::Ready {
+    while scans.load(Ordering::SeqCst) < 3 {
         let _ = app.update(Message::Scan);
         drain(&mut app);
-        assert!(Instant::now() < deadline, "read did not retry");
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert!(Instant::now() < deadline, "inventory did not arrive");
         std::thread::yield_now();
     }
+    let _ = app.update(Message::Scan);
+    drain(&mut app);
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+    assert!(matches!(
+        app.session.keymap().status(),
+        Status::Unverified {
+            problem: Problem::Read(_)
+        }
+    ));
+    let _ = app.update(Message::Read);
+    drain(&mut app);
+    assert_eq!(app.session.keymap().status(), &Status::Ready);
     assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
 
