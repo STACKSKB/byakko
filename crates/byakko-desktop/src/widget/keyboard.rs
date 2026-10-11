@@ -219,12 +219,10 @@ fn board_view<'a, Message: Clone + 'a>(
                     let mut appearance = iced::widget::button::secondary(theme, status);
                     appearance.background =
                         Some(iced::Background::Color(iced::Color::from_rgb8(r, g, b)));
-                    appearance.text_color =
-                        if u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114 > 128_000 {
-                            iced::Color::BLACK
-                        } else {
-                            iced::Color::WHITE
-                        };
+                    appearance.text_color = super::controls::readable(
+                        iced::Color::WHITE,
+                        iced::Color::from_rgb8(r, g, b),
+                    );
                     if selected {
                         appearance.border.width = 2.0;
                         appearance.border.color = theme.extended_palette().primary.strong.color;

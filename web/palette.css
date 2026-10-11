@@ -4,11 +4,12 @@
   color-scheme: light;
   --canvas: #f4f3ef; --paper: #ffffff; --ink: #272823; --muted: #686962;
   --rule: #d8d8d0; --control-border: #bdbfb5; --border-hover: #818477;
-  --hover: #f0f0eb; --disabled-ink: #989b91; --disabled-surface: #f8f8f5;
+  --hover: #f0f0eb; --disabled-ink: #686962; --disabled-surface: #f8f8f5;
   --disabled-border: #e0e1da; --disabled-primary: #e9eae4;
   --primary-hover: #45473f; --on-primary: #ffffff;
   --nav-selected: #e7e7df; --nav-hover: #ebebe5;
   --accent: #565b8f; --selected: #eeedf6; --on-accent: #ffffff;
+  --focus: var(--accent);
   --error: #a4382c; --error-border: #c68980; --warning: #8a651f;
   --success: #5c7455; --pending: #956217;
   --capture-border: #a3a698; --capture-surface: #fafaf7;
@@ -17,14 +18,14 @@
   --case: #e4e3db; --case-border: #c3c2b8; --case-edge: #cecec3; --case-shadow: #b5b7aa;
   --keycap: #fafaf5; --key-ink: #4b4e49; --key-border: #c8c9bf; --key-edge: #e0e1d6;
   --indigo: #626991; --indigo-ink: #ffffff; --indigo-border: #555c81; --indigo-edge: #4c527a;
-  --key-hover: #eeeee5; --key-border-hover: #767b6e; --indigo-hover: #757ca5; --indigo-border-hover: #454c75;
+  --key-hover: #eeeee5; --key-border-hover: #767b6e; --indigo-hover: #697099; --indigo-border-hover: #454c75;
   --key-selected: #272823; --key-changed: #ad6814; --swatch-border: #00000033;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
   --canvas: #20211f; --paper: #292b28; --ink: #e5e6df; --muted: #adb0a6;
   --rule: #40443b; --control-border: #686d61; --border-hover: #9ca38f;
-  --hover: #34372f; --disabled-ink: #81877a; --disabled-surface: #252722;
+  --hover: #34372f; --disabled-ink: #adb0a6; --disabled-surface: #252722;
   --disabled-border: #41463a; --disabled-primary: #373b32;
   --primary-hover: #c8cec0; --on-primary: #20211f;
   --nav-selected: #35392f; --nav-hover: #2e312a;
@@ -57,12 +58,33 @@
   --hover: #374632; --control-border: #6a7c60; --on-primary: #1d241e; --on-accent: #23351d;
 }
 
+/* StacksKB light tokens from https://stackskb.com (2026-10-11).
+   Dark colours are a Byakko adaptation of that neutral/blue direction. */
+:root[data-palette="stackskb"] {
+  --canvas: #f7f7f7; --paper: #ffffff; --ink: #000000; --muted: #505050;
+  --rule: #ededed; --control-border: #d3d3d3; --border-hover: #215387;
+  --hover: #f7f7f7; --primary-hover: #464646; --on-primary: #ffffff;
+  --accent: #000000; --selected: #000000; --on-accent: #ffffff; --focus: #2b6cb0;
+  --nav-selected: #ededed; --nav-hover: #f7f7f7;
+  --capture-border: #d3d3d3; --capture-surface: #f7f7f7; --dialog-border: #d3d3d3;
+}
+:root[data-palette="stackskb"][data-theme="dark"] {
+  --canvas: #181818; --paper: #242424; --ink: #f7f7f7; --muted: #b8b8b8;
+  --rule: #505050; --control-border: #696969; --border-hover: #b8b8b8;
+  --hover: #303030; --primary-hover: #d0d0d0; --on-primary: #181818;
+  --accent: #ededed; --selected: #ededed; --on-accent: #181818; --focus: #6fa7df;
+  --nav-selected: #353535; --nav-hover: #303030;
+  --capture-border: #696969; --capture-surface: #242424; --dialog-border: #696969;
+}
+:root[data-palette="stackskb"] button.active,
+:root[data-palette="stackskb"] .slot-list button.active { color: var(--on-accent); }
+:root[data-palette="stackskb"] button.nav-item.active { color: var(--ink); }
 /* Neutral embedded palette with white surfaces and the application accent. */
 :root[data-palette="embed"] {
   --canvas: #ffffff; --paper: #ffffff; --ink: #1a202c; --muted: #505050;
   --rule: #ededed; --control-border: #d3d3d3; --border-hover: #808080;
   --hover: #f7f7f7; --disabled-surface: #f7f7f7; --disabled-border: #ededed;
-  --disabled-primary: #ededed; --disabled-ink: #808080;
+  --disabled-primary: #ededed; --disabled-ink: #505050;
   --nav-selected: #f4ebfa; --nav-hover: #f7f7f7;
   --accent: #565b8f; --selected: #f4ebfa; --on-accent: #ffffff;
   --primary-hover: #454a77; --on-primary: #ffffff;
@@ -72,7 +94,7 @@
   --canvas: #202027; --paper: #292932; --ink: #eeeef2; --muted: #b5b5bf;
   --rule: #42424d; --control-border: #70707d; --border-hover: #a3a3af;
   --hover: #363640; --disabled-surface: #25252d; --disabled-border: #42424d;
-  --disabled-primary: #363640; --disabled-ink: #8e8e9a;
+  --disabled-primary: #363640; --disabled-ink: #b5b5bf;
   --nav-selected: #443253; --nav-hover: #363640;
   --accent: #b5b9ec; --selected: #443253; --on-accent: #291a36;
   --primary-hover: #d4d6f4; --on-primary: #202027;

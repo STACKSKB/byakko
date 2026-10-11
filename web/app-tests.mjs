@@ -35,6 +35,13 @@ function fieldControl(root, label) {
 function change(control, value) {
   control.value = value; control.dispatchEvent(new Event("change", {bubbles:true}));
 }
+function contrastRatio(first, second) {
+  const luminance = color => [1, 3, 5].map(start => parseInt(color.slice(start, start + 2), 16) / 255)
+    .map(value => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4)
+    .reduce((sum, value, index) => sum + value * [0.2126, 0.7152, 0.0722][index], 0);
+  const a = luminance(first), b = luminance(second);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
 async function harness(run) {
   const root = document.getElementById("fixture");
   const device = new TestDevice();
@@ -82,6 +89,74 @@ function beginImport(root, pending) {
 }
 
 const tests = [
+  ["appearance saves custom interface colours without device writes", async h => {
+    const key = "byakko-appearance", previous = window.localStorage.getItem(key);
+    try {
+      const calls = h.device.calls.length;
+      button(h.root, "Appearance").click();
+      const dialog = h.root.querySelector(".appearance-dialog");
+      assert(dialog?.open, "Appearance dialog did not open");
+      change(fieldControl(dialog, "Theme"), "light");
+      change(fieldControl(dialog, "Colour palette"), "custom");
+      assert(document.documentElement.dataset.palette === "custom", "Custom palette did not apply");
+      assert(!dialog.querySelector("div[hidden] input[type=color]"), "Custom controls stayed hidden");
+      const canvas = fieldControl(dialog, "Canvas");
+      const ink = fieldControl(dialog, "Text");
+      canvas.value = "#f9f9f9";
+      ink.value = "#f9f9f9";
+      button(dialog, "Save custom colours").click();
+      assert(dialog.querySelector('[role="status"]').textContent.includes("contrasting"), "Unreadable custom colours were accepted");
+      assert(document.documentElement.style.getPropertyValue("--canvas") !== "#f9f9f9", "Invalid colours reached the interface");
+      ink.value = "#111111";
+      button(dialog, "Save custom colours").click();
+      assert(document.documentElement.style.getPropertyValue("--canvas") === "#f9f9f9", "Valid custom canvas was not applied");
+      assert(JSON.parse(window.localStorage.getItem(key)).custom.light.ink === "#111111", "Custom colours were not saved locally");
+      change(fieldControl(dialog, "Edit custom colours for"), "dark");
+      fieldControl(dialog, "Canvas").value = "#151515";
+      button(dialog, "Save custom colours").click();
+      change(fieldControl(dialog, "Theme"), "dark");
+      assert(document.documentElement.style.getPropertyValue("--canvas") === "#151515", "Saved dark custom canvas was not applied");
+      change(fieldControl(dialog, "Colour palette"), "stackskb");
+      assert(document.documentElement.dataset.palette === "stackskb", "StacksKB palette did not apply");
+      assert(!document.documentElement.style.getPropertyValue("--canvas"), "Custom override leaked into preset");
+      assert(h.device.calls.length === calls, "Appearance sent a keyboard operation");
+    } finally {
+      if (previous === null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, previous);
+    }
+  }],
+  ["custom appearance keeps actual active and hover text readable", async h => {
+    const key = "byakko-appearance", previous = window.localStorage.getItem(key);
+    try {
+      button(h.root, "Appearance").click();
+      const dialog = h.root.querySelector(".appearance-dialog");
+      change(fieldControl(dialog, "Theme"), "light");
+      change(fieldControl(dialog, "Colour palette"), "custom");
+      const setColors = colors => {
+        for (const [name, value] of Object.entries(colors)) fieldControl(dialog, name).value = value;
+        button(dialog, "Save custom colours").click();
+        assert(!dialog.querySelector('[role="status"]').classList.contains("error"), "Readable custom palette was rejected");
+      };
+      const check = pairs => {
+        const style = document.documentElement.style;
+        for (const [foreground, background] of pairs) {
+          const first = style.getPropertyValue(`--${foreground}`), second = style.getPropertyValue(`--${background}`);
+          assert(contrastRatio(first, second) >= 4.5, `${foreground} on ${background} is unreadable: ${first} / ${second}`);
+        }
+      };
+      setColors({Canvas:"#ffffff",Surface:"#ffffff",Text:"#767676","Muted text":"#767676",Accent:"#767676",Focus:"#767676",Rule:"#ffffff"});
+      check([["ink","hover"],["accent","selected"],["ink","nav-hover"],["ink","nav-selected"],
+        ["on-primary","primary-hover"],["on-accent","accent"],["disabled-ink","disabled-surface"],
+        ["error","paper"],["error","hover"],["warning","canvas"]]);
+      setColors({Canvas:"#767676",Surface:"#767676",Text:"#ffffff","Muted text":"#ffffff",Accent:"#000000",Focus:"#000000",Rule:"#000000"});
+      check([["on-primary","primary-hover"],["on-accent","accent"],["ink","hover"],["accent","selected"],["pending","paper"]]);
+      setColors({Canvas:"#000000",Surface:"#000000",Text:"#ffffff","Muted text":"#ffffff",Accent:"#777777",Focus:"#ffffff",Rule:"#ffffff"});
+      check([["on-accent","accent"],["accent","selected"],["error","hover"]]);
+    } finally {
+      if (previous === null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, previous);
+    }
+  }],
   ["a current import still stages its document and name", async h => {
     const contents = await documentFor(h.app), pending = deferred();
     beginImport(h.root, pending); pending.resolve(contents);

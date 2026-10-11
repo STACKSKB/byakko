@@ -1,3 +1,4 @@
+pub mod appearance;
 pub mod application;
 pub mod catalog;
 pub mod files;

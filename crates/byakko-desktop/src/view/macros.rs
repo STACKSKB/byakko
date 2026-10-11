@@ -1,4 +1,5 @@
 //! Macro widgets project the shared editor, library and unsubmitted form.
+use crate::widget::controls::{pick_list, text_input};
 use crate::{
     form::macros::{self, Composer, Form, Kind, Message},
     widget::{
@@ -17,7 +18,7 @@ use byakko_core::{
 };
 use iced::{
     Element, Fill,
-    widget::{checkbox, column, pick_list, row, text, text_input},
+    widget::{checkbox, column, row, text},
 };
 pub struct View<'a> {
     pub form: &'a Form,

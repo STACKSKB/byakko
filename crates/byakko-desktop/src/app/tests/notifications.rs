@@ -154,6 +154,176 @@ fn discard_modal_escape_keeps_draft_and_other_screens_have_no_modal_listener() {
 }
 
 #[test]
+fn rendered_appearance_controls_preview_cancel_and_apply_without_device_reads() {
+    use byakko_devices::storage::appearance::{Mode, Palette};
+    let (mut app, reads) = app(false);
+    let _ = app.update(Message::Read);
+    settle(&mut app);
+    edit(&mut app);
+    let draft = app.session.keymap().draft().cloned();
+    let before = reads.load(Ordering::SeqCst);
+    app.tester.update(crate::form::tester::Message::Start);
+    let messages = click_text(&app, "Appearance");
+    assert_eq!(messages.len(), 1);
+    let _ = app.update(messages.into_iter().next().unwrap());
+    assert!(app.appearance.open);
+    assert!(!app.tester.active());
+    let _ = app.update(Message::Appearance(appearance::Message::Mode(Mode::Light)));
+    let _ = app.update(Message::Appearance(appearance::Message::Palette(
+        Palette::StacksKB,
+    )));
+    assert_eq!(
+        app.style.theme.palette().background,
+        iced::Color::from_rgb8(247, 247, 247)
+    );
+    assert!(
+        !rendered_text(&app).iter().any(|label| label == "Revert"),
+        "modal backdrop must be inert"
+    );
+    assert!(appearance_escape(escape_key(true)).is_none());
+    let _ = app.update(appearance_escape(escape_key(false)).unwrap());
+    assert!(!app.appearance.open);
+    assert_eq!(app.style.theme, iced::Theme::Dark);
+
+    let _ = app.update(Message::Appearance(appearance::Message::Open));
+    let _ = app.update(Message::Appearance(appearance::Message::Mode(Mode::Light)));
+    let _ = app.update(Message::Appearance(appearance::Message::Palette(
+        Palette::StacksKB,
+    )));
+    let messages = click_text(&app, "Apply");
+    assert_eq!(messages.len(), 1);
+    let _ = app.update(messages.into_iter().next().unwrap());
+    assert!(!app.appearance.open);
+    assert_eq!(app.appearance.saved.palette, Palette::StacksKB);
+    assert_eq!(app.session.keymap().draft(), draft.as_ref());
+    assert_eq!(reads.load(Ordering::SeqCst), before);
+    assert!(!app.session.busy());
+}
+
+#[test]
+fn failed_appearance_save_keeps_the_modal_and_draft_when_close_was_requested() {
+    use byakko_devices::storage::appearance::Mode;
+    let (mut app, _) = app(false);
+    let _ = app.update(Message::Appearance(appearance::Message::Open));
+    let _ = app.update(Message::Appearance(appearance::Message::Mode(Mode::Light)));
+    let target = app.appearance.begin_apply().unwrap();
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+    let _ = app.update(Message::AppearanceSaved(Err("disk full".into())));
+    assert_eq!(app.closing, Closing::Open);
+    assert!(app.appearance.open);
+    assert_eq!(app.appearance.draft, target);
+    assert_eq!(app.appearance.saved.mode, Mode::Dark);
+    assert!(
+        app.appearance
+            .problem
+            .as_deref()
+            .unwrap()
+            .contains("disk full")
+    );
+}
+
+#[test]
+fn closing_appearance_preserves_the_workspace_through_the_existing_widget_cache() {
+    use byakko_devices::storage::appearance::{Mode, Palette};
+    use iced_renderer::graphics::{Viewport, damage};
+    use iced_runtime::user_interface::Cache;
+    use iced_tiny_skia::Layer;
+
+    fn frame(
+        app: &App,
+        cache: Cache,
+        renderer: &mut iced::Renderer,
+        mask: &mut tiny_skia::Mask,
+    ) -> (Cache, tiny_skia::Pixmap) {
+        let mut ui = iced_runtime::UserInterface::build(
+            app.view(),
+            Size::new(1360.0, 800.0),
+            cache,
+            renderer,
+        );
+        let mut messages = Vec::new();
+        let _ = ui.update(
+            &[Event::Window(iced::window::Event::RedrawRequested(
+                Instant::now(),
+            ))],
+            mouse::Cursor::Unavailable,
+            renderer,
+            &mut iced::advanced::clipboard::Null,
+            &mut messages,
+        );
+        ui.draw(
+            renderer,
+            &app.style.theme,
+            &iced::advanced::renderer::Style {
+                text_color: app.style.theme.palette().text,
+            },
+            mouse::Cursor::Unavailable,
+        );
+        let mut pixels = tiny_skia::Pixmap::new(1360, 800).unwrap();
+        renderer.draw(
+            &mut pixels.as_mut(),
+            mask,
+            &Viewport::with_physical_size(Size::new(1360, 800), 1.0),
+            &[Rectangle::with_size(Size::new(1360.0, 800.0))],
+            app.style.theme.palette().background,
+        );
+        (ui.into_cache(), pixels)
+    }
+
+    let mut app = App::new(
+        byakko_devices::nia87::application::session().unwrap(),
+        Box::new(|_| Err("No device effects in this test".into())),
+    );
+    app.session.connect().unwrap();
+    let command = app.session.read().unwrap();
+    app.session.accept(
+        command.map(|_| CompletionPayload::Keymap(FeatureResult::Read(Err("read failed".into())))),
+    );
+    let mut renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
+    let mut mask = tiny_skia::Mask::new(1360, 800).unwrap();
+    let (cache, _) = frame(&app, Cache::default(), &mut renderer, &mut mask);
+    let _ = app.update(Message::Appearance(appearance::Message::Open));
+    let _ = app.update(Message::Appearance(appearance::Message::Mode(Mode::Light)));
+    let _ = app.update(Message::Appearance(appearance::Message::Palette(
+        Palette::StacksKB,
+    )));
+    let (cache, mut retained) = frame(&app, cache, &mut renderer, &mut mask);
+    let previous = renderer.layers().to_vec();
+    let _ = app.update(Message::Appearance(appearance::Message::Apply));
+    let (_cache, fresh) = frame(&app, cache, &mut renderer, &mut mask);
+    let full = Rectangle::with_size(Size::new(1360.0, 800.0));
+    let regions = damage::group(
+        damage::diff(
+            &previous,
+            renderer.layers(),
+            |layer| vec![layer.bounds],
+            Layer::damage,
+        ),
+        full,
+    );
+    renderer.draw(
+        &mut retained.as_mut(),
+        &mut mask,
+        &Viewport::with_physical_size(Size::new(1360, 800), 1.0),
+        &regions,
+        app.style.theme.palette().background,
+    );
+    let differences = retained
+        .data()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(fresh.data().as_chunks::<4>().0.iter())
+        .filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8))
+        .count();
+    assert_eq!(
+        differences, 0,
+        "closing the modal must repaint the workspace controls"
+    );
+}
+
+#[test]
 fn failed_keymap_read_has_one_short_rendered_diagnostic() {
     let (mut app, _) = app(false);
     let _ = app.update(Message::Read);

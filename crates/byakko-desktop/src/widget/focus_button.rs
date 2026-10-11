@@ -6,7 +6,9 @@ pub fn button<'a, Message: Clone + 'a>(
     content: impl Into<Element<'a, Message>>,
 ) -> Button<'a, Message> {
     Button {
-        inner: iced_button(content),
+        inner: iced_button(content).style(|theme, status| {
+            super::controls::button_style(theme, iced_button::primary(theme, status))
+        }),
         on_press: None,
     }
 }
@@ -43,7 +45,9 @@ impl<'a, Message: Clone + 'a> Button<'a, Message> {
         mut self,
         style: impl Fn(&Theme, iced_button::Status) -> iced_button::Style + 'a,
     ) -> Self {
-        self.inner = self.inner.style(style);
+        self.inner = self
+            .inner
+            .style(move |theme, status| super::controls::button_style(theme, style(theme, status)));
         self
     }
 }

@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         [] => {
             let data = byakko_devices::storage::user_data_dir()?;
             let backups = data.join("backups");
+            config.appearance = byakko_devices::storage::appearance::load(&data);
             config.data_directory = Some(data);
             let discovery = Discovery::spawn(|| match nia87::device::availability() {
                 nia87::device::Availability::Available(candidate) => Availability::Ready {

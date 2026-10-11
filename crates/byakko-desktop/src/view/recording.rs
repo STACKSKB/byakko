@@ -1,4 +1,5 @@
 //! Local recording controls; no device state or clocks live in the view.
+use crate::widget::controls::text_input;
 use crate::widget::focus_button::button;
 use crate::{
     form::recording::{Message, Options},
@@ -6,7 +7,7 @@ use crate::{
 };
 use iced::{
     Element,
-    widget::{checkbox, column, row, text, text_input},
+    widget::{checkbox, column, row, text},
 };
 
 pub enum Phase {

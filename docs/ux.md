@@ -23,10 +23,17 @@ Treat these as starting values, not a mandate to make every component monochrome
 ## Appearance preferences
 
 The browser's Appearance dialog offers System, Light and Dark themes, plus
-Indigo, Slate and Forest palettes. System follows the operating system's colour
+Indigo, Slate, Forest, StacksKB and Custom palettes. System follows the operating system's colour
 preference, including changes during a visit. The choice is stored locally in
 the browser, separately from keyboard settings and backups. If storage is
 unavailable, the choice still applies to the current visit.
+
+The StacksKB light preset uses the [StacksKB](https://stackskb.com/) interface's
+neutral canvas and surfaces, black buttons and selected controls, and blue focus
+colour. Its dark preset is a Byakko adaptation, not an official StacksKB theme.
+Custom provides separate saved light and dark colours for canvas, surface, text,
+muted text, accent, focus and rules. Save applies only combinations with readable
+text and visible accent/focus contrast.
 
 All interface colours belong to semantic custom properties in
 [palette.css](../web/palette.css); [style.css](../web/style.css) owns layout and

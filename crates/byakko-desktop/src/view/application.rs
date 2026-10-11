@@ -3,6 +3,7 @@ use crate::widget::focus_button::button;
 use crate::{
     controller::discovery::Availability,
     form::{
+        appearance,
         application::{Closing, Message, Page},
         files, host, keymap, lighting, macros, picture, recording, tester,
     },
@@ -24,6 +25,7 @@ use iced::{
 #[derive(Clone, Copy)]
 pub struct View<'a> {
     pub session: &'a Session,
+    pub appearance: &'a appearance::Form,
     pub presence: &'a Availability,
     pub keys: &'a keymap::Form,
     pub macros: &'a macros::Form,
@@ -102,10 +104,18 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         navigation = navigation
             .push(button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)));
     }
+    navigation = navigation.push(panels::selectable_button(
+        input.style,
+        "Appearance",
+        false,
+        input
+            .editing_allowed()
+            .then_some(Message::Appearance(appearance::Message::Open)),
+    ));
     let base: Element<'a, Message> = container(
         column![
             text(&input.session.descriptor().device_name).size(input.style.type_scale.page_title),
-            navigation,
+            navigation.wrap(),
             responsive(move |size| workspace(
                 input,
                 size.width >= input.style.key_sidebar_breakpoint
@@ -124,12 +134,28 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         .width(Fill)
         .height(Fill)
         .into();
+    let blocked = input.appearance.open || input.closing == Closing::ConfirmDiscard;
+    // Keep the workspace's widget ancestry stable when a modal opens or closes.
+    let base = crate::widget::tester_capture::capture(
+        base,
+        !blocked && input.page == Page::Tester && input.tester.active(),
+        Message::Tester(crate::form::tester::Message::Pause),
+    );
+    let layers = iced::widget::stack![crate::widget::inert::guard(base, blocked)];
+    if input.appearance.open && input.closing != Closing::ConfirmDiscard {
+        return layers
+            .push(
+                container(iced::widget::opaque(
+                    view::appearance::view(input.appearance, input.style).map(Message::Appearance),
+                ))
+                .padding(input.style.spacing.page_padding)
+                .center_x(Fill)
+                .center_y(Fill),
+            )
+            .into();
+    }
     if input.closing != Closing::ConfirmDiscard {
-        return crate::widget::tester_capture::capture(
-            base,
-            input.page == Page::Tester && input.tester.active(),
-            Message::Tester(crate::form::tester::Message::Pause),
-        );
+        return layers.into();
     }
     let dialog = container(
         column![
@@ -145,13 +171,13 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
     )
     .padding(input.style.spacing.page_padding)
     .style(container::bordered_box);
-    iced::widget::stack![
-        crate::widget::inert::backdrop(base),
-        container(iced::widget::opaque(dialog))
-            .center_x(Fill)
-            .center_y(Fill)
-    ]
-    .into()
+    layers
+        .push(
+            container(iced::widget::opaque(dialog))
+                .center_x(Fill)
+                .center_y(Fill),
+        )
+        .into()
 }
 
 fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {

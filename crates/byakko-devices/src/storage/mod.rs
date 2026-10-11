@@ -1,4 +1,5 @@
 //! Stable per-user GUI data location. No current-directory fallback.
+pub mod appearance;
 pub mod json;
 pub mod labels;
 pub mod macros;

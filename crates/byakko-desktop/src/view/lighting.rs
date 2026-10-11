@@ -1,4 +1,5 @@
 //! Compact onboard controls and the shared lighting mode dropdown.
+use crate::widget::controls::pick_list;
 use crate::widget::focus_button::button;
 use crate::{
     form::lighting::{Form, Message, Mode},
@@ -11,7 +12,7 @@ use byakko_core::{
 };
 use iced::{
     Element,
-    widget::{column, pick_list, text},
+    widget::{column, text},
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

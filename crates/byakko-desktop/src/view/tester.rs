@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Compact local keyboard observations with optional device details.
+use crate::widget::controls::pick_list;
 use crate::widget::focus_button::button;
 use crate::{
     form::tester::{Form, Message, Source},
@@ -12,7 +13,7 @@ use byakko_core::projection::tester::{self, Legends, Size, Standard};
 use iced::widget::button as button_style;
 use iced::{
     Color, Element, Fill,
-    widget::{column, container, pick_list, pin, responsive, row, scrollable, space, stack, text},
+    widget::{column, container, pin, responsive, row, scrollable, space, stack, text},
 };
 use std::fmt;
 

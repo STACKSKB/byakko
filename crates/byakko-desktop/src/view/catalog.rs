@@ -1,4 +1,5 @@
 //! The complete advertised catalog, with section navigation and search.
+use crate::widget::controls::text_input;
 use crate::widget::focus_button::button;
 use crate::{
     form::{
@@ -13,7 +14,7 @@ use crate::{
 use byakko_core::model::keymap::{Action, ActionChoice};
 use iced::{
     Element, Fill,
-    widget::{column, container, row, text, text_input},
+    widget::{column, container, row, text},
 };
 
 pub fn view<'a>(

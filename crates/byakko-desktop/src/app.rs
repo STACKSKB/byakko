@@ -8,6 +8,7 @@ use crate::{
     controller::host::{Controller as Host, Outcome as HostOutcome},
     controller::recording::Controller as Recording,
     form::{
+        appearance,
         application::{Closing, Message, Page},
         catalog, files, host, keymap, lighting, macros, picture, recording, settings, tester,
     },
@@ -32,6 +33,7 @@ use std::{
 
 struct App {
     session: Session,
+    appearance: appearance::Form,
     keys: keymap::Form,
     macros: macros::Form,
     recording: Recording,
@@ -63,6 +65,8 @@ pub fn run(
     let mut app = App::new(session, Box::new(attach));
     app.link.monitor(discovery);
     app.files = Files::new(&app.session, config.data_directory.clone());
+    app.appearance = appearance::Form::new(config.appearance.clone());
+    app.preview_appearance(app.appearance.saved.clone());
     app.config = config;
     let initial = std::cell::RefCell::new(Some(app));
     iced::application(
@@ -79,7 +83,7 @@ pub fn run(
         App::view,
     )
     .title("Byakko")
-    .theme(UiStyle::DEFAULT.theme)
+    .theme(|app: &App| app.style.theme.clone())
     .window(window::Settings {
         icon: Some(
             window::icon::from_rgba(
@@ -101,6 +105,7 @@ impl App {
     fn new(session: Session, attach: Box<Attach>) -> Self {
         Self {
             files: Files::new(&session, None),
+            appearance: appearance::Form::new(Ok(None)),
             assignment_binding: None,
             new_macro: None,
             observation: Observation::default(),
@@ -134,6 +139,39 @@ impl App {
     }
 
     fn reduce(&mut self, message: Message) -> Task<Message> {
+        if let Message::AppearanceSaved(result) = message {
+            let failed = result.is_err();
+            self.appearance.accept(result);
+            if self.closing == Closing::Waiting {
+                if failed {
+                    self.closing = Closing::Open;
+                    return Task::none();
+                }
+                return self.close();
+            }
+            return Task::none();
+        }
+        if let Message::Appearance(message) = message {
+            if self.closing != Closing::Open
+                || self.session.recording()
+                || self.recording.pending()
+                || self.host.busy()
+                || !self.session.host().is_idle()
+            {
+                return Task::none();
+            }
+            if matches!(message, appearance::Message::Open) {
+                self.tester.pause();
+                self.keys.catalog.input = catalog::InputMode::Browse;
+            }
+            if matches!(message, appearance::Message::Apply) {
+                return self.save_appearance();
+            }
+            if let Some(preferences) = self.appearance.update(message) {
+                self.preview_appearance(preferences);
+            }
+            return Task::none();
+        }
         if matches!(&message, Message::Tester(tester::Message::Input(event, _)) if input::tester::pauses(event))
         {
             self.tester.pause();
@@ -219,6 +257,7 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::Appearance(_) | Message::AppearanceSaved(_) => unreachable!(),
             Message::Host(message) => return self.update_host(message),
             Message::Files(message) => return self.update_files(message),
             Message::FileComplete(completion) => return self.complete_file(completion),
@@ -1206,6 +1245,13 @@ impl App {
 
     fn close(&mut self) -> Task<Message> {
         self.tester.pause();
+        if self.appearance.submitted.is_some() {
+            self.closing = Closing::Waiting;
+            return Task::none();
+        }
+        if let Some(saved) = self.appearance.update(appearance::Message::Cancel) {
+            self.preview_appearance(saved);
+        }
         self.keys.catalog.input = catalog::InputMode::Browse;
         self.link.invalidate_discovery();
         if self.host.busy() || !self.session.host().is_idle() {
@@ -1254,6 +1300,8 @@ impl App {
         let mut subscriptions = vec![close];
         if self.closing == Closing::ConfirmDiscard {
             subscriptions.push(iced::keyboard::listen().filter_map(modal_escape));
+        } else if self.appearance.open && self.appearance.submitted.is_none() {
+            subscriptions.push(iced::keyboard::listen().filter_map(appearance_escape));
         }
         if let Some(notifications) = self
             .link
@@ -1345,6 +1393,7 @@ impl App {
         crate::widget::focus_navigation::navigate(
             view::application::view(view::application::View {
                 session: &self.session,
+                appearance: &self.appearance,
                 presence: self.link.presence(),
                 keys: &self.keys,
                 macros: &self.macros,
@@ -1370,6 +1419,51 @@ impl App {
                 || self.recording.pending(),
         )
     }
+    fn preview_appearance(
+        &mut self,
+        preferences: byakko_devices::storage::appearance::Preferences,
+    ) {
+        use byakko_devices::storage::appearance::Palette;
+        self.style.theme = appearance::theme(&preferences);
+        if preferences.palette == Palette::Default {
+            self.style.palette = UiStyle::DEFAULT.palette;
+        } else {
+            let accent = appearance::colours(&preferences).accent;
+            let color = iced::Color::from_rgb8(accent[0], accent[1], accent[2]);
+            self.style.palette.selected_background = Some(color);
+            self.style.palette.selected_text =
+                Some(iced::theme::palette::Pair::new(color, iced::Color::WHITE).text);
+        }
+    }
+
+    fn save_appearance(&mut self) -> Task<Message> {
+        let preferences = match self.appearance.begin_apply() {
+            Ok(preferences) => preferences,
+            Err(_) => return Task::none(),
+        };
+        let Some(directory) = self.config.data_directory.clone() else {
+            self.appearance.accept(Ok(()));
+            return Task::none();
+        };
+        // Preferences are a local file operation, independent of the device executor.
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        std::thread::spawn(move || {
+            let result = byakko_devices::storage::appearance::save(&directory, &preferences);
+            let _ = sender.send(result);
+        });
+        Task::perform(
+            async move {
+                receiver
+                    .await
+                    .unwrap_or_else(|_| Err("Could not save application colours.".into()))
+            },
+            Message::AppearanceSaved,
+        )
+    }
+}
+
+fn appearance_escape(event: iced::keyboard::Event) -> Option<Message> {
+    modal_escape(event).map(|_| Message::Appearance(appearance::Message::Cancel))
 }
 
 fn modal_escape(event: iced::keyboard::Event) -> Option<Message> {

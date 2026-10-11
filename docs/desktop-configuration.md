@@ -1,4 +1,19 @@
-# Desktop autosave configuration
+# Desktop configuration
+
+Choose **Appearance** in the top navigation to set a light or dark theme, select
+Default, Slate, Forest, StacksKB or Custom, and edit application colours. Valid
+colours preview immediately; **Cancel** or Escape restores the saved appearance.
+**Apply** saves it for future launches. Custom text and focus colours must remain
+readable on both the canvas and surface. Placeholders, disabled text, selections
+and button states use contrast-safe colours across all palettes.
+
+Preferences are stored in `appearance.json` in the per-user Byakko data directory
+(`%LOCALAPPDATA%\\Byakko` on Windows; the XDG data directory on Linux). The demo
+applies colours for its current session. These settings do not issue device
+commands or change the keyboard's RGB values.
+
+The StacksKB light preset uses [StacksKB's published site colours](https://stackskb.com/).
+The dark preset is a Byakko adaptation of those colours.
 
 `BYAKKO_AUTO_SAVE_DELAY_MS` configures the idle gap before per-key RGB edits
 are sent. The default is **2000 milliseconds**; valid values are

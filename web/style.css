@@ -16,7 +16,7 @@ button {
 button:hover:not(:disabled) { background: var(--hover); border-color: var(--border-hover); }
 button:disabled { color: var(--disabled-ink); background: var(--disabled-surface); border-color: var(--disabled-border); cursor: default; }
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, textarea:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 3px;
+  outline: 2px solid var(--focus); outline-offset: 3px;
 }
 button.primary { color: var(--on-primary); background: var(--ink); border-color: var(--ink); font-weight: 600; }
 button.primary:hover:not(:disabled) { background: var(--primary-hover); }
@@ -27,6 +27,7 @@ input, select, textarea {
   color: var(--ink); background: var(--paper); border: 1px solid var(--control-border);
   border-radius: 2px; padding: 5px 8px; min-height: 32px; max-width: 100%;
 }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 input:disabled, select:disabled { color: var(--disabled-ink); background: var(--disabled-surface); border-color: var(--disabled-border); }
 input[type=color] { width: 62px; height: 32px; padding: 2px; cursor: pointer; }
 input[type=checkbox] { accent-color: var(--accent); min-height: 0; width: 15px; height: 15px; margin: 0 7px 0 0; vertical-align: -2px; }
@@ -97,7 +98,7 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
 .key.changed { border-top: 3px solid var(--key-changed); }
 .key.protected .key-legend { text-decoration: underline dotted; text-underline-offset: 3px; }
 .key-legend { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.key-binding { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; opacity: .78; }
+.key-binding { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
 .key.has-color::after { content: ""; position: absolute; height: 4px; bottom: 3px; left: 6px; right: 6px; background: var(--key-color); border: 1px solid var(--swatch-border); }
 .key.has-color { padding-bottom: 7px; }
 .panel { border-top: 1px solid var(--rule); padding: 22px 0 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 20px; }
@@ -132,7 +133,7 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
 .event-row span { flex: 1; min-width: 110px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .event-row button { padding: 2px 7px; min-height: 26px; font-size: 11px; }
 .record-capture { border: 1px dashed var(--capture-border); border-radius: 2px; padding: 12px; color: var(--muted); margin-top: 12px; font-size: 12px; background: var(--capture-surface); }
-.record-capture:focus { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+.record-capture:focus { border-color: var(--focus); outline: 2px solid var(--focus); outline-offset: 2px; }
 .name-row { display: flex; gap: 8px; margin: 12px 0; }
 .name-row input { flex: 1; min-width: 0; }
 .macro-detail .actions input[type=number] { width: 78px; }
@@ -197,7 +198,7 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
   .event-row { flex-wrap: wrap; }
 }
 
-.appearance-dialog { color: var(--ink); background: var(--paper); border: 1px solid var(--dialog-border); border-radius: 4px; padding: 24px; width: min(90vw, 360px); box-shadow: 0 12px 50px var(--dialog-shadow); }
+.appearance-dialog { color: var(--ink); background: var(--paper); border: 1px solid var(--dialog-border); border-radius: 4px; padding: 24px; width: min(90vw, 360px); max-height: 90vh; overflow-y: auto; box-shadow: 0 12px 50px var(--dialog-shadow); }
 .appearance-dialog::backdrop { background: var(--backdrop); }
 .appearance-dialog .field { margin: 18px 0; }
 .appearance-dialog .actions { justify-content: flex-end; margin-top: 20px; }

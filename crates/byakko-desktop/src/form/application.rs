@@ -1,9 +1,13 @@
 //! Window-level intents, navigation and close presentation state.
-use super::{files, host, keymap, lighting, macros, picture, recording, settings, tester};
+use super::{
+    appearance, files, host, keymap, lighting, macros, picture, recording, settings, tester,
+};
 use iced::Event;
 use std::time::Instant;
 #[derive(Clone, Debug)]
 pub enum Message {
+    Appearance(appearance::Message),
+    AppearanceSaved(Result<(), String>),
     Files(files::Message),
     FileComplete(crate::controller::files::Completion),
     Keys(keymap::Message),

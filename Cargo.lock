@@ -289,6 +289,8 @@ dependencies = [
  "byakko-devices",
  "iced",
  "iced_renderer",
+ "iced_runtime",
+ "iced_tiny_skia",
  "tiny-skia",
 ]
 

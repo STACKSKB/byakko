@@ -469,15 +469,10 @@ fn color_presets<Message: Clone + 'static>(
         [0, 0, 0],
     ];
     row(presets.into_iter().map(|rgb| {
-        let foreground = if u32::from(rgb[0]) * 299
-            + u32::from(rgb[1]) * 587
-            + u32::from(rgb[2]) * 114
-            > 128_000
-        {
-            iced::Color::BLACK
-        } else {
-            iced::Color::WHITE
-        };
+        let foreground = super::controls::readable(
+            iced::Color::WHITE,
+            iced::Color::from_rgb8(rgb[0], rgb[1], rgb[2]),
+        );
         let swatch = crate::widget::focus_button::button(iced::widget::space())
             .width(style.color_hue_width)
             .height(style.color_hue_width)

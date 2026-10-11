@@ -360,7 +360,7 @@ fn tab_reveals_focused_control_in_scrollable_panel() {
 #[test]
 fn modal_backdrop_is_visible_but_excluded_from_focus_and_activation() {
     use crate::widget::{focus_button::button, focus_navigation::navigate, inert};
-    let backdrop = inert::backdrop(button("Read").on_press(Message::Read).into());
+    let backdrop = inert::guard(button("Read").on_press(Message::Read).into(), true);
     let dialog = button("Keep editing").on_press(Message::KeepEditing);
     let mut element = navigate(iced::widget::stack![backdrop, dialog].into(), true, false);
     let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));

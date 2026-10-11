@@ -1,4 +1,5 @@
 //! Advertised host modes, local source choices, and explicit start/stop.
+use crate::widget::controls::pick_list;
 use crate::widget::focus_button::button;
 use crate::{
     form::host::{Displays, Form, Message},
@@ -13,7 +14,7 @@ use byakko_core::{
 use byakko_devices::screen_sample::ScreenSampling;
 use iced::{
     Element,
-    widget::{column, pick_list, row, slider, text},
+    widget::{column, row, slider, text},
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
