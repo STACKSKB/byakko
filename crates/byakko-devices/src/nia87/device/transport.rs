@@ -343,18 +343,21 @@ fn receiver_exchange(
     }
 
     for poll in 0..receiver::MAX_POLLS {
+        // The radio needs this interval after the keyboard command and before
+        // every reply-status query, including the first one.
+        wait(Duration::from_millis(receiver::POLL_INTERVAL_MS));
         let status = receiver_status(&mut send, &mut receive, &mut wait)?;
         if !status.keyboard_online {
             return Err(RelayError::KeyboardOffline.into());
         }
         if status.reply_ready {
             send(&host_report(receiver::release_reply_request()))?;
+            wait(Duration::from_millis(receiver::STATUS_SETTLE_MS));
             return Ok(Some(receive_report(&mut receive)?));
         }
         if poll + 1 == receiver::MAX_POLLS {
             return Err(RelayError::ReplyTimeout.into());
         }
-        wait(Duration::from_millis(receiver::POLL_INTERVAL_MS));
     }
     unreachable!("receiver poll count is nonzero")
 }
@@ -672,8 +675,10 @@ mod tests {
             *waits.borrow(),
             vec![
                 Duration::from_millis(10),
+                Duration::from_millis(100),
                 Duration::from_millis(10),
                 Duration::from_millis(100),
+                Duration::from_millis(10),
                 Duration::from_millis(10),
             ]
         );
