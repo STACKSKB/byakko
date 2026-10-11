@@ -147,9 +147,8 @@ impl<Message: Clone> Widget<Message, Theme, iced::Renderer> for Capture<'_, Mess
         viewport: &Rectangle,
         translation: Vector,
     ) -> Option<overlay::Element<'b, Message, Theme, iced::Renderer>> {
-        if self.active {
-            return None;
-        }
+        // Tester menus pause on open. Passive help/key tooltips remain usable
+        // while listening; keyboard capture still belongs to update above.
         self.content.as_widget_mut().overlay(
             &mut tree.children[0],
             layout,
