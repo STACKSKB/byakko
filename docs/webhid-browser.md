@@ -138,7 +138,7 @@ visibility on the intended host before publishing it.
   `web/license-inventory.mjs` embeds GPL and third-party notices from the locked
   browser dependency graph. Neither build module enters the browser bundle.
 
-The chooser filters VID `3151`, PID `4011`/`4015` to receive all interfaces of the selected keyboard. Configuration validation requires usage page `FFFF`, usage `2`. The notification listener uses only the same chooser result, vendor collection `FFFF:1`, input report 5 with exactly three payload bytes.
+The chooser filters VID `3151`, PID `4011`/`4015` to receive all interfaces of the selected keyboard. Configuration validation requires usage page `FFFF`, usage `2`. For PID `4011`, the executor first validates the paired board and wraps feature requests in the bounded receiver relay; see [Nia87 receiver support](nia87-receiver.md). The notification listener uses only the same chooser result, vendor collection `FFFF:1`, input report 5 with exactly three payload bytes. Receiver notification delivery is not enabled as verified behavior.
 Selection requires exactly one matching configuration interface and one
 unnumbered 512-bit feature report. Browser APIs do not expose the native device
 path, interface number or physical USB ancestor, so the browser retains the
@@ -175,10 +175,13 @@ use simulated WebHID and storage effects.
 Limited physical checks have covered an initial keyboard read, keymap remapping,
 global and per-key lighting changes, a macro save-and-assign, onboard input
 notifications and restoration of the tested values. This evidence applies only
-to the tested Nia87 and operations. Settings writes, physical host lighting
-output, fault recovery, power-cycle persistence, standalone browser variants,
-PID 4011 and Linux WebHID still need acceptance. A simulated control test or
-successful transport call does not establish visible hardware output.
+to the tested Nia87 and operations. A separate Windows receiver check passed
+bounded feature reads and a visible RGB check, with the limits and unresolved
+post-set acceptance recorded in [receiver evidence](nia87-receiver.md). Browser
+WASM relay tests are simulated; physical receiver WebHID, receiver host lighting,
+settings writes, fault recovery, power-cycle persistence, standalone browser
+variants and Linux receiver access still need acceptance. A simulated control
+test or successful transport call does not establish visible hardware output.
 
 The browser backup viewer offers read-only JSON and Download for recovery
 inspection. Diagnostic exports can retain private keyboard settings or macros;

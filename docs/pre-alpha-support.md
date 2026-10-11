@@ -1,11 +1,14 @@
 # Pre-alpha support and recovery
 
 Current scope: source-only native Rust/Iced desktop and separate CLI, Windows
-and Linux, Nia87 stock firmware over USB. The observed board uses firmware
+and Linux, Nia87 stock firmware over USB. The observed USB board uses firmware
 `0x0100`, profile 0, VID/PID `3151:4015`, and the validated configuration HID
-collection. Matching USB IDs alone do not establish another board's write
-compatibility. QMK/VIA, 2.4 GHz configuration, macOS and browser delivery remain
-outside this pre-alpha. Current UI text is English.
+collection. A narrowly tested `3151:4011` 2.4 GHz relay path is documented in
+[Nia87 receiver support](nia87-receiver.md); its physical acceptance and
+platform limits remain bounded to that evidence. Matching IDs alone do not
+establish another board's write compatibility. QMK/VIA, macOS and unverified
+browser receiver behavior remain outside this pre-alpha. Current UI text is
+English.
 
 ## What sends a write
 
@@ -35,6 +38,7 @@ backups. A changed lighting selector invalidates dependent picture data.
 | Ordinary lighting/picture | Windows physical presets, steady/hue response, retained brush; twelve consecutive bulk uploads and later full picture readback. Linux fixed-camera steady-green 4→1 dimming and full baseline restoration | Interrupted-upload recovery, broader effect/selector behavior, persistence and Linux picture writes |
 | Native archives | Iced capture/export diagnostic tool; complete captures use one sweep | Restore is deferred from the public UI. Older Windows collateral changes remain unresolved; exact native restore must report nonidentical white bytes under the intentional official convention. Retained developer restore APIs are research-only |
 | Host screen/music | Headless lifecycle plus earlier research-backend physical evidence | Current Iced streaming, focus/close/disconnect restoration and Linux routing/runtime |
+| 2.4 GHz receiver | Windows `3151:4011` paired-board identity and bounded feature reads; one visible RGB check and explicit reads; a late held lighting reply verified restoration | Longer-window post-set acceptance, host streaming, browser physical WebHID, native input notifications and Linux hardware/udev access; see [receiver evidence](nia87-receiver.md) |
 | Linux GUI | Earlier X11 demo startup | Current rendered interaction and Wayland startup; screen capture is X11-only |
 
 See [parity ledger](parity-status.md), [Linux handoff](linux-handoff.md), and the
