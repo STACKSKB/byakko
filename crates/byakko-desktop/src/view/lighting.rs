@@ -101,14 +101,9 @@ pub fn view<'a>(
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
     if !matches!(editor.status(), Status::Ready) {
-        let mut content = column![
-            text(
-                super::status::editor_attention(editor.status())
-                    .unwrap_or_else(|| "Lighting needs to be read before editing.".into())
-            ),
-            button("Retry lighting read").on_press_maybe(idle.then_some(Message::Read))
-        ]
-        .spacing(style.spacing.s);
+        let mut content =
+            column![button("Read lighting").on_press_maybe(idle.then_some(Message::Read))]
+                .spacing(style.spacing.s);
         if editor.dirty() {
             content = content
                 .push(button("Revert edits").on_press_maybe(idle.then_some(Message::Revert)));

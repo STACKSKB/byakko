@@ -3,13 +3,13 @@ use byakko_core::contract::{ApplyFailure, Problem, Recovery};
 use byakko_core::editor::Status;
 
 /// Keep unresolved feature problems visible independently of transient notices.
-pub fn editor_attention<S>(status: &Status<S>) -> Option<String> {
+pub fn editor_attention<S>(feature: &str, status: &Status<S>) -> Option<String> {
     match status {
         Status::Ready | Status::Unloaded => None,
-        Status::Conflict { .. } => Some(
-            "The keyboard changed while you were editing. Your edits are kept. To load the keyboard's changes, revert your edits, then read this feature again.".into(),
-        ),
-        Status::Unverified { problem } => Some(problem_text(problem)),
+        Status::Conflict { .. } => Some(format!(
+            "{feature} changed on the keyboard. Edits kept; Revert, then Read to reload."
+        )),
+        Status::Unverified { problem } => Some(format!("{feature}: {}", problem_text(problem))),
     }
 }
 
@@ -32,11 +32,20 @@ pub fn apply_failure(action: &str, failure: &ApplyFailure) -> String {
 
 pub fn problem_text(problem: &Problem) -> String {
     match problem {
-        Problem::ReadRequired => "Choose Read / reconnect to load the keyboard's settings.".into(),
-        Problem::Read(reason) => format!("Could not read the keyboard: {reason}"),
-        Problem::Apply(failure) => apply_failure("Could not save to the keyboard", failure),
-        Problem::InvalidApplyResult(reason) => format!("Could not confirm the save: {reason}. Your edits are kept. Choose Read / reconnect before trying again."),
-        Problem::ApplyReadbackMismatch => "The keyboard's settings did not match the changes you sent. Your edits are kept. Choose Read / reconnect before trying again.".into(),
+        Problem::ReadRequired => "Read / reconnect to load.".into(),
+        Problem::Read(_) => "Read failed. Try Read / reconnect.".into(),
+        Problem::Apply(failure) => match failure.recovery {
+            Recovery::Verified => "Save failed; previous state restored. Edits kept.".into(),
+            Recovery::Failed => "Save and recovery failed. Edits kept; Read / reconnect.".into(),
+            Recovery::Unverified => {
+                "Save failed; recovery unverified. Edits kept; Read / reconnect.".into()
+            }
+            Recovery::NotAttempted => {
+                "Save failed; recovery not attempted. Edits kept; Read / reconnect.".into()
+            }
+        },
+        Problem::InvalidApplyResult(_) => "Save unverified. Edits kept; Read / reconnect.".into(),
+        Problem::ApplyReadbackMismatch => "Readback differs. Edits kept; Read / reconnect.".into(),
     }
 }
 
@@ -61,10 +70,13 @@ mod tests {
                 "Choose Read / reconnect before trying again.",
             ),
         ] {
-            let message = problem_text(&Problem::Apply(ApplyFailure {
-                message: "The keyboard was disconnected.".into(),
-                recovery: recovery.clone(),
-            }));
+            let message = apply_failure(
+                "Could not save to the keyboard",
+                &ApplyFailure {
+                    message: "The keyboard was disconnected.".into(),
+                    recovery: recovery.clone(),
+                },
+            );
             assert!(message.contains(explanation));
             assert!(message.contains("Your edits are kept."));
             assert!(!message.contains("Recovery:"));

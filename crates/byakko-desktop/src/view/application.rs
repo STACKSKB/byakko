@@ -223,7 +223,7 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
                 editor,
                 !input.files_busy
                     && (!input.session.blocks_editing() || editor.submitted().is_some()),
-                idle,
+                idle && matches!(input.session.connection(), Connection::Connected { .. }),
                 input.style,
             )
             .map(Message::Settings),
@@ -317,7 +317,7 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     else {
         return text("Macros are unavailable for this keyboard.").into();
     };
-    let idle = input.idle();
+    let idle = input.idle() && matches!(input.session.connection(), Connection::Connected { .. });
     let bound_slots = editor
         .capabilities()
         .bindings
@@ -430,7 +430,7 @@ pub(crate) fn lighting_mode(session: &Session, form: &lighting::Form) -> Option<
 }
 
 fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
-    let idle = input.idle();
+    let idle = input.idle() && matches!(input.session.connection(), Connection::Connected { .. });
     let mode = lighting_mode(input.session, input.lighting);
     let editable = !input.files_busy
         && !input.host_preparing
@@ -512,9 +512,6 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
     if let Some(detail) = detail {
         controls = controls.push(detail);
     }
-    if idle && input.session.requires_manual_read() {
-        controls = controls.push(button("Read / reconnect").on_press(Message::Read));
-    }
     panels::vertical_scroll(input.style, controls)
         .height(Fill)
         .into()
@@ -528,22 +525,71 @@ fn status<'a>(input: View<'a>) -> Element<'a, Message> {
         .into()
 }
 
-fn notice(input: View<'_>) -> Option<String> {
+pub(crate) fn notice(input: View<'_>) -> Option<String> {
     if input.closing == Closing::Waiting {
         return Some("Waiting for the operation before closing…".into());
     }
-    if !input.notice.is_empty() {
-        return Some(input.notice.into());
-    }
     match input.presence {
-        Availability::Unknown => Some("Looking for a keyboard…".into()),
-        Availability::Missing => Some("Keyboard not connected. Your edits are kept.".into()),
-        Availability::Ambiguous { count } => Some(format!(
-            "Found {count} supported keyboards. Connect one at a time."
-        )),
-        Availability::Error(reason) => Some(format!("Could not find the keyboard: {reason}")),
-        Availability::Ready { .. } => None,
+        Availability::Missing => return Some("Keyboard disconnected. Edits kept.".into()),
+        Availability::Ambiguous { count } => {
+            return Some(format!("{count} keyboards found. Connect one at a time."));
+        }
+        Availability::Error(_) => {
+            return Some("Keyboard discovery failed. Try Read / reconnect.".into());
+        }
+        Availability::Unknown | Availability::Ready { .. } => {}
     }
+    if input.session.busy() {
+        return (!input.notice.is_empty()).then(|| input.notice.into());
+    }
+    let attention = match input.page {
+        Page::Keys => view::status::editor_attention("Keys", input.session.keymap().status()),
+        Page::Macros => input
+            .session
+            .macros()
+            .filter(|editor| {
+                editor.baseline().is_some()
+                    || !matches!(
+                        editor.status(),
+                        Status::Unverified {
+                            problem: byakko_core::contract::Problem::ReadRequired
+                        }
+                    )
+            })
+            .and_then(|editor| view::status::editor_attention("Macro", editor.status()))
+            .or_else(|| {
+                input.session.macro_library().and_then(|library| {
+                    library
+                        .error()
+                        .map(|_| "Macro discovery failed. Retry scan.".into())
+                })
+            }),
+        Page::Lighting | Page::Picture => input
+            .session
+            .lighting()
+            .and_then(|editor| view::status::editor_attention("Lighting", editor.status()))
+            .or_else(|| {
+                (lighting_mode(input.session, input.lighting) == Some(lighting::Mode::PerKey))
+                    .then(|| {
+                        input.session.picture().and_then(|editor| {
+                            view::status::editor_attention("Colors", editor.status())
+                        })
+                    })
+                    .flatten()
+            }),
+        Page::Settings => input
+            .session
+            .settings()
+            .and_then(|editor| view::status::editor_attention("Settings", editor.status())),
+        Page::Archive | Page::Tester => None,
+    };
+    attention
+        .or_else(|| (!input.notice.is_empty()).then(|| input.notice.into()))
+        .or_else(|| view::status::editor_attention("Keys", input.session.keymap().status()))
+        .or_else(|| {
+            matches!(input.presence, Availability::Unknown)
+                .then(|| "Looking for a keyboard…".into())
+        })
 }
 
 pub(crate) fn picture_is_displayed(session: &Session) -> bool {

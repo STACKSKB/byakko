@@ -99,8 +99,7 @@ pub fn view<'a, M: Clone + 'a>(
             (idle && !editor.dirty()).then(|| Message::Select(slot.id.clone())),
         ));
     }
-    if let Some(error) = library.error() {
-        slots = slots.push(text(format!("Library scan failed: {error}")));
+    if library.error().is_some() {
         slots = slots.push(
             button("Retry scan")
                 .on_press_maybe((idle && !scanning).then_some(Message::ReadCatalog)),
@@ -113,22 +112,33 @@ pub fn view<'a, M: Clone + 'a>(
             .values()
             .filter(|occupancy| matches!(occupancy, Occupancy::Configured | Occupancy::Opaque))
             .count();
-        slots = slots.push(text(format!(
-            "{used} of {} slots used",
-            editor.capabilities().slots.len()
-        )));
+        let unknown = library
+            .slots()
+            .values()
+            .filter(|occupancy| matches!(occupancy, Occupancy::Unknown))
+            .count();
+        slots = slots.push(text(if unknown == 0 {
+            format!("{used} of {} slots used", editor.capabilities().slots.len())
+        } else if used == 0 {
+            "Library not fully read".into()
+        } else {
+            format!("{used} slots used · {unknown} unread")
+        }));
     }
     let library: Element<'a, Message> = slots.width(Fill).into();
     let library = panels::panel(style, "Library", library.map(on_message));
     let mut detail = column![].spacing(style.spacing.s).width(Fill);
-    if let Some(explanation) = super::status::editor_attention(editor.status()) {
+    if editor.status() != &Status::Ready
+        && (selected
+            || !matches!(
+                editor.status(),
+                Status::Unverified {
+                    problem: byakko_core::contract::Problem::ReadRequired
+                } | Status::Unloaded
+            ))
+    {
         detail = detail
-            .push(text(explanation))
-            .push(button("Retry read").on_press_maybe(idle.then_some(on_message(Message::Read))));
-    } else if selected && editor.status() != &Status::Ready {
-        detail = detail
-            .push(text("Slot needs attention; read it again to continue."))
-            .push(button("Retry read").on_press_maybe(idle.then_some(on_message(Message::Read))));
+            .push(button("Read macro").on_press_maybe(idle.then_some(on_message(Message::Read))));
     }
     if selected {
         detail = detail.push(name_controls).push(recording_controls);

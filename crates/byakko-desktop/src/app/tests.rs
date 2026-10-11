@@ -1,5 +1,6 @@
 use super::*;
 mod navigation;
+mod notifications;
 mod picture_layers;
 use crate::controller::discovery::Availability;
 use crate::view::application::picture_is_displayed;
@@ -1436,7 +1437,10 @@ fn failed_background_read_stops_observing_and_retains_the_device_error() {
     completion.payload =
         CompletionPayload::Lighting(FeatureResult::Read(Err("Keyboard disconnected".into())));
     let _ = app.complete(completion);
-    assert!(app.notice.contains("Keyboard disconnected"));
+    assert_eq!(app.notice, "Read failed. Try Read / reconnect.");
+    assert!(matches!(app.session.lighting().unwrap().status(),
+        Status::Unverified { problem: Problem::Read(reason) }
+        if reason == "Keyboard disconnected"));
     assert!(!app.can_observe());
     notify(&mut app, byakko_core::contract::DeviceChange::Lighting);
     observe_due(&mut app);
@@ -1950,7 +1954,10 @@ fn reconnect_after_read_failure_waits_for_cleanup_and_keeps_edits() {
         !app.session.busy(),
         "failure must clear the pending operation"
     );
-    assert!(app.notice.contains("keyboard was disconnected"));
+    assert_eq!(app.notice, "Read failed. Try Read / reconnect.");
+    assert!(matches!(app.session.keymap().status(),
+        Status::Unverified { problem: Problem::Read(reason) }
+        if reason.contains("keyboard was disconnected")));
     let _ = app.update(Message::Read);
     retired.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(app.link.settling());

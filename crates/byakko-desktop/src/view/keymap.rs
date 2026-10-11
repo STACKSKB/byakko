@@ -33,9 +33,6 @@ pub fn view<'a>(
             .push(button("Revert").on_press_maybe(idle.then_some(Message::Revert)));
     }
     let mut detail = column![toolbar].spacing(style.spacing.m);
-    if let Some(explanation) = super::status::editor_attention(editor.status()) {
-        detail = detail.push(text(explanation));
-    }
     if let Some(caps) = &descriptor.shortcuts {
         detail = detail.push(
             super::shortcut::view(

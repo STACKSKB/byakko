@@ -33,9 +33,6 @@ pub fn view<'a>(
     });
     let pending = submitted.or_else(|| changes.first().map(|edit| edit.id.as_str()));
     let mut content = column![].spacing(style.spacing.s);
-    if let Some(explanation) = super::status::editor_attention(editor.status()) {
-        content = content.push(text(explanation));
-    }
     if !matches!(editor.status(), Status::Ready) {
         let mut actions = row![].spacing(style.spacing.s);
         if editor.dirty() {
@@ -48,7 +45,7 @@ pub fn view<'a>(
             } else {
                 "Reload & retry"
             })
-            .on_press_maybe((idle && !editor.dirty()).then_some(Message::Read)),
+            .on_press_maybe(idle.then_some(Message::Read)),
         );
         content = content.push(actions);
     }

@@ -181,6 +181,42 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer> for Control
         viewport: &Rectangle,
     ) {
         if self.enabled
+            && tree.state.downcast_ref::<State>().focused
+            && matches!(self.keys, Keys::Select { .. })
+            && let Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(key),
+                repeat: false,
+                ..
+            }) = event
+            && matches!(
+                key,
+                keyboard::key::Named::Escape | keyboard::key::Named::Tab
+            )
+        {
+            let menu_open = self
+                .inner
+                .as_widget_mut()
+                .overlay(
+                    &mut tree.children[0],
+                    layout,
+                    renderer,
+                    viewport,
+                    Vector::ZERO,
+                )
+                .is_some();
+            if menu_open {
+                // PickList keeps its open menu in private widget state. Recreate
+                // only that child; focus and the application's value remain.
+                tree.children[0] = Tree::new(&self.inner);
+                shell.invalidate_layout();
+                shell.request_redraw();
+                if *key == keyboard::key::Named::Escape {
+                    shell.capture_event();
+                    return;
+                }
+            }
+        }
+        if self.enabled
             && cursor.is_over(layout.bounds())
             && matches!(
                 event,
@@ -307,8 +343,212 @@ mod tests {
     use super::*;
     use iced::{
         Pixels, Point,
-        keyboard::key::{Named, Physical},
+        keyboard::key::{Code, Named, Physical},
     };
+
+    #[derive(Default)]
+    struct Focused {
+        count: usize,
+        index: Option<usize>,
+    }
+
+    impl Operation for Focused {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+
+        fn focusable(
+            &mut self,
+            _: Option<&iced::advanced::widget::Id>,
+            _: Rectangle,
+            state: &mut dyn Focusable,
+        ) {
+            if state.is_focused() {
+                self.index = Some(self.count);
+            }
+            self.count += 1;
+        }
+    }
+
+    fn key_event(key: Named, code: Code) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(key),
+            modified_key: keyboard::Key::Named(key),
+            physical_key: Physical::Code(code),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::empty(),
+            text: None,
+            repeat: false,
+        })
+    }
+
+    fn send_event(
+        element: &mut Element<'_, i32>,
+        tree: &mut Tree,
+        node: &layout::Node,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        event: Event,
+    ) -> (Vec<i32>, bool) {
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        element.as_widget_mut().update(
+            tree,
+            &event,
+            Layout::new(node),
+            mouse::Cursor::Available(Point::new(10.0, 10.0)),
+            renderer,
+            &mut iced::advanced::clipboard::Null,
+            &mut shell,
+            viewport,
+        );
+        let relayout = shell.is_layout_invalid();
+        (messages, relayout)
+    }
+
+    #[test]
+    fn real_pick_list_escape_dismisses_and_tab_moves_to_next_control() {
+        use crate::widget::{focus_button::button, focus_navigation::navigate};
+
+        let pick = iced::widget::pick_list(vec!["One", "Two"], Some("One"), |value| {
+            if value == "One" { 1 } else { 2 }
+        });
+        let mut element = navigate(
+            iced::widget::column![
+                select(pick, vec![1, 2], Some(0), true),
+                button("Next").on_press(3)
+            ]
+            .into(),
+            true,
+            false,
+        );
+        let renderer = iced::Renderer::new(iced::Font::DEFAULT, Pixels(16.0));
+        let mut tree = Tree::new(&element);
+        let viewport = Rectangle::with_size(Size::new(400.0, 200.0));
+        let mut node = element.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, viewport.size()),
+        );
+        let (messages, _) = send_event(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            &viewport,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        );
+        assert!(messages.is_empty());
+        assert!(
+            element
+                .as_widget_mut()
+                .overlay(
+                    &mut tree,
+                    Layout::new(&node),
+                    &renderer,
+                    &viewport,
+                    Vector::ZERO
+                )
+                .is_some()
+        );
+        let (messages, relayout) = send_event(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            &viewport,
+            key_event(Named::Escape, Code::Escape),
+        );
+        assert!(messages.is_empty());
+        assert!(relayout);
+        node = element.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, viewport.size()),
+        );
+        assert!(
+            element
+                .as_widget_mut()
+                .overlay(
+                    &mut tree,
+                    Layout::new(&node),
+                    &renderer,
+                    &viewport,
+                    Vector::ZERO
+                )
+                .is_none()
+        );
+        let mut focus = Focused::default();
+        element
+            .as_widget_mut()
+            .operate(&mut tree, Layout::new(&node), &renderer, &mut focus);
+        assert_eq!((focus.index, focus.count), (Some(0), 2));
+
+        let (messages, relayout) = send_event(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            &viewport,
+            key_event(Named::Escape, Code::Escape),
+        );
+        assert!(messages.is_empty());
+        assert!(!relayout, "closed pick list needs no state reset");
+
+        let (messages, _) = send_event(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            &viewport,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        );
+        assert!(messages.is_empty());
+        assert!(
+            element
+                .as_widget_mut()
+                .overlay(
+                    &mut tree,
+                    Layout::new(&node),
+                    &renderer,
+                    &viewport,
+                    Vector::ZERO
+                )
+                .is_some()
+        );
+        let (messages, relayout) = send_event(
+            &mut element,
+            &mut tree,
+            &node,
+            &renderer,
+            &viewport,
+            key_event(Named::Tab, Code::Tab),
+        );
+        assert!(messages.is_empty());
+        assert!(relayout);
+        node = element.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, viewport.size()),
+        );
+        assert!(
+            element
+                .as_widget_mut()
+                .overlay(
+                    &mut tree,
+                    Layout::new(&node),
+                    &renderer,
+                    &viewport,
+                    Vector::ZERO
+                )
+                .is_none()
+        );
+        let mut focus = Focused::default();
+        element
+            .as_widget_mut()
+            .operate(&mut tree, Layout::new(&node), &renderer, &mut focus);
+        assert_eq!((focus.index, focus.count), (Some(1), 2));
+    }
 
     fn press(
         control: &mut Control<'_, i32>,

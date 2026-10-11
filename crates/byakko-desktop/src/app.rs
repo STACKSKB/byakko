@@ -272,6 +272,7 @@ impl App {
             Message::Page(page) => {
                 self.tester.pause();
                 self.keys.catalog.input = catalog::InputMode::Browse;
+                self.notice.clear();
                 self.page = page;
                 if self.session.busy() {
                     return Task::none();
