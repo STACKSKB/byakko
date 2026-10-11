@@ -49,23 +49,44 @@ on transport acceptance after pacing; they do not trigger an automatic getter.
 An explicit later Read supplies readback evidence. A successful HID send or
 relay status is not proof that a setting persisted.
 
-Windows physical checks on one paired Nia87 have passed reads of keymaps,
-settings, global lighting, picture context and macro slot 49. In a user-approved
-RGB check, red and green were visible and explicit reads passed. A rainbow
-lighting setter was accepted, but its verification reply exceeded the earlier
-five-poll (500 ms) wait. The operation's own held `0x87` lighting reply was
-later retrieved with `FC` and showed the original setting restored. The only
-reported byte difference was the existing semantic-white convention: semantic
-`FF FF FF` is represented on the wire as `FA FF FA` at offsets 5 and 7. This
-does not establish that other features were unchanged: the subsequent
-cross-feature comparison could not run because the paired keyboard was asleep.
+Windows physical checks on one paired Nia87 passed feature reads and these
+native Iced write tests with the current 20-poll relay bound:
 
-The relay wait is now bounded at 20 polls (about two seconds); longer-window
-physical post-set acceptance remains pending. Browser WASM tests cover a
-simulated relay only, not physical WebHID on this receiver. Receiver host-lighting
-streams remain blocked as unverified. Browser receiver notification delivery
-remains disabled. Native input notifications remain unverified until an actual
-event is observed. Linux builds and descriptor
+- Base F12 was mapped to F11. A physical F12 press produced F11 press/release
+  events in the tester on the receiver's exact `MI_00` input endpoint. Both
+  complete keymap layers were then restored byte for byte.
+- Debounce changed from 1 to 2 ms and back. The complete settings snapshot
+  matched its original bytes after restoration. A separate 2.4 GHz sleep
+  setting changed from 2 to 10 minutes and read back as 600 seconds, with the
+  other settings unchanged. This does not measure the actual inactivity timer.
+- Global brightness changed from 4 to 2 and back, with visible rainbow output
+  and an exact final lighting snapshot. Earlier steady red/green checks also
+  had visible output; a subsequent comparison found keymaps, settings and the
+  captured picture unchanged.
+- In per-key layer 1, F12 changed from black to red. The camera showed red at
+  F12, and an explicit read found only that picture entry changed. All 384
+  picture bytes and their selector context were restored exactly, followed by
+  restoration of the original global lighting, including speed and rainbow.
+- An unassigned, originally empty macro slot stored B down, a 20 ms wait and
+  B up with repeat count 1. Its complete readback matched the program. The
+  developer native-backup restoration path restored all 256 original zero
+  bytes, including the stored zero count. Playback was not tested.
+
+When the keyboard naturally slept before the F12 restoration, Byakko rejected
+the save and retained the original target as a draft. After a physical wake,
+explicit Read / reconnect preserved that draft, and its save/readback restored
+the complete original maps. This verifies that bounded sleep/wake path, not
+arbitrary interrupted-write recovery or power-cycle persistence.
+
+The earlier five-poll RGB check timed out on a held lighting reply; the current
+tests close ordinary post-set acceptance with the longer bounded wait. Nia87's
+intentional global-white convention remains semantic `FF FF FF` to wire
+`FA FF FA`; exact comparisons must still report any raw byte differences.
+
+Browser WASM tests cover a simulated relay only, not physical WebHID on this
+receiver. Receiver host-lighting streams remain blocked as unverified. Browser
+receiver notification delivery remains disabled. Native input notifications
+remain unverified until an actual event is observed. Linux builds and descriptor
 checks do not establish physical receiver access or a working udev grant.
 
 See [pre-alpha support](pre-alpha-support.md), the
