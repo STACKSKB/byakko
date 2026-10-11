@@ -1,6 +1,6 @@
 //! Whole-configuration capture, apply, and recovery on one locked HID session.
 use super::apply_error::{ApplyResult, not_attempted};
-use super::transaction::{pacing, save_encoded_backup};
+use super::transaction::{no_logical_setter_sent, pacing, save_encoded_backup};
 use super::{
     FeatureSetter, HidDevice, Result, Selection, Session, lighting_restore_report,
     read_lighting_on_device, read_macro_on_device, read_picture_on_device, read_settings_on_device,
@@ -309,6 +309,21 @@ fn retain_readback(
     }
 }
 
+fn track_configuration_setter(result: Result<()>, setter_started: &mut bool) -> Result<()> {
+    match result {
+        Ok(()) => {
+            *setter_started = true;
+            Ok(())
+        }
+        Err(error) => {
+            if !no_logical_setter_sent(error.as_ref()) {
+                *setter_started = true;
+            }
+            Err(error)
+        }
+    }
+}
+
 fn write_configuration_changes(
     device: &HidDevice,
     before: &byakko_protocol::nia87::configuration::Configuration,
@@ -318,8 +333,10 @@ fn write_configuration_changes(
 ) -> Result<()> {
     // Macro contents precede the key bindings that refer to them.
     for &slot in &plan.macro_slots {
-        *setter_started = true;
-        write_macro_bytes(device, slot, &target.macros[usize::from(slot)])?;
+        track_configuration_setter(
+            write_macro_bytes(device, slot, &target.macros[usize::from(slot)]),
+            setter_started,
+        )?;
     }
     for function in [false, true] {
         let prior = &before.keymaps;
@@ -330,8 +347,10 @@ fn write_configuration_changes(
         };
         for slot in 0..126 {
             if old[slot] != new[slot] {
-                *setter_started = true;
-                write_binding(device, function, 0, slot, new[slot])?;
+                track_configuration_setter(
+                    write_binding(device, function, 0, slot, new[slot]),
+                    setter_started,
+                )?;
             }
         }
     }
@@ -345,8 +364,7 @@ fn write_configuration_changes(
                 )?;
                 let mut host = [0u8; 65];
                 host[1..].copy_from_slice(&report);
-                *setter_started = true;
-                device.send_setter(&host)?;
+                track_configuration_setter(device.send_setter(&host), setter_started)?;
                 std::thread::sleep(pacing::ARCHIVE_PICTURE_KEY);
             }
         }
@@ -364,13 +382,14 @@ fn write_configuration_changes(
         };
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&report);
-        *setter_started = true;
-        device.send_setter(&host)?;
+        track_configuration_setter(device.send_setter(&host), setter_started)?;
         std::thread::sleep(pacing::SETTING_SETTER);
     }
     if plan.lighting {
-        *setter_started = true;
-        write_lighting_report(device, &lighting_restore_report(&target.lighting))?;
+        track_configuration_setter(
+            write_lighting_report(device, &lighting_restore_report(&target.lighting)),
+            setter_started,
+        )?;
     }
     Ok(())
 }
@@ -412,6 +431,31 @@ mod evidence_tests {
         .unwrap();
         assert_eq!(actual, expected);
         assert!(progress.is_empty());
+    }
+
+    #[test]
+    fn archive_first_receiver_rejection_does_not_claim_a_setter_started() {
+        use super::super::transport::SetterNotAttempted;
+        use byakko_protocol::nia87::receiver::RelayError;
+        let mut started = false;
+        let rejected = || -> super::Result<()> {
+            Err(Box::new(SetterNotAttempted::new(
+                RelayError::KeyboardOffline.into(),
+            )))
+        };
+        super::track_configuration_setter(rejected(), &mut started).unwrap_err();
+        assert!(!started);
+        super::track_configuration_setter(Ok(()), &mut started).unwrap();
+        super::track_configuration_setter(rejected(), &mut started).unwrap_err();
+        assert!(started);
+
+        let mut uncertain = false;
+        super::track_configuration_setter(
+            Err("logical send failed after submission".into()),
+            &mut uncertain,
+        )
+        .unwrap_err();
+        assert!(uncertain);
     }
 
     #[test]

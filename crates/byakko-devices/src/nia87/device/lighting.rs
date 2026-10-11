@@ -1,5 +1,7 @@
 use super::apply_error::{ApplyResult, lighting_apply_error, not_attempted};
-use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
+use super::transaction::{
+    VerifiedStep, apply_roundtrip, no_logical_setter_sent, pacing, save_json_backup,
+};
 use super::*;
 use byakko_core::contract::{ApplyFailure, Recovery};
 use byakko_protocol::nia87::host_adapter::{
@@ -253,6 +255,9 @@ fn submit_lighting_report(
     mut send: impl FnMut(&[u8; 64]) -> Result<()>,
 ) -> ApplyResult<()> {
     send(report).map_err(|error| {
+        if no_logical_setter_sent(error.as_ref()) {
+            return not_attempted(format!("{error}; backup {}", backup.display()));
+        }
         ApplyFailure {
             message: format!(
                 "Lighting upload stopped after a transport error: {error}. Device state is unknown; no automatic restore sent. Backup: {}",

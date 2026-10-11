@@ -242,6 +242,31 @@ pub(super) trait FeatureSetter {
     fn send_setter(&self, report: &[u8]) -> Result<()>;
 }
 
+/// The logical keyboard setter was not submitted. Relay status/selection may
+/// have been exchanged, but restoring a before-image would itself be a write.
+#[derive(Debug)]
+pub(super) struct SetterNotAttempted {
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl SetterNotAttempted {
+    pub(super) fn new(source: Box<dyn std::error::Error + Send + Sync>) -> Self {
+        Self { source }
+    }
+}
+
+impl std::fmt::Display for SetterNotAttempted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.source, f)
+    }
+}
+
+impl std::error::Error for SetterNotAttempted {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ReadPhase {
     SendRequest,
@@ -320,6 +345,7 @@ fn receiver_status(
 fn receiver_exchange(
     command: &[u8; 65],
     expects_reply: bool,
+    logical_send_started: &mut bool,
     mut send: impl FnMut(&[u8; 65]) -> Result<()>,
     mut receive: impl FnMut(&mut [u8; 65]) -> Result<usize>,
     mut wait: impl FnMut(Duration),
@@ -337,6 +363,7 @@ fn receiver_exchange(
     }
 
     send(&host_report(receiver::select_keyboard_request()))?;
+    *logical_send_started = true;
     send(command)?;
     if !expects_reply {
         return Ok(None);
@@ -364,6 +391,7 @@ fn receiver_exchange(
 
 impl FeatureSetter for HidDevice {
     fn send_setter(&self, report: &[u8]) -> Result<()> {
+        let mut logical_send_started = false;
         let submit = || {
             if self.product_id() == 0x4011 {
                 let command: &[u8; 65] = report
@@ -375,26 +403,36 @@ impl FeatureSetter for HidDevice {
                 receiver_exchange(
                     command,
                     false,
+                    &mut logical_send_started,
                     |report| self.send_feature_report(report),
                     |reply| self.get_feature_report(reply),
                     std::thread::sleep,
                 )?;
                 Ok(())
             } else {
+                logical_send_started = true;
                 self.send_feature_report(report)
             }
         };
         #[cfg(feature = "research-tools")]
         let result = crate::research_fault::send(report, submit);
         #[cfg(not(feature = "research-tools"))]
-        let result = submit();
-        // An error does not prove that the firmware did not receive the setter.
-        // Callers normally sleep only after success; retain the longest known
-        // setter interval before any recovery request on an uncertain result.
-        if result.is_err() {
+        let result = {
+            let mut submit = submit;
+            submit()
+        };
+        // A failed logical send is uncertain; keep its recovery pacing. A
+        // receiver rejection before that send needs no restore or setter wait.
+        if result.is_err() && logical_send_started {
             std::thread::sleep(std::time::Duration::from_secs(1));
         }
-        result
+        result.map_err(|source| {
+            if logical_send_started {
+                source
+            } else {
+                Box::new(SetterNotAttempted::new(source))
+            }
+        })
     }
 }
 
@@ -413,6 +451,7 @@ pub(super) fn read_payload(
             *reply = receiver_exchange(
                 &request,
                 true,
+                &mut false,
                 |report| device.send_feature_report(report),
                 |report| device.get_feature_report(report),
                 std::thread::sleep,
@@ -644,6 +683,7 @@ mod tests {
         let result = super::receiver_exchange(
             &request,
             true,
+            &mut false,
             |report| {
                 sent.borrow_mut().push(*report);
                 Ok(())
@@ -703,6 +743,7 @@ mod tests {
             let error = super::receiver_exchange(
                 &request,
                 true,
+                &mut false,
                 |report| {
                     sent.borrow_mut().push(*report);
                     Ok(())
@@ -733,6 +774,7 @@ mod tests {
         let result = super::receiver_exchange(
             &command,
             false,
+            &mut false,
             |report| {
                 sent.borrow_mut().push(*report);
                 Ok(())
@@ -758,6 +800,53 @@ mod tests {
     }
 
     #[test]
+    fn receiver_exchange_marks_only_the_logical_keyboard_send_as_attempted() {
+        let command = super::host_report([0x07; 64]);
+        let mut started = false;
+        let error = super::receiver_exchange(
+            &command,
+            false,
+            &mut started,
+            |_| Ok(()),
+            |reply| {
+                *reply = receiver_status_report(false, false, true);
+                Ok(65)
+            },
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&byakko_protocol::nia87::receiver::RelayError::KeyboardOffline)
+        );
+        assert!(!started);
+
+        let mut sent = 0;
+        let error = super::receiver_exchange(
+            &command,
+            false,
+            &mut started,
+            |_| {
+                sent += 1;
+                if sent == 3 {
+                    Err("logical HID send failed".into())
+                } else {
+                    Ok(())
+                }
+            },
+            |reply| {
+                *reply = receiver_status_report(false, true, true);
+                Ok(65)
+            },
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(error.to_string(), "logical HID send failed");
+        assert_eq!(sent, 3);
+        assert!(started);
+    }
+
+    #[test]
     fn receiver_poll_limits_stop_without_unrelated_reports() {
         use std::cell::RefCell;
         let request =
@@ -777,6 +866,7 @@ mod tests {
             let error = super::receiver_exchange(
                 &request,
                 true,
+                &mut false,
                 |report| {
                     sent.borrow_mut().push(*report);
                     Ok(())
