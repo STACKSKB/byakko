@@ -5,7 +5,9 @@ use serde::Serialize;
 
 pub const POLL_INTERVAL_MS: u64 = 100;
 pub const STATUS_SETTLE_MS: u64 = 10;
-pub const MAX_POLLS: usize = 5;
+// A post-lighting verification reply exceeded the initial five-poll window.
+// Wait for the same command for at most about two seconds; never resend it.
+pub const MAX_POLLS: usize = 20;
 
 pub fn status_request() -> [u8; 64] {
     protocol::read_request(0xf7, 0, 0)

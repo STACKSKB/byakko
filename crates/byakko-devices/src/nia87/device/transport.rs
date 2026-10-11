@@ -725,6 +725,55 @@ mod tests {
     }
 
     #[test]
+    fn receiver_retains_one_request_until_a_reply_after_the_initial_half_second() {
+        use std::{cell::RefCell, collections::VecDeque};
+        let request =
+            super::host_report(byakko_protocol::nia87::protocol::read_request(0x87, 0, 0));
+        let mut keyboard_reply = [0; 65];
+        keyboard_reply[1] = 0x87;
+        let mut responses = VecDeque::from([receiver_status_report(false, true, true)]);
+        responses.extend(std::iter::repeat_n(
+            receiver_status_report(false, true, false),
+            5,
+        ));
+        responses.push_back(receiver_status_report(true, true, false));
+        responses.push_back(keyboard_reply);
+        let responses = RefCell::new(responses);
+        let sent = RefCell::new(Vec::new());
+        let waits = RefCell::new(Vec::new());
+        let result = super::receiver_exchange(
+            &request,
+            true,
+            &mut false,
+            |report| {
+                sent.borrow_mut().push(*report);
+                Ok(())
+            },
+            |reply| {
+                *reply = responses
+                    .borrow_mut()
+                    .pop_front()
+                    .expect("scripted response");
+                Ok(65)
+            },
+            |delay| waits.borrow_mut().push(delay),
+        )
+        .unwrap();
+        assert_eq!(result, Some(keyboard_reply));
+        assert!(responses.borrow().is_empty());
+        let sent = sent.borrow();
+        assert_eq!(sent.iter().filter(|report| report[1] == 0x87).count(), 1);
+        assert_eq!(sent.iter().filter(|report| report[1] == 0xfc).count(), 1);
+        assert_eq!(
+            waits
+                .borrow()
+                .iter()
+                .filter(|delay| **delay == std::time::Duration::from_millis(100))
+                .count(),
+            6
+        );
+    }
+    #[test]
     fn receiver_rejects_stale_reply_or_sleep_before_keyboard_command() {
         use std::cell::RefCell;
         let request =
