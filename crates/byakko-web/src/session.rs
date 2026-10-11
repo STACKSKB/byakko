@@ -525,7 +525,10 @@ fn outcome(outcome: Outcome) -> ResultValue {
         } => (
             "picturePreparationFailed",
             None,
-            json!({"lightingApplied": lighting_applied, "problem": format!("{problem:?}")}),
+            json!({"lightingApplied": lighting_applied, "problem": match problem {
+                byakko_core::workflow::Problem::Validation(reason) => json!({"Validation": reason}),
+                byakko_core::workflow::Problem::Device(problem) => json!({"Device": problem}),
+            }}),
         ),
         Outcome::CatalogLoaded => ("catalogLoaded", None, Value::Null),
         Outcome::CatalogFailed(problem) => ("catalogFailed", None, json!(problem)),
@@ -541,7 +544,10 @@ fn outcome(outcome: Outcome) -> ResultValue {
         } => (
             "assignmentFailed",
             None,
-            json!({"macroSaved": macro_saved, "problem": format!("{problem:?}")}),
+            json!({"macroSaved": macro_saved, "problem": match problem {
+                byakko_core::workflow::Problem::Validation(reason) => json!({"Validation": reason}),
+                byakko_core::workflow::Problem::Device(problem) => json!({"Device": problem}),
+            }}),
         ),
     };
     ResultValue {

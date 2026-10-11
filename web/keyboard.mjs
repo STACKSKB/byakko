@@ -35,6 +35,7 @@ export function createKeyboard({ doc, selectLayer, selectKey, redraw }) {
         selectKey(item.id);
         if (tab !== "lighting" || !lighting.paintKey(item.id)) redraw();
       }, false, `key ${indigoKeys.has(item.label) ? "indigo" : "ivory"} ${key === item.id ? "selected" : ""} ${changed ? "changed" : ""} ${view.descriptor.layers.find(entry => entry.id === layer)?.read_only_keys.includes(item.id) || !item.writable ? "protected" : ""}`);
+      element.dataset.key = item.id;
       element.append(node(doc, "span", item.label, "key-legend"));
       if (mapped && mapped.compact !== item.label) element.append(node(doc, "span", mapped.compact, "key-binding"));
       element.title = mapped ? `${item.label} · ${mapped.full}` : item.label;

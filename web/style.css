@@ -104,6 +104,8 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
 .panel > h2, .panel > p { grid-column: 1; }
 .panel > .actions { grid-column: 2; grid-row: 1 / span 2; align-self: start; justify-content: flex-end; }
 .panel > :not(h2):not(p):not(.actions) { grid-column: 1 / -1; }
+.editor-attention { border-left: 3px solid var(--error); padding: 7px 12px; color: var(--error); background: var(--paper); margin: 10px 0; }
+.editor-attention p { margin: 0; }
 .actions > .muted { font-size: 11px; margin-left: 5px; }
 .card { padding: 18px 0 0; margin: 16px 0 0; border-top: 1px solid var(--rule); background: transparent; }
 .card:first-of-type { margin-top: 8px; }

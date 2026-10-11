@@ -54,9 +54,14 @@ export function number(doc, value, min, max, changed, disabled = false) {
 
 export function actions(doc, editor, feature, dispatch, { auto = false, revert } = {}) {
   const row = node(doc, "div", undefined, "actions");
-  row.append(button(doc, "Read", () => void dispatch({ type: "read", feature }), !editor?.canRead));
-  row.append(button(doc, "Revert", () => void (revert ? revert() : dispatch({ type: "revert", feature })), !editor?.canRevert));
-  row.append(button(doc, "Save", () => void dispatch({ type: "apply", feature }), !editor?.canApply, "primary"));
+  for (const [name, control] of [
+    ["read", button(doc, "Read", () => void dispatch({ type: "read", feature }), !editor?.canRead)],
+    ["revert", button(doc, "Revert", () => void (revert ? revert() : dispatch({ type: "revert", feature })), !editor?.canRevert)],
+    ["save", button(doc, "Save", () => void dispatch({ type: "apply", feature }), !editor?.canApply, "primary")],
+  ]) {
+    control.dataset.featureAction = `${feature}:${name}`;
+    row.append(control);
+  }
   if (auto) row.append(node(doc, "span", "Changes save after 500 ms", "muted"));
   return row;
 }

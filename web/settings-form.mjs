@@ -63,7 +63,8 @@ export function createSettingsForm({ doc, runtime }) {
           const next = Number(numberInput.value);
           if (!Number.isInteger(next) || next < limits.min || next > limits.max ||
               (next - limits.min) % limits.step !== 0) {
-            numberInput.value = String(amount || limits.min);
+            const current = runtime.view.settings.editor.draft?.[setting.id]?.Number ?? amount;
+            numberInput.value = String(current || limits.min);
             runtime.announce(`Choose ${setting.label} from ${limits.min} to ${limits.max} ${limits.unit}.`);
             return;
           }

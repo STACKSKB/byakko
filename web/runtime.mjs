@@ -4,6 +4,7 @@ import { DeviceExecutor } from "./executor.mjs";
 import { notificationDevice, NotificationListener } from "./notifications.mjs";
 import { HostController } from "./host.mjs";
 import { editable, text } from "./widgets.mjs";
+import { assignmentFailureMessage, deviceProblemMessage, workflowProblemMessage } from "./outcome-message.mjs";
 
 // Owns one connection and its ordered effects. Editable feature values stay in core.
 export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win,
@@ -33,10 +34,23 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
       noticeError = true;
       notice = `Diagnostic archive capture failed: ${response.outcome.detail ?? "Read and try again."}`;
     }
-    else if (response.outcome?.kind === "failed" || ["picturePreparationFailed", "catalogFailed", "assignmentFailed"].includes(response.outcome?.kind)) {
+    else if (response.outcome?.kind === "assignmentFailed") {
       noticeError = true;
-      notice = JSON.stringify(response.outcome.detail ?? response.outcome.kind);
-    } else if (response.outcome?.kind === "conflict") { noticeError = true; notice = "The keyboard changed. Review and read this feature again."; }
+      notice = assignmentFailureMessage(response.outcome.detail);
+    }
+    else if (response.outcome?.kind === "failed") {
+      noticeError = true;
+      notice = deviceProblemMessage(response.outcome.detail);
+    }
+    else if (response.outcome?.kind === "picturePreparationFailed") {
+      noticeError = true;
+      notice = `Per-key color preparation failed. ${workflowProblemMessage(response.outcome.detail.problem)}`;
+      if (response.outcome.detail.lightingApplied) notice += " The lighting mode changed; read Lighting before trying again.";
+    }
+    else if (response.outcome?.kind === "catalogFailed") {
+      noticeError = true;
+      notice = `Macro discovery failed: ${response.outcome.detail}`;
+    } else if (response.outcome?.kind === "conflict") { noticeError = true; notice = "The keyboard changed. Review your draft, then use Revert and Read this feature again."; }
     else {
       const saved = {
         saved: "Keymap saved and verified by keyboard readback.",
@@ -102,7 +116,9 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
     const result = handle(JSON.parse(session.dispatch(JSON.stringify(input))), background);
     if (result.ok && !result.command) {
       const messages = {
-        edit: "Draft updated. Save to keyboard when ready.",
+        edit: ["lighting", "picture", "settings"].includes(input.feature)
+          ? "Draft updated. Changes save after 500 ms."
+          : "Draft updated. Save to keyboard when ready.",
         revert: "Draft reverted.",
         initializeMacro: "Empty macro initialized. Add events, then save.",
         importMacroDocument: "Macro document staged. Save to keyboard when ready.",

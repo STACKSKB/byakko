@@ -140,10 +140,89 @@ const tests = [
     assert(reads() === before && h.app.view.observation.queued, "Notification bypassed the editing gate");
     input.dispatchEvent(new Event("change", {bubbles:true}));
     assert(h.app.view.lighting.editor.draft.brightness === 2, "Retained input could not commit");
+    await until(() => !h.app.view.lighting.editor.dirty && !h.app.view.busy);
+    assert(h.app.view.observation.queued, "Focused edit should keep the notification queued");
+    document.getElementById("heading").focus();
     await until(() => !h.app.view.observation.queued && !h.app.view.busy && !h.app.view.lighting.editor.dirty);
     assert(reads() > before, "Observation did not resume after editing");
   }],
-  ["background read completion retains input focus and flushes after leaving", async h => {
+  ["foreground edits and autosave keep the active control and keyboard scroll", async h => {
+    button(h.root, "Lighting").click();
+    const input = fieldControl(h.root, "Brightness");
+    const scroll = h.root.querySelector(".keyboard-scroll");
+    scroll.scrollLeft = 80;
+    let focusouts = 0; input.addEventListener("focusout", () => focusouts++);
+    input.focus(); change(input, "2");
+    assert(input.isConnected && document.activeElement === input, "Foreground edit replaced the active control");
+    await until(() => !h.app.view.lighting.editor.dirty && !h.app.view.busy);
+    assert(input.isConnected && document.activeElement === input, "Autosave replaced the active control");
+    assert(focusouts === 0, "Autosave blurred the active control");
+    assert(h.root.querySelector(".keyboard-scroll").scrollLeft === 80, "Autosave reset the keyboard scroll");
+    document.getElementById("heading").focus(); await tick();
+    assert(fieldControl(h.root, "Brightness").value === "2", "Flushed view lost the saved value");
+    assert(h.root.querySelector(".keyboard-scroll").scrollLeft === 80, "Flushed view reset the keyboard scroll");
+  }],
+  ["lighting mode selection updates its dependent controls without losing focus", async h => {
+    button(h.root, "Lighting").click();
+    const select = fieldControl(h.root, "Lighting mode");
+    const current = h.app.view.lighting.editor.draft.effect;
+    const effect = h.app.view.lighting.capabilities.effects.find(item => item.id !== current && item.options.length);
+    assert(effect, "Missing alternative lighting mode with options");
+    let focusouts = 0; select.addEventListener("focusout", () => focusouts++);
+    select.focus(); change(select, `onboard:${effect.id}`);
+    await until(() => h.app.view.lighting.editor.draft.effect === effect.id);
+    await tick();
+    assert(select.isConnected && document.activeElement === select, "Mode redraw replaced the selected control");
+    assert(focusouts === 0, "Mode redraw closed the focused selector");
+    assert(h.root.querySelector(".panel .card.form-grid select"), "Dependent mode options did not appear");
+  }],
+  ["focused lighting selector follows a fresh device read without losing its node", async h => {
+    button(h.root, "Lighting").click();
+    const select = fieldControl(h.root, "Lighting mode");
+    const current = h.app.view.lighting.editor.draft.effect;
+    const effect = h.app.view.lighting.capabilities.effects.find(item => item.id !== current && item.options.length);
+    assert(effect, "Missing alternative lighting mode");
+    select.focus(); h.device.lighting[1] = Number(effect.id);
+    h.device.lighting[2] = Number(effect.options[0].id);
+    await h.app.intent({type:"read", feature:"lighting"});
+    assert(select.isConnected && document.activeElement === select, "Read replaced the focused mode selector");
+    assert(select.value === `onboard:${effect.id}`, "Focused selector did not follow the newly read mode");
+    assert(h.root.querySelector(".panel .card.form-grid select"), "Read did not update dependent mode controls");
+  }],
+  ["macro composer redraw preserves its type control and open document details", async h => {
+    const documents = [...h.root.querySelectorAll("details")].find(item => item.querySelector("summary")?.textContent === "Import or export macro JSON");
+    assert(documents, "Missing macro document details"); documents.open = true;
+    const select = fieldControl(h.root, "Type");
+    select.focus(); change(select, "Move");
+    assert(select.isConnected && document.activeElement === select, "Composer redraw replaced the type control");
+    assert(fieldControl(h.root, "Horizontal"), "Pointer fields did not replace key fields");
+    assert([...h.root.querySelectorAll("details")].some(item => item.querySelector("summary")?.textContent === "Import or export macro JSON" && item.open), "Document details closed during redraw");
+  }],
+  ["disconnect updates connection and feature controls while a field is focused", async h => {
+    const input = nameInput(h.root, "Keep local name"); input.focus();
+    await h.app.disconnect();
+    assert(h.root.querySelector(".device-name").textContent === "No keyboard connected", "Connection stayed stale during focused edit");
+    assert(button(h.root, "Choose keyboard"), "Reconnect action did not appear");
+    assert(nameInput(h.root).value === "Keep local name", "Disconnect lost local draft");
+  }],
+  ["header and keyboard buttons keep focus through unrelated edits", async h => {
+    const disconnect = button(h.root, "Disconnect");
+    disconnect.focus();
+    await h.app.intent({type:"initializeMacro"});
+    assert(disconnect.isConnected && document.activeElement === disconnect, "Unrelated edit replaced Disconnect");
+    const key = h.root.querySelector("button.key");
+    key.focus();
+    await h.app.intent({type:"read", feature:"lighting"});
+    assert(key.isConnected && document.activeElement === key, "Unrelated read replaced the focused key");
+    const nextKey = h.root.querySelector('button.key[aria-pressed="false"]');
+    nextKey.focus(); nextKey.click();
+    assert(nextKey.isConnected && document.activeElement === nextKey && nextKey.getAttribute("aria-pressed") === "true", "Selecting a key lost keyboard focus");
+    const read = button(h.root, "Read");
+    read.focus();
+    await h.app.intent({type:"edit", feature:"macro", change:{Repeat:1}});
+    assert(read.isConnected && document.activeElement === read, "Unrelated edit replaced Read");
+  }],
+  ["background read completion retains input focus and current controls", async h => {
     const pending = deferred(); let entered = false;
     h.device.beforeReceive = request => {
       if (request[0] === 0x87) { entered = true; return pending.promise; }
@@ -155,7 +234,8 @@ const tests = [
     assert(input.isConnected && document.activeElement === input && input.value === "Unfinished name", "Completion replaced the active edit");
     document.getElementById("heading").focus();
     await tick();
-    assert(!input.isConnected && nameInput(h.root).value === "Unfinished name", "Deferred render did not flush with the draft intact");
+    assert(input.isConnected && nameInput(h.root) === input && input.value === "Unfinished name", "Read completion lost the local draft field");
+    assert(h.app.view.lighting.editor.status === "Ready", "Read completion did not update feature state");
   }],
   ["an import retains newer edits to the same macro", async h => {
     const contents = await documentFor(h.app), pending = deferred();
@@ -257,6 +337,9 @@ const tests = [
     const original = [...h.device.lighting];
     change(fieldControl(h.root, "Lighting mode"), `host:${mode.id}`);
     button(h.root, "Start host lighting").click(); await until(() => h.app.view.host.phase === "Active");
+    const headerStop = button(h.root, "Stop host lighting");
+    headerStop.focus(); change(fieldControl(h.root, "Screen sample"), "point");
+    assert(headerStop.isConnected && document.activeElement === headerStop, "Host option update replaced the header Stop control");
     button(h.root, "Stop and restore").click(); await until(() => h.app.view.host.phase === "Idle");
     assert(h.captures.length === 1 && h.captures[0].stopped, "Capture lifecycle did not stop");
     assert(JSON.stringify([...h.device.lighting]) === JSON.stringify(original), "Host stop did not restore exact onboard bytes");
@@ -300,6 +383,16 @@ const tests = [
     assert(status.classList.contains('error'), "Read failure was not marked");
     h.notify();
     assert(status.textContent === message && status.classList.contains('error'), "Notification erased failure severity");
+  }],
+  ["feature attention remains after an unrelated global notice", async h => {
+    h.device.beforeReceive = request => { if (request[0] === 0x87) throw new Error("Lighting read failed"); };
+    await h.app.intent({type:"read", feature:"lighting"});
+    button(h.root, "Lighting").click();
+    const attention = h.root.querySelector(".editor-attention");
+    assert(attention?.textContent.includes("Lighting could not be read"), "Lighting failure lacks feature guidance");
+    await h.app.intent({type:"initializeMacro"});
+    assert(h.root.querySelector(".status").textContent.includes("Empty macro initialized"), "Unrelated notice did not replace global status");
+    assert(h.root.querySelector(".editor-attention")?.textContent.includes("Lighting could not be read"), "Unrelated notice erased feature guidance");
   }],
   ["closing or cancelling the discard dialog settles its pending action", async h => {
     const discard = createDiscardDialog({doc:document, win:window});

@@ -13,6 +13,7 @@ import { createRecorder } from "./recorder.mjs";
 import { needsInitialRead } from "./settings_view.mjs";
 import { createAppearance } from "./appearance.mjs";
 import { transportLabel } from "./transport.mjs";
+import { editorAttention } from "./editor-attention.mjs";
 
 // Composition, navigation and DOM focus belong here; features and effects have their own owners.
 export function mount(root, {codec, hid, storage, now = () => performance.now(), wait, prepareHost} = {}) {
@@ -20,13 +21,13 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
     throw new Error("The browser session, WebHID and backup storage are required.");
   }
   const doc = root.ownerDocument, win = doc.defaultView ?? globalThis;
-  let disposed = false, destroying = null, pendingRender = false, settingsAutoRead = false;
+  let disposed = false, destroying = null, settingsAutoRead = false;
   const runtime = createRuntime({codec, hid, storage, now, wait, prepareHost, win,
-    changed: background => render(background), isEditing: focusedForm,
+    changed: () => render(), isEditing: focusedForm,
     connected: (device, generation) => macros.connected(device, generation),
     disconnected: () => { settingsAutoRead = false; recorder.reset(); macros.disconnected(); },
   });
-  let tab = "keymap", layer = runtime.view.descriptor.layers[0]?.id, key = runtime.view.descriptor.keys[0]?.id;
+  let tab = "keymap", renderedTarget = null, layer = runtime.view.descriptor.layers[0]?.id, key = runtime.view.descriptor.keys[0]?.id;
   const recorder = createRecorder({doc, win, runtime, now, redraw: render});
   const keymap = createKeymapForm({doc, runtime});
   const settings = createSettingsForm({doc, runtime});
@@ -46,6 +47,7 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   mark.src = "assets/byakko.svg"; mark.alt = "";
   brand.append(mark, node(doc, "strong", "Byakko"), node(doc, "small", "Keyboard configurator"));
   const connection = node(doc, "div", undefined, "connection");
+  let connectionParts = null;
   const workspace = node(doc, "div", undefined, "workspace");
   const sidebar = node(doc, "nav", undefined, "sidebar");
   sidebar.setAttribute("aria-label", "Features");
@@ -82,63 +84,189 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   }
   function renderConnection() {
     const {device, connecting, closing, writes, listener, notificationStatus} = runtime.connection;
-    connection.replaceChildren();
-    const identity = node(doc, "span", device ? `Nia87 · ${transportLabel(device)} connected` : "No keyboard connected", device ? "device-name connected" : "device-name");
-    if (device) identity.title = `${device.productName || "Nia87"} · ${device.vendorId.toString(16)}:${device.productId.toString(16)}`;
-    connection.append(identity);
-    if (device) {
-      const live = node(doc, "span", listener ? "Live updates" : notificationStatus || "Use Read to refresh", listener ? "live-status" : "live-status unavailable");
-      live.title = notificationStatus; connection.append(live);
-    } else connection.append(button(doc, connecting ? "Connecting…" : "Choose keyboard", () => runtime.connect(), Boolean(connecting || closing), "primary"));
-    if (runtime.hostBusy) {
-      const stop = button(doc, runtime.host.phase === "Stopping" ? "Restoring…" : "Stop host lighting", () => void lighting.stopHost(), closing || runtime.host.phase === "Stopping", "host-stop");
-      stop.dataset.hostStop = "true";
-      connection.append(stop);
+    if (!connectionParts) {
+      const identity = node(doc, "span", undefined, "device-name");
+      const live = node(doc, "span", undefined, "live-status");
+      const choose = button(doc, "Choose keyboard", () => runtime.connect(), false, "primary");
+      const stop = button(doc, "Stop host lighting", () => void lighting.stopHost(), false, "host-stop"); stop.dataset.hostStop = "true";
+      const disconnect = button(doc, "Disconnect", () => void runtime.disconnect());
+      connectionParts = {identity, live, choose, stop, disconnect};
+      connection.append(identity);
     }
-    if (device) connection.append(button(doc, "Disconnect", () => void runtime.disconnect(), Boolean(writes || closing || connecting)));
+    const {identity, live, choose, stop, disconnect} = connectionParts;
+    identity.textContent = device ? `Nia87 · ${transportLabel(device)} connected` : "No keyboard connected";
+    identity.classList.toggle("connected", Boolean(device));
+    identity.title = device ? `${device.productName || "Nia87"} · ${device.vendorId.toString(16)}:${device.productId.toString(16)}` : "";
+    live.textContent = listener ? "Live updates" : notificationStatus || "Use Read to refresh";
+    live.classList.toggle("unavailable", !listener);
+    live.title = notificationStatus;
+    choose.textContent = connecting ? "Connecting…" : "Choose keyboard";
+    choose.disabled = Boolean(connecting || closing);
+    stop.textContent = runtime.host.phase === "Stopping" ? "Restoring…" : "Stop host lighting";
+    stop.disabled = closing || runtime.host.phase === "Stopping";
+    disconnect.disabled = Boolean(writes || closing || connecting);
+    if (device) {
+      choose.remove();
+      if (!live.isConnected) connection.append(live);
+      if (!disconnect.isConnected) connection.append(disconnect);
+    } else {
+      live.remove(); disconnect.remove();
+      if (!choose.isConnected) connection.append(choose);
+    }
+    if (runtime.hostBusy) {
+      if (!stop.isConnected) connection.insertBefore(stop, disconnect.isConnected ? disconnect : null);
+    } else stop.remove();
   }
 
   function renderSidebar(view) {
     appearance.button.disabled = view.recording;
-    sidebar.replaceChildren(node(doc, "p", "Configure", "eyebrow"));
+    if (!sidebar.hasChildNodes()) {
+      sidebar.append(node(doc, "p", "Configure", "eyebrow"));
+      for (const id of ["keymap", "macros", "lighting", "settings", "diagnostics"]) {
+        const item = button(doc, "", () => navigate(id), false, "nav-item");
+        item.dataset.feature = id;
+        sidebar.append(item);
+      }
+      const tools = node(doc, "div", undefined, "sidebar-tools");
+      const backupsButton = button(doc, "View backups", () => void backups.show());
+      backupsButton.dataset.backups = "true";
+      tools.append(appearance.button, backupsButton);
+      sidebar.append(tools);
+    }
     for (const [id, label] of [["keymap", "Keymap"], ["macros", "Macros"], ["lighting", "Lighting"], ["settings", "Settings"], ["diagnostics", "Diagnostics"]]) {
       const dirty = editable(id === "macros" ? view.macros : view[id])?.dirty;
-      const item = button(doc, `${label}${dirty ? " •" : ""}`, () => navigate(id), false, tab === id ? "nav-item active" : "nav-item");
-      item.setAttribute("aria-current", tab === id ? "page" : "false"); sidebar.append(item);
+      const item = [...sidebar.querySelectorAll(".nav-item")].find(element => element.dataset.feature === id);
+      item.textContent = `${label}${dirty ? " •" : ""}`;
+      item.classList.toggle("active", tab === id);
+      item.setAttribute("aria-current", tab === id ? "page" : "false");
     }
-    const tools = node(doc, "div", undefined, "sidebar-tools");
-    tools.append(appearance.button, button(doc, "View backups", () => void backups.show(), view.recording));
-    sidebar.append(tools);
+    sidebar.querySelector("[data-backups]").disabled = view.recording;
   }
-  function render(background = false) {
-    if (disposed) return;
-    renderConnection();
-    status.textContent = runtime.notice.message;
-    status.classList.toggle("error", runtime.notice.error);
-    // Preserve the real input and its unfinished value across asynchronous observations/completions.
-    if (background && focusedForm()) pendingRender = true;
-    else {
-      pendingRender = false;
-      const view = runtime.view, selection = {tab, layer, key};
-      renderSidebar(view);
-      board.render(keyboard, view, selection, macros.names, lighting);
-      panel.replaceChildren();
-      if (tab === "keymap") keymap.render(panel, view, selection, macros.names);
-      else if (tab === "macros") macros.render(panel, view, selection);
-      else if (tab === "lighting") lighting.render(panel, view, selection);
-      else if (tab === "settings") settings.render(panel, view);
-      else diagnostics.render(panel, view);
-      if (runtime.host.phase === "Preparing") {
-        for (const control of [...panel.querySelectorAll("button,input,select"), ...keyboard.querySelectorAll("button")]) {
-          if (!control.dataset.hostStop) control.disabled = true;
-        }
+  function renderAttention(target, view) {
+    const features = tab === "lighting" ? ["lighting", "picture"] : tab === "macros" ? ["macros", "keymap"] : [tab];
+    const messages = features.flatMap(feature => {
+      const message = editorAttention(editable(view[feature]), feature);
+      return message ? [message] : [];
+    });
+    let attention = target.querySelector(".editor-attention");
+    if (!messages.length) { attention?.remove(); return; }
+    if (!attention) {
+      attention = node(doc, "div", undefined, "editor-attention");
+      attention.setAttribute("role", "alert");
+      target.insertBefore(attention, target.children[2] ?? null);
+    }
+    attention.replaceChildren(...messages.map(message => node(doc, "p", message)));
+  }
+  function controlIdentity(control) {
+    if (control.tagName === "BUTTON") {
+      if (control.dataset.key) return `KEY:${control.dataset.key}`;
+      if (control.dataset.featureAction) return `ACTION:${control.dataset.featureAction}`;
+      if (control.classList.contains("host-stop")) return "ACTION:host-stop";
+      return control.textContent ? `BUTTON:${control.textContent}` : null;
+    }
+    const label = control.getAttribute("aria-label") ?? control.closest("label.field")?.querySelector("span")?.textContent
+      ?? control.closest("label")?.textContent ?? control.getAttribute("placeholder");
+    if (!label) return null;
+    return `${control.tagName}:${control.type}:${label.replace(/ · \d+$/, "")}`;
+  }
+  function preserveActiveControl(oldRegion, newRegion, active) {
+    if (!oldRegion.contains(active)) return false;
+    const identity = controlIdentity(active);
+    if (!identity) return false;
+    const matches = [...newRegion.querySelectorAll("input,select,textarea,button")].filter(item => controlIdentity(item) === identity);
+    if (matches.length !== 1) return false;
+    const counterpart = matches[0];
+    const path = (element, root) => {
+      const ancestors = [];
+      while (element !== root) { ancestors.unshift(element); element = element.parentNode; }
+      return ancestors;
+    };
+    const current = path(active, oldRegion), updated = path(counterpart, newRegion);
+    if (current.length !== updated.length || current.some((element, index) => element.tagName !== updated[index].tagName)) return false;
+    let oldParent = oldRegion, newParent = newRegion;
+    for (let index = 0; index < current.length; index++) {
+      const oldChild = current[index], newChild = updated[index];
+      const oldSiblings = [...oldParent.childNodes].filter(node => node !== oldChild);
+      const newSiblings = [...newParent.childNodes];
+      const pivot = newSiblings.indexOf(newChild);
+      for (const sibling of newSiblings.slice(0, pivot)) oldParent.insertBefore(sibling, oldChild);
+      const after = oldChild.nextSibling;
+      for (const sibling of newSiblings.slice(pivot + 1)) oldParent.insertBefore(sibling, after);
+      for (const sibling of oldSiblings) sibling.remove();
+      oldChild.className = newChild.className;
+      oldParent = oldChild; newParent = newChild;
+    }
+    active.disabled = counterpart.disabled;
+    if (active.tagName === "BUTTON") {
+      active.replaceChildren(...counterpart.childNodes);
+      active.title = counterpart.title;
+      active.style.cssText = counterpart.style.cssText;
+      for (const name of ["aria-label", "aria-pressed"]) {
+        if (counterpart.hasAttribute(name)) active.setAttribute(name, counterpart.getAttribute(name));
+        else active.removeAttribute(name);
       }
     }
+    if (active.type === "checkbox" || active.type === "radio") active.checked = counterpart.checked;
+    for (const name of ["min", "max", "step", "aria-label"]) {
+      if (counterpart.hasAttribute(name)) active.setAttribute(name, counterpart.getAttribute(name));
+      else active.removeAttribute(name);
+    }
+    if (active.tagName === "SELECT") {
+      if (active.options.length !== counterpart.options.length || [...active.options].some((option, index) =>
+          option.value !== counterpart.options[index]?.value || option.textContent !== counterpart.options[index]?.textContent)) {
+        active.replaceChildren(...counterpart.childNodes);
+      }
+      active.value = counterpart.value;
+    }
+    return true;
+  }
+  function render() {
+    if (disposed) return;
+    status.textContent = runtime.notice.message;
+    status.classList.toggle("error", runtime.notice.error);
+    const view = runtime.view, selection = {tab, layer, key};
+    const active = doc.activeElement;
+    const keyboardScroll = keyboard.querySelector(".keyboard-scroll")?.scrollLeft ?? 0;
+    const sidebarScroll = sidebar.scrollTop;
+    const pageScroll = doc.scrollingElement?.scrollTop;
+    const openDetails = new Set([...panel.querySelectorAll("details[open] summary")].map(summary => summary.textContent));
+    const listScroll = panel.querySelector(".slot-list")?.scrollTop ?? 0;
+    const nextKeyboard = node(doc, "div");
+    const nextPanel = node(doc, "section");
+    board.render(nextKeyboard, view, selection, macros.names, lighting);
+    if (tab === "keymap") keymap.render(nextPanel, view, selection, macros.names);
+    else if (tab === "macros") macros.render(nextPanel, view, selection);
+    else if (tab === "lighting") lighting.render(nextPanel, view, selection);
+    else if (tab === "settings") settings.render(nextPanel, view);
+    else diagnostics.render(nextPanel, view);
+    renderAttention(nextPanel, view);
+    for (const details of nextPanel.querySelectorAll("details")) {
+      if (openDetails.has(details.querySelector("summary")?.textContent)) details.open = true;
+    }
+    const target = {tab, layer, key, slot: view.macros?.slot, generation: view.connection.generation, connection: view.connection.kind};
+    const sameTarget = renderedTarget && Object.keys(target).every(field => target[field] === renderedTarget[field]);
+    const sameKeyboardTarget = renderedTarget && ["tab", "layer", "generation", "connection"]
+      .every(field => target[field] === renderedTarget[field]);
+    const keptKeyboard = sameKeyboardTarget && preserveActiveControl(keyboard, nextKeyboard, active);
+    const keptPanel = !keptKeyboard && sameTarget && preserveActiveControl(panel, nextPanel, active);
+    renderConnection();
+    renderSidebar(view);
+    if (!keptKeyboard) keyboard.replaceChildren(...nextKeyboard.childNodes);
+    if (!keptPanel) panel.replaceChildren(...nextPanel.childNodes);
+    renderedTarget = target;
+    keyboard.querySelector(".keyboard-scroll").scrollLeft = keyboardScroll;
+    sidebar.scrollTop = sidebarScroll;
+    if (panel.querySelector(".slot-list")) panel.querySelector(".slot-list").scrollTop = listScroll;
+    if (runtime.host.phase === "Preparing") {
+      for (const control of [...panel.querySelectorAll("button,input,select"), ...keyboard.querySelectorAll("button")]) {
+        if (!control.dataset.hostStop) control.disabled = true;
+      }
+    }
+    if (pageScroll !== undefined) doc.scrollingElement.scrollTop = pageScroll;
     maybeReadSettings();
   }
   const focusOut = () => { win.setTimeout(() => {
     if (disposed) return;
-    if (pendingRender && !focusedForm()) render();
     runtime.scheduleObservation();
   }, 0); };
   const unloading = event => {

@@ -5,6 +5,8 @@ import { readFile } from "node:fs/promises";
 import * as codec from "./pkg/byakko_web.js";
 import { DeviceExecutor } from "./executor.mjs";
 import { TestDevice, TestStore } from "./test-device.mjs";
+import { assignmentFailureMessage } from "./outcome-message.mjs";
+import { editorAttention } from "./editor-attention.mjs";
 
 await codec.default({ module_or_path: await readFile(new URL("./pkg/byakko_web_bg.wasm", import.meta.url)) });
 
@@ -102,6 +104,28 @@ test("slot49 macro save and assign uses five safe pages, one readback, and core 
   assert.equal(reads(h.device).filter(call => call.opcode === 0x8b).length, 4);
   assert(h.device.calls.some(call => call.kind === "wait" && call.ms === 2030));
   assert.deepEqual([...h.device.base.slice(36, 40)], [9, 0, 49, 0]);
+  assert.equal(h.store.records.length, 2);
+});
+
+test("a failed key assignment reports the saved macro and retains keymap recovery guidance", async () => {
+  const h = harness();
+  await h.send({ type: "connect" });
+  await h.send({ type: "read", feature: "keymap" });
+  await h.send({ type: "read", feature: "macro" });
+  await h.send({ type: "initializeMacro" });
+  await h.send({ type: "edit", feature: "macro", change: { Insert: { at: 0, event: { action: { Key: { usage: 4, pressed: true } }, delay_ms: 10 } } } });
+  let failed = false;
+  h.device.beforeSend = report => {
+    if (report[0] === 0x13 && !failed) { failed = true; throw new Error("Synthetic keymap write failure"); }
+  };
+  const result = await h.send({ type: "saveAndAssignMacro", layer: "base", key: "slot-009", binding: "counted" });
+  assert.equal(result.outcome.kind, "assignmentFailed");
+  assert.equal(result.outcome.detail.macroSaved, true);
+  assert.equal(h.view().macros.editor.dirty, false);
+  const message = assignmentFailureMessage(result.outcome.detail);
+  assert.match(message, /^Macro saved and verified, but assignment to the key failed/);
+  assert.doesNotMatch(message, /\{"|Device\(/);
+  assert.match(editorAttention(h.view().keymap, "keymap"), /Your draft is retained|needs a read/);
   assert.equal(h.store.records.length, 2);
 });
 
