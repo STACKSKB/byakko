@@ -11,7 +11,7 @@ receiver or paired board.
 On the tested Windows setup, choose the `3151:4011` receiver configuration
 collection (`MI_02`, usage page `FFFF`, usage `2`). Its feature report is 65
 bytes in the native HID API, including the leading report-ID byte. The paired
-keyboard was validated once at connection as board `0x095f`, firmware `0x0100`,
+keyboard was identified as board `0x095f`, firmware `0x0100`,
 profile 0. Do not infer pairing or write support from the receiver VID/PID
 alone. Use the exact receiver shown by the chooser; Byakko does not switch to
 another granted device.
@@ -19,7 +19,7 @@ another granted device.
 The relay checks receiver status before each keyboard command. If the paired
 keyboard is asleep or offline, press a key on it and retry with Read or reconnect.
 If status reports an unread reply from an earlier operation, Byakko rejects the
-next logical command. Unplug and reconnect the receiver to clear that uncertain
+next logical command. Reconnect the receiver before retrying that uncertain
 session; Byakko does not drain, retry or periodically poll feature reports in
 the background.
 
@@ -35,13 +35,14 @@ The bounded read exchange is:
    keyboard response.
 
 The identity request uses the same selected-keyboard exchange once at
-connection. An ordinary feature read gets its own exchange. Timeouts fail the
+the selected device worker's first operation, with the result retained until
+explicit reconnect. An ordinary feature read gets its own exchange. Timeouts fail the
 operation; there is no automatic retry or idle drain. These bounds apply to
 the relay wait, not to an arbitrary firmware response guarantee.
 
 ## Writes and evidence
 
-Before each setter, Byakko saves the cached feature before-image and follows
+Before each feature write, Byakko saves the cached feature before-image and follows
 the established feature pacing. Keymap, macro and settings writes get one
 feature readback. Ordinary global-lighting and per-key picture setters finish
 on transport acceptance after pacing; they do not trigger an automatic getter.
@@ -62,7 +63,9 @@ cross-feature comparison could not run because the paired keyboard was asleep.
 The relay wait is now bounded at 20 polls (about two seconds); longer-window
 physical post-set acceptance remains pending. Browser WASM tests cover a
 simulated relay only, not physical WebHID on this receiver. Receiver host-lighting
-streams remain blocked as unverified. Browser receiver notification delivery remains disabled. Native input notifications remain unverified until an actual event is observed. Linux builds and descriptor
+streams remain blocked as unverified. Browser receiver notification delivery
+remains disabled. Native input notifications remain unverified until an actual
+event is observed. Linux builds and descriptor
 checks do not establish physical receiver access or a working udev grant.
 
 See [pre-alpha support](pre-alpha-support.md), the

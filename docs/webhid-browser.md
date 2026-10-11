@@ -175,12 +175,12 @@ use simulated WebHID and storage effects.
 Limited physical checks have covered an initial keyboard read, keymap remapping,
 global and per-key lighting changes, a macro save-and-assign, onboard input
 notifications and restoration of the tested values. This evidence applies only
-to the tested Nia87 and operations. A separate Windows receiver check passed
+to the tested Nia87 and operations. A separate native Windows receiver check passed
 bounded feature reads and a visible RGB check, with the limits and unresolved
 post-set acceptance recorded in [receiver evidence](nia87-receiver.md). Browser
 WASM relay tests are simulated; physical receiver WebHID, receiver host lighting,
 settings writes, fault recovery, power-cycle persistence, standalone browser
-variants and Linux receiver access still need acceptance. A simulated control
+variants and Linux WebHID still need acceptance. A simulated control
 test or successful transport call does not establish visible hardware output.
 
 The browser backup viewer offers read-only JSON and Download for recovery
