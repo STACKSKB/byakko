@@ -1,7 +1,7 @@
 use super::apply_error::{
     ApplyResult, RestoreFailure, RestoreResult, keymap_apply_error, not_attempted,
 };
-use super::transaction::{apply_with_recovery, pacing, save_json_backup};
+use super::transaction::{after_prior_setter, apply_with_recovery, pacing, save_json_backup};
 use super::*;
 
 fn read_matrix(device: &HidDevice, opcode: u8, index: u8) -> Result<Vec<[u8; 4]>> {
@@ -134,15 +134,20 @@ pub(super) fn apply_keymaps_with(
         || -> Result<Snapshot> {
             // The official helper's captured final HID report for a Fn binding is
             // the single-key 0x15 command with index 0.
+            let mut prior_setter_sent = false;
             for &(is_fn, slot, _, new) in &changes {
                 if is_fn {
                     continue;
                 }
-                write_binding(&device, false, expected.profile, slot, new)?;
+                write_binding(&device, false, expected.profile, slot, new)
+                    .map_err(|error| after_prior_setter(error, prior_setter_sent))?;
+                prior_setter_sent = true;
             }
             for &(is_fn, slot, _, new) in &changes {
                 if is_fn {
-                    write_binding(&device, true, 0, slot, new)?;
+                    write_binding(&device, true, 0, slot, new)
+                        .map_err(|error| after_prior_setter(error, prior_setter_sent))?;
+                    prior_setter_sent = true;
                 }
             }
             let actual = snapshot_on_device(&device)?;

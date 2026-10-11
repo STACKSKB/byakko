@@ -5,7 +5,8 @@
 //! substitutes another keyboard. Feature-specific reads, comparisons, and
 //! recovery plans remain in their feature modules.
 use super::Result;
-use super::apply_error::{ApplyResult, RestoreFailure, RestoreResult};
+use super::apply_error::{ApplyResult, RestoreFailure, RestoreResult, not_attempted};
+use super::transport::SetterNotAttempted;
 use serde::Serialize;
 use std::fmt;
 use std::io::Write;
@@ -90,6 +91,50 @@ pub(super) fn save_encoded_backup(
     })
 }
 
+/// A later page may fail before its own logical send while an earlier setter
+/// has already changed the device. Keep that progress typed for recovery.
+#[derive(Debug)]
+struct EarlierSetterSent {
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl fmt::Display for EarlierSetterSent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.source, f)
+    }
+}
+
+impl std::error::Error for EarlierSetterSent {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+pub(super) fn after_prior_setter(
+    error: Box<dyn std::error::Error + Send + Sync>,
+    prior_sent: bool,
+) -> Box<dyn std::error::Error + Send + Sync> {
+    if prior_sent {
+        Box::new(EarlierSetterSent { source: error })
+    } else {
+        error
+    }
+}
+
+pub(super) fn no_logical_setter_sent(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut current = Some(error);
+    while let Some(cause) = current {
+        if cause.is::<EarlierSetterSent>() {
+            return false;
+        }
+        if cause.is::<SetterNotAttempted>() {
+            return true;
+        }
+        current = cause.source();
+    }
+    false
+}
+
 /// Run the feature's setter and single verification, then its precise
 /// restoration plan on failure. The backup must already be durable. The
 /// feature supplies its existing error formatter to retain recovery wording.
@@ -102,6 +147,12 @@ pub(super) fn apply_with_recovery<T>(
     match apply() {
         Ok(value) => Ok(value),
         Err(cause) => {
+            if no_logical_setter_sent(cause.as_ref()) {
+                return Err(not_attempted(format!(
+                    "{cause}; backup {}",
+                    backup.path().display()
+                )));
+            }
             let recovery = restore();
             Err(error(cause.as_ref(), recovery, backup.path()))
         }
@@ -258,6 +309,50 @@ mod tests {
             assert!(failure.message.contains("readback mismatch"));
             assert!(failure.message.contains("before.json"));
         }
+    }
+
+    #[test]
+    fn receiver_rejection_before_first_setter_skips_restore_but_later_page_recovers() {
+        use byakko_protocol::nia87::receiver::RelayError;
+        let backup = DurableBackup {
+            path: "before.json".into(),
+            stamp: 1,
+        };
+        for (prior_sent, expected) in [(false, Recovery::NotAttempted), (true, Recovery::Verified)]
+        {
+            let mut restored = false;
+            let failure = apply_with_recovery::<()>(
+                &backup,
+                || {
+                    let rejected =
+                        Box::new(SetterNotAttempted::new(RelayError::KeyboardOffline.into()));
+                    Err(after_prior_setter(rejected, prior_sent))
+                },
+                || {
+                    restored = true;
+                    Ok(())
+                },
+                macro_apply_error,
+            )
+            .unwrap_err();
+            assert_eq!(failure.recovery, expected);
+            assert_eq!(restored, prior_sent);
+            assert!(failure.message.contains("before.json"));
+        }
+
+        let mut restored = false;
+        let failure = apply_with_recovery::<()>(
+            &backup,
+            || Err("logical send failed after submission".into()),
+            || {
+                restored = true;
+                Ok(())
+            },
+            macro_apply_error,
+        )
+        .unwrap_err();
+        assert_eq!(failure.recovery, Recovery::Verified);
+        assert!(restored, "uncertain logical sends still require recovery");
     }
 
     #[test]

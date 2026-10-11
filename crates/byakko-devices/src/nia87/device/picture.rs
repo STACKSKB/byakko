@@ -1,5 +1,5 @@
 use super::apply_error::{ApplyResult, not_attempted, picture_submit_error};
-use super::transaction::{pacing, save_json_backup};
+use super::transaction::{no_logical_setter_sent, pacing, save_json_backup};
 use super::*;
 
 /// Read the current custom lighting picture as 128 matrix-indexed RGB values.
@@ -109,13 +109,21 @@ fn submit_picture_reports(
     mut send: impl FnMut(&[u8; 65]) -> Result<()>,
     mut schedule: impl FnMut(),
 ) -> ApplyResult<()> {
+    let mut prior_setter_sent = false;
     for report in reports {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(report);
         schedule();
         if let Err(error) = send(&host) {
+            if !prior_setter_sent && no_logical_setter_sent(error.as_ref()) {
+                return Err(not_attempted(format!(
+                    "{error}; backup {}",
+                    backup.display()
+                )));
+            }
             return Err(picture_submit_error(error.as_ref(), backup));
         }
+        prior_setter_sent = true;
     }
     Ok(())
 }
@@ -177,6 +185,36 @@ mod tests {
         assert!(failure.message.contains("no automatic restore"));
         assert_eq!(sends, 3);
         assert_eq!(schedules.get(), 3);
+    }
+
+    #[test]
+    fn receiver_offline_before_first_picture_page_has_no_restore_uncertainty() {
+        use super::super::transport::SetterNotAttempted;
+        use byakko_protocol::nia87::receiver::RelayError;
+        let reports = [[0; 64]; 7];
+        for (failed_page, expected) in [(0, Recovery::NotAttempted), (2, Recovery::Unverified)] {
+            let mut sends = 0;
+            let failure = submit_picture_reports(
+                &reports,
+                std::path::Path::new("before.json"),
+                |_| {
+                    let page = sends;
+                    sends += 1;
+                    if page == failed_page {
+                        Err(Box::new(SetterNotAttempted::new(
+                            RelayError::KeyboardOffline.into(),
+                        )))
+                    } else {
+                        Ok(())
+                    }
+                },
+                || {},
+            )
+            .unwrap_err();
+            assert_eq!(failure.recovery, expected);
+            assert_eq!(sends, failed_page + 1);
+            assert!(failure.message.contains("before.json"));
+        }
     }
 
     #[test]

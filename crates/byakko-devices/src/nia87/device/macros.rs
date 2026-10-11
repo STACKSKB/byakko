@@ -1,5 +1,7 @@
 use super::apply_error::{ApplyResult, macro_apply_error, not_attempted};
-use super::transaction::{VerifiedStep, apply_roundtrip, pacing, save_json_backup};
+use super::transaction::{
+    VerifiedStep, after_prior_setter, apply_roundtrip, pacing, save_json_backup,
+};
 use super::transport::FeatureSetter;
 use super::{HidDevice, Result, Selection, Session, read_payload, transaction_lock};
 use serde_json;
@@ -27,20 +29,61 @@ pub(super) fn read_macro_on_device(device: &HidDevice, slot: u8) -> Result<Vec<u
     })
 }
 
-pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
+#[derive(Debug)]
+struct MacroPageError {
+    slot: u8,
+    page: usize,
+    source: Box<dyn std::error::Error + Send + Sync>,
+}
+
+impl std::fmt::Display for MacroPageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Macro {}, write page {}: {}",
+            self.slot, self.page, self.source
+        )
+    }
+}
+
+impl std::error::Error for MacroPageError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+fn submit_macro_bytes(
+    slot: u8,
+    bytes: &[u8],
+    mut send: impl FnMut(&[u8; 65]) -> Result<()>,
+    mut wait: impl FnMut(std::time::Duration),
+) -> Result<()> {
+    let mut prior_setter_sent = false;
     for (page, report) in byakko_protocol::nia87::macros::write_reports(slot, bytes)?
         .into_iter()
         .enumerate()
     {
         let mut host = [0u8; 65];
         host[1..].copy_from_slice(&report);
-        device
-            .send_setter(&host)
-            .map_err(|error| format!("Macro {slot}, write page {page}: {error}"))?;
-        std::thread::sleep(pacing::MACRO_PAGE);
+        send(&host).map_err(|error| MacroPageError {
+            slot,
+            page,
+            source: after_prior_setter(error, prior_setter_sent),
+        })?;
+        prior_setter_sent = true;
+        wait(pacing::MACRO_PAGE);
     }
-    std::thread::sleep(pacing::MACRO_SETTLE);
+    wait(pacing::MACRO_SETTLE);
     Ok(())
+}
+
+pub(super) fn write_macro_bytes(device: &HidDevice, slot: u8, bytes: &[u8]) -> Result<()> {
+    submit_macro_bytes(
+        slot,
+        bytes,
+        |report| device.send_setter(report),
+        std::thread::sleep,
+    )
 }
 
 pub fn apply_macro(
@@ -99,4 +142,44 @@ pub(super) fn apply_macro_validated_with(
         || read_macro_on_device(&device, slot),
         macro_apply_error,
     )
+}
+
+#[cfg(test)]
+mod submit_tests {
+    use super::super::transaction::no_logical_setter_sent;
+    use super::super::transport::SetterNotAttempted;
+    use super::*;
+    use byakko_protocol::nia87::receiver::RelayError;
+
+    #[test]
+    fn receiver_offline_on_first_macro_page_differs_from_later_page() {
+        let bytes = [0; 256];
+        for failed_page in [0, 2] {
+            let mut sends = 0;
+            let error = submit_macro_bytes(
+                3,
+                &bytes,
+                |_| {
+                    let page = sends;
+                    sends += 1;
+                    if page == failed_page {
+                        Err(Box::new(SetterNotAttempted::new(
+                            RelayError::KeyboardOffline.into(),
+                        )))
+                    } else {
+                        Ok(())
+                    }
+                },
+                |_| {},
+            )
+            .unwrap_err();
+            assert_eq!(sends, failed_page + 1);
+            assert_eq!(no_logical_setter_sent(error.as_ref()), failed_page == 0);
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("Macro 3, write page {failed_page}"))
+            );
+        }
+    }
 }
