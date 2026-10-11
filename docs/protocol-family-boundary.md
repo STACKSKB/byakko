@@ -74,7 +74,9 @@ support follows Nia87 through the device contract rather than sharing this
 OEM's packet representation.
 
 USB cable and 2.4 GHz receiver access are transport variants, not command
-families. The receiver's settings relay must be discovered and validated on the
-connected hardware; a matching board name cannot imply that its receiver
-forwards reads or safely accepts writes. USB remains the only supported Nia87
-configuration transport until those observations exist.
+families. On one Windows `3151:4011` receiver paired to Nia87 board `0x095f`,
+bounded reads through the status/route/release relay have been observed. The
+receiver wraps ordinary Nia87 commands; it does not give another paired board
+Nia87 capabilities. Setter completion and platform acceptance remain limited
+as recorded in [receiver evidence](nia87-receiver.md). Do not generalize these
+observations to other receivers, pairings or command families.
