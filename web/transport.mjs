@@ -7,6 +7,14 @@ export const filters = [0x4011, 0x4015].map(productId => ({
 // returned alongside configuration. Each interface is still validated below.
 export const selectionFilters = filters.map(({ vendorId, productId }) => ({ vendorId, productId }));
 
+export function transportLabel(device) {
+  switch (device.productId) {
+    case 0x4011: return "2.4 GHz receiver";
+    case 0x4015: return "USB";
+    default: throw new HidError("unsupported", "This is not a supported Nia87 transport.");
+  }
+}
+
 export class HidError extends Error {
   constructor(code, message, cause) {
     super(message, { cause });

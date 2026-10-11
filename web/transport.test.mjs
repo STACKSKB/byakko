@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import * as codec from "./pkg/byakko_web.js";
-import { filters, selectDevice, validateDevice, payloadFromView } from "./transport.mjs";
+import { filters, selectDevice, validateDevice, payloadFromView, transportLabel } from "./transport.mjs";
 
 await codec.default({ module_or_path: await readFile(new URL("./pkg/byakko_web_bg.wasm", import.meta.url)) });
 
@@ -38,6 +38,28 @@ test("the selected Nia87 vendor collection has one unnumbered 64-byte feature re
   const alternate = device();
   alternate.productId = 0x4015;
   assert.equal(selectDevice([alternate]), alternate);
+});
+
+test("receiver and wired selections identify their transport without relaxing collection validation", () => {
+  const receiver = device();
+  const wired = device();
+  wired.productId = 0x4015;
+  assert.equal(transportLabel(selectDevice([receiver])), "2.4 GHz receiver");
+  assert.equal(transportLabel(selectDevice([wired])), "USB");
+  assert.throws(() => transportLabel({ productId: 0x4012 }), { code: "unsupported" });
+
+  const missingConfiguration = device();
+  missingConfiguration.collections[0].usage = 1;
+  assert.throws(() => selectDevice([missingConfiguration]), { code: "selection" });
+  const wrongReportId = device();
+  wrongReportId.collections[0].featureReports[0].reportId = 5;
+  assert.throws(() => selectDevice([wrongReportId]), { code: "report-shape" });
+  const wrongWidth = device();
+  wrongWidth.collections[0].featureReports[0].items[0].reportCount = 65;
+  assert.throws(() => selectDevice([wrongWidth]), { code: "report-shape" });
+  const ambiguous = device();
+  ambiguous.collections.push(structuredClone(ambiguous.collections[0]));
+  assert.throws(() => selectDevice([ambiguous]), { code: "collection" });
 });
 
 test("the Rust codec emits only the three supported exact read headers", () => {
