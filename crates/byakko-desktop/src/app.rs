@@ -138,6 +138,13 @@ impl App {
         {
             self.tester.pause();
         }
+        if let Message::Tester(
+            completion @ (tester::Message::Sources(_) | tester::Message::Usb { .. }),
+        ) = message
+        {
+            self.tester.update(completion);
+            return Task::none();
+        }
         if let Message::DeviceEvent(event) = message {
             if self.session.connection()
                 != &(Connection::Connected {
@@ -228,7 +235,7 @@ impl App {
                 self.recording_notice(result, was_recording);
             }
             Message::Tester(message) => {
-                if self.page != Page::Tester && !matches!(message, tester::Message::Sources(_)) {
+                if self.page != Page::Tester {
                     return Task::none();
                 }
                 if matches!(message, tester::Message::Refresh) {
@@ -242,7 +249,25 @@ impl App {
                         |result| Message::Tester(tester::Message::Sources(result)),
                     );
                 }
+                let usb_device = match &message {
+                    tester::Message::Source(tester::Source::Device(device)) => Some(device.clone()),
+                    _ => None,
+                };
                 self.tester.update(message);
+                if let Some(device) = usb_device {
+                    let request = self.tester.usb_request();
+                    return Task::perform(
+                        async move {
+                            let result = byakko_devices::tester_usb::inspect(&device);
+                            tester::Message::Usb {
+                                request,
+                                device,
+                                result,
+                            }
+                        },
+                        Message::Tester,
+                    );
+                }
             }
             Message::Page(page) => {
                 self.tester.pause();

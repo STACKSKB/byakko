@@ -4,7 +4,10 @@ use byakko_core::{
     model::tester::Tester,
     projection::tester::{LayoutSelection, Legends, Standard},
 };
-use byakko_devices::tester_input::{self, InputDevice, Sample, Sampler};
+use byakko_devices::{
+    tester_input::{self, InputDevice, Sample, Sampler},
+    tester_usb::{Metadata, Unavailable},
+};
 use iced::Event;
 use std::{fmt, time::Instant};
 
@@ -30,6 +33,11 @@ pub enum Message {
     Refresh,
     Sources(Result<Vec<InputDevice>, String>),
     Source(Source),
+    Usb {
+        request: u64,
+        device: InputDevice,
+        result: Result<Metadata, Unavailable>,
+    },
     Layout(LayoutSelection),
     Standard(Standard),
     Threshold(u64),
@@ -46,6 +54,8 @@ pub struct Form {
     pub notice: String,
     pub refreshing: bool,
     pub inspected: Option<u16>,
+    pub usb: Option<Result<Metadata, Unavailable>>,
+    usb_request: u64,
     sampler: Option<Sampler>,
     origin: Instant,
 }
@@ -61,12 +71,17 @@ impl Default for Form {
             notice: String::new(),
             refreshing: false,
             inspected: None,
+            usb: None,
+            usb_request: 0,
             sampler: None,
             origin: Instant::now(),
         }
     }
 }
 impl Form {
+    pub fn usb_request(&self) -> u64 {
+        self.usb_request
+    }
     pub fn active(&self) -> bool {
         !self.test.is_paused()
     }
@@ -86,6 +101,9 @@ impl Form {
                     match Sampler::start(device) {
                         Ok(sampler) => self.sampler = Some(sampler),
                         Err(reason) => {
+                            if reason == tester_input::InputError::DeviceUnavailable {
+                                self.usb_unavailable();
+                            }
                             self.notice = reason.to_string();
                             return;
                         }
@@ -105,7 +123,21 @@ impl Form {
                 // A result belongs to one explicit source; never mix two keyboards.
                 self.test.reset();
                 self.source = source;
+                self.usb = None;
+                self.usb_request = self.usb_request.wrapping_add(1);
                 self.notice.clear();
+            }
+            Message::Usb {
+                request,
+                device,
+                result,
+            } => {
+                if request == self.usb_request
+                    && self.source == Source::Device(device)
+                    && self.usb.is_none()
+                {
+                    self.usb = Some(result);
+                }
             }
             Message::Layout(layout) => self.layout = layout,
             Message::Standard(standard) => {
@@ -128,6 +160,7 @@ impl Form {
                             .collect();
                         if !self.sources.contains(&self.source) {
                             self.pause();
+                            self.usb_unavailable();
                             self.notice = "Selected input keyboard is unavailable. Choose a source explicitly.".into();
                         }
                     }
@@ -164,6 +197,9 @@ impl Form {
                         }
                         Sample::Error(reason) => {
                             self.pause();
+                            if reason == tester_input::InputError::DeviceUnavailable {
+                                self.usb_unavailable();
+                            }
                             self.notice = reason.to_string();
                             break;
                         }
@@ -173,6 +209,12 @@ impl Form {
             Message::Inspect(usage) => self.inspected = Some(usage),
             Message::Refresh | Message::Input(..) => {}
         }
+    }
+    fn usb_unavailable(&mut self) {
+        self.usb_request = self.usb_request.wrapping_add(1);
+        self.usb = Some(Err(Unavailable(
+            "Selected input device is unavailable".into(),
+        )));
     }
     pub fn timing_source(&self) -> &'static str {
         match self.source {

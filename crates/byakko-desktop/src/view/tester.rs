@@ -156,7 +156,8 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             text(format!("Timestamp source: {}", form.timing_source())),
             text(timing),
             text("Observed OS event spacing includes your tapping, keyboard processing, and OS delivery. It does not measure USB polling or switch-to-host latency.").size(12),
-            text("USB descriptor interval: unavailable in this observation. Actual USB polling: not measured. Physical latency: requires an actuation reference.").size(12),
+                        usb_metadata(form),
+            text("Actual USB polling: not measured. Physical latency: requires an actuation reference.").size(12),
         ].spacing(style.spacing.s).into()));
     panels::vertical_scroll(style, body).height(Fill).into()
 }
@@ -239,4 +240,39 @@ fn board<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     })
     .height(310)
     .into()
+}
+
+fn usb_metadata(form: &Form) -> Element<'_, Message> {
+    use crate::form::tester::Source;
+    match (&form.source, &form.usb) {
+        (Source::Window, _) => {
+            text("Declared USB service interval: unavailable for combined window input.")
+                .size(12)
+                .into()
+        }
+        (Source::Device(_), None) => text("Inspecting selected input's USB descriptor metadata…")
+            .size(12)
+            .into(),
+        (_, Some(Err(reason))) => text(format!(
+            "Declared USB service interval: unavailable · {reason}"
+        ))
+        .size(12)
+        .into(),
+        (_, Some(Ok(metadata))) => {
+            let mut rows = column![
+                text(format!(
+                    "USB descriptor snapshot · {} · {}",
+                    metadata.speed, metadata.source
+                ))
+                .size(12)
+            ];
+            for endpoint in &metadata.endpoints {
+                rows = rows.push(text(format!(
+                    "Declared interrupt IN service interval · interface {} alternate {} endpoint 0x{:02X}: {:.3} ms (bInterval {})",
+                    endpoint.interface, endpoint.alternate, endpoint.address, ms(endpoint.interval_us), endpoint.b_interval
+                )).size(12));
+            }
+            rows.push(text("This declares an endpoint scheduling opportunity; it does not measure report rate, actual host scheduling, or receiver-to-keyboard radio timing.").size(12)).spacing(4).into()
+        }
+    }
 }
