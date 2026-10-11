@@ -13,7 +13,7 @@ import { createRecorder } from "./recorder.mjs";
 import { needsInitialRead } from "./settings_view.mjs";
 import { createAppearance } from "./appearance.mjs";
 import { transportLabel } from "./transport.mjs";
-import { editorAttention } from "./editor-attention.mjs";
+import { editorAttention, editorDetail } from "./editor-attention.mjs";
 
 // Composition, navigation and DOM focus belong here; features and effects have their own owners.
 export function mount(root, {codec, hid, storage, now = () => performance.now(), wait, prepareHost} = {}) {
@@ -144,18 +144,26 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   }
   function renderAttention(target, view) {
     const features = tab === "lighting" ? ["lighting", "picture"] : tab === "macros" ? ["macros", "keymap"] : [tab];
-    const messages = features.flatMap(feature => {
-      const message = editorAttention(editable(view[feature]), feature);
-      return message ? [message] : [];
-    });
+    const messages = tab === "macros" && view.macros?.discoveryError
+      ? [{message: "Macro discovery failed. Retry discovery.", detail: view.macros.discoveryError}]
+      : [];
+    messages.push(...features.flatMap(feature => {
+      const editor = editable(view[feature]);
+      const message = editorAttention(editor, feature);
+      return message ? [{message, detail: editorDetail(editor)}] : [];
+    }));
     let attention = target.querySelector(".editor-attention");
-    if (!messages.length) { attention?.remove(); return; }
+    if (!messages.length || ["assignmentFailed", "picturePreparationFailed"].includes(runtime.notice.kind)) {
+      attention?.remove(); return false;
+    }
     if (!attention) {
       attention = node(doc, "div", undefined, "editor-attention");
       attention.setAttribute("role", "alert");
       target.insertBefore(attention, target.children[2] ?? null);
     }
-    attention.replaceChildren(...messages.map(message => node(doc, "p", message)));
+    attention.textContent = messages[0].message;
+    attention.title = messages[0].detail;
+    return true;
   }
   function controlIdentity(control) {
     if (control.tagName === "BUTTON") {
@@ -222,8 +230,6 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   }
   function render() {
     if (disposed) return;
-    status.textContent = runtime.notice.message;
-    status.classList.toggle("error", runtime.notice.error);
     const view = runtime.view, selection = {tab, layer, key};
     const active = doc.activeElement;
     const keyboardScroll = keyboard.querySelector(".keyboard-scroll")?.scrollLeft ?? 0;
@@ -239,7 +245,10 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
     else if (tab === "lighting") lighting.render(nextPanel, view, selection);
     else if (tab === "settings") settings.render(nextPanel, view);
     else diagnostics.render(nextPanel, view);
-    renderAttention(nextPanel, view);
+    const hasAttention = renderAttention(nextPanel, view);
+    status.hidden = hasAttention;
+    status.textContent = hasAttention ? "" : runtime.notice.message;
+    status.classList.toggle("error", !hasAttention && runtime.notice.error);
     for (const details of nextPanel.querySelectorAll("details")) {
       if (openDetails.has(details.querySelector("summary")?.textContent)) details.open = true;
     }

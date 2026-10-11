@@ -389,10 +389,43 @@ const tests = [
     await h.app.intent({type:"read", feature:"lighting"});
     button(h.root, "Lighting").click();
     const attention = h.root.querySelector(".editor-attention");
-    assert(attention?.textContent.includes("Lighting could not be read"), "Lighting failure lacks feature guidance");
+    assert(attention?.textContent.includes("Lighting read failed"), "Lighting failure lacks feature guidance");
+    assert(h.root.querySelector(".status").hidden, "Feature failure duplicated the global notice");
     await h.app.intent({type:"initializeMacro"});
-    assert(h.root.querySelector(".status").textContent.includes("Empty macro initialized"), "Unrelated notice did not replace global status");
-    assert(h.root.querySelector(".editor-attention")?.textContent.includes("Lighting could not be read"), "Unrelated notice erased feature guidance");
+    assert(h.root.querySelector(".status").hidden, "Unrelated notice duplicated the feature failure");
+    assert(h.root.querySelector(".editor-attention")?.textContent.includes("Lighting read failed"), "Unrelated notice erased feature guidance");
+    button(h.root, "Macros").click();
+    assert(!h.root.querySelector(".status").hidden && h.root.querySelector(".status").textContent.includes("Macro ready"), "Routine notice did not return outside the affected editor");
+  }],
+  ["partial macro save uses one concise notice, then keeps keymap attention", async h => {
+    await h.app.intent({type:"initializeMacro"});
+    await h.app.intent({type:"edit", feature:"macro", change:{Insert:{at:0,event:{action:{Key:{usage:4,pressed:true}},delay_ms:10}}}});
+    let failed = false;
+    h.device.beforeSend = report => {
+      if (report[0] === 0x13 && !failed) { failed = true; throw new Error("Synthetic keymap write failure"); }
+    };
+    const result = await h.app.intent({type:"saveAndAssignMacro",layer:"base",key:"slot-009",binding:"counted"});
+    assert(result.outcome.kind === "assignmentFailed" && result.outcome.detail.macroSaved, "Fixture did not reach partial success");
+    assert(!h.root.querySelector(".status").hidden && /Macro saved; key assignment failed/.test(h.root.querySelector(".status").textContent), "Partial success was not concise and visible");
+    assert(!h.root.querySelector(".editor-attention"), "Partial success showed a duplicate notification");
+    await h.app.intent({type:"edit",feature:"macro",change:{Repeat:2}});
+    assert(h.root.querySelector(".status").hidden && /Keymap save failed/.test(h.root.querySelector(".editor-attention")?.textContent ?? ""), "Unresolved keymap failure did not persist after the next edit");
+  }],
+  ["macro discovery failure has one persistent notice and a retry", async h => {
+    h.device.beforeReceive = request => { if (request[0] === 0x8b) throw new Error("Synthetic catalog read failure"); };
+    const result = await h.app.intent({type:"discoverMacros"});
+    assert(result.outcome.kind === "catalogFailed", "Fixture did not fail catalog discovery");
+    const attention = h.root.querySelector(".editor-attention");
+    assert(attention?.textContent === "Macro discovery failed. Retry discovery.", "Catalog failure was not concise");
+    assert(attention.title.includes("Synthetic catalog read failure"), "Catalog detail was not retained");
+    assert(h.root.querySelector(".status").hidden && !h.root.querySelector(".macro-library p.error"), "Catalog failure showed duplicate notices");
+    await h.app.intent({type:"initializeMacro"});
+    assert(h.root.querySelector(".editor-attention")?.textContent === "Macro discovery failed. Retry discovery.", "Unrelated notice erased catalog failure");
+    h.device.beforeReceive = null;
+    button(h.root, "Retry discovery").click();
+    await until(() => !h.app.view.macros.discoveryBusy && !h.app.view.macros.discoveryError);
+    assert(!h.root.querySelector(".editor-attention"), "Retry left stale catalog failure visible");
+    assert(!h.root.querySelector(".status").hidden && !h.root.querySelector(".status").textContent, "Retry left a stale failure notice");
   }],
   ["closing or cancelling the discard dialog settles its pending action", async h => {
     const discard = createDiscardDialog({doc:document, win:window});

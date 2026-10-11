@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 export function deviceProblemMessage(problem) {
-  if (problem === "ReadRequired") return "Read this feature before trying again.";
-  if (problem === "ApplyReadbackMismatch") return "The keyboard readback differed. Use Read before trying again.";
-  if (problem?.Read !== undefined) return `Read failed: ${problem.Read}. Use Read to retry.`;
-  if (problem?.Apply) return `Save failed: ${problem.Apply.message}. Use Read before trying again.`;
-  if (problem?.InvalidApplyResult !== undefined) return `Save could not be verified: ${problem.InvalidApplyResult}. Use Read before trying again.`;
-  return "The keyboard operation failed. Use Read to check its state.";
+  if (problem === "ReadRequired") return "Read this feature first.";
+  if (problem === "ApplyReadbackMismatch" || problem?.InvalidApplyResult !== undefined) return "Save unverified. Read to check.";
+  if (problem?.Read !== undefined) return "Read failed. Retry Read.";
+  if (problem?.Apply) {
+    const recovery = {
+      Verified: "Recovery verified.", Failed: "Recovery failed.",
+      NotAttempted: "Recovery not attempted.", Unverified: "Recovery unverified.",
+    }[problem.Apply.recovery] ?? "Check keyboard state.";
+    return `Save failed. ${recovery} Read to check.`;
+  }
+  return "Keyboard operation failed. Read to check.";
 }
 
 export function workflowProblemMessage(problem) {
@@ -15,8 +20,14 @@ export function workflowProblemMessage(problem) {
 }
 
 export function assignmentFailureMessage({ macroSaved, problem } = {}) {
-  const detail = ` ${workflowProblemMessage(problem)}`;
-  return macroSaved
-    ? `Macro saved and verified, but assignment to the key failed.${detail} Review the keymap and use Keymap Read before retrying the assignment.`
-    : `Macro was not saved or assigned.${detail} Review the macro and keymap status, then use Read before retrying.`;
+  if (macroSaved) {
+    const recovery = problem?.Device?.Apply?.recovery;
+    const warning = recovery === "Failed" ? " Recovery failed." : recovery === "Unverified" ? " Recovery unverified." : "";
+    return `Macro saved; key assignment failed.${warning} Check Keymap.`;
+  }
+  return "Macro was not saved or assigned. Check Macro and Keymap.";
+}
+
+export function assignmentSuccessMessage(detail) {
+  return detail?.macroSaved ? "Macro saved and assigned (read back)." : "Macro assigned (read back).";
 }

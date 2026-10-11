@@ -4,7 +4,7 @@ import { DeviceExecutor } from "./executor.mjs";
 import { notificationDevice, NotificationListener } from "./notifications.mjs";
 import { HostController } from "./host.mjs";
 import { editable, text } from "./widgets.mjs";
-import { assignmentFailureMessage, deviceProblemMessage, workflowProblemMessage } from "./outcome-message.mjs";
+import { assignmentFailureMessage, assignmentSuccessMessage, deviceProblemMessage, workflowProblemMessage } from "./outcome-message.mjs";
 
 // Owns one connection and its ordered effects. Editable feature values stay in core.
 export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win,
@@ -12,14 +12,16 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
   const session = new codec.BrowserSession();
   let view = JSON.parse(session.view());
   let device = null, executor = null, connecting = false, closing = false;
-  let notice = "Choose your Nia87 to load its keymap and lighting.", noticeError = false;
+  let notice = "Choose a Nia87 keyboard.", noticeError = false, noticeKind = null;
   let writes = 0, disposed = false, previousDiscovery = false, destroying = null, connectTask = null;
   let listener = null, notificationStatus = "", generation = null, observationTimer = null;
   let interactionUntil = 0, hostController = null;
   const timers = new Map(), inflight = new Set();
 
   function handle(response, background = false) {
+    const previousCatalogError = Boolean(view.macros?.discoveryError);
     view = response.view;
+    noticeKind = response.outcome?.kind ?? null;
     executor?.setRecording(view.recording);
     if (response.outcome?.cancelCatalog) executor?.cancelCatalog();
     const discovery = Boolean(view.macros?.discoveryBusy);
@@ -28,11 +30,11 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
     if (!response.ok) { notice = response.error; noticeError = true; }
     else if (response.outcome?.kind === "hostFailed") {
       noticeError = true;
-      notice = `Host lighting restoration failed: ${response.outcome.detail?.message ?? "Read lighting before changing it again."}`;
+      notice = "Host lighting restoration failed. Read Lighting before retrying.";
     }
     else if (response.outcome?.kind === "archiveCaptureFailed") {
       noticeError = true;
-      notice = `Diagnostic archive capture failed: ${response.outcome.detail ?? "Read and try again."}`;
+      notice = "Diagnostic capture failed. Retry Capture.";
     }
     else if (response.outcome?.kind === "assignmentFailed") {
       noticeError = true;
@@ -44,22 +46,26 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
     }
     else if (response.outcome?.kind === "picturePreparationFailed") {
       noticeError = true;
-      notice = `Per-key color preparation failed. ${workflowProblemMessage(response.outcome.detail.problem)}`;
-      if (response.outcome.detail.lightingApplied) notice += " The lighting mode changed; read Lighting before trying again.";
+      notice = response.outcome.detail.lightingApplied
+        ? "Lighting mode changed; per-key colors did not load. Read Lighting."
+        : `Per-key colors did not load. ${workflowProblemMessage(response.outcome.detail.problem)}`;
     }
     else if (response.outcome?.kind === "catalogFailed") {
       noticeError = true;
-      notice = `Macro discovery failed: ${response.outcome.detail}`;
-    } else if (response.outcome?.kind === "conflict") { noticeError = true; notice = "The keyboard changed. Review your draft, then use Revert and Read this feature again."; }
+      notice = "Macro discovery failed. Retry discovery.";
+    } else if (response.outcome?.kind === "catalogLoaded" && previousCatalogError) {
+      noticeError = false;
+      notice = "";
+    } else if (response.outcome?.kind === "conflict") { noticeError = true; notice = "Keyboard changed. Draft kept; Revert, then Read."; }
     else {
       const saved = {
-        saved: "Keymap saved and verified by keyboard readback.",
-        macroSaved: "Macro saved and verified by keyboard readback.",
-        lightingSaved: "Lighting accepted by the keyboard after pacing. It was not read back.",
-        pictureSaved: "Per-key colors accepted by the keyboard after pacing. They were not read back.",
-        settingsSaved: "Settings saved and verified by keyboard readback.",
-        assignmentSucceeded: "Macro saved and assigned; the keymap was verified by readback.",
-        archiveCaptured: "Diagnostic archive captured. Export to review its exact JSON.",
+        saved: "Keymap saved (read back).",
+        macroSaved: "Macro saved (read back).",
+        lightingSaved: "Lighting sent (not read back).",
+        pictureSaved: "Per-key colors sent (not read back).",
+        settingsSaved: "Settings saved (read back).",
+        assignmentSucceeded: assignmentSuccessMessage(response.outcome?.detail),
+        archiveCaptured: "Diagnostic archive captured.",
       };
       if (saved[response.outcome?.kind]) { noticeError = false; notice = saved[response.outcome.kind]; }
     }
@@ -109,6 +115,7 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
   async function intent(input, background = false) {
     if (device?.productId === 0x4011 && ["hostStart", "hostUpdate"].includes(input.type)) {
       noticeError = true;
+      noticeKind = null;
       notice = "Host lighting over the 2.4 GHz receiver is not verified.";
       changed(background);
       return { ok: false, error: notice, view };
@@ -117,19 +124,20 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
     if (result.ok && !result.command) {
       const messages = {
         edit: ["lighting", "picture", "settings"].includes(input.feature)
-          ? "Draft updated. Changes save after 500 ms."
-          : "Draft updated. Save to keyboard when ready.",
+          ? "Autosaving in 500 ms…"
+          : "Draft changed. Save when ready.",
         revert: "Draft reverted.",
-        initializeMacro: "Empty macro initialized. Add events, then save.",
-        importMacroDocument: "Macro document staged. Save to keyboard when ready.",
-        recordStart: "Recording locally. Press keys, then stop to release held inputs.",
-        recordStop: "Recording stopped. Review events before saving.",
+        initializeMacro: "Macro ready for events.",
+        importMacroDocument: "Macro staged. Save when ready.",
+        recordStart: "Recording locally. Stop when done.",
+        recordStop: "Recording stopped. Review before saving.",
       };
-      if (messages[input.type]) { noticeError = false; notice = messages[input.type]; changed(); }
+      if (messages[input.type]) { noticeError = false; noticeKind = null; notice = messages[input.type]; changed(); }
     }
     if (result.command) {
       const running = execute(result.command).catch(error => {
         noticeError = true;
+        noticeKind = null;
         notice = text(error);
         changed(true);
         return { ok: false, error: notice, view };
@@ -200,9 +208,10 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
         codec, dispatch: input => intent(input), executor,
         changed: state => {
           noticeError = Boolean(state.problem);
+          noticeKind = null;
           if (state.problem) notice = `Host lighting: ${state.problem}`;
-          else if (state.phase === "Active") notice = `Host lighting active from ${state.source}. Stop to restore the original onboard lighting.`;
-          else if (state.phase === "Idle" && view.host?.phase === "Idle") notice = "Host lighting stopped. Original onboard lighting restored.";
+          else if (state.phase === "Active") notice = "Host lighting active. Stop to restore onboard lighting.";
+          else if (state.phase === "Idle" && view.host?.phase === "Idle") notice = "Onboard lighting restored.";
           changed(true);
           scheduleObservation();
         },
@@ -242,7 +251,7 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
       }
       if (disposed || device !== selectedDevice) return;
       const ready = view.keymap.status === "Ready" && view.lighting?.editor.status === "Ready";
-      if (ready) { noticeError = false; notice = "Keyboard ready. Select a key or feature to edit."; }
+      if (ready) { noticeError = false; notice = "Keyboard ready."; }
       else if (!noticeError) notice = "Some keyboard data could not be read. Use the feature Read control to retry.";
       changed();
       if (!disposed && (device.productId !== 0x4011 || ready)) void intent({ type: "discoverMacros" }, true);
@@ -294,7 +303,7 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
   }
 
   function announce(message, error = false, background = false) {
-    notice = message; noticeError = error; changed(background);
+    notice = message; noticeError = error; noticeKind = null; changed(background);
   }
   function identity() { return { device, generation }; }
   function isCurrent(target) {
@@ -328,7 +337,7 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
   return {
     get view() { return view; },
     get connection() { return { device, connecting, closing, writes, listener: Boolean(listener), notificationStatus }; },
-    get notice() { return { message: notice, error: noticeError }; },
+    get notice() { return { message: notice, error: noticeError, kind: noticeKind }; },
     get host() { return hostController?.state ?? { phase: "Idle", source: "", problem: null }; },
     get hostBusy() { return Boolean(hostController?.busy); },
     get autosaving() { return Boolean(timers.size); },

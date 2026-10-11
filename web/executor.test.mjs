@@ -123,9 +123,9 @@ test("a failed key assignment reports the saved macro and retains keymap recover
   assert.equal(result.outcome.detail.macroSaved, true);
   assert.equal(h.view().macros.editor.dirty, false);
   const message = assignmentFailureMessage(result.outcome.detail);
-  assert.match(message, /^Macro saved and verified, but assignment to the key failed/);
+  assert.match(message, /^Macro saved; key assignment failed/);
   assert.doesNotMatch(message, /\{"|Device\(/);
-  assert.match(editorAttention(h.view().keymap, "keymap"), /Your draft is retained|needs a read/);
+  assert.match(editorAttention(h.view().keymap, "keymap"), /Draft kept|Read before editing/);
   assert.equal(h.store.records.length, 2);
 });
 

@@ -11,6 +11,14 @@ function eventLabel(event) {
   return "Unknown event";
 }
 
+export function librarySummary(slots, occupancy) {
+  const used = slots.filter(slot => ["Configured", "Opaque"].includes(occupancy[slot.id])).length;
+  const unread = slots.filter(slot => !occupancy[slot.id] || occupancy[slot.id] === "Unknown").length;
+  if (unread === slots.length) return "Library not fully read";
+  if (unread) return `${used} slots used · ${unread} unread`;
+  return `${used} of ${slots.length} slots used`;
+}
+
 // Core owns macro values. This owner keeps only unsubmitted browser form fields and local names.
 export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, navigate, confirmDiscard }) {
   let eventIndex = null, eventType = "Key", eventUsage = 4, eventButton = 1;
@@ -154,11 +162,9 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
     library.append(list);
     if (state.discoveryBusy) library.append(node(doc, "p", "Discovering slot occupancy…", "muted"));
     if (state.discoveryError) {
-      library.append(node(doc, "p", state.discoveryError, "error"));
       library.append(button(doc, "Retry discovery", () => void runtime.intent({ type: "discoverMacros" }), state.discoveryBusy));
     } else if (!state.discoveryBusy) {
-      const used = Object.values(state.occupancy).filter(value => value === "Configured" || value === "Opaque").length;
-      library.append(node(doc, "p", `${used} of ${caps.slots.length} slots used`, "muted"));
+      library.append(node(doc, "p", librarySummary(caps.slots, state.occupancy), "muted"));
     }
     const detail = node(doc, "div", undefined, "macro-detail");
     detail.append(node(doc, "h3", `${nameFor(state.slot).trim() || caps.slots.find(item => item.id === state.slot)?.label || state.slot} · Editor`));

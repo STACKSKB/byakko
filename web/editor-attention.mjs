@@ -1,25 +1,29 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// A feature's typed status survives unrelated global notices.
+// The current editor's typed status survives unrelated global notices.
 export function editorAttention(editor, feature) {
   const status = editor?.status;
   if (!status || typeof status !== "object") return null;
   const label = { keymap: "Keymap", macros: "Macro", lighting: "Lighting", picture: "Per-key colors", settings: "Settings" }[feature];
   if (!label) return null;
-  if (status.Conflict) return `${label} changed on the keyboard. Your draft is retained. Review it, then use Revert to discard your draft and Read to load the keyboard state.`;
+  if (status.Conflict) return `${label} changed on the keyboard. Draft kept; Revert, then Read.`;
   const problem = status.Unverified?.problem;
   if (!problem) return null;
-  if (problem === "ReadRequired") return `${label} needs a read before editing. Use Read to load the keyboard state.`;
-  if (problem.Read !== undefined) return `${label} could not be read: ${problem.Read}. Check the connection, then use Read again.`;
+  if (problem === "ReadRequired") return `${label}: Read before editing.`;
+  if (problem.Read !== undefined) return `${label} read failed. Retry Read.`;
   if (problem.Apply) {
     const recovery = {
-      Verified: "The prior keyboard state was verified after recovery.",
-      Failed: "Recovery failed; the keyboard state needs checking.",
-      NotAttempted: "Recovery was not attempted; the keyboard state needs checking.",
-      Unverified: "Recovery could not be verified; the keyboard state needs checking.",
-    }[problem.Apply.recovery] ?? "The keyboard state needs checking.";
-    return `${label} was not saved: ${problem.Apply.message}. ${recovery} Your draft is retained; use Read before trying again.`;
+      Verified: "Recovery verified.",
+      Failed: "Recovery failed.",
+      NotAttempted: "Recovery not attempted.",
+      Unverified: "Recovery unverified.",
+    }[problem.Apply.recovery] ?? "Check keyboard state.";
+    return `${label} save failed. ${recovery} Draft kept; Read to check.`;
   }
-  if (problem.InvalidApplyResult !== undefined) return `${label} could not verify the save: ${problem.InvalidApplyResult}. Your draft is retained; use Read before trying again.`;
-  if (problem === "ApplyReadbackMismatch") return `${label} readback differed after saving. Your draft is retained; use Read before trying again.`;
-  return `${label} needs attention. Your draft is retained; use Read to check the keyboard state.`;
+  if (problem.InvalidApplyResult !== undefined || problem === "ApplyReadbackMismatch") return `${label} save unverified. Draft kept; Read to check.`;
+  return `${label} needs attention. Draft kept; Read to check.`;
+}
+
+export function editorDetail(editor) {
+  const problem = editor?.status?.Unverified?.problem;
+  return problem?.Read ?? problem?.Apply?.message ?? problem?.InvalidApplyResult ?? "";
 }
