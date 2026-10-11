@@ -329,7 +329,7 @@ pub fn enumerate() -> Result<Vec<DeviceInfo>> {
 }
 
 pub fn open(path: &CStr) -> Result<Device> {
-    let device = open_handle(path, GENERIC_READ | GENERIC_WRITE)?;
+    let mut device = open_handle(path, GENERIC_READ | GENERIC_WRITE)?;
     let attr = attributes(device.handle)?;
     let caps = capabilities(device.handle)?;
     if attr.VendorID != 0x3151
@@ -340,10 +340,8 @@ pub fn open(path: &CStr) -> Result<Device> {
     {
         return Err("Opened HID path is not the expected Nia87 65-byte vendor collection".into());
     }
-    Ok(Device {
-        product_id: attr.ProductID,
-        ..device
-    })
+    device.product_id = attr.ProductID;
+    Ok(device)
 }
 
 impl Device {
