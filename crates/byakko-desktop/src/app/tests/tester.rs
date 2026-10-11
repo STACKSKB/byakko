@@ -85,44 +85,56 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
     let _ = app.update(Message::Page(Page::Tester));
     for (name, width, height, standard, board_size) in [
         (
-            "tester-wide",
+            "tester-compact-wide",
             1360_u32,
-            1200_u32,
+            1000_u32,
             byakko_core::projection::tester::Standard::Ansi,
             byakko_core::projection::tester::Size::Full,
         ),
         (
-            "tester-narrow",
+            "tester-compact-narrow",
             900,
             800,
             byakko_core::projection::tester::Standard::Iso,
             byakko_core::projection::tester::Size::Tkl,
         ),
         (
-            "tester-jis",
+            "tester-compact-jis",
             1360,
-            1200,
+            800,
             byakko_core::projection::tester::Standard::Jis,
             byakko_core::projection::tester::Size::Full,
         ),
         (
-            "tester-usb-snapshot-fixture",
+            "tester-compact-usb-fixture",
             1360,
-            1300,
+            800,
             byakko_core::projection::tester::Standard::Ansi,
             byakko_core::projection::tester::Size::Tkl,
+        ),
+        (
+            "tester-compact-active",
+            1360,
+            800,
+            byakko_core::projection::tester::Standard::Ansi,
+            byakko_core::projection::tester::Size::Full,
         ),
     ] {
         app.tester.update(tester_form::Message::Standard(standard));
         app.tester.layout.size = board_size;
-        let usb_fixture = name == "tester-usb-snapshot-fixture";
+        let usb_fixture = name == "tester-compact-usb-fixture";
+        let listening = name == "tester-compact-active";
+        if !usb_fixture {
+            app.tester
+                .update(tester_form::Message::Source(tester_form::Source::Window));
+        }
         if usb_fixture {
             use byakko_devices::{
                 tester_input::InputDevice,
                 tester_usb::{Endpoint, Metadata, Speed},
             };
             let device = InputDevice {
-                id: "fixture://keyboard-input".into(),
+                id: r"\\?\HID#VID_3151&PID_4011&MI_00#fixture".into(),
                 identity: "fixture-identity".into(),
                 label: "Fixture keyboard".into(),
             };
@@ -146,6 +158,8 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
                 }),
             });
         }
+        app.tester.test.pause();
+        app.tester.test.reset();
         app.tester.test.resume();
         app.tester.test.accept(Input {
             usage: 4,
@@ -162,7 +176,20 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
             kind: InputKind::Press,
             at_us: 7_000,
         });
-        app.tester.test.pause();
+        if listening {
+            app.tester.test.accept(Input {
+                usage: 4,
+                kind: InputKind::Release,
+                at_us: 9_000,
+            });
+            app.tester.test.accept(Input {
+                usage: 0x44,
+                kind: InputKind::Press,
+                at_us: 11_000,
+            });
+        } else {
+            app.tester.test.pause();
+        }
         let mut element = app.view();
         let mut renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
         let mut tree = Tree::new(&element);
@@ -181,28 +208,56 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
             texts
                 .0
                 .iter()
-                .any(|(text, _)| text.starts_with("Reported host keys"))
+                .any(|(text, _)| text.starts_with("Observed "))
         );
-        assert!(texts.0.iter().any(|(text, _)| {
-            text.contains("Firmware remapping prevents identifying the actuated switch")
-        }));
+        assert!(
+            !texts
+                .0
+                .iter()
+                .any(|(text, _)| text.contains("Firmware remapping")
+                    || text.starts_with("Selected input:")
+                    || text.starts_with("Choose an input source"))
+        );
+        for (label, bounds) in &texts.0 {
+            if label == "Timing"
+                || label.starts_with("Event spacing")
+                || label.starts_with("USB declared")
+                || label.starts_with("Chatter:")
+                || label.starts_with("Last ")
+            {
+                assert!(
+                    bounds.y >= 0.0 && bounds.y + bounds.height <= height as f32,
+                    "{name}: {label} below viewport: {bounds:?}"
+                );
+                assert!(
+                    bounds.x >= 0.0 && bounds.x + bounds.width <= width as f32,
+                    "{name}: {label} outside viewport: {bounds:?}"
+                );
+            }
+        }
+        if listening {
+            assert!(texts.0.iter().any(|(text, _)| text == "Last F11 · press"));
+        }
         if usb_fixture {
-            assert!(texts.0.iter().any(|(text, _)| {
-                text.contains("Declared interrupt IN service interval")
-                    && text.contains("1.000 ms (bInterval 4)")
-            }));
             assert!(
                 texts
                     .0
                     .iter()
-                    .any(|(text, _)| text.contains("Actual USB polling: not measured"))
+                    .any(|(text, _)| text == "USB declared: 1.000 ms")
+            );
+            assert!(
+                !texts
+                    .0
+                    .iter()
+                    .any(|(text, _)| text.contains("bInterval")
+                        || text.contains("Descriptor fixture"))
             );
         }
         let start = texts
             .0
             .iter()
-            .find(|(text, _)| text == "Start test")
-            .expect("actual Start button label")
+            .find(|(text, _)| text == if listening { "Pause" } else { "Start" })
+            .expect("actual tester control label")
             .1;
         assert!(start.x >= 0.0 && start.x + start.width <= width as f32);
         assert!(start.y >= 0.0 && start.y + start.height <= height as f32);
@@ -223,11 +278,13 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
                 &viewport,
             );
         }
-        assert!(
-            messages
-                .iter()
-                .any(|message| matches!(message, Message::Tester(tester_form::Message::Start)))
-        );
+        assert!(messages.iter().any(|message| {
+            if listening {
+                matches!(message, Message::Tester(tester_form::Message::Pause))
+            } else {
+                matches!(message, Message::Tester(tester_form::Message::Start))
+            }
+        }));
         element.as_widget_mut().update(
             &mut tree,
             &Event::Window(window::Event::RedrawRequested(Instant::now())),
@@ -269,7 +326,7 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
         drop(element);
         if !usb_fixture {
             let _ = app.update(messages.remove(0));
-            assert!(app.tester.active());
+            assert_eq!(app.tester.active(), !listening);
         }
         app.tester.pause();
     }
@@ -288,7 +345,58 @@ fn active_capture_consumes_keyboard_navigation_without_triggering_controls() {
         &renderer,
         &layout::Limits::new(Size::ZERO, Size::new(1360.0, 800.0)),
     );
+    let viewport = Rectangle::with_size(Size::new(1360.0, 800.0));
+    let mut texts = TextBounds::default();
+    element
+        .as_widget_mut()
+        .operate(&mut tree, Layout::new(&node), &renderer, &mut texts);
+    let info = texts.0.iter().find(|(label, _)| label == "Info").unwrap().1;
+    let cursor = mouse::Cursor::Available(Point::new(info.center_x(), info.center_y()));
+    element.as_widget_mut().update(
+        &mut tree,
+        &Event::Mouse(mouse::Event::CursorMoved {
+            position: Point::new(info.center_x(), info.center_y()),
+        }),
+        Layout::new(&node),
+        cursor,
+        &renderer,
+        &mut iced::advanced::clipboard::Null,
+        &mut iced::advanced::Shell::new(&mut Vec::new()),
+        &viewport,
+    );
     let mut messages = Vec::new();
+    let event = key(
+        keyboard::key::Code::Space,
+        false,
+        keyboard::Modifiers::empty(),
+    );
+    {
+        let mut overlay = element
+            .as_widget_mut()
+            .overlay(
+                &mut tree,
+                Layout::new(&node),
+                &renderer,
+                &viewport,
+                iced::Vector::ZERO,
+            )
+            .expect("passive help remains available while listening");
+        let overlay_node = overlay.as_overlay_mut().layout(&renderer, viewport.size());
+        let mut shell = iced::advanced::Shell::new(&mut messages);
+        overlay.as_overlay_mut().update(
+            &event,
+            Layout::new(&overlay_node),
+            cursor,
+            &renderer,
+            &mut iced::advanced::clipboard::Null,
+            &mut shell,
+        );
+        assert!(
+            !shell.is_event_captured(),
+            "passive help must pass keys to capture"
+        );
+    }
+    assert!(messages.is_empty());
     let mut shell = iced::advanced::Shell::new(&mut messages);
     element.as_widget_mut().update(
         &mut tree,
@@ -328,11 +436,11 @@ fn opening_a_layout_menu_pauses_capture_and_exposes_the_menu() {
     let label = texts
         .0
         .iter()
-        .find(|(label, _)| label == "Physical layout")
+        .find(|(label, _)| label == "Layout")
         .unwrap()
         .1;
     let cursor =
-        mouse::Cursor::Available(Point::new(label.x + 15.0, label.y + label.height + 12.0));
+        mouse::Cursor::Available(Point::new(label.x + label.width + 20.0, label.center_y()));
     let mut messages = Vec::new();
     element.as_widget_mut().update(
         &mut tree,
