@@ -201,6 +201,43 @@ test("receiver status failure before a setter retains the draft without attempti
   } finally { await h.close(); }
 });
 
+test("disconnect after receiver selection does not report an unsubmitted setter", async () => {
+  const h = harness();
+  try {
+    await h.executor.verifyReceiver();
+    await h.send({ type: "connect" });
+    await h.send({ type: "read", feature: "lighting" });
+    await h.send({ type: "edit", feature: "lighting", change: { Color: { Rgb: [1, 2, 3] } } });
+    h.device.calls.length = 0;
+
+    const originalSend = h.device.sendFeatureReport.bind(h.device);
+    let disconnected;
+    h.device.sendFeatureReport = (id, data) => {
+      const sent = originalSend(id, data);
+      if (data[0] !== 0xf6) return sent;
+      return {
+        then(resolve, reject) {
+          sent.then(() => {
+            resolve();
+            // The F6 send has completed; retire the executor before the write resumes.
+            queueMicrotask(() => { disconnected = h.executor.close(); });
+          }, reject);
+        },
+      };
+    };
+
+    const result = await h.send({ type: "apply", feature: "lighting" });
+    await disconnected;
+    assert.equal(result.outcome.kind, "failed");
+    assert.equal(h.device.calls[0].kind, "backup");
+    assert.deepEqual(sends(h.device), [0xf7, 0xf6]);
+    assert.equal(h.device.calls.filter(call => call.kind === "wait" && call.ms === 1000).length, 0);
+    const editor = JSON.parse(h.session.view()).lighting.editor;
+    assert.equal(editor.status.Unverified.problem.Apply.recovery, "NotAttempted");
+    assert.equal(editor.dirty, true);
+  } finally { await h.close(); }
+});
+
 test("failed receiver identity leaves the browser disconnected with a useful status", async () => {
   for (const [change, diagnostic] of [
     [device => { device.online = false; }, /Press a key/],

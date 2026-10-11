@@ -91,9 +91,11 @@ export class DeviceExecutor {
     void this.#pump();
   }
 
-  async #send(report) {
+  async #send(report, onAttempt) {
     this.#check();
-    await this.#device.sendFeatureReport(0, Uint8Array.from(report));
+    const payload = Uint8Array.from(report);
+    onAttempt?.();
+    await this.#device.sendFeatureReport(0, payload);
     this.#check();
   }
 
@@ -174,11 +176,10 @@ export class DeviceExecutor {
             await this.#send(this.#receiver.reports.select_keyboard);
           }
           try {
-            setterAttempted = true;
-            await this.#send(step.report);
+            await this.#send(step.report, () => { setterAttempted = true; });
           } catch (error) {
-            // A potentially delivered setter must settle before recovery begins.
-            await this.#wait(Math.max(1000, step.after_ms));
+            // Only a submitted setter needs uncertain-write settling before recovery.
+            if (setterAttempted) await this.#wait(Math.max(1000, step.after_ms));
             throw error;
           }
           if (step.after_ms) await this.#wait(step.after_ms);
