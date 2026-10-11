@@ -199,7 +199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let target = nia87::device::Target::from_candidate(&candidate)?;
         Executor::spawn(
-            BoundNia87Adapter::new(target),
+            BoundNia87Adapter::connect(target).map_err(|error| error.to_string())?,
             byakko_devices::storage::user_data_dir()?.join("backups"),
         )?
     };

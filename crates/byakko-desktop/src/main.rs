@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         nia87::device::Availability::Available(candidate) => candidate,
                         nia87::device::Availability::Unavailable => {
                             return Err(
-                                "Connect the keyboard by USB, then choose Read / reconnect.".into(),
+                                "Connect the keyboard by USB or its 2.4 GHz receiver, then choose Read / reconnect.".into(),
                             );
                         }
                         nia87::device::Availability::Ambiguous(_) => {
@@ -54,7 +54,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .map_err(|error| error.to_string())?;
                     let mut listener = nia87::notifications::Listener::open(&candidate.identity())
                         .map_err(|error| error.to_string());
-                    let worker = Executor::spawn(BoundNia87Adapter::new(target), backups.clone())
+                    let adapter =
+                        BoundNia87Adapter::connect(target).map_err(|error| error.to_string())?;
+                    let worker = Executor::spawn(adapter, backups.clone())
                         .and_then(|worker| {
                             worker.with_notifications(move |timeout| match &mut listener {
                                 Ok(listener) => listener

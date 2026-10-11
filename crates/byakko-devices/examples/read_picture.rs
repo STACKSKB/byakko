@@ -24,7 +24,10 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         return Err(format!("Expected one Nia87 collection; found {}", candidates.len()).into());
     };
     let target = nia87::device::Target::from_candidate(candidate)?;
-    let executor = Executor::spawn(nia87::BoundNia87Adapter::new(target), Default::default())?;
+    let executor = Executor::spawn(
+        nia87::BoundNia87Adapter::connect(target)?,
+        Default::default(),
+    )?;
     executor.set_generation(1);
     executor
         .try_submit(Command {

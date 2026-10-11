@@ -30,6 +30,17 @@ impl Access {
         Selection::Expected(&self.target)
     }
 
+    /// Receiver PID is shared by other boards. Establish the selected board
+    /// once when attaching the executor, rather than preflighting each feature.
+    pub(crate) fn validate_connection(&self) -> Result<()> {
+        if self.target.product_id() != 0x4011 {
+            return Ok(());
+        }
+        let session = Session::open_for(self.selection())?;
+        let reply = read_payload(session.device(), 0x8f, 0, 0)?;
+        byakko_protocol::nia87::receiver::validate_board_identity(&reply)?;
+        Ok(())
+    }
     pub fn snapshot(&self) -> Result<Snapshot> {
         keymaps::snapshot_with(self.selection())
     }

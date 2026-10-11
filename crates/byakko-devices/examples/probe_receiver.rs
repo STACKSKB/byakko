@@ -5,8 +5,10 @@ use std::{ffi::CString, fs::OpenOptions, time::Duration};
 
 fn main() -> device::Result<()> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
-    let [output] = arguments.as_slice() else {
-        return Err("Usage: probe_receiver NEW_CAPTURE.json".into());
+    let (output, opcodes): (&String, &[u8]) = match arguments.as_slice() {
+        [output] => (output, &[0x80, 0x85]),
+        [flag, output] if flag == "--status" => (output, &[0xf7]),
+        _ => return Err("Usage: probe_receiver [--status] NEW_CAPTURE.json".into()),
     };
     let mut file = OpenOptions::new()
         .write(true)
@@ -23,7 +25,7 @@ fn main() -> device::Result<()> {
     let path = CString::new(candidate.path.as_str())?;
     let handle = api.open_path(&path)?;
     let mut observations = Vec::new();
-    for opcode in [0x80, 0x85] {
+    for &opcode in opcodes {
         let mut request = [0u8; 65];
         request[1..].copy_from_slice(&protocol::read_request(opcode, 0, 0));
         handle.send_feature_report(&request)?;

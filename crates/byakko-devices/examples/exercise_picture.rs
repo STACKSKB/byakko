@@ -17,7 +17,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("Expected one Nia87".into());
     };
     let target = nia87::device::Target::from_candidate(&candidate)?;
-    let mut device = nia87::BoundNia87Adapter::new(target);
+    let mut device =
+        nia87::BoundNia87Adapter::connect(target).map_err(|error| error.to_string())?;
     let mut baseline = device.read_picture()?;
     if baseline.context_revision != [13, 0] {
         return Err("Select per-key layer 1 first".into());

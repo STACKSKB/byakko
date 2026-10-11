@@ -11,10 +11,10 @@ pub struct BoundNia87Adapter {
     access: device::Access,
 }
 impl BoundNia87Adapter {
-    pub fn new(target: device::Target) -> Self {
-        Self {
-            access: device::Access::bound(target),
-        }
+    pub fn connect(target: device::Target) -> device::Result<Self> {
+        let access = device::Access::bound(target);
+        access.validate_connection()?;
+        Ok(Self { access })
     }
 }
 
