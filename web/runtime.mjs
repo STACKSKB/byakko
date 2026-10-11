@@ -93,6 +93,12 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
   }
 
   async function intent(input, background = false) {
+    if (device?.productId === 0x4011 && ["hostStart", "hostUpdate"].includes(input.type)) {
+      noticeError = true;
+      notice = "Host lighting over the 2.4 GHz receiver is not verified.";
+      changed(background);
+      return { ok: false, error: notice, view };
+    }
     const result = handle(JSON.parse(session.dispatch(JSON.stringify(input))), background);
     if (result.ok && !result.command) {
       const messages = {
@@ -168,10 +174,12 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
       if (disposed) return;
       if (!candidates.length) { noticeError = false; notice = "Keyboard selection was cancelled."; return; }
       device = selectDevice(candidates);
-      executor = new DeviceExecutor(device, codec.BrowserOperation, storage, wait);
+      executor = new DeviceExecutor(device, codec.BrowserOperation, storage, wait, codec);
       const result = handle(JSON.parse(session.dispatch('{"type":"connect"}')));
       if (!result.ok) throw new Error(result.error);
       generation = result.outcome.generation;
+      await executor.verifyReceiver();
+      if (disposed) return;
       hostController = new HostController({
         codec, dispatch: input => intent(input), executor,
         changed: state => {
@@ -187,16 +195,20 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
       const selectedDevice = device;
       const selectedGeneration = generation;
       try {
-        const notifications = notificationDevice(candidates, device);
-        listener = new NotificationListener(notifications, (reportId, payload) => {
-          if (disposed || device !== selectedDevice || generation !== selectedGeneration) return;
-          handle(JSON.parse(session.dispatch(JSON.stringify({
-            type: "notification", generation: selectedGeneration, reportId, payload: [...payload], nowMs: Math.round(now()),
-          }))), true);
-        });
-        await listener.open();
-        if (disposed || device !== selectedDevice) return;
-        notificationStatus = "Live onboard updates available";
+        if (device.productId === 0x4011) {
+          notificationStatus = "Receiver onboard updates are unverified. Use Read to refresh.";
+        } else {
+          const notifications = notificationDevice(candidates, device);
+          listener = new NotificationListener(notifications, (reportId, payload) => {
+            if (disposed || device !== selectedDevice || generation !== selectedGeneration) return;
+            handle(JSON.parse(session.dispatch(JSON.stringify({
+              type: "notification", generation: selectedGeneration, reportId, payload: [...payload], nowMs: Math.round(now()),
+            }))), true);
+          });
+          await listener.open();
+          if (disposed || device !== selectedDevice) return;
+          notificationStatus = "Live onboard updates available";
+        }
       } catch (error) {
         notificationStatus = `${text(error)} Manual Read and reconnect remain available.`;
         await listener?.close().catch(() => {});
@@ -209,14 +221,15 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
       changed();
       await intent({ type: "read", feature: "keymap" });
       if (disposed || device !== selectedDevice) return;
-      await intent({ type: "read", feature: "lighting" });
+      if (device.productId !== 0x4011 || view.keymap.status === "Ready") {
+        await intent({ type: "read", feature: "lighting" });
+      }
       if (disposed || device !== selectedDevice) return;
-      noticeError = false;
-      notice = view.keymap.status === "Ready" && view.lighting?.editor.status === "Ready"
-        ? "Keyboard ready. Select a key or feature to edit."
-        : "Some keyboard data could not be read. Use the feature Read control to retry.";
+      const ready = view.keymap.status === "Ready" && view.lighting?.editor.status === "Ready";
+      if (ready) { noticeError = false; notice = "Keyboard ready. Select a key or feature to edit."; }
+      else if (!noticeError) notice = "Some keyboard data could not be read. Use the feature Read control to retry.";
       changed();
-      if (!disposed) void intent({ type: "discoverMacros" }, true);
+      if (!disposed && (device.productId !== 0x4011 || ready)) void intent({ type: "discoverMacros" }, true);
     } catch (error) {
       noticeError = true;
       notice = `Could not open the keyboard: ${text(error)}`;
@@ -303,8 +316,11 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
     get host() { return hostController?.state ?? { phase: "Idle", source: "", problem: null }; },
     get hostBusy() { return Boolean(hostController?.busy); },
     get autosaving() { return Boolean(timers.size); },
+    get hostModesAvailable() { return device?.productId === 0x4015; },
     identity, isCurrent, announce, intent, edit, connect, disconnect, scheduleObservation, startRecording,
-    startHost: (mode, setting, options) => hostController?.start(mode, setting, options),
+    startHost: (mode, setting, options) => device?.productId === 0x4011
+      ? Promise.reject(new Error("Host lighting over the 2.4 GHz receiver is not verified."))
+      : hostController?.start(mode, setting, options),
     updateHost: setting => hostController?.update(setting), stopHost,
     destroy() {
       if (destroying) return destroying;
