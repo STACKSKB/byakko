@@ -8,6 +8,7 @@ import { createRuntime } from "./runtime.mjs";
 import { TestDevice, TestStore } from "./test-device.mjs";
 
 await codec.default({ module_or_path: await readFile(new URL("./pkg/byakko_web_bg.wasm", import.meta.url)) });
+const receiverLimits = JSON.parse(codec.receiver_limits());
 
 class ReceiverDevice extends TestDevice {
   productId = 0x4011;
@@ -20,6 +21,8 @@ class ReceiverDevice extends TestDevice {
   boardId = 0x095f;
   statusFlag = null;
   showReply = true;
+  replyReadyOnPoll = 1;
+  replyPolls = 0;
   reply = null;
   constructor() {
     super();
@@ -32,7 +35,8 @@ class ReceiverDevice extends TestDevice {
     switch (report[0]) {
       case 0xf7: {
         const status = new Uint8Array(64);
-        status[0] = Number(this.pending && this.showReply);
+        if (this.pending) this.replyPolls++;
+        status[0] = Number(this.pending && this.showReply && this.replyPolls >= this.replyReadyOnPoll);
         status[3] = Number(!this.online);
         status[5] = Number(this.ready);
         status[7] = 0x7f; // Opaque retained bytes are not status flags.
@@ -56,12 +60,14 @@ class ReceiverDevice extends TestDevice {
           this.keyboardReply = new Uint8Array(64);
           this.keyboardReply.set([0x8f, this.boardId & 0xff, this.boardId >> 8]);
           this.pending = true;
+          this.replyPolls = 0;
         } else {
           await this.keyboard.sendFeatureReport(0, report);
           if (report[0] >= 0x80) {
             const view = await this.keyboard.receiveFeatureReport(0);
             this.keyboardReply = new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
             this.pending = true;
+            this.replyPolls = 0;
           }
         }
     }
@@ -144,17 +150,28 @@ test("receiver polling remains bounded when command or reply never becomes ready
   try {
     command.device.ready = false;
     await assert.rejects(command.executor.verifyReceiver(), /did not become ready/);
-    assert.deepEqual(sends(command.device), Array(5).fill(0xf7));
-    assert.equal(command.device.calls.filter(call => call.kind === "wait" && call.ms === 100).length, 4);
+    assert.deepEqual(sends(command.device), Array(receiverLimits.max_polls).fill(0xf7));
+    assert.equal(command.device.calls.filter(call => call.kind === "wait" && call.ms === receiverLimits.poll_interval_ms).length, receiverLimits.max_polls - 1);
   } finally { await command.close(); }
 
   const reply = harness();
   try {
     reply.device.showReply = false;
     await assert.rejects(reply.executor.verifyReceiver(), /did not return a reply/);
-    assert.deepEqual(sends(reply.device), [0xf7, 0xf6, 0x8f, ...Array(5).fill(0xf7)]);
-    assert.equal(reply.device.calls.filter(call => call.kind === "wait" && call.ms === 100).length, 5);
+    assert.deepEqual(sends(reply.device), [0xf7, 0xf6, 0x8f, ...Array(receiverLimits.max_polls).fill(0xf7)]);
+    assert.equal(reply.device.calls.filter(call => call.kind === "wait" && call.ms === receiverLimits.poll_interval_ms).length, receiverLimits.max_polls);
   } finally { await reply.close(); }
+});
+
+test("receiver reply on sixth poll releases one logical reply without resending the command", async () => {
+  const h = harness();
+  try {
+    h.device.replyReadyOnPoll = 6;
+    await h.executor.verifyReceiver();
+    assert.deepEqual(sends(h.device), [0xf7, 0xf6, 0x8f, ...Array(6).fill(0xf7), 0xfc]);
+    assert.equal(h.device.calls.filter(call => call.kind === "wait" && call.ms === receiverLimits.poll_interval_ms).length, 6);
+    assert.equal(h.device.calls.filter(call => call.kind === "receive").length, 8);
+  } finally { await h.close(); }
 });
 
 test("wrong board identity fails closed before feature loading", async () => {
