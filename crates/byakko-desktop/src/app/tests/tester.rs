@@ -98,8 +98,15 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
             byakko_core::projection::tester::Standard::Iso,
             byakko_core::projection::tester::Size::Tkl,
         ),
+        (
+            "tester-jis",
+            1360,
+            1200,
+            byakko_core::projection::tester::Standard::Jis,
+            byakko_core::projection::tester::Size::Full,
+        ),
     ] {
-        app.tester.layout.standard = standard;
+        app.tester.update(tester_form::Message::Standard(standard));
         app.tester.layout.size = board_size;
         app.tester.test.resume();
         app.tester.test.accept(Input {
@@ -393,4 +400,33 @@ fn first_shift_tab_pauses_and_moves_real_iced_focus_backward() {
     let _ = app.update(messages.remove(0));
     assert!(!app.tester.active());
     assert_eq!(app.tester.test.total_presses(), 0);
+}
+
+#[test]
+fn jis_choice_and_window_input_preserve_japanese_host_usages() {
+    use byakko_core::projection::tester::{Legends, Standard};
+    let (mut app, _) = app(false);
+    let _ = app.update(Message::Page(Page::Tester));
+    let _ = app.update(Message::Tester(tester_form::Message::Standard(
+        Standard::Jis,
+    )));
+    assert_eq!(app.tester.layout.legends, Legends::Japanese);
+    let _ = app.update(Message::Tester(tester_form::Message::Start));
+    for (code, usage) in [
+        (keyboard::key::Code::IntlRo, 0x87),
+        (keyboard::key::Code::KanaMode, 0x88),
+        (keyboard::key::Code::IntlYen, 0x89),
+        (keyboard::key::Code::Convert, 0x8a),
+        (keyboard::key::Code::NonConvert, 0x8b),
+    ] {
+        let _ = app.update(Message::Tester(tester_form::Message::Input(
+            key(code, false, keyboard::Modifiers::empty()),
+            Instant::now(),
+        )));
+        assert_eq!(app.tester.test.last_input().unwrap().usage, usage);
+    }
+    let _ = app.update(Message::Tester(tester_form::Message::Standard(
+        Standard::Ansi,
+    )));
+    assert_eq!(app.tester.layout.legends, Legends::Qwerty);
 }

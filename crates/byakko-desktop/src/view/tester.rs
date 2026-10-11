@@ -17,10 +17,8 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     let choices = row![
         column![
             text("Physical layout"),
-            pick_list(Standard::ALL, Some(layout.standard), move |standard| {
-                Message::Layout(tester::LayoutSelection { standard, ..layout })
-            })
-            .on_open(Message::Pause)
+            pick_list(Standard::ALL, Some(layout.standard), Message::Standard)
+                .on_open(Message::Pause)
         ],
         column![
             text("Size"),

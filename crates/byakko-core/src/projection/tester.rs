@@ -8,6 +8,7 @@ pub enum Standard {
     #[default]
     Ansi,
     Iso,
+    Jis,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Size {
@@ -26,6 +27,7 @@ pub enum Legends {
     Colemak,
     Azerty,
     Qwertz,
+    Japanese,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -36,7 +38,7 @@ pub struct LayoutSelection {
 }
 
 impl Standard {
-    pub const ALL: [Self; 2] = [Self::Ansi, Self::Iso];
+    pub const ALL: [Self; 3] = [Self::Ansi, Self::Iso, Self::Jis];
 }
 impl Size {
     pub const ALL: [Self; 5] = [
@@ -48,12 +50,13 @@ impl Size {
     ];
 }
 impl Legends {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Qwerty,
         Self::Dvorak,
         Self::Colemak,
         Self::Azerty,
         Self::Qwertz,
+        Self::Japanese,
     ];
 }
 impl fmt::Display for Standard {
@@ -61,6 +64,7 @@ impl fmt::Display for Standard {
         f.write_str(match self {
             Self::Ansi => "ANSI",
             Self::Iso => "ISO",
+            Self::Jis => "JIS",
         })
     }
 }
@@ -83,6 +87,7 @@ impl fmt::Display for Legends {
             Self::Colemak => "Colemak",
             Self::Azerty => "AZERTY (French)",
             Self::Qwertz => "QWERTZ (German)",
+            Self::Japanese => "Japanese (JIS)",
         })
     }
 }
@@ -123,7 +128,7 @@ fn key(
 fn row(keys: &mut Vec<Key>, selection: LayoutSelection, y: f32, specs: &[Spec]) {
     let mut x = 0.0;
     for &(id, width) in specs {
-        let height = if selection.standard == Standard::Iso && id == Some(0x28) {
+        let height = if selection.standard != Standard::Ansi && id == Some(0x28) {
             2.0
         } else {
             1.0
@@ -161,6 +166,14 @@ pub fn layout_for(selection: LayoutSelection) -> Vec<Key> {
             usage(0x2a, 2.0),
         ],
     );
+    if selection.standard == Standard::Jis {
+        // The JIS yen key occupies half of the usual two-unit Backspace.
+        if let Some(backspace) = keys.iter_mut().find(|key| key.usage == Some(0x2a)) {
+            backspace.x = 14.0;
+            backspace.width = 1.0;
+        }
+        key(&mut keys, selection, Some(0x89), 13.0, alpha_y, 1.0, 1.0);
+    }
     let mut second = vec![
         usage(0x2b, 1.5),
         usage(0x14, 1.0),
@@ -176,7 +189,7 @@ pub fn layout_for(selection: LayoutSelection) -> Vec<Key> {
         usage(0x2f, 1.0),
         usage(0x30, 1.0),
     ];
-    second.push(if selection.standard == Standard::Iso {
+    second.push(if selection.standard != Standard::Ansi {
         usage(0x28, 1.5)
     } else {
         usage(0x31, 1.5)
@@ -196,7 +209,7 @@ pub fn layout_for(selection: LayoutSelection) -> Vec<Key> {
         usage(0x33, 1.0),
         usage(0x34, 1.0),
     ];
-    third.push(if selection.standard == Standard::Iso {
+    third.push(if selection.standard != Standard::Ansi {
         usage(0x31, 0.75)
     } else {
         usage(0x28, 2.25)
@@ -233,8 +246,42 @@ pub fn layout_for(selection: LayoutSelection) -> Vec<Key> {
             },
         ),
     ]);
+    if selection.standard == Standard::Jis {
+        let shift = fourth.last_mut().expect("fourth row has right Shift");
+        shift.1 = if matches!(selection.size, Size::SeventyFive | Size::SixtyFive) {
+            0.75
+        } else {
+            1.75
+        };
+        fourth.insert(fourth.len() - 1, usage(0x87, 1.0));
+    }
     row(&mut keys, selection, alpha_y + 3.0, &fourth);
-    let bottom = if matches!(selection.size, Size::SeventyFive | Size::SixtyFive) {
+    let bottom = if selection.standard == Standard::Jis {
+        let mut row = vec![
+            usage(0xe0, 1.25),
+            usage(0xe3, 1.25),
+            usage(0xe2, 1.25),
+            usage(0x8b, 1.25),
+            usage(0x2c, 2.5),
+            usage(0x8a, 1.25),
+            usage(0x88, 1.25),
+        ];
+        if matches!(selection.size, Size::SeventyFive | Size::SixtyFive) {
+            row.extend([usage(0xe6, 1.0), (None, 1.0), usage(0xe4, 1.0)]);
+        } else {
+            row.extend([
+                usage(0xe6, 1.25),
+                if selection.size == Size::Sixty {
+                    (None, 1.25)
+                } else {
+                    usage(0xe7, 1.25)
+                },
+                usage(0x65, 1.25),
+                usage(0xe4, 1.25),
+            ]);
+        }
+        row
+    } else if matches!(selection.size, Size::SeventyFive | Size::SixtyFive) {
         vec![
             usage(0xe0, 1.25),
             usage(0xe3, 1.25),
@@ -466,6 +513,7 @@ fn label(id: u16, choice: LayoutSelection) -> String {
                 0x10 => ",",
                 _ => QWERTY[index],
             },
+            Legends::Japanese => QWERTY[index],
             Legends::Qwertz => match id {
                 0x1c => "Z",
                 0x1d => "Y",
@@ -531,6 +579,11 @@ fn label(id: u16, choice: LayoutSelection) -> String {
         0x63 => ".",
         0x64 => "\\",
         0x65 => "Menu",
+        0x87 => "\\ ろ",
+        0x88 => "かな",
+        0x89 => "¥",
+        0x8a => "変換",
+        0x8b => "無変換",
         0xe0 | 0xe4 => "Ctrl",
         0xe1 | 0xe5 => "Shift",
         0xe2 | 0xe6 => "Alt",
@@ -538,6 +591,12 @@ fn label(id: u16, choice: LayoutSelection) -> String {
         _ => "?",
     };
     let override_label = match (choice.legends, id) {
+        (Legends::Japanese, 0x35) => Some("半角"),
+        (Legends::Japanese, 0x2e) => Some("^"),
+        (Legends::Japanese, 0x2f) => Some("@"),
+        (Legends::Japanese, 0x30) => Some("["),
+        (Legends::Japanese, 0x34) => Some(":"),
+        (Legends::Japanese, 0x31) => Some("]"),
         (Legends::Qwertz, 0x2d) => Some("ß"),
         (Legends::Qwertz, 0x2e) => Some("´"),
         (Legends::Qwertz, 0x2f) => Some("Ü"),
@@ -662,6 +721,72 @@ mod tests {
                 expected,
                 "AZERTY digit HID {usage:02X}"
             );
+        }
+    }
+    #[test]
+    fn jis_usages_legends_and_geometry_cover_each_size() {
+        for size in Size::ALL {
+            for legends in Legends::ALL {
+                let selection = LayoutSelection {
+                    standard: Standard::Jis,
+                    size,
+                    legends,
+                };
+                let keys = layout_for(selection);
+                let (width, height) = layout_bounds(&keys);
+                let mut usages = std::collections::BTreeSet::new();
+                for key in &keys {
+                    assert!(key.x >= 0.0 && key.y >= 0.0);
+                    assert!(key.width > 0.0 && key.height > 0.0);
+                    assert!(key.x + key.width <= width && key.y + key.height <= height);
+                    if let Some(usage) = key.usage {
+                        assert!(
+                            usages.insert(usage),
+                            "duplicate JIS HID {usage:02X} at {size}"
+                        );
+                    }
+                }
+                for usage in [0x87, 0x88, 0x89, 0x8a, 0x8b] {
+                    assert!(
+                        usages.contains(&usage),
+                        "missing JIS HID {usage:02X} at {size}"
+                    );
+                }
+                for (index, left) in keys.iter().enumerate() {
+                    for right in keys.iter().skip(index + 1) {
+                        let overlap_x =
+                            left.x < right.x + right.width && right.x < left.x + left.width;
+                        let overlap_y =
+                            left.y < right.y + right.height && right.y < left.y + left.height;
+                        assert!(
+                            !(overlap_x && overlap_y),
+                            "JIS {size} overlap: {:?} and {:?}",
+                            left.usage,
+                            right.usage
+                        );
+                    }
+                }
+            }
+        }
+        let japanese = LayoutSelection {
+            standard: Standard::Jis,
+            legends: Legends::Japanese,
+            ..Default::default()
+        };
+        for (usage, expected) in [
+            (0x35, "半角"),
+            (0x2e, "^"),
+            (0x2f, "@"),
+            (0x30, "["),
+            (0x34, ":"),
+            (0x31, "]"),
+            (0x87, "\\ ろ"),
+            (0x88, "かな"),
+            (0x89, "¥"),
+            (0x8a, "変換"),
+            (0x8b, "無変換"),
+        ] {
+            assert_eq!(label(usage, japanese), expected, "JIS HID {usage:02X}");
         }
     }
     #[test]

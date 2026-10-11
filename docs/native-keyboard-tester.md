@@ -47,7 +47,9 @@ Coverage, highlights and counts describe the host key usages reported by the
 input source. Firmware can map a physical Caps Lock switch to Escape, for
 example; that actuation highlights the reported Escape usage. The tester cannot
 infer which switch was actuated and does not read the configurator's keymap.
-Presets are representative layouts, and legends are display choices.
+ANSI, ISO and JIS presets cover full size, TKL, 75%, 65% and 60% geometries.
+Choosing JIS initially selects Japanese legends; legends remain a display choice.
+Presets are representative layouts rather than an exact model for every board.
 
 Shift+Tab publishes Pause on its first chord and runs Iced's backward focus
 operation. Other test keys remain captured so they do not activate controls.

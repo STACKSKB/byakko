@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Local tester state and the lifetime of its explicit input observation.
-use byakko_core::{model::tester::Tester, projection::tester::LayoutSelection};
+use byakko_core::{
+    model::tester::Tester,
+    projection::tester::{LayoutSelection, Legends, Standard},
+};
 use byakko_devices::tester_input::{self, InputDevice, Sample, Sampler};
 use iced::Event;
 use std::{fmt, time::Instant};
@@ -28,6 +31,7 @@ pub enum Message {
     Sources(Result<Vec<InputDevice>, String>),
     Source(Source),
     Layout(LayoutSelection),
+    Standard(Standard),
     Threshold(u64),
     Input(Event, Instant),
     Drain,
@@ -104,6 +108,16 @@ impl Form {
                 self.notice.clear();
             }
             Message::Layout(layout) => self.layout = layout,
+            Message::Standard(standard) => {
+                if self.layout.standard != standard {
+                    self.layout.standard = standard;
+                    if standard == Standard::Jis {
+                        self.layout.legends = Legends::Japanese;
+                    } else if self.layout.legends == Legends::Japanese {
+                        self.layout.legends = Legends::Qwerty;
+                    }
+                }
+            }
             Message::Threshold(us) => self.test.set_chatter_threshold_us(us),
             Message::Sources(result) => {
                 self.refreshing = false;
