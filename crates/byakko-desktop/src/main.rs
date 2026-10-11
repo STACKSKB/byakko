@@ -54,8 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .map_err(|error| error.to_string())?;
                     let mut listener = nia87::notifications::Listener::open(&candidate.identity())
                         .map_err(|error| error.to_string());
-                    let adapter =
-                        BoundNia87Adapter::connect(target).map_err(|error| error.to_string())?;
+                    let adapter = BoundNia87Adapter::new(target);
                     let worker = Executor::spawn(adapter, backups.clone())
                         .and_then(|worker| {
                             worker.with_notifications(move |timeout| match &mut listener {

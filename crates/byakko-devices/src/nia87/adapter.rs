@@ -9,12 +9,36 @@ use std::{collections::BTreeMap, path::Path};
 
 pub struct BoundNia87Adapter {
     access: device::Access,
+    connection: std::sync::OnceLock<Result<(), String>>,
 }
 impl BoundNia87Adapter {
-    pub fn connect(target: device::Target) -> device::Result<Self> {
-        let access = device::Access::bound(target);
-        access.validate_connection()?;
-        Ok(Self { access })
+    /// Bind without device I/O. The selected worker establishes receiver identity
+    /// on its first operation and retains that result until explicit reconnect.
+    pub fn new(target: device::Target) -> Self {
+        Self {
+            access: device::Access::bound(target),
+            connection: std::sync::OnceLock::new(),
+        }
+    }
+
+    fn access(&self) -> Result<&device::Access, String> {
+        self.connection
+            .get_or_init(|| {
+                self.access
+                    .validate_connection()
+                    .map_err(|error| error.to_string())
+            })
+            .as_ref()
+            .map(|()| &self.access)
+            .map_err(Clone::clone)
+    }
+
+    fn access_for_write(&self) -> Result<&device::Access, byakko_core::contract::ApplyFailure> {
+        self.access()
+            .map_err(|message| byakko_core::contract::ApplyFailure {
+                message,
+                recovery: byakko_core::contract::Recovery::NotAttempted,
+            })
     }
 }
 
@@ -44,7 +68,7 @@ fn apply_keymap(
 
 impl crate::Device for BoundNia87Adapter {
     fn read(&mut self) -> Result<State, String> {
-        self.access
+        self.access()?
             .snapshot()
             .map_err(|error| error.to_string())
             .and_then(|snapshot| from_snapshot(&snapshot))
@@ -56,15 +80,15 @@ impl crate::Device for BoundNia87Adapter {
         changes: &[Change],
         backup_dir: &Path,
     ) -> Result<State, byakko_core::contract::ApplyFailure> {
-        apply_keymap(&self.access, expected, changes, backup_dir)
+        apply_keymap(self.access_for_write()?, expected, changes, backup_dir)
     }
 
     fn read_macro(&mut self, slot: &str) -> Result<macros::Snapshot, String> {
-        macro_adapter::read_with(&self.access, slot)
+        macro_adapter::read_with(self.access()?, slot)
     }
 
     fn read_macro_catalog(&mut self, slots: &[String]) -> Result<Vec<macros::Snapshot>, String> {
-        macro_adapter::read_catalog_with(&self.access, slots)
+        macro_adapter::read_catalog_with(self.access()?, slots)
     }
 
     fn apply_macro(
@@ -73,11 +97,11 @@ impl crate::Device for BoundNia87Adapter {
         desired: &macros::Program,
         backup_dir: &Path,
     ) -> Result<macros::Snapshot, byakko_core::contract::ApplyFailure> {
-        macro_adapter::apply_with(&self.access, expected, desired, backup_dir)
+        macro_adapter::apply_with(self.access_for_write()?, expected, desired, backup_dir)
     }
 
     fn read_lighting(&mut self) -> Result<byakko_core::model::lighting::Snapshot, String> {
-        crate::nia87::lighting_adapter::read_with(&self.access)
+        crate::nia87::lighting_adapter::read_with(self.access()?)
     }
 
     fn apply_lighting(
@@ -86,7 +110,12 @@ impl crate::Device for BoundNia87Adapter {
         desired: &byakko_core::model::lighting::Setting,
         backup_dir: &Path,
     ) -> Result<byakko_core::model::lighting::Snapshot, byakko_core::contract::ApplyFailure> {
-        crate::nia87::lighting_adapter::apply_with(&self.access, expected, desired, backup_dir)
+        crate::nia87::lighting_adapter::apply_with(
+            self.access_for_write()?,
+            expected,
+            desired,
+            backup_dir,
+        )
     }
 
     fn start_host_lighting(
@@ -96,11 +125,17 @@ impl crate::Device for BoundNia87Adapter {
         expected: &byakko_core::model::lighting::Snapshot,
         backup_dir: &Path,
     ) -> Result<Box<dyn crate::HostActivity>, byakko_core::contract::ApplyFailure> {
-        crate::nia87::host_adapter::start(&self.access, mode, setting, expected, backup_dir)
+        crate::nia87::host_adapter::start(
+            self.access_for_write()?,
+            mode,
+            setting,
+            expected,
+            backup_dir,
+        )
     }
 
     fn read_picture(&mut self) -> Result<byakko_core::model::picture::Snapshot, String> {
-        crate::nia87::picture_adapter::read_with(&self.access)
+        crate::nia87::picture_adapter::read_with(self.access()?)
     }
 
     fn apply_picture(
@@ -109,11 +144,16 @@ impl crate::Device for BoundNia87Adapter {
         desired: &BTreeMap<String, [u8; 3]>,
         backup_dir: &Path,
     ) -> Result<byakko_core::model::picture::Snapshot, byakko_core::contract::ApplyFailure> {
-        crate::nia87::picture_adapter::apply_with(&self.access, expected, desired, backup_dir)
+        crate::nia87::picture_adapter::apply_with(
+            self.access_for_write()?,
+            expected,
+            desired,
+            backup_dir,
+        )
     }
 
     fn read_settings(&mut self) -> Result<byakko_core::model::settings::Snapshot, String> {
-        crate::nia87::settings_adapter::read_with(&self.access)
+        crate::nia87::settings_adapter::read_with(self.access()?)
     }
 
     fn apply_setting(
@@ -122,7 +162,12 @@ impl crate::Device for BoundNia87Adapter {
         edit: &byakko_core::model::settings::Edit,
         backup_dir: &Path,
     ) -> Result<byakko_core::model::settings::Snapshot, byakko_core::contract::ApplyFailure> {
-        crate::nia87::settings_adapter::apply_with(&self.access, expected, edit, backup_dir)
+        crate::nia87::settings_adapter::apply_with(
+            self.access_for_write()?,
+            expected,
+            edit,
+            backup_dir,
+        )
     }
 
     fn archive_capabilities(&self) -> Option<byakko_core::model::archive::ArchiveCapabilities> {
@@ -130,14 +175,14 @@ impl crate::Device for BoundNia87Adapter {
     }
 
     fn capture_archive(&mut self) -> Result<byakko_core::model::archive::NativeArchive, String> {
-        crate::nia87::archive_adapter::capture_with(&self.access)
+        crate::nia87::archive_adapter::capture_with(self.access()?)
     }
 
     fn review_archive(
         &mut self,
         target: &byakko_core::model::archive::NativeArchive,
     ) -> Result<byakko_core::model::archive::Review, String> {
-        crate::nia87::archive_adapter::review_with(&self.access, target)
+        crate::nia87::archive_adapter::review_with(self.access()?, target)
     }
 
     fn apply_archive(
@@ -147,6 +192,11 @@ impl crate::Device for BoundNia87Adapter {
         backup_dir: &Path,
     ) -> Result<byakko_core::model::archive::NativeArchive, byakko_core::contract::ApplyFailure>
     {
-        crate::nia87::archive_adapter::apply_with(&self.access, expected, target, backup_dir)
+        crate::nia87::archive_adapter::apply_with(
+            self.access_for_write()?,
+            expected,
+            target,
+            backup_dir,
+        )
     }
 }
