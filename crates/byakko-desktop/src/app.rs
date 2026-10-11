@@ -1252,6 +1252,9 @@ impl App {
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         let mut subscriptions = vec![close];
+        if self.closing == Closing::ConfirmDiscard {
+            subscriptions.push(iced::keyboard::listen().filter_map(modal_escape));
+        }
         if let Some(notifications) = self
             .link
             .executor()
@@ -1366,6 +1369,17 @@ impl App {
                 || self.session.recording()
                 || self.recording.pending(),
         )
+    }
+}
+
+fn modal_escape(event: iced::keyboard::Event) -> Option<Message> {
+    match event {
+        iced::keyboard::Event::KeyPressed {
+            key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+            repeat: false,
+            ..
+        } => Some(Message::KeepEditing),
+        _ => None,
     }
 }
 

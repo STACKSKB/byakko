@@ -7,7 +7,7 @@ use iced::{
         Layout, layout,
         widget::{Operation, Tree},
     },
-    mouse,
+    keyboard, mouse,
 };
 
 #[derive(Default)]
@@ -80,6 +80,77 @@ fn click_text(app: &App, label: &str) -> Vec<Message> {
         );
     }
     messages
+}
+
+fn escape_key(repeat: bool) -> keyboard::Event {
+    keyboard::Event::KeyPressed {
+        key: keyboard::Key::Named(keyboard::key::Named::Escape),
+        modified_key: keyboard::Key::Named(keyboard::key::Named::Escape),
+        physical_key: keyboard::key::Physical::Code(keyboard::key::Code::Escape),
+        location: keyboard::Location::Standard,
+        modifiers: keyboard::Modifiers::empty(),
+        text: None,
+        repeat,
+    }
+}
+
+fn rendered_escape_status(app: &App) -> iced::event::Status {
+    let mut element = app.view();
+    let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
+    let mut tree = Tree::new(&element);
+    let viewport = Rectangle::with_size(Size::new(1360.0, 900.0));
+    let node = element.as_widget_mut().layout(
+        &mut tree,
+        &renderer,
+        &layout::Limits::new(Size::ZERO, viewport.size()),
+    );
+    let mut messages = Vec::new();
+    let mut shell = iced::advanced::Shell::new(&mut messages);
+    element.as_widget_mut().update(
+        &mut tree,
+        &Event::Keyboard(escape_key(false)),
+        Layout::new(&node),
+        mouse::Cursor::Unavailable,
+        &renderer,
+        &mut iced::advanced::clipboard::Null,
+        &mut shell,
+        &viewport,
+    );
+    let status = shell.event_status();
+    assert!(
+        messages.is_empty(),
+        "view must leave Escape to the subscription"
+    );
+    status
+}
+
+#[test]
+fn discard_modal_escape_keeps_draft_and_other_screens_have_no_modal_listener() {
+    use iced::advanced::subscription::into_recipes;
+
+    let (mut app, _) = app(false);
+    let _ = app.update(Message::Read);
+    settle(&mut app);
+    edit(&mut app);
+    let draft = app.session.keymap().draft().cloned();
+    let ordinary_listeners = into_recipes(app.subscription()).len();
+    assert_eq!(rendered_escape_status(&app), iced::event::Status::Ignored);
+
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::ConfirmDiscard);
+    assert_eq!(
+        into_recipes(app.subscription()).len(),
+        ordinary_listeners + 1,
+        "only the open modal subscribes to ignored keyboard events"
+    );
+    assert_eq!(rendered_escape_status(&app), iced::event::Status::Ignored);
+    assert!(modal_escape(escape_key(true)).is_none());
+    let message = modal_escape(escape_key(false)).unwrap();
+    assert!(matches!(message, Message::KeepEditing));
+    let _ = app.update(message);
+    assert_eq!(app.closing, Closing::Open);
+    assert_eq!(app.session.keymap().draft(), draft.as_ref());
+    assert_eq!(into_recipes(app.subscription()).len(), ordinary_listeners);
 }
 
 #[test]
