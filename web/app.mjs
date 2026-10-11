@@ -12,6 +12,7 @@ import { createKeyboard } from "./keyboard.mjs";
 import { createRecorder } from "./recorder.mjs";
 import { needsInitialRead } from "./settings_view.mjs";
 import { createAppearance } from "./appearance.mjs";
+import { transportLabel } from "./transport.mjs";
 
 // Composition, navigation and DOM focus belong here; features and effects have their own owners.
 export function mount(root, {codec, hid, storage, now = () => performance.now(), wait, prepareHost} = {}) {
@@ -82,7 +83,7 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   function renderConnection() {
     const {device, connecting, closing, writes, listener, notificationStatus} = runtime.connection;
     connection.replaceChildren();
-    const identity = node(doc, "span", device ? "Nia87 · USB connected" : "No keyboard connected", device ? "device-name connected" : "device-name");
+    const identity = node(doc, "span", device ? `Nia87 · ${transportLabel(device)} connected` : "No keyboard connected", device ? "device-name connected" : "device-name");
     if (device) identity.title = `${device.productName || "Nia87"} · ${device.vendorId.toString(16)}:${device.productId.toString(16)}`;
     connection.append(identity);
     if (device) {
