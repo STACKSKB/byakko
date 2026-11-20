@@ -654,13 +654,17 @@ fn lighting_and_picture_conflicts_have_an_explicit_revert_then_read_path() {
     assert_eq!(app.session.picture().unwrap().status(), &Status::Ready);
 }
 
-fn settle(app: &mut App) {
+fn settle_attachment(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while app.link.settling() {
-        assert!(Instant::now() < deadline, "worker did not retire");
+        assert!(Instant::now() < deadline, "connection did not settle");
         let _ = app.update(Message::Poll(Instant::now()));
         std::thread::yield_now();
     }
+}
+
+fn settle(app: &mut App) {
+    settle_attachment(app);
     if !app.session.busy() && !app.session.catalog_scanning() {
         return;
     }

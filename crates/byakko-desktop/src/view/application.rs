@@ -43,6 +43,7 @@ pub struct View<'a> {
     pub selected_transport: Option<&'a str>,
     pub monitor_transports: bool,
     pub transport_scan_pending: bool,
+    pub transport_opening: bool,
     pub can_choose_transport: bool,
     pub confirm_transport_switch: bool,
     pub keys: &'a keymap::Form,
@@ -219,8 +220,10 @@ fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
             || input.session.requires_manual_read()
             || matches!(input.session.keymap().status(), Status::Unverified { .. }))
     {
-        navigation = navigation
-            .push(button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)));
+        navigation = navigation.push(
+            button("Read / reconnect")
+                .on_press_maybe((idle && !input.transport_opening).then_some(Message::Read)),
+        );
     }
     navigation = navigation.push(nav_button(
         "Appearance",

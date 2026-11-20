@@ -327,6 +327,7 @@ fn closing_appearance_preserves_the_workspace_through_the_existing_widget_cache(
 fn failed_keymap_read_has_one_short_rendered_diagnostic() {
     let (mut app, _) = app(false);
     let _ = app.update(Message::Read);
+    settle_attachment(&mut app);
     let mut completion = app
         .link
         .executor()

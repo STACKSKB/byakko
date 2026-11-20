@@ -5,8 +5,19 @@ use byakko_core::{
     session::{Outcome, Session},
 };
 use byakko_devices::{Executor, Retirement};
+use std::{
+    sync::Arc,
+    thread::{self, JoinHandle},
+};
 
-pub type Attach = dyn Fn(Option<&str>) -> Result<(String, Executor), String>;
+type Attached = Result<(String, Executor), String>;
+pub type Attach = dyn Fn(Option<&str>) -> Attached + Send + Sync;
+
+enum Attachment {
+    Idle,
+    Queued,
+    Opening(JoinHandle<Attached>),
+}
 
 enum Refresh {
     Idle,
@@ -21,13 +32,13 @@ pub enum RefreshStep {
 pub struct Connection {
     worker: Option<Executor>,
     retiring: Option<Retirement>,
-    reconnect: bool,
+    attachment: Attachment,
     // The pin outlives the worker. Only a deliberate choice can replace it.
     selected: Option<String>,
     presence: Availability,
     discovery: Option<Discovery>,
     scan_requested: bool,
-    attach: Box<Attach>,
+    attach: Arc<Attach>,
     refresh: Refresh,
 }
 
@@ -36,12 +47,12 @@ impl Connection {
         Self {
             worker: None,
             retiring: None,
-            reconnect: false,
+            attachment: Attachment::Idle,
             selected: None,
             presence: Availability::Unknown,
             discovery: None,
             scan_requested: false,
-            attach,
+            attach: Arc::from(attach),
             refresh: Refresh::Idle,
         }
     }
@@ -58,7 +69,10 @@ impl Connection {
         self.worker.as_ref()
     }
     pub fn settling(&self) -> bool {
-        self.retiring.is_some() || self.reconnect
+        self.retiring.is_some() || self.attaching()
+    }
+    pub fn attaching(&self) -> bool {
+        !matches!(self.attachment, Attachment::Idle)
     }
     pub fn monitoring(&self) -> bool {
         self.discovery.is_some()
@@ -82,9 +96,12 @@ impl Connection {
         self.scan_requested
     }
     pub fn retire(&mut self, session: &mut Session) -> Result<(), String> {
+        if matches!(self.attachment, Attachment::Opening(_)) {
+            return Err("Wait for the keyboard connection to finish opening.".into());
+        }
         self.invalidate_discovery();
         self.refresh = Refresh::Idle;
-        self.reconnect = false;
+        self.attachment = Attachment::Idle;
         if let Some(worker) = self.worker.take() {
             self.retiring = Some(worker.retire());
         }
@@ -92,6 +109,9 @@ impl Connection {
     }
     /// Manual refresh retries the pinned endpoint even if discovery saw a replacement.
     pub fn read(&mut self, session: &mut Session) -> Result<Option<Command>, String> {
+        if self.attaching() {
+            return Ok(None);
+        }
         if self.selected.is_none() {
             match &self.presence {
                 Availability::Choices { .. } => {
@@ -102,7 +122,7 @@ impl Connection {
             }
         }
         self.retire(session)?;
-        self.reconnect = true;
+        self.attachment = Attachment::Queued;
         self.poll(session)
     }
     /// Start a read-only connection to the exact endpoint named by the control.
@@ -119,10 +139,10 @@ impl Connection {
             session.reset_target()?;
         }
         self.selected = Some(id.to_owned());
-        self.reconnect = true;
+        self.attachment = Attachment::Queued;
         self.poll(session)
     }
-    /// Finish the old worker before opening another device transaction.
+    /// Wait for the old device worker to retire, then open its replacement off the UI thread.
     pub fn poll(&mut self, session: &mut Session) -> Result<Option<Command>, String> {
         if self
             .retiring
@@ -132,16 +152,35 @@ impl Connection {
             return Ok(None);
         }
         self.retiring = None;
-        if std::mem::take(&mut self.reconnect) {
-            self.attach(session).map(Some)
-        } else {
-            Ok(None)
-        }
+        self.attachment = match std::mem::replace(&mut self.attachment, Attachment::Idle) {
+            Attachment::Idle => Attachment::Idle,
+            Attachment::Queued => {
+                let attach = Arc::clone(&self.attach);
+                let expected = self.selected.clone();
+                let worker = thread::Builder::new()
+                    .name("keyboard-attachment".into())
+                    .spawn(move || attach(expected.as_deref()))
+                    .map_err(|error| format!("Could not start keyboard connection: {error}"))?;
+                Attachment::Opening(worker)
+            }
+            Attachment::Opening(worker) if !worker.is_finished() => Attachment::Opening(worker),
+            Attachment::Opening(worker) => {
+                let (id, worker) = worker
+                    .join()
+                    .map_err(|_| "Keyboard attachment stopped unexpectedly".to_owned())??;
+                return self.accept_attachment(session, id, worker).map(Some);
+            }
+        };
+        Ok(None)
     }
-    fn attach(&mut self, session: &mut Session) -> Result<Command, String> {
-        let expected = self.selected();
-        let (id, worker) = (self.attach)(expected)?;
-        if expected.is_some_and(|expected| expected != id) {
+    fn accept_attachment(
+        &mut self,
+        session: &mut Session,
+        id: String,
+        worker: Executor,
+    ) -> Result<Command, String> {
+        if self.selected().is_some_and(|expected| expected != id) {
+            self.retiring = Some(worker.retire());
             return Err("The discovered keyboard changed before attachment".into());
         }
         worker.set_generation(session.connect()?);
@@ -167,7 +206,7 @@ impl Connection {
         if let Some(observed) = observed {
             let requested = std::mem::take(&mut self.scan_requested);
             let command = self.observe(session, observed)?;
-            if command.is_some() || requested {
+            if command.is_some() || requested || self.settling() {
                 return Ok(command);
             }
         }
@@ -195,7 +234,7 @@ impl Connection {
                 self.retire(session)?;
             }
         } else if available && !session.requires_manual_read() {
-            self.reconnect = true;
+            self.attachment = Attachment::Queued;
             return self.poll(session);
         }
         Ok(None)
@@ -302,6 +341,17 @@ mod tests {
         ));
     }
 
+    fn wait_for_read(link: &mut Connection, session: &mut Session) -> Command {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(command) = link.poll(session).unwrap() {
+                return command;
+            }
+            assert!(Instant::now() < deadline, "attachment did not settle");
+            thread::yield_now();
+        }
+    }
+
     #[test]
     fn offline_receiver_stays_pinned_with_wired_present_and_manual_read_retries_it() {
         let (mut link, mut session, attachments) = fixture();
@@ -316,22 +366,18 @@ mod tests {
             },
         };
         assert!(link.observe(&mut session, both.clone()).unwrap().is_none());
-        let command = link.choose(&mut session, "receiver").unwrap().unwrap();
+        assert!(link.choose(&mut session, "receiver").unwrap().is_none());
+        let command = wait_for_read(&mut link, &mut session);
         complete_failed_first_read(&mut link, &mut session, command);
         for _ in 0..3 {
             assert!(link.observe(&mut session, both.clone()).unwrap().is_none());
         }
         assert_eq!(attachments.load(Ordering::SeqCst), 1);
-        let mut command = link.read(&mut session).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while command.is_none() {
-            assert!(Instant::now() < deadline, "manual reconnect did not settle");
-            std::thread::yield_now();
-            command = link.poll(&mut session).unwrap();
-        }
+        assert!(link.read(&mut session).unwrap().is_none());
+        let command = wait_for_read(&mut link, &mut session);
         assert_eq!(attachments.load(Ordering::SeqCst), 2);
         assert!(link.executor().is_some());
-        complete_failed_first_read(&mut link, &mut session, command.unwrap());
+        complete_failed_first_read(&mut link, &mut session, command);
     }
 
     #[test]
@@ -341,7 +387,8 @@ mod tests {
             id: "receiver".into(),
             label: "2.4 GHz receiver",
         });
-        let command = link.observe(&mut session, ready.clone()).unwrap().unwrap();
+        assert!(link.observe(&mut session, ready.clone()).unwrap().is_none());
+        let command = wait_for_read(&mut link, &mut session);
         complete_failed_first_read(&mut link, &mut session, command);
         assert!(
             link.observe(&mut session, Availability::Missing)
@@ -358,8 +405,51 @@ mod tests {
             std::thread::yield_now();
             assert!(link.poll(&mut session).unwrap().is_none());
         }
-        let command = link.observe(&mut session, ready).unwrap().unwrap();
+        assert!(link.observe(&mut session, ready).unwrap().is_none());
+        let command = wait_for_read(&mut link, &mut session);
         assert_eq!(attachments.load(Ordering::SeqCst), 2);
         complete_failed_first_read(&mut link, &mut session, command);
+    }
+
+    #[test]
+    fn an_attachment_returning_another_id_never_allocates_a_generation() {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let count = attempts.clone();
+        let mut link = Connection::new(Box::new(move |expected| {
+            assert_eq!(expected, Some("receiver"));
+            let id = if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                "wired"
+            } else {
+                "receiver"
+            };
+            let worker = Executor::spawn(memory::demo()?, PathBuf::new())
+                .map_err(|error| error.to_string())?;
+            Ok((id.into(), worker))
+        }));
+        let mut session = memory::demo().unwrap().session().unwrap();
+        let ready = Availability::Ready(Endpoint {
+            id: "receiver".into(),
+            label: "2.4 GHz receiver",
+        });
+        assert!(link.observe(&mut session, ready).unwrap().is_none());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match link.poll(&mut session) {
+                Err(reason) => {
+                    assert_eq!(reason, "The discovered keyboard changed before attachment");
+                    break;
+                }
+                Ok(result) => assert!(result.is_none(), "the wrong device may never be read"),
+            }
+            assert!(Instant::now() < deadline, "attachment did not settle");
+            thread::yield_now();
+        }
+        assert_eq!(link.selected(), Some("receiver"));
+        assert!(link.executor().is_none());
+        assert!(!session.busy());
+        assert!(link.read(&mut session).unwrap().is_none());
+        let read = wait_for_read(&mut link, &mut session);
+        assert_eq!(read.generation, 1);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
     }
 }

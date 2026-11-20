@@ -9,6 +9,107 @@ fn choices() -> Availability {
 }
 
 #[test]
+fn delayed_attachment_leaves_navigation_responsive() {
+    use std::sync::mpsc;
+
+    let (started, starts) = mpsc::channel();
+    let (release, releases) = mpsc::channel();
+    let releases = Mutex::new(releases);
+    let mut app = App::new(
+        memory::demo().unwrap().session().unwrap(),
+        Box::new(move |expected| {
+            assert_eq!(expected, Some("receiver"));
+            started.send(()).unwrap();
+            // A watchdog catches a regression that blocks the update thread.
+            releases
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(10))
+                .expect("update thread did not release attachment");
+            let worker = Executor::spawn(memory::demo()?, Default::default())
+                .map_err(|error| error.to_string())?;
+            Ok(("receiver".into(), worker))
+        }),
+    );
+    app.link.monitor(Discovery::spawn(choices).unwrap());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.link.presence() != &choices() {
+        let _ = app.update(Message::Scan);
+        assert!(Instant::now() < deadline);
+        std::thread::yield_now();
+    }
+
+    let _ = app.update(Message::ChooseTransport("receiver".into()));
+    starts.recv_timeout(Duration::from_secs(2)).unwrap();
+    let _ = app.update(Message::Page(Page::Settings));
+    assert_eq!(app.page, Page::Settings);
+    assert!(
+        app.link.settling(),
+        "navigation must run before attach finishes"
+    );
+    assert!(app.link.executor().is_none());
+    assert!(click_text(&app, "Read / reconnect").is_empty());
+    assert!(click_text(&app, "Wired USB").is_empty());
+    let _ = app.update(Message::Read);
+    let _ = app.update(Message::ChooseTransport("wired".into()));
+    assert_eq!(app.link.selected(), Some("receiver"));
+    let _ = app.update(Message::Close);
+    assert_eq!(app.closing, Closing::Waiting);
+
+    release.send(()).unwrap();
+    drain(&mut app);
+    assert!(matches!(
+        app.session.connection(),
+        Connection::Connected { generation: 1 }
+    ));
+    assert_eq!(app.session.keymap().status(), &Status::Ready);
+    assert!(starts.try_recv().is_err(), "only one attachment may start");
+}
+
+#[test]
+fn a_failed_reconnect_resumes_close_and_confirms_discard_only_when_dirty() {
+    use iced::futures::{FutureExt, StreamExt};
+    use iced_runtime::{Action, task::into_stream};
+
+    for dirty in [false, true] {
+        let mut h = DiscoveryApp::new(false);
+        h.observe(ready("wired"));
+        if dirty {
+            edit(&mut h.app);
+        }
+        let draft = h.app.session.keymap().draft().cloned();
+        h.reject_attach.store(true, Ordering::SeqCst);
+        let _ = h.app.update(Message::Read);
+        let _ = h.app.update(Message::Close);
+        assert_eq!(h.app.closing, Closing::Waiting);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let task = loop {
+            let task = h.app.update(Message::Poll(Instant::now()));
+            if !h.app.link.settling() {
+                break task;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "failed attachment did not settle"
+            );
+            std::thread::yield_now();
+        };
+        assert_eq!(h.app.notice, "Injected attach failure");
+        assert_eq!(h.app.session.connection(), &Connection::Disconnected);
+        let action =
+            into_stream(task).and_then(|mut actions| actions.next().now_or_never().flatten());
+        if dirty {
+            assert_eq!(h.app.closing, Closing::ConfirmDiscard);
+            assert!(action.is_none());
+            assert_eq!(h.app.session.keymap().draft(), draft.as_ref());
+        } else {
+            assert!(matches!(action, Some(Action::Exit)));
+        }
+    }
+}
+
+#[test]
 fn dual_transport_startup_requires_a_choice_and_pins_either_endpoint() {
     for id in ["wired", "receiver"] {
         let mut h = DiscoveryApp::new(false);

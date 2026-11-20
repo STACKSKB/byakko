@@ -61,7 +61,10 @@ pub fn run(
     session: Session,
     config: Config,
     discovery: Discovery,
-    attach: impl Fn(Option<&str>) -> Result<(String, byakko_devices::Executor), String> + 'static,
+    attach: impl Fn(Option<&str>) -> Result<(String, byakko_devices::Executor), String>
+    + Send
+    + Sync
+    + 'static,
 ) -> iced::Result {
     let mut app = App::new(session, Box::new(attach));
     app.link.monitor(discovery);
@@ -383,7 +386,7 @@ impl App {
                 Ok(None) => {}
                 Err(reason) => self.notice = reason,
             },
-            Message::Read if !self.session.busy() => {
+            Message::Read if !self.session.busy() && !self.link.attaching() => {
                 self.keys.catalog.input = catalog::InputMode::Browse;
                 self.autosave.clear();
                 self.assignment_binding = None;
@@ -394,8 +397,7 @@ impl App {
                 return match request {
                     Ok(Some(command)) => self.submit(Ok(command)),
                     Ok(None) => {
-                        self.notice =
-                            "Finishing the previous keyboard operation before reconnecting…".into();
+                        self.notice = "Connecting to the keyboard…".into();
                         Task::none()
                     }
                     Err(reason) => self.submit(Err(reason)),
@@ -1045,6 +1047,7 @@ impl App {
         {
             return Task::none();
         }
+        let attaching = self.link.attaching();
         let connection = self.session.connection().clone();
         let request = self.link.scan(&mut self.session);
         if &connection != self.session.connection() {
@@ -1055,7 +1058,12 @@ impl App {
         }
         match request {
             Ok(Some(command)) => self.submit(Ok(command)),
-            Ok(None) => Task::none(),
+            Ok(None) => {
+                if !attaching && self.link.attaching() {
+                    self.notice = "Connecting to the keyboard…".into();
+                }
+                Task::none()
+            }
             Err(reason) => {
                 self.notice = reason;
                 Task::none()
@@ -1216,7 +1224,9 @@ impl App {
             }
             Err(reason) => {
                 self.notice = reason;
-                self.closing = Closing::Open;
+                if self.closing == Closing::Waiting {
+                    return self.close();
+                }
                 return Task::none();
             }
             Ok(None) => {}
@@ -1655,6 +1665,7 @@ impl App {
                 selected_transport: self.link.selected(),
                 monitor_transports: self.link.monitoring(),
                 transport_scan_pending: self.link.scan_requested(),
+                transport_opening: self.link.attaching(),
                 can_choose_transport: self.can_choose_transport(),
                 confirm_transport_switch: self.transport_switch.is_some(),
                 keys: &self.keys,
