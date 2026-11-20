@@ -9,6 +9,28 @@ const lavenderKeys = new Set(["Esc", "F5", "F6", "F7", "F8", "PrtSc", "ScrLk", "
   "Fn", "Menu", "Backspace", "Enter", "Insert", "Home", "PgUp", "Delete", "End", "PgDn",
   "Left", "Down", "Up", "Right"]);
 
+// Cap printing is separate from the full physical label used by the chooser and assistive technology.
+const printedLegends = {
+  PrtSc: "PS", ScrLk: "SL", Pause: "PB", Insert: "INS", Delete: "DEL", Caps: "CAPS LOCK",
+  LShift: "SHIFT", RShift: "SHIFT", LWin: "WIN", RWin: "WIN", LCtrl: "CTRL", RCtrl: "CTRL",
+  LAlt: "ALT", RAlt: "ALT", Left: "◀", Right: "▶", Up: "▲", Down: "▼",
+};
+const shiftedSymbols = {
+  "`": "~", "1": "!", "2": "@", "3": "#", "4": "$", "5": "%", "6": "^", "7": "&",
+  "8": "*", "9": "(", "0": ")", "-": "_", "=": "+", "[": "{", "]": "}", "\\": "|",
+  ";": ":", "'": '"', ",": "<", ".": ">", "/": "?",
+};
+
+function capLegend(doc, label) {
+  const legend = node(doc, "span", undefined, "key-legend");
+  const printed = printedLegends[label] ?? label.toUpperCase();
+  const shifted = shiftedSymbols[label];
+  if (shifted) legend.append(node(doc, "span", shifted, "key-shifted"));
+  if (printed.length > 1) legend.classList.add("key-word");
+  legend.append(doc.createTextNode(printed));
+  return legend;
+}
+
 function readableOn(color) {
   const channels = [1, 3, 5].map(at => parseInt(color.slice(at, at + 2), 16) / 255);
   const light = channels.map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4)
@@ -53,7 +75,8 @@ export function createKeyboard({ doc, selectLayer, selectKey, redraw }) {
         if (tab !== "lighting" || !lighting.paintKey(item.id)) redraw();
       }, false, `key ${stock} ${key === item.id ? "selected" : ""} ${changed ? "changed" : ""} ${view.descriptor.layers.find(entry => entry.id === layer)?.read_only_keys.includes(item.id) || !item.writable ? "protected" : ""}`);
       element.dataset.key = item.id;
-      element.append(node(doc, "span", item.label, "key-legend"));
+      if (item.label === "Space") element.classList.add("spacebar");
+      element.append(capLegend(doc, item.label));
       if (mapped && mapped.compact !== item.label) element.append(node(doc, "span", mapped.compact, "key-binding"));
       element.title = mapped ? `${item.label} · ${mapped.full}` : item.label;
       element.setAttribute("aria-label", mapped && mapped.compact !== item.label ? `${item.label} · ${mapped.full}` : item.label);

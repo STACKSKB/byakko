@@ -28,6 +28,41 @@ function key(h, label) { return h.app.view.descriptor.keys.find(item => item.lab
 function boardColor(h, id) { return h.root.querySelector(`.keyboard .key[data-key="${id}"]`)?.style.getPropertyValue("--key-color"); }
 
 export const galleryTests = [
+  ["flat caps preserve RGB, labels, and geometry through a Look preview", async h => {
+    const boardKeys = () => [...h.root.querySelectorAll(".keyboard button.key")];
+    const bounds = () => new Map(boardKeys().map(key => [key.dataset.key, key.getBoundingClientRect()]));
+    const flat = element => {
+      const style = getComputedStyle(element);
+      assert(style.boxShadow === "none" && style.backgroundImage === "none" && style.filter === "none", "Shaded keyboard or key");
+      for (const pseudo of ["::before", "::after"]) {
+        const face = getComputedStyle(element, pseudo);
+        assert(face.display === "none" || (face.boxShadow === "none" && face.backgroundImage === "none" && face.filter === "none"),
+          `Shaded ${pseudo} face`);
+      }
+    };
+    assert(boardKeys().length === 87, "Physical board is incomplete");
+    flat(h.root.querySelector(".keyboard"));
+    boardKeys().forEach(flat);
+    const original = bounds();
+    await ready(h);
+    const print = h.app.view.descriptor.keys.find(item => item.label === "PrtSc" && item.visible);
+    const printButton = h.root.querySelector(`.keyboard button.key[data-key="${print?.id}"]`);
+    assert(printButton?.querySelector(".key-legend")?.textContent === "PS", "Print Screen did not use its compact legend");
+    assert(printButton.title === "PrtSc" && printButton.getAttribute("aria-label") === "PrtSc", "Print Screen lost its full accessible label");
+    button(h.root, "WASD").click();
+    const look = JSON.parse(codec.picture_looks(255, 255, 255)).find(entry => entry.id === "wasd");
+    assert(look && Object.keys(look.colors).length === 87, "Canonical Look colors are incomplete");
+    for (const key of boardKeys()) {
+      flat(key);
+      const color = look.colors[key.dataset.key];
+      assert(color, `Look omitted ${key.dataset.key}`);
+      assert(getComputedStyle(key).backgroundColor === `rgb(${color.join(", ")})`, `Rendered color differs from canonical RGB on ${key.dataset.key}`);
+      const before = original.get(key.dataset.key), after = key.getBoundingClientRect();
+      assert(before && ["x", "y", "width", "height"].every(part => Math.abs(before[part] - after[part]) < .1),
+        `Key geometry moved at ${key.dataset.key}`);
+    }
+    flat(h.root.querySelector(".keyboard"));
+  }],
   ["brush selection does not paint until Paint and a key click", async h => {
     await ready(h);
     const w = key(h, "W"), before = h.app.view.picture.editor.draft[w].join();

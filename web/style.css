@@ -81,26 +81,6 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
 .layer-tabs button { min-height: 28px; min-width: 52px; border: 0; border-radius: 0; background: var(--paper); padding: 3px 12px; font-size: 12px; }
 .layer-tabs button.active { color: var(--on-accent); background: var(--accent); }
 .keyboard-scroll { overflow-x: auto; margin-top: 18px; padding: 7px 5px 9px; }
-.keyboard {
-  position: relative; border: 1px solid var(--case-border); border-radius: 7px; background: var(--case);
-  box-shadow: 0 3px 0 var(--case-edge), 0 4px 0 var(--case-shadow); margin: 0 auto; max-width: none;
-}
-.key {
-  position: absolute; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; text-align: center; padding: 2px; overflow: hidden; line-height: 1.15; border-radius: 4px;
-  color: var(--key-ink); background: var(--keycap); border: 1px solid var(--key-border);
-  box-shadow: inset 0 -3px var(--key-edge); font-size: 10px; font-weight: 500;
-}
-.key.indigo { color: var(--indigo-ink); background: var(--indigo); border-color: var(--indigo-border); box-shadow: inset 0 -3px var(--indigo-edge); }
-.key:hover:not(:disabled) { background: var(--key-hover); border-color: var(--key-border-hover); }
-.key.indigo:hover:not(:disabled) { background: var(--indigo-hover); border-color: var(--indigo-border-hover); }
-.key.selected, .key.indigo.selected { outline: 2px solid var(--key-selected); outline-offset: 2px; z-index: 1; }
-.key.changed { border-top: 3px solid var(--key-changed); }
-.key.protected .key-legend { text-decoration: underline dotted; text-underline-offset: 3px; }
-.key-legend { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.key-binding { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 8px; }
-.key.has-color::after { content: ""; position: absolute; height: 4px; bottom: 3px; left: 6px; right: 6px; background: var(--key-color); border: 1px solid var(--swatch-border); }
-.key.has-color { padding-bottom: 7px; }
 .panel { border-top: 1px solid var(--rule); padding: 22px 0 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 20px; }
 .panel > h2, .panel > p { grid-column: 1; }
 .panel > .actions { grid-column: 2; grid-row: 1 / span 2; align-self: start; justify-content: flex-end; }
@@ -236,9 +216,9 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
 /* The approved Nia87 workspace. Feature colours remain owned by palette.css. */
 :root {
   --stage: var(--canvas);
-  --case-top: #d2d2d4; --case-rim: #9c9c9e; --case-lip: #c3bfc3;
-  --cap-light: #dcdbe1; --skirt-light: #bcbfc6; --legend-violet: #494666;
-  --cap-lavender: #6d65a9; --skirt-lavender: #595580; --well: #484f5a;
+  --case-top: #d2d2d4; --case-rim: #9c9c9e;
+  --cap-light: #dcdbe1; --legend-violet: #4c486d; --cap-lavender: #6d65a9;
+  --lavender-outline: #595580; --well: #484f5a;
 }
 .shell { height: 100vh; height: 100dvh; min-height: 0; display: grid; grid-template-rows: 58px minmax(0,1fr); overflow: hidden; }
 .topbar { position: relative; top: auto; min-height: 0; height: 58px; padding: 0 20px; gap: 18px; background: #000; border: 0; color: #fff; }
@@ -278,23 +258,50 @@ button.nav-item:hover:not(:disabled) { background: var(--nav-hover); }
 .layer-tabs { flex: none; border-radius: 5px; }
 .layer-tabs button { min-width: 43px; }
 .keyboard-scroll { min-width: 0; min-height: 0; overflow: auto hidden; margin: 0; padding: 7px 13px; display: flex; align-items: center; overscroll-behavior: contain; }
-.keyboard { flex: none; position: relative; width: 100%; min-width: 0; max-width: 1040px; height: auto !important; margin: auto; padding: 0; border: 7px solid var(--case-rim); border-bottom: 10px solid var(--case-lip); border-radius: 13px; background: var(--case-top); box-shadow: inset 0 1px #ece9ed, 0 3px 5px #0002; container-type: inline-size; }
-.keyboard::after { content: ""; position: absolute; pointer-events: none; left: 83.7%; top: 58%; width: .7%; aspect-ratio: 1; background: var(--well); border-radius: 2px; box-shadow: 1.8cqw 0 var(--well); }
-.key, .key.indigo { --top: var(--cap-light); --skirt: var(--skirt-light); --letter: var(--legend-violet); display: block; padding: 0; background: var(--skirt); color: var(--letter); border: 1px solid var(--well); border-radius: 5px; box-shadow: inset 0 -3px #0002; font-family: "Segoe UI", system-ui, sans-serif; font-size: clamp(8px,1.45cqw,15px); font-weight: 600; line-height: 1; }
-.key.lavender { --top: var(--cap-lavender); --skirt: var(--skirt-lavender); --letter: #fff; }
-.key::before { content: ""; position: absolute; z-index: 0; pointer-events: none; inset: 3% 7% 12% 5%; border-radius: 20%; background: var(--top); box-shadow: 1px 1px 2px #0002, inset 0 1px #ffffff52; }
-.key[data-key="Space"]::before { inset: 3% 1.4% 9% .9%; border-radius: 6px; }
-.key-legend, .key-binding { position: relative; z-index: 1; display: block; max-width: 96%; margin: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.key-binding { font-size: .68em; }
-.key[data-key="Space"] .key-legend { opacity: 0; }
-.key[data-key="Space"]:is(:hover,:focus-visible,.selected) .key-legend { opacity: 1; }
-.key.has-color, .key.lavender.has-color { --top: var(--key-color); --skirt: color-mix(in srgb,var(--key-color),#000 22%); --letter: var(--key-color-ink); color: var(--letter); }
-.key.has-color::after { display: none; }
-.key.has-color .key-binding { color: var(--letter); }
-.key:hover:not(:disabled), .key.indigo:hover:not(:disabled) { background: var(--skirt); border-color: #000; outline: 1px solid #000; outline-offset: -2px; }
-.key.selected, .key.indigo.selected { outline: 2px solid #000; outline-offset: 1px; z-index: 2; }
+.keyboard {
+  flex: none; position: relative; width: 100%; min-width: 0; max-width: 1040px; height: auto;
+  margin: auto; padding: 0; container-type: inline-size;
+  /* The transparent rim reserves the original containing block for all 87 physical keys. */
+  border: 7px solid transparent; border-bottom-width: 10px; border-radius: 12px;
+  background: var(--case-top); outline: 1px solid var(--case-rim); outline-offset: -1px;
+}
+.keyboard::before, .keyboard::after {
+  content: ""; position: absolute; pointer-events: none; top: 58%; width: .7%; aspect-ratio: 1;
+  border-radius: 1px; background: var(--well);
+}
+.keyboard::before { left: 83.7%; }
+.keyboard::after { left: 85.5%; }
+.key {
+  --face: var(--cap-light); --letter: var(--legend-violet); --edge: var(--case-rim);
+  position: absolute; min-height: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; padding: 0; overflow: hidden;
+  background: var(--face); color: var(--letter); border: 1px solid var(--edge);
+  border-radius: clamp(2px,.43cqw,5px); font: 500 clamp(8px,1.79cqw,17px)/1 "Segoe UI",system-ui,sans-serif;
+}
+.key.lavender { --face: var(--cap-lavender); --letter: #fff; --edge: var(--lavender-outline); }
+.key.has-color { --face: var(--key-color); --letter: var(--key-color-ink); --edge: var(--well); }
+.key-legend, .key-binding { display: block; max-width: 100%; overflow: hidden; white-space: nowrap; }
+.key-word { font-size: clamp(6px,1.45cqw,14px); font-weight: 650; }
+.key-shifted { display: block; }
+.key-legend:has(.key-shifted) { font-size: .8em; }
+.key-binding { font-size: .68em; text-overflow: ellipsis; }
+.key:has(.key-binding) .key-shifted { display: none; }
+.key.protected .key-legend { text-decoration: underline dotted; text-underline-offset: 2px; }
+.key.spacebar .key-legend { opacity: 0; }
+.key.spacebar:is(:hover,:focus-visible,.selected) .key-legend { opacity: 1; }
+.key:hover:not(:disabled) { background: var(--face); border-color: #000; }
+.key.selected { outline: 2px solid #000; outline-offset: 0; z-index: 2; }
 .key.changed { border-top: 3px solid var(--key-changed); }
-.key:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; z-index: 3; }
+.keyboard .key:focus-visible { outline: 3px solid #2b6cb0; outline-offset: 1px; z-index: 3; }
+@container (max-width: 510px) {
+  .key { font-size: clamp(8px,2.65cqw,12px); }
+  .key-word {
+    max-width: none; overflow: visible; font-size: clamp(6px,1.8cqw,9px); line-height: 1.15;
+    letter-spacing: -.025em; transform: scaleX(.84);
+  }
+  .key-shifted { display: none; }
+  .key-legend:has(.key-shifted) { font-size: inherit; }
+}
 .keyboard-footer { min-height: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 20px; color: var(--muted); font-size: 12px; }
 .keyboard-legend { display: flex; gap: 14px; white-space: nowrap; }
 .key-chooser { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
