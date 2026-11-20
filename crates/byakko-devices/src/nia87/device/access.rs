@@ -200,6 +200,7 @@ mod tests {
         assert!(Selection::Unique.validate_product(0x4015).is_ok());
         let target = Target::from_candidate(&Candidate {
             path: "selected-receiver".into(),
+            physical_device: None,
             vid: 0x3151,
             pid: 0x4011,
             interface: 2,

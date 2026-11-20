@@ -1,7 +1,7 @@
 //! The persistent keyboard workspace composes the approved feature layouts.
 use crate::widget::focus_button::button;
 use crate::{
-    controller::discovery::Availability,
+    controller::discovery::{Availability, Endpoint},
     form::{
         appearance,
         application::{Closing, Message, Page},
@@ -40,6 +40,11 @@ pub struct View<'a> {
     pub session: &'a Session,
     pub appearance: &'a appearance::Form,
     pub presence: &'a Availability,
+    pub selected_transport: Option<&'a str>,
+    pub monitor_transports: bool,
+    pub transport_scan_pending: bool,
+    pub can_choose_transport: bool,
+    pub confirm_transport_switch: bool,
     pub keys: &'a keymap::Form,
     pub macros: &'a macros::Form,
     pub lighting: &'a lighting::Form,
@@ -100,28 +105,28 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
                 .padding(iced::Padding::default().left(10).right(10))
                 .into()
         };
-        column![
-            container(header).style(|_| container::Style {
-                background: Some(iced::Background::Color(Color::BLACK)),
-                text_color: Some(Color::WHITE),
-                ..Default::default()
-            }),
-            workspace(input, wide),
-        ]
-        .height(Fill)
-        .into()
+        let mut content = column![container(header).style(|_| container::Style {
+            background: Some(iced::Background::Color(Color::BLACK)),
+            text_color: Some(Color::WHITE),
+            ..Default::default()
+        })];
+        if input.monitor_transports {
+            content = content.push(transport_controls(input));
+        }
+        content.push(workspace(input, wide)).height(Fill).into()
     })
     .width(Fill)
     .height(Fill)
     .into();
-    let blocked = input.appearance.open || input.closing == Closing::ConfirmDiscard;
+    let confirm_close = input.closing == Closing::ConfirmDiscard;
+    let blocked = input.appearance.open || confirm_close || input.confirm_transport_switch;
     let base = crate::widget::tester_capture::capture(
         base,
         !blocked && input.page == Page::Tester && input.tester.active(),
         Message::Tester(crate::form::tester::Message::Pause),
     );
     let layers = iced::widget::stack![crate::widget::inert::guard(base, blocked)];
-    if input.appearance.open && input.closing != Closing::ConfirmDiscard {
+    if input.appearance.open && !confirm_close && !input.confirm_transport_switch {
         return layers
             .push(
                 container(iced::widget::opaque(
@@ -133,16 +138,32 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
             )
             .into();
     }
-    if input.closing != Closing::ConfirmDiscard {
+    let (title, detail, keep, discard, label) = if confirm_close {
+        (
+            "Discard unsaved changes?",
+            "Your unsaved changes will be lost when Byakko closes.",
+            Message::KeepEditing,
+            Message::Discard,
+            "Discard & close",
+        )
+    } else if input.confirm_transport_switch {
+        (
+            "Discard changes and switch connections?",
+            "Your unsaved edits for the selected connection will be discarded.",
+            Message::CancelTransportSwitch,
+            Message::ConfirmTransportSwitch,
+            "Discard & switch",
+        )
+    } else {
         return layers.into();
-    }
+    };
     let dialog = container(
         column![
-            text("Discard unsaved changes?").size(input.style.type_scale.section_title),
-            text("Your unsaved changes will be lost when Byakko closes."),
+            text(title).size(input.style.type_scale.section_title),
+            text(detail),
             row![
-                button("Keep editing").on_press(Message::KeepEditing),
-                button("Discard & close").on_press(Message::Discard)
+                button("Keep editing").on_press(keep),
+                button(label).on_press(discard)
             ]
             .spacing(input.style.spacing.m),
         ]
@@ -190,10 +211,13 @@ fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
             ));
         }
     }
-    if !matches!(input.session.connection(), Connection::Connected { .. })
-        || input.live_updates_unavailable
-        || input.session.requires_manual_read()
-        || matches!(input.session.keymap().status(), Status::Unverified { .. })
+    let awaiting_choice = input.selected_transport.is_none()
+        && matches!(input.presence, Availability::Choices { .. });
+    if !awaiting_choice
+        && (!matches!(input.session.connection(), Connection::Connected { .. })
+            || input.live_updates_unavailable
+            || input.session.requires_manual_read()
+            || matches!(input.session.keymap().status(), Status::Unverified { .. }))
     {
         navigation = navigation
             .push(button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)));
@@ -206,6 +230,44 @@ fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
             .then_some(Message::Appearance(appearance::Message::Open)),
     ));
     navigation
+}
+
+fn transport_controls(input: View<'_>) -> Element<'_, Message> {
+    let controls = row![].spacing(8).align_y(iced::Alignment::Center);
+    let controls = match input.presence {
+        Availability::Ready(endpoint) if input.selected_transport.is_some() => {
+            controls.push(transport_control(input, endpoint))
+        }
+        Availability::Choices { wired, receiver } => controls
+            .push(transport_control(input, wired))
+            .push(transport_control(input, receiver)),
+        _ => controls,
+    };
+    let controls = if input.transport_scan_pending {
+        controls.push(text("Checking connections…"))
+    } else {
+        controls.push(
+            button("Find connections").on_press_maybe(
+                input
+                    .can_choose_transport
+                    .then_some(Message::RefreshTransports),
+            ),
+        )
+    };
+    container(controls).padding([4, 10]).into()
+}
+
+fn transport_control<'a>(input: View<'a>, endpoint: &Endpoint) -> Element<'a, Message> {
+    if input.selected_transport == Some(endpoint.id.as_str()) {
+        text(format!("{} (selected)", endpoint.label)).into()
+    } else {
+        button(endpoint.label)
+            .on_press_maybe(
+                (input.can_choose_transport && !input.transport_scan_pending)
+                    .then(|| Message::ChooseTransport(endpoint.id.clone())),
+            )
+            .into()
+    }
 }
 
 fn nav_button(
@@ -767,14 +829,40 @@ pub(crate) fn notice(input: View<'_>) -> Option<String> {
         return Some("Waiting for the operation before closing…".into());
     }
     match input.presence {
-        Availability::Missing => return Some("Keyboard disconnected. Edits kept.".into()),
+        Availability::Missing => {
+            return Some(if input.selected_transport.is_some() {
+                "Keyboard disconnected. Edits kept.".into()
+            } else {
+                "No keyboard connection found.".into()
+            });
+        }
         Availability::Ambiguous { count } => {
-            return Some(format!("{count} keyboards found. Connect one at a time."));
+            return Some(format!(
+                "{count} configuration endpoints found. Leave at most one wired USB connection and one 2.4 GHz receiver connected."
+            ));
         }
         Availability::Error(_) => {
             return Some("Keyboard discovery failed. Try Read / reconnect.".into());
         }
-        Availability::Unknown | Availability::Ready { .. } => {}
+        Availability::Choices { .. } if input.selected_transport.is_none() => {
+            return Some("Choose a connection to read the keyboard.".into());
+        }
+        Availability::Choices { .. }
+            if input
+                .selected_transport
+                .is_some_and(|id| !input.presence.contains(id)) =>
+        {
+            return Some("Selected connection unavailable. Choose a connection to switch.".into());
+        }
+        Availability::Ready(endpoint)
+            if input.selected_transport.is_some_and(|id| id != endpoint.id) =>
+        {
+            return Some(format!(
+                "Selected connection unavailable. Choose {} to switch.",
+                endpoint.label
+            ));
+        }
+        Availability::Unknown | Availability::Ready(_) | Availability::Choices { .. } => {}
     }
     if input.session.busy() {
         return (!input.notice.is_empty()).then(|| input.notice.into());

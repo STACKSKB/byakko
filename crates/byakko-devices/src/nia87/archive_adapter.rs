@@ -125,6 +125,7 @@ mod tests {
     fn selected_access() -> Access {
         let candidate = crate::nia87::device::Candidate {
             path: "unused-test-path".into(),
+            physical_device: None,
             vid: 0x3151,
             pid: 0x4011,
             interface: 0,

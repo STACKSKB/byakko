@@ -421,6 +421,34 @@ impl Session {
         }
         Ok(self.generation)
     }
+    /// Start with empty device data after the user selects a different endpoint.
+    /// Keep correlation IDs monotonic so late events from the previous worker stay stale.
+    pub fn reset_target(&mut self) -> Result<(), String> {
+        self.idle()?;
+        if self.connection != Connection::Disconnected {
+            return Err("Disconnect before changing keyboards".into());
+        }
+        let mut fresh = Self::new(self.descriptor().clone())?;
+        if let Some(editor) = self.macros() {
+            fresh = fresh.with_macros(editor.capabilities().clone())?;
+        }
+        if let Some(editor) = self.lighting() {
+            fresh = fresh.with_lighting(editor.capabilities().clone())?;
+        }
+        if let Some(editor) = self.settings() {
+            fresh = fresh.with_settings(editor.capabilities().clone())?;
+        }
+        if let Some(editor) = self.picture() {
+            fresh = fresh.with_picture(editor.capabilities().clone())?;
+        }
+        if let Some(capture) = self.archive() {
+            fresh = fresh.with_archive(capture.capabilities().clone())?;
+        }
+        fresh.generation = self.generation;
+        fresh.operation = self.operation;
+        *self = fresh;
+        Ok(())
+    }
     pub fn disconnect(&mut self) -> Result<Option<StopOutcome>, String> {
         if let Some(editor) = &mut self.lighting {
             self.host.disconnect(editor);

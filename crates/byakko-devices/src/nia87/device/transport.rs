@@ -1,11 +1,17 @@
 use super::Result;
 use crate::hid::{
     HidApi, HidDevice,
-    selection::{self, Identity},
+    selection::{self, Identity, same_path},
 };
 use byakko_protocol::nia87::receiver::{self, RelayError, Status};
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::{
+    ffi::{CStr, CString},
+    time::Duration,
+};
+
+const WIRED_PID: u16 = 0x4015;
+const RECEIVER_PID: u16 = 0x4011;
 
 // OS-held lock survives neither crashes nor process exit. The empty lock file
 // stays on disk; existence alone never means that a transaction is active.
@@ -36,6 +42,8 @@ fn lock_error(error: std::fs::TryLockError) -> Box<dyn std::error::Error + Send 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Candidate {
     pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_device: Option<String>,
     pub vid: u16,
     pub pid: u16,
     pub interface: i32,
@@ -49,6 +57,7 @@ impl Candidate {
     pub fn identity(&self) -> Identity {
         Identity {
             path: self.path.clone(),
+            physical_device: self.physical_device.clone(),
             vendor_id: self.vid,
             product_id: self.pid,
             interface: self.interface,
@@ -88,6 +97,8 @@ pub enum TargetSelectionError {
     Ambiguous(usize),
     Changed,
     Unsupported,
+    TransportSelectionRequired,
+    EnumerationFailed(String),
     ReceiverSelectionRequired,
 }
 
@@ -99,11 +110,15 @@ impl std::fmt::Display for TargetSelectionError {
             ),
             Self::Ambiguous(count) => write!(
                 f,
-                "Found {count} compatible keyboards. Connect only the keyboard you want to configure."
+                "Found {count} compatible HID collections. The keyboard connection is ambiguous."
             ),
             Self::Changed => {
                 f.write_str("The keyboard connection changed. Choose Read / reconnect.")
             }
+            Self::TransportSelectionRequired => {
+                f.write_str("Choose Wired USB or the 2.4 GHz receiver to connect.")
+            }
+            Self::EnumerationFailed(reason) => f.write_str(reason),
             Self::ReceiverSelectionRequired => f.write_str(
                 "Receiver operations require a selected, board-validated Access connection.",
             ),
@@ -121,17 +136,29 @@ impl Target {
         &self,
         candidates: &[Candidate],
     ) -> std::result::Result<Candidate, TargetSelectionError> {
-        let identities = candidates
-            .iter()
-            .map(Candidate::identity)
-            .collect::<Vec<_>>();
-        self.inner
-            .select(&identities)
-            .map_err(TargetSelectionError::from)?;
-        candidates
-            .first()
-            .cloned()
-            .ok_or(TargetSelectionError::Missing)
+        let expected = self.inner.identity();
+        let candidate = match candidates {
+            [] => return Err(TargetSelectionError::Missing),
+            [candidate] => candidate,
+            _ => {
+                let (wired, receiver) = transport_choices(candidates)
+                    .ok_or(TargetSelectionError::Ambiguous(candidates.len()))?;
+                if expected.product_id == WIRED_PID {
+                    wired
+                } else {
+                    receiver
+                }
+            }
+        };
+        let observed = candidate.identity();
+        if observed.product_id != expected.product_id
+            && is_nia87_configuration_candidate(&observed)
+            && !same_path(&observed.path, &expected.path)
+        {
+            return Err(TargetSelectionError::Missing);
+        }
+        self.inner.select(&[observed])?;
+        Ok(candidate.clone())
     }
 }
 
@@ -147,7 +174,7 @@ impl From<selection::SelectionError> for TargetSelectionError {
 
 fn is_nia87_configuration_candidate(identity: &Identity) -> bool {
     identity.vendor_id == 0x3151
-        && matches!(identity.product_id, 0x4011 | 0x4015)
+        && matches!(identity.product_id, RECEIVER_PID | WIRED_PID)
         && identity.usage_page == 0xffff
         && identity.usage == 2
 }
@@ -156,6 +183,58 @@ fn is_nia87_configuration_candidate(identity: &Identity) -> bool {
 /// collection. Callers can decide how to present discovery without parsing
 /// diagnostics or inferring state from a candidate count.
 pub type Availability = selection::Availability<Candidate>;
+
+/// Identify the wired and receiver collections in a mixed discovery, in that
+/// order. These are separate endpoints with no presumed physical relationship.
+pub fn transport_choices(candidates: &[Candidate]) -> Option<(&Candidate, &Candidate)> {
+    let [first, second] = candidates else {
+        return None;
+    };
+    if same_path(&first.path, &second.path)
+        || !is_nia87_configuration_candidate(&first.identity())
+        || !is_nia87_configuration_candidate(&second.identity())
+    {
+        return None;
+    }
+    match (first.pid, second.pid) {
+        (WIRED_PID, RECEIVER_PID) => Some((first, second)),
+        (RECEIVER_PID, WIRED_PID) => Some((second, first)),
+        _ => None,
+    }
+}
+
+/// Resolve desktop attachment against current discovery. A mixed inventory
+/// requires a choice. A supplied ID must match even when only one endpoint remains.
+pub fn select_candidate<'a>(
+    availability: &'a Availability,
+    expected: Option<&str>,
+) -> std::result::Result<&'a Candidate, TargetSelectionError> {
+    match availability {
+        Availability::Available(candidate) => {
+            if expected.is_some_and(|id| id != candidate.identity().discovery_id()) {
+                return Err(TargetSelectionError::Changed);
+            }
+            if is_nia87_configuration_candidate(&candidate.identity()) {
+                Ok(candidate)
+            } else {
+                Err(TargetSelectionError::Unsupported)
+            }
+        }
+        Availability::Ambiguous(candidates) => {
+            let (wired, receiver) = transport_choices(candidates)
+                .ok_or(TargetSelectionError::Ambiguous(candidates.len()))?;
+            let expected = expected.ok_or(TargetSelectionError::TransportSelectionRequired)?;
+            [wired, receiver]
+                .into_iter()
+                .find(|candidate| candidate.identity().discovery_id() == expected)
+                .ok_or(TargetSelectionError::Changed)
+        }
+        Availability::Unavailable => Err(TargetSelectionError::Missing),
+        Availability::EnumerationFailed(reason) => {
+            Err(TargetSelectionError::EnumerationFailed(reason.clone()))
+        }
+    }
+}
 
 /// Enumerate matching collections without opening a handle or sending reports.
 pub fn availability() -> Availability {
@@ -168,21 +247,29 @@ fn classify(result: Result<Vec<Candidate>>) -> Availability {
 
 pub fn candidates() -> Result<Vec<Candidate>> {
     let api = HidApi::new()?;
-    Ok(matching_candidates(&api))
+    Ok(matching_candidates(&api, None))
 }
 
-fn matching_candidates(api: &HidApi) -> Vec<Candidate> {
+fn matching_candidates(api: &HidApi, selected_path: Option<&str>) -> Vec<Candidate> {
     api.device_list()
-        .filter(|d| is_nia87_configuration_candidate(&d.identity()))
-        .map(|d| Candidate {
-            path: d.path().to_string_lossy().into_owned(),
-            vid: d.vendor_id(),
-            pid: d.product_id(),
-            interface: d.interface_number(),
-            usage_page: d.usage_page(),
-            usage: d.usage(),
-            manufacturer: d.manufacturer_string().map(str::to_owned),
-            product: d.product_string().map(str::to_owned),
+        .filter_map(|device| {
+            let identity = device.identity();
+            if !is_nia87_configuration_candidate(&identity)
+                && !selected_path.is_some_and(|path| same_path(path, &identity.path))
+            {
+                return None;
+            }
+            Some(Candidate {
+                path: identity.path,
+                physical_device: identity.physical_device,
+                vid: identity.vendor_id,
+                pid: identity.product_id,
+                interface: identity.interface,
+                usage_page: identity.usage_page,
+                usage: identity.usage,
+                manufacturer: device.manufacturer_string().map(str::to_owned),
+                product: device.product_string().map(str::to_owned),
+            })
         })
         .collect()
 }
@@ -196,7 +283,7 @@ pub fn open_unique() -> Result<(Candidate, HidDevice)> {
     }
     let candidate = list.into_iter().next().unwrap();
     let api = HidApi::new()?;
-    let path = std::ffi::CString::new(candidate.path.as_str())?;
+    let path = CString::new(candidate.path.as_str())?;
     let device = api.open_path(&path)?;
     Ok((candidate, device))
 }
@@ -205,10 +292,28 @@ pub fn open_unique() -> Result<(Candidate, HidDevice)> {
 /// unique, then open that exact path through the same OS enumeration handle.
 pub fn open_expected(target: &Target) -> Result<(Candidate, HidDevice)> {
     let api = HidApi::new()?;
-    let observed = matching_candidates(&api);
-    let candidate = target.select(&observed)?;
-    let path = std::ffi::CString::new(candidate.path.as_str())?;
-    let device = api.open_path(&path)?;
+    let observed = matching_candidates(&api, Some(&target.inner.identity().path));
+    open_selected(
+        target,
+        &observed,
+        |path| api.open_path(path),
+        HidDevice::product_id,
+    )
+}
+
+fn open_selected<D>(
+    target: &Target,
+    observed: &[Candidate],
+    open: impl FnOnce(&CStr) -> Result<D>,
+    product_id: impl FnOnce(&D) -> u16,
+) -> Result<(Candidate, D)> {
+    let candidate = target.select(observed)?;
+    let path = CString::new(candidate.path.as_str())?;
+    let device = open(&path)?;
+    // The OS may replace a device at this path after enumeration.
+    if product_id(&device) != candidate.pid {
+        return Err(TargetSelectionError::Changed.into());
+    }
     Ok((candidate, device))
 }
 
@@ -514,21 +619,233 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::{
-        Availability, Candidate, FeatureReadError, ReadPhase, Session, Target,
-        TargetSelectionError, classify, feature_read_exchange, lock_error, lock_file,
+        Availability, Candidate, FeatureReadError, RECEIVER_PID, ReadPhase, Session, Target,
+        TargetSelectionError, WIRED_PID, classify, feature_read_exchange, lock_error, lock_file,
+        open_selected, select_candidate, transport_choices,
     };
 
     fn candidate(path: &str) -> Candidate {
         Candidate {
             path: path.into(),
+            physical_device: Some(format!("usb-parent-{path}")),
             vid: 0x3151,
-            pid: 0x4011,
+            pid: RECEIVER_PID,
             interface: 1,
             usage_page: 0xffff,
             usage: 2,
             manufacturer: None,
             product: Some("Nia87".into()),
         }
+    }
+
+    fn mixed_transports() -> (Candidate, Candidate) {
+        let wired = Candidate {
+            pid: WIRED_PID,
+            ..candidate("nia87-usb")
+        };
+        let receiver = candidate("nia87-receiver");
+        (wired, receiver)
+    }
+
+    #[test]
+    fn candidate_without_usb_parent_preserves_the_legacy_json_and_identity() {
+        let legacy = serde_json::json!({
+            "path": "nia87-usb",
+            "vid": 0x3151,
+            "pid": WIRED_PID,
+            "interface": 1,
+            "usage_page": 0xffff,
+            "usage": 2,
+            "manufacturer": null,
+            "product": "Nia87"
+        });
+        let candidate: Candidate = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(candidate.physical_device, None);
+        assert_eq!(
+            candidate.identity().discovery_id(),
+            "nia87-usb|3151:4015:1:ffff:0002"
+        );
+        assert_eq!(serde_json::to_value(&candidate).unwrap(), legacy);
+        let target = Target::from_candidate(&candidate).unwrap();
+        assert_eq!(
+            target.select(std::slice::from_ref(&candidate)),
+            Ok(candidate.clone())
+        );
+    }
+
+    #[test]
+    fn desktop_discovery_resolves_single_or_chosen_transport_in_either_order() {
+        let (wired, receiver) = mixed_transports();
+        let wired_id = wired.identity().discovery_id();
+        let receiver_id = receiver.identity().discovery_id();
+
+        for (candidate, chosen, other) in [
+            (&wired, &wired_id, &receiver_id),
+            (&receiver, &receiver_id, &wired_id),
+        ] {
+            let availability = Availability::Available(candidate.clone());
+            assert_eq!(select_candidate(&availability, None), Ok(candidate));
+            assert_eq!(select_candidate(&availability, Some(chosen)), Ok(candidate));
+            assert_eq!(
+                select_candidate(&availability, Some(other)),
+                Err(TargetSelectionError::Changed)
+            );
+        }
+
+        for inventory in [
+            vec![wired.clone(), receiver.clone()],
+            vec![receiver.clone(), wired.clone()],
+        ] {
+            assert_eq!(transport_choices(&inventory), Some((&wired, &receiver)));
+            let availability = classify(Ok(inventory));
+            assert_eq!(
+                select_candidate(&availability, None),
+                Err(TargetSelectionError::TransportSelectionRequired)
+            );
+            assert_eq!(select_candidate(&availability, Some(&wired_id)), Ok(&wired));
+            assert_eq!(
+                select_candidate(&availability, Some(&receiver_id)),
+                Ok(&receiver)
+            );
+            assert_eq!(
+                select_candidate(&availability, Some("stale")),
+                Err(TargetSelectionError::Changed)
+            );
+        }
+    }
+
+    #[test]
+    fn discovery_requires_unique_distinct_paths_for_transport_choice() {
+        let (wired, receiver) = mixed_transports();
+        let receiver_id = receiver.identity().discovery_id();
+        let second_receiver = candidate("another-2.4ghz-receiver");
+        let path_collision = Candidate {
+            path: receiver.path.clone(),
+            ..wired.clone()
+        };
+        for inventory in [
+            vec![receiver.clone(), second_receiver.clone()],
+            vec![receiver.clone(), second_receiver, wired],
+            vec![receiver, path_collision],
+        ] {
+            let count = inventory.len();
+            assert_eq!(transport_choices(&inventory), None);
+            assert_eq!(
+                select_candidate(&classify(Ok(inventory)), Some(&receiver_id)),
+                Err(TargetSelectionError::Ambiguous(count))
+            );
+        }
+    }
+
+    #[test]
+    fn bound_open_uses_only_the_selected_path_and_rejects_any_replacement() {
+        use std::cell::RefCell;
+
+        let (wired, receiver) = mixed_transports();
+        let target = Target::from_candidate(&wired).unwrap();
+        let opened = RefCell::new(Vec::new());
+        let writes = RefCell::new(Vec::new());
+        let apply = |inventory: &[Candidate], opened_pid: Option<u16>| {
+            let (candidate, _) = open_selected(
+                &target,
+                inventory,
+                |path| {
+                    opened.borrow_mut().push(path.to_str()?.to_owned());
+                    opened_pid.ok_or_else(|| "HID collection disappeared".into())
+                },
+                |pid| *pid,
+            )?;
+            writes.borrow_mut().push(candidate.path);
+            Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+        };
+
+        let both = [receiver.clone(), wired.clone()];
+        apply(&both, Some(WIRED_PID)).unwrap();
+        assert_eq!(*opened.borrow(), vec![wired.path.clone()]);
+        assert_eq!(*writes.borrow(), vec![wired.path.clone()]);
+        writes.borrow_mut().clear();
+        opened.borrow_mut().clear();
+
+        let alternate_wired = Candidate {
+            path: "another-usb-board".into(),
+            ..wired.clone()
+        };
+        let collision = Candidate {
+            path: wired.path.clone(),
+            ..receiver.clone()
+        };
+        let same_path_different_parent = Candidate {
+            physical_device: Some("replacement-usb-parent".into()),
+            ..wired.clone()
+        };
+        let same_path_unknown_parent = Candidate {
+            physical_device: None,
+            ..wired.clone()
+        };
+        let wired_id = wired.identity().discovery_id();
+        for replacement in [&same_path_different_parent, &same_path_unknown_parent] {
+            let discovery = Availability::Available(replacement.clone());
+            assert_eq!(
+                select_candidate(&discovery, Some(&wired_id)),
+                Err(TargetSelectionError::Changed)
+            );
+        }
+        for (inventory, expected) in [
+            (vec![receiver], TargetSelectionError::Missing),
+            (vec![alternate_wired.clone()], TargetSelectionError::Changed),
+            (
+                vec![same_path_different_parent],
+                TargetSelectionError::Changed,
+            ),
+            (
+                vec![same_path_unknown_parent],
+                TargetSelectionError::Changed,
+            ),
+            (
+                vec![alternate_wired, wired.clone()],
+                TargetSelectionError::Ambiguous(2),
+            ),
+            (
+                vec![collision, wired.clone()],
+                TargetSelectionError::Ambiguous(2),
+            ),
+        ] {
+            let error = apply(&inventory, Some(WIRED_PID)).unwrap_err();
+            assert_eq!(error.downcast_ref(), Some(&expected));
+        }
+        assert!(opened.borrow().is_empty());
+        assert!(writes.borrow().is_empty());
+
+        let error = apply(&both, Some(RECEIVER_PID)).unwrap_err();
+        assert_eq!(error.downcast_ref(), Some(&TargetSelectionError::Changed));
+        assert!(apply(&both, None).is_err());
+        assert_eq!(*opened.borrow(), vec![wired.path.clone(), wired.path]);
+        assert!(writes.borrow().is_empty());
+    }
+
+    #[test]
+    fn bound_targets_accept_their_exact_collection_in_either_mixed_order() {
+        let (wired, receiver) = mixed_transports();
+        let wired_target = Target::from_candidate(&wired).unwrap();
+        let receiver_target = Target::from_candidate(&receiver).unwrap();
+        for inventory in [
+            [wired.clone(), receiver.clone()],
+            [receiver.clone(), wired.clone()],
+        ] {
+            assert_eq!(wired_target.select(&inventory), Ok(wired.clone()));
+            assert_eq!(receiver_target.select(&inventory), Ok(receiver.clone()));
+        }
+
+        let another_receiver = candidate("other-receiver");
+        let inventory = [wired, receiver, another_receiver];
+        assert_eq!(
+            wired_target.select(&inventory),
+            Err(TargetSelectionError::Ambiguous(3))
+        );
+        assert_eq!(
+            receiver_target.select(&inventory),
+            Err(TargetSelectionError::Ambiguous(3))
+        );
     }
 
     #[test]
@@ -667,6 +984,52 @@ mod tests {
         report[6] = u8::from(command_ready);
         report[7] = 1;
         report
+    }
+
+    #[test]
+    fn offline_selected_receiver_never_submits_a_setter_or_opens_wired_usb() {
+        let (wired, receiver) = mixed_transports();
+        let target = Target::from_candidate(&receiver).unwrap();
+        let (_, fake_device) = open_selected(
+            &target,
+            &[wired, receiver.clone()],
+            |path| {
+                assert_eq!(path.to_str()?, receiver.path);
+                Ok(RECEIVER_PID)
+            },
+            |pid| *pid,
+        )
+        .unwrap();
+        assert_eq!(fake_device, RECEIVER_PID);
+
+        let mut started = false;
+        let mut sent = Vec::new();
+        let error = super::receiver_exchange(
+            &super::host_report([0x07; 64]),
+            false,
+            &mut started,
+            |report| {
+                sent.push(*report);
+                Ok(())
+            },
+            |reply| {
+                *reply = receiver_status_report(false, false, true);
+                Ok(65)
+            },
+            |_| {},
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.downcast_ref(),
+            Some(&byakko_protocol::nia87::receiver::RelayError::KeyboardOffline)
+        );
+        assert!(!started);
+        assert_eq!(
+            sent,
+            vec![super::host_report(
+                byakko_protocol::nia87::receiver::status_request()
+            )]
+        );
     }
 
     #[test]

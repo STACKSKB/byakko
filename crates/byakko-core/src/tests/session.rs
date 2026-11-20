@@ -104,6 +104,31 @@ fn reconnect_keeps_edits_until_one_read_reestablishes_baseline() {
     assert!(s.keymap().dirty());
     assert!(s.save().is_ok());
 }
+
+#[test]
+fn a_new_target_starts_empty_and_rejects_the_previous_targets_completion() {
+    let mut s = loaded();
+    edit(&mut s);
+    let old = s.save().unwrap();
+    let late = result(&old, FeatureResult::Apply(Ok(state(Action::Key(5)))));
+    s.disconnect().unwrap();
+    s.reset_target().unwrap();
+    assert!(s.keymap().baseline().is_none());
+    assert!(s.keymap().draft().is_none());
+    assert!(s.connect().unwrap() > old.generation);
+    let read = s.read().unwrap();
+    assert!(read.operation > old.operation);
+    assert_eq!(s.accept(late), Outcome::Ignored);
+    assert_eq!(
+        s.accept(result(
+            &read,
+            FeatureResult::Read(Ok(state(Action::Key(4))))
+        )),
+        Outcome::Loaded
+    );
+    assert!(!s.keymap().dirty());
+    assert!(s.save().is_err());
+}
 #[test]
 fn failed_save_and_disconnect_retain_edits() {
     let mut s = loaded();

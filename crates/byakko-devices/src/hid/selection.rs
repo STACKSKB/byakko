@@ -2,9 +2,21 @@
 
 use std::fmt;
 
+/// Windows HID paths are case-insensitive. Exact identity still uses the
+/// observed path, while conflict checks also detect aliases of that path.
+pub(crate) fn same_path(left: &str, right: &str) -> bool {
+    if cfg!(windows) {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Identity {
     pub path: String,
+    /// OS USB parent identifier, when available from the collection inventory.
+    pub physical_device: Option<String>,
     pub vendor_id: u16,
     pub product_id: u16,
     pub interface: i32,
@@ -16,10 +28,15 @@ impl Identity {
     /// Stable discovery token for the same collection fields used by exact selection.
     /// Display strings are deliberately absent because they can vary by OS locale.
     pub fn discovery_id(&self) -> String {
-        format!(
+        let mut id = format!(
             "{}|{:04x}:{:04x}:{}:{:04x}:{:04x}",
             self.path, self.vendor_id, self.product_id, self.interface, self.usage_page, self.usage
-        )
+        );
+        if let Some(parent) = &self.physical_device {
+            id.push('|');
+            id.push_str(parent);
+        }
+        id
     }
 }
 
@@ -106,6 +123,7 @@ mod tests {
     fn identity(path: &str) -> Identity {
         Identity {
             path: path.into(),
+            physical_device: None,
             vendor_id: 1,
             product_id: 2,
             interface: 3,
@@ -158,8 +176,9 @@ mod tests {
     #[test]
     fn discovery_id_changes_with_every_selected_identity_field() {
         let original = identity("path-a");
-        let changes: [fn(&mut Identity); 6] = [
+        let changes: [fn(&mut Identity); 7] = [
             |id| id.path = "path-b".into(),
+            |id| id.physical_device = Some("usb-parent".into()),
             |id| id.vendor_id += 1,
             |id| id.product_id += 1,
             |id| id.interface += 1,

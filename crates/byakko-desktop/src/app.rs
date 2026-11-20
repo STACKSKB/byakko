@@ -51,6 +51,7 @@ struct App {
     config: Config,
     page: Page,
     link: Link,
+    transport_switch: Option<String>,
     closing: Closing,
     notice: String,
     style: UiStyle,
@@ -123,6 +124,7 @@ impl App {
             page: Page::Keys,
             session,
             link: Link::new(attach),
+            transport_switch: None,
             closing: Closing::Open,
             notice: String::new(),
             style: UiStyle::DEFAULT,
@@ -153,6 +155,7 @@ impl App {
         }
         if let Message::Appearance(message) = message {
             if self.closing != Closing::Open
+                || self.transport_switch.is_some()
                 || self.session.recording()
                 || self.recording.pending()
                 || self.host.busy()
@@ -219,6 +222,17 @@ impl App {
                     | Message::Discard
                     | Message::KeepEditing
                     | Message::FileComplete(_)
+            )
+        {
+            return Task::none();
+        }
+        if self.transport_switch.is_some()
+            && !matches!(
+                message,
+                Message::Poll(_)
+                    | Message::Close
+                    | Message::ConfirmTransportSwitch
+                    | Message::CancelTransportSwitch
             )
         {
             return Task::none();
@@ -397,12 +411,25 @@ impl App {
             }
             Message::Poll(_) => return self.poll(),
             Message::Scan => return self.scan(),
+            Message::RefreshTransports if self.can_choose_transport() => {
+                self.link.request_scan();
+                return self.scan();
+            }
+            Message::ChooseTransport(id) => return self.choose_transport(id),
+            Message::ConfirmTransportSwitch => {
+                if let Some(id) = self.transport_switch.take()
+                    && self.can_choose_transport()
+                {
+                    return self.switch_transport(&id);
+                }
+            }
+            Message::CancelTransportSwitch => self.transport_switch = None,
             Message::ObserveDevice(at) => return self.observe_device(at),
             Message::DeviceEvent(_) => unreachable!("device events handled before activity guards"),
             Message::Close => return self.close(),
             Message::Discard if self.closing == Closing::ConfirmDiscard => return iced::exit(),
             Message::KeepEditing => self.closing = Closing::Open,
-            Message::Read | Message::Discard => {}
+            Message::Read | Message::Discard | Message::RefreshTransports => {}
         }
         Task::none()
     }
@@ -479,6 +506,7 @@ impl App {
             || self.session.recording()
             || self.recording.pending()
             || self.closing == Closing::ConfirmDiscard
+            || self.transport_switch.is_some()
         {
             return Task::none();
         }
@@ -1035,6 +1063,65 @@ impl App {
         }
     }
 
+    fn can_choose_transport(&self) -> bool {
+        self.closing == Closing::Open
+            && !self.appearance.open
+            && !self.session.busy()
+            && !self.session.catalog_scanning()
+            && !self.session.recording()
+            && !self.recording.pending()
+            && !self.files.busy()
+            && !self.host.busy()
+            && self.session.host().is_idle()
+            && !self.link.settling()
+    }
+
+    fn choose_transport(&mut self, id: String) -> Task<Message> {
+        if !self.can_choose_transport()
+            || self.link.scan_requested()
+            || self.link.selected() == Some(id.as_str())
+            || !self.link.presence().contains(&id)
+        {
+            return Task::none();
+        }
+        self.tester.pause();
+        self.keys.catalog.input = catalog::InputMode::Browse;
+        if self.has_unsaved_changes()
+            || self.autosave.pending()
+            || self.macros.composer != macros::Composer::Closed
+            || self.picture.preview_look().is_some()
+        {
+            self.transport_switch = Some(id);
+            return Task::none();
+        }
+        self.switch_transport(&id)
+    }
+
+    fn switch_transport(&mut self, id: &str) -> Task<Message> {
+        let previous = self.link.selected().map(str::to_owned);
+        let request = self.link.choose(&mut self.session, id);
+        if self.link.selected() != previous.as_deref() {
+            self.keys = keymap::Form::new(self.session.descriptor());
+            self.macros = macros::Form::default();
+            self.lighting = lighting::Form::default();
+            self.picture = picture::Form::default();
+            self.host_form = host::Form::default();
+            self.files.form.bindings.clear();
+            self.assignment_binding = None;
+            self.new_macro = None;
+            self.observation = Observation::default();
+            self.autosave.clear();
+        }
+        match request {
+            Ok(Some(command)) => self.submit(Ok(command)),
+            Ok(None) => {
+                self.notice = "Switching connections…".into();
+                Task::none()
+            }
+            Err(reason) => self.submit(Err(reason)),
+        }
+    }
+
     fn submit(&mut self, request: Result<Command, String>) -> Task<Message> {
         let command = match request {
             Ok(command) => command,
@@ -1076,6 +1163,7 @@ impl App {
 
     fn can_observe(&self) -> bool {
         self.closing == Closing::Open
+            && self.transport_switch.is_none()
             && !self.recording.pending()
             && !self.host.busy()
             && !self.files.busy()
@@ -1401,6 +1489,7 @@ impl App {
     }
 
     fn close(&mut self) -> Task<Message> {
+        self.transport_switch = None;
         self.tester.pause();
         if self.appearance.submitted.is_some() {
             self.closing = Closing::Waiting;
@@ -1439,12 +1528,7 @@ impl App {
         } else if self.autosave.pending() {
             self.closing = Closing::Waiting;
             return self.flush_saves(Instant::now(), true);
-        } else if self.session.keymap().dirty()
-            || self.session.macros().is_some_and(|editor| editor.dirty())
-            || self.session.lighting().is_some_and(|editor| editor.dirty())
-            || self.session.picture().is_some_and(|editor| editor.dirty())
-            || self.session.settings().is_some_and(|editor| editor.dirty())
-        {
+        } else if self.has_unsaved_changes() {
             self.closing = Closing::ConfirmDiscard;
         } else {
             return iced::exit();
@@ -1452,11 +1536,25 @@ impl App {
         Task::none()
     }
 
+    fn has_unsaved_changes(&self) -> bool {
+        self.session.keymap().dirty()
+            || self.session.macros().is_some_and(|editor| editor.dirty())
+            || self.session.lighting().is_some_and(|editor| editor.dirty())
+            || self.session.picture().is_some_and(|editor| editor.dirty())
+            || self.session.settings().is_some_and(|editor| editor.dirty())
+    }
+
     fn subscription(&self) -> Subscription<Message> {
         let close = window::close_requests().map(|_| Message::Close);
         let mut subscriptions = vec![close];
         if self.closing == Closing::ConfirmDiscard {
             subscriptions.push(iced::keyboard::listen().filter_map(modal_escape));
+        } else if self.transport_switch.is_some() {
+            subscriptions.push(
+                iced::keyboard::listen().filter_map(|event| {
+                    modal_escape(event).map(|_| Message::CancelTransportSwitch)
+                }),
+            );
         } else if self.appearance.open && self.appearance.submitted.is_none() {
             subscriptions.push(iced::keyboard::listen().filter_map(appearance_escape));
         }
@@ -1502,17 +1600,19 @@ impl App {
                 || self.link.settling()
                 || self.session.busy()
                 || self.session.catalog_scanning()
-                || self.autosave.pending())
+                || (self.autosave.pending() && self.transport_switch.is_none()))
         {
             subscriptions.push(iced::time::every(Duration::from_millis(25)).map(Message::Poll));
         }
         if self.closing == Closing::Open
+            && self.transport_switch.is_none()
             && self.link.monitoring()
-            && (self
-                .link
-                .executor()
-                .and_then(byakko_devices::Executor::notifications)
-                .is_none()
+            && (self.link.scan_requested()
+                || self
+                    .link
+                    .executor()
+                    .and_then(byakko_devices::Executor::notifications)
+                    .is_none()
                 || self.observation.unavailable)
             && !self.session.recording()
             && !self.recording.pending()
@@ -1522,7 +1622,7 @@ impl App {
             && !self.autosave.pending()
             && !self.host.busy()
         {
-            let cadence = if self.link.awaiting_discovery() {
+            let cadence = if self.link.awaiting_discovery() || self.link.scan_requested() {
                 Duration::from_millis(100)
             } else {
                 Duration::from_secs(2)
@@ -1552,6 +1652,11 @@ impl App {
                 session: &self.session,
                 appearance: &self.appearance,
                 presence: self.link.presence(),
+                selected_transport: self.link.selected(),
+                monitor_transports: self.link.monitoring(),
+                transport_scan_pending: self.link.scan_requested(),
+                can_choose_transport: self.can_choose_transport(),
+                confirm_transport_switch: self.transport_switch.is_some(),
                 keys: &self.keys,
                 macros: &self.macros,
                 lighting: &self.lighting,

@@ -8,4 +8,4 @@ mod view;
 pub mod widget;
 
 pub use app::run;
-pub use controller::discovery::{Availability, Discovery};
+pub use controller::discovery::{Availability, Discovery, Endpoint};

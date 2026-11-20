@@ -1,5 +1,8 @@
 //! Selected-keyboard onboard notifications, received without feature polling.
-use crate::hid::{self, HidApi, InputDevice, selection::Identity};
+use crate::hid::{
+    self, HidApi, InputDevice,
+    selection::{Identity, same_path},
+};
 use byakko_core::contract::DeviceChange;
 use byakko_protocol::nia87::notifications;
 use std::time::Duration;
@@ -22,10 +25,18 @@ impl Listener {
             );
         }
         let inventory = HidApi::new()?;
-        let selected_device = inventory
-            .device_list()
-            .find(|device| device.identity() == *selected)
+        let mut at_selected_path = inventory.device_list().filter(|device| {
+            device
+                .path()
+                .to_str()
+                .is_ok_and(|path| same_path(path, &selected.path))
+        });
+        let selected_device = at_selected_path
+            .next()
             .ok_or("The selected keyboard is disconnected")?;
+        if selected_device.identity() != *selected || at_selected_path.next().is_some() {
+            return Err("The selected keyboard's notification target changed".into());
+        }
         let physical = selected_device
             .physical_device
             .as_deref()
@@ -45,7 +56,7 @@ impl Listener {
             return Err("This keyboard has ambiguous notification collections".into());
         }
         Ok(Self {
-            input: InputDevice::open(sibling.path())?,
+            input: InputDevice::open(sibling.path(), selected.product_id)?,
         })
     }
 

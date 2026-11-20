@@ -4,8 +4,9 @@ mod macros_workspace;
 mod navigation;
 mod notifications;
 mod picture_layers;
+mod transport_choice;
 mod workspace;
-use crate::controller::discovery::Availability;
+use crate::controller::discovery::{Availability, Endpoint};
 use crate::view::application::picture_is_displayed;
 use byakko_core::{
     contract::{ApplyFailure, Recovery},
@@ -1757,11 +1758,58 @@ fn failed_picture_activation_does_not_read_or_retry_and_keeps_diagnostic() {
     assert_eq!(app.closing, Closing::Open);
 }
 
+fn test_endpoint(id: &str) -> Endpoint {
+    let label = match id {
+        "receiver" | "second" => "2.4 GHz receiver",
+        _ => "Wired USB",
+    };
+    Endpoint {
+        id: id.into(),
+        label,
+    }
+}
+
+fn ready(id: &str) -> Availability {
+    Availability::Ready(test_endpoint(id))
+}
+
+struct DiscoveredDevice {
+    id: String,
+    memory: MemoryDevice,
+    reads: Arc<AtomicUsize>,
+    writes: Arc<Mutex<Vec<String>>>,
+    fail_save: bool,
+}
+
+impl Device for DiscoveredDevice {
+    fn read(&mut self) -> Result<State, String> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        self.memory.read()
+    }
+
+    fn apply(
+        &mut self,
+        expected: &State,
+        changes: &[Change],
+        backup: &Path,
+    ) -> Result<State, ApplyFailure> {
+        self.writes.lock().unwrap().push(self.id.clone());
+        if self.fail_save {
+            return Err(ApplyFailure {
+                message: "Injected save failure".into(),
+                recovery: Recovery::Verified,
+            });
+        }
+        self.memory.apply(expected, changes, backup)
+    }
+}
+
 struct DiscoveryApp {
     app: App,
     presence: Arc<Mutex<Availability>>,
     attachments: Arc<Mutex<Vec<Option<String>>>>,
     reads: Arc<AtomicUsize>,
+    writes: Arc<Mutex<Vec<String>>>,
     reject_attach: Arc<std::sync::atomic::AtomicBool>,
 }
 impl DiscoveryApp {
@@ -1772,6 +1820,8 @@ impl DiscoveryApp {
         let calls = attachments.clone();
         let reads = Arc::new(AtomicUsize::new(0));
         let count = reads.clone();
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let write_targets = writes.clone();
         let reject_attach = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let rejected = reject_attach.clone();
         let available = presence.clone();
@@ -1783,17 +1833,24 @@ impl DiscoveryApp {
                 if rejected.load(Ordering::SeqCst) {
                     return Err("Injected attach failure".into());
                 }
-                let Availability::Ready { id } = available.lock().unwrap().clone() else {
-                    return Err("No keyboard".into());
+                let inventory = available.lock().unwrap();
+                let endpoint = match (&*inventory, expected) {
+                    (Availability::Ready(endpoint), None) => endpoint,
+                    (Availability::Ready(endpoint), Some(id)) if endpoint.id == id => endpoint,
+                    (Availability::Choices { wired, .. }, Some(id)) if wired.id == id => wired,
+                    (Availability::Choices { receiver, .. }, Some(id)) if receiver.id == id => {
+                        receiver
+                    }
+                    _ => return Err("Selected keyboard is unavailable".into()),
                 };
+                let id = endpoint.id.clone();
                 let worker = Executor::spawn(
-                    ObservedDevice {
+                    DiscoveredDevice {
+                        id: id.clone(),
                         memory: memory::demo()?,
                         reads: count.clone(),
+                        writes: write_targets.clone(),
                         fail_save,
-                        macro_reads: Default::default(),
-                        feature_calls: Default::default(),
-                        fail_lighting: false,
                     },
                     Default::default(),
                 )
@@ -1808,6 +1865,7 @@ impl DiscoveryApp {
             presence,
             attachments,
             reads,
+            writes,
             reject_attach,
         }
     }
@@ -1836,80 +1894,131 @@ impl DiscoveryApp {
 }
 
 #[test]
-fn discovery_replaces_connections_but_never_reads_on_an_unchanged_scan() {
+fn discovery_reconnects_only_the_pinned_endpoint_and_keeps_its_draft() {
     let mut h = DiscoveryApp::new(false);
     h.observe(Availability::Missing);
     assert!(h.attachments.lock().unwrap().is_empty());
-    h.observe(Availability::Ready { id: "first".into() });
+    h.observe(ready("first"));
     assert_eq!(h.reads.load(Ordering::SeqCst), 1);
     let first_generation = h.app.session.connection().clone();
     edit(&mut h.app);
-    h.observe(Availability::Ready { id: "first".into() });
+    let draft = h.app.session.keymap().draft().cloned();
+    h.observe(ready("first"));
     assert_eq!(h.reads.load(Ordering::SeqCst), 1);
-    h.observe(Availability::Missing);
+    // Discovery can miss a brief unplug and see only the remaining endpoint.
+    h.observe(ready("second"));
     assert!(h.app.link.executor().is_none());
     assert_eq!(h.app.session.connection(), &Connection::Disconnected);
     assert!(h.app.session.keymap().dirty());
-    h.observe(Availability::Ready {
-        id: "second".into(),
-    });
+    let _ = h.app.update(Message::Save);
+    drain(&mut h.app);
+    assert!(h.writes.lock().unwrap().is_empty());
+    assert_eq!(*h.attachments.lock().unwrap(), [Some("first".into())]);
+
+    h.observe(ready("first"));
     assert_ne!(h.app.session.connection(), &first_generation);
     assert_eq!(h.reads.load(Ordering::SeqCst), 2);
     assert!(h.app.session.keymap().dirty());
+    assert_eq!(h.app.session.keymap().draft(), draft.as_ref());
     assert_eq!(
         *h.attachments.lock().unwrap(),
-        [Some("first".into()), Some("second".into())]
+        [Some("first".into()), Some("first".into())]
     );
     assert_eq!(h.app.session.keymap().status(), &Status::Ready);
+    let _ = h.app.update(Message::Save);
+    drain(&mut h.app);
+    assert_eq!(*h.writes.lock().unwrap(), ["first"]);
+    assert!(!h.app.session.keymap().dirty());
 }
 
 #[test]
-fn manual_refresh_replaces_worker_even_without_a_discovery_change_and_failure_retires_it() {
+fn manual_refresh_keeps_the_pin_when_inventory_changes_between_scans() {
     let mut h = DiscoveryApp::new(false);
-    h.observe(Availability::Ready { id: "first".into() });
+    h.observe(ready("first"));
     let generation = h.app.session.connection().clone();
     edit(&mut h.app);
-    // Unplug/replug occurred between scans; deliberate Read chooses the current collection.
-    *h.presence.lock().unwrap() = Availability::Ready {
-        id: "second".into(),
-    };
+    let draft = h.app.session.keymap().draft().cloned();
+    *h.presence.lock().unwrap() = ready("second");
+    let _ = h.app.update(Message::Read);
+    drain(&mut h.app);
+    assert_eq!(h.app.session.connection(), &Connection::Disconnected);
+    assert!(h.app.link.executor().is_none());
+    assert_eq!(
+        *h.attachments.lock().unwrap(),
+        [Some("first".into()), Some("first".into())]
+    );
+    assert_eq!(h.reads.load(Ordering::SeqCst), 1);
+    assert!(h.app.session.keymap().dirty());
+    let _ = h.app.update(Message::Save);
+    drain(&mut h.app);
+    assert!(h.writes.lock().unwrap().is_empty());
+
+    *h.presence.lock().unwrap() = ready("first");
     let _ = h.app.update(Message::Read);
     drain(&mut h.app);
     assert_ne!(h.app.session.connection(), &generation);
-    assert_eq!(*h.attachments.lock().unwrap(), [Some("first".into()), None]);
+    assert!(h.app.link.executor().is_some());
+    assert_eq!(h.reads.load(Ordering::SeqCst), 2);
+    assert_eq!(h.app.session.keymap().draft(), draft.as_ref());
     assert!(h.app.session.keymap().dirty());
-    h.reject_attach.store(true, Ordering::SeqCst);
-    let _ = h.app.update(Message::Read);
-    drain(&mut h.app);
-    assert!(h.app.link.executor().is_none());
-    assert_eq!(h.app.session.connection(), &Connection::Disconnected);
-    assert!(h.app.session.keymap().dirty());
-    assert_eq!(h.app.notice, "Injected attach failure");
 }
 
 #[test]
-fn failed_write_holds_automatic_refresh_until_explicit_read() {
+fn failed_write_requires_an_explicit_read_of_the_pinned_endpoint() {
     let mut h = DiscoveryApp::new(true);
-    h.observe(Availability::Ready { id: "first".into() });
+    h.observe(ready("first"));
     edit(&mut h.app);
+    let draft = h.app.session.keymap().draft().cloned();
     let _ = h.app.update(Message::Save);
-    drain(&mut h.app);
+    let failed_write = h
+        .app
+        .link
+        .executor()
+        .unwrap()
+        .receive(Some(Duration::from_secs(2)))
+        .unwrap();
+    let _ = h.app.complete(failed_write.clone());
     let diagnostic = h.app.session.keymap().status().clone();
     assert!(h.app.session.requires_manual_read());
+    assert_eq!(*h.writes.lock().unwrap(), ["first"]);
     h.observe(Availability::Missing);
-    h.observe(Availability::Ready {
-        id: "second".into(),
-    });
+    h.observe(ready("second"));
     assert_eq!(h.attachments.lock().unwrap().len(), 1);
     assert!(h.app.link.executor().is_none());
     assert_eq!(h.app.session.keymap().status(), &diagnostic);
     assert!(h.app.session.keymap().dirty());
+
     let _ = h.app.update(Message::Read);
     drain(&mut h.app);
+    assert!(h.app.link.executor().is_none());
+    assert_eq!(h.app.session.keymap().status(), &diagnostic);
+    let _ = h.app.update(Message::Save);
+    assert_eq!(*h.writes.lock().unwrap(), ["first"]);
+    assert_eq!(h.reads.load(Ordering::SeqCst), 1);
+    assert!(
+        h.attachments
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|id| id.as_deref() == Some("first"))
+    );
+
+    let attachment_count = h.attachments.lock().unwrap().len();
+    h.observe(ready("first"));
+    assert_eq!(h.attachments.lock().unwrap().len(), attachment_count);
+    let _ = h.app.update(Message::Read);
+    drain(&mut h.app);
+    assert_eq!(h.reads.load(Ordering::SeqCst), 2);
+    let _ = h.app.complete(failed_write);
     assert_eq!(h.app.session.keymap().status(), &Status::Ready);
     assert!(!h.app.session.requires_manual_read());
     assert!(h.app.session.keymap().dirty());
-    assert_eq!(h.attachments.lock().unwrap().last(), Some(&None));
+    assert_eq!(h.app.session.keymap().draft(), draft.as_ref());
+    assert_eq!(
+        h.attachments.lock().unwrap().last(),
+        Some(&Some("first".into()))
+    );
+    assert_eq!(*h.writes.lock().unwrap(), ["first"]);
 }
 
 #[test]
@@ -2002,7 +2111,7 @@ fn reconnect_after_read_failure_waits_for_cleanup_and_keeps_edits() {
 #[test]
 fn ambiguous_and_failed_enumeration_never_attach_or_clear_drafts() {
     let mut h = DiscoveryApp::new(false);
-    h.observe(Availability::Ready { id: "first".into() });
+    h.observe(ready("first"));
     edit(&mut h.app);
     h.observe(Availability::Ambiguous { count: 2 });
     assert!(h.app.link.executor().is_none());
@@ -2016,7 +2125,7 @@ fn ambiguous_and_failed_enumeration_never_attach_or_clear_drafts() {
 fn unchanged_inventory_retries_failed_attachment_without_fast_idle_scans() {
     let mut h = DiscoveryApp::new(false);
     h.reject_attach.store(true, Ordering::SeqCst);
-    h.observe(Availability::Ready { id: "first".into() });
+    h.observe(ready("first"));
     assert!(h.app.link.executor().is_none());
     assert!(!h.app.link.awaiting_discovery());
     h.reject_attach.store(false, Ordering::SeqCst);
@@ -2127,7 +2236,7 @@ fn failed_connection_read_requires_explicit_retry_on_the_same_inventory() {
     app.link.monitor(
         Discovery::spawn(move || {
             inventory_reads.fetch_add(1, Ordering::SeqCst);
-            Availability::Ready { id: "demo".into() }
+            ready("demo")
         })
         .unwrap(),
     );

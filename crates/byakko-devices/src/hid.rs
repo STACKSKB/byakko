@@ -39,6 +39,7 @@ impl DeviceInfo {
     pub fn identity(&self) -> selection::Identity {
         selection::Identity {
             path: self.path.to_string_lossy().into_owned(),
+            physical_device: self.physical_device.clone(),
             vendor_id: self.vid,
             product_id: self.pid,
             interface: self.interface,

@@ -19,7 +19,7 @@ pub(crate) struct InputDevice {
 }
 
 impl InputDevice {
-    pub(crate) fn open(path: &CStr) -> Result<Self> {
+    pub(crate) fn open(path: &CStr, expected_pid: u16) -> Result<Self> {
         let path = Path::new(OsStr::from_bytes(path.to_bytes()));
         if path.parent() != Some(Path::new("/dev"))
             || !path
@@ -43,6 +43,7 @@ impl InputDevice {
             parse_descriptor(&descriptor).ok_or("Malformed notification HID descriptor")?;
         if info.vendor as u16 != 0x3151
             || !matches!(info.product as u16, 0x4011 | 0x4015)
+            || info.product as u16 != expected_pid
             || !parsed.notification_input_valid
         {
             return Err(

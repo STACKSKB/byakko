@@ -6,12 +6,29 @@ use std::{
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Endpoint {
+    pub id: String,
+    pub label: &'static str,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Availability {
     Unknown,
     Missing,
-    Ready { id: String },
+    Ready(Endpoint),
+    Choices { wired: Endpoint, receiver: Endpoint },
     Ambiguous { count: usize },
     Error(String),
+}
+
+impl Availability {
+    pub fn contains(&self, id: &str) -> bool {
+        match self {
+            Self::Ready(endpoint) => endpoint.id == id,
+            Self::Choices { wired, receiver } => wired.id == id || receiver.id == id,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,18 +72,20 @@ impl Discovery {
         })
     }
 
-    pub fn request(&mut self) {
+    /// Queue a scan or keep the outstanding scan. A stopped worker cannot reply.
+    pub fn request(&mut self) -> bool {
         if !matches!(self.state, State::Idle) {
-            return;
+            return !matches!(self.state, State::Stopped);
         }
         let Some(id) = self.next_id.checked_add(1) else {
             self.state = State::Failed("Discovery scan IDs exhausted".into());
-            return;
+            return true;
         };
         self.next_id = id;
         self.state = State::Pending(Pending::Current(id));
         // A failed send is delivered once through the disconnected result channel.
         let _ = self.requests.try_send(self.next_id);
+        true
     }
 
     pub fn invalidate(&mut self) {

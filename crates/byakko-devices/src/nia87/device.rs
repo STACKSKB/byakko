@@ -25,7 +25,7 @@ pub use picture::{apply_picture, read_picture};
 pub use settings::{apply_setting, read_settings};
 pub use transport::{
     Availability, Candidate, Target, TargetSelectionError, availability, candidates, descriptor,
-    inspect, open_expected, open_unique,
+    inspect, open_expected, open_unique, select_candidate, transport_choices,
 };
 use transport::{FeatureSetter, Session, read_payload, transaction_lock};
 

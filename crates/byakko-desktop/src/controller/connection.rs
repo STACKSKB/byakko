@@ -1,5 +1,5 @@
 //! Discovery selects a connection; each worker remains bound to its own target.
-use super::discovery::{Availability, Discovery};
+use super::discovery::{Availability, Discovery, Endpoint};
 use byakko_core::{
     contract::Command,
     session::{Outcome, Session},
@@ -12,10 +12,6 @@ enum Refresh {
     Idle,
     Reading,
 }
-enum Reconnect {
-    Manual,
-    Discovered(String),
-}
 pub enum RefreshStep {
     Inactive,
     Finished,
@@ -25,10 +21,12 @@ pub enum RefreshStep {
 pub struct Connection {
     worker: Option<Executor>,
     retiring: Option<Retirement>,
-    reconnect: Option<Reconnect>,
+    reconnect: bool,
+    // The pin outlives the worker. Only a deliberate choice can replace it.
     selected: Option<String>,
     presence: Availability,
     discovery: Option<Discovery>,
+    scan_requested: bool,
     attach: Box<Attach>,
     refresh: Refresh,
 }
@@ -38,10 +36,11 @@ impl Connection {
         Self {
             worker: None,
             retiring: None,
-            reconnect: None,
+            reconnect: false,
             selected: None,
             presence: Availability::Unknown,
             discovery: None,
+            scan_requested: false,
             attach,
             refresh: Refresh::Idle,
         }
@@ -52,11 +51,14 @@ impl Connection {
     pub fn presence(&self) -> &Availability {
         &self.presence
     }
+    pub fn selected(&self) -> Option<&str> {
+        self.selected.as_deref()
+    }
     pub fn executor(&self) -> Option<&Executor> {
         self.worker.as_ref()
     }
     pub fn settling(&self) -> bool {
-        self.retiring.is_some() || self.reconnect.is_some()
+        self.retiring.is_some() || self.reconnect
     }
     pub fn monitoring(&self) -> bool {
         self.discovery.is_some()
@@ -69,20 +71,55 @@ impl Connection {
             discovery.invalidate();
         }
     }
+    pub fn request_scan(&mut self) {
+        if let Some(discovery) = &mut self.discovery {
+            // A result already waiting in the channel may predate a new plug-in.
+            discovery.invalidate();
+            self.scan_requested = discovery.request();
+        }
+    }
+    pub fn scan_requested(&self) -> bool {
+        self.scan_requested
+    }
     pub fn retire(&mut self, session: &mut Session) -> Result<(), String> {
         self.invalidate_discovery();
         self.refresh = Refresh::Idle;
-        self.reconnect = None;
-        self.selected = None;
+        self.reconnect = false;
         if let Some(worker) = self.worker.take() {
             self.retiring = Some(worker.retire());
         }
         session.disconnect().map(|_| ())
     }
-    /// An explicit read reselects the current collection even if no scan saw removal.
+    /// Manual refresh retries the pinned endpoint even if discovery saw a replacement.
     pub fn read(&mut self, session: &mut Session) -> Result<Option<Command>, String> {
+        if self.selected.is_none() {
+            match &self.presence {
+                Availability::Choices { .. } => {
+                    return Err("Choose Wired USB or 2.4 GHz receiver to read the keyboard.".into());
+                }
+                Availability::Ready(endpoint) => self.selected = Some(endpoint.id.clone()),
+                _ => {}
+            }
+        }
         self.retire(session)?;
-        self.reconnect = Some(Reconnect::Manual);
+        self.reconnect = true;
+        self.poll(session)
+    }
+    /// Start a read-only connection to the exact endpoint named by the control.
+    pub fn choose(&mut self, session: &mut Session, id: &str) -> Result<Option<Command>, String> {
+        if !self.presence.contains(id) {
+            return Err("This keyboard connection is no longer available.".into());
+        }
+        if self.settling() {
+            return Err("Wait for the previous keyboard operation to finish.".into());
+        }
+        let switching = self.selected().is_some_and(|pinned| pinned != id);
+        self.retire(session)?;
+        if switching {
+            session.reset_target()?;
+        }
+        self.selected = Some(id.to_owned());
+        self.reconnect = true;
         self.poll(session)
     }
     /// Finish the old worker before opening another device transaction.
@@ -95,20 +132,28 @@ impl Connection {
             return Ok(None);
         }
         self.retiring = None;
-        match self.reconnect.take() {
-            Some(Reconnect::Manual) => self.attach(session, None).map(Some),
-            Some(Reconnect::Discovered(id)) => self.attach(session, Some(&id)).map(Some),
-            None => Ok(None),
+        if std::mem::take(&mut self.reconnect) {
+            self.attach(session).map(Some)
+        } else {
+            Ok(None)
         }
     }
-    fn attach(&mut self, session: &mut Session, expected: Option<&str>) -> Result<Command, String> {
+    fn attach(&mut self, session: &mut Session) -> Result<Command, String> {
+        let expected = self.selected();
         let (id, worker) = (self.attach)(expected)?;
         if expected.is_some_and(|expected| expected != id) {
             return Err("The discovered keyboard changed before attachment".into());
         }
         worker.set_generation(session.connect()?);
-        self.selected = Some(id.clone());
-        self.presence = Availability::Ready { id };
+        if !self.presence.contains(&id) {
+            // Manual read before the first scan, or a pin that returned between scans.
+            self.presence = Availability::Ready(Endpoint {
+                id: id.clone(),
+                label: "Keyboard",
+            });
+            self.request_scan();
+        }
+        self.selected = Some(id);
         self.worker = Some(worker);
         self.refresh = Refresh::Reading;
         session.read()
@@ -119,10 +164,12 @@ impl Connection {
             return self.poll(session);
         }
         let observed = self.discovery.as_mut().and_then(Discovery::receive);
-        if let Some(observed) = observed
-            && let Some(command) = self.observe(session, observed)?
-        {
-            return Ok(Some(command));
+        if let Some(observed) = observed {
+            let requested = std::mem::take(&mut self.scan_requested);
+            let command = self.observe(session, observed)?;
+            if command.is_some() || requested {
+                return Ok(command);
+            }
         }
         if let Some(discovery) = &mut self.discovery {
             discovery.request();
@@ -134,27 +181,22 @@ impl Connection {
         session: &mut Session,
         observed: Availability,
     ) -> Result<Option<Command>, String> {
-        let changed = observed != self.presence;
         self.presence = observed;
-        let ready = match &self.presence {
-            Availability::Ready { id } => Some(id.clone()),
-            _ => None,
+        let available = match (&self.selected, &self.presence) {
+            (Some(id), presence) => presence.contains(id),
+            (None, Availability::Ready(endpoint)) => {
+                self.selected = Some(endpoint.id.clone());
+                true
+            }
+            _ => false,
         };
-        // An unchanged selected collection remains connected after a read
-        // failure. Reattempting its receiver identity requires explicit Read.
-        let needs_connection = self.worker.is_none() || ready.as_ref() != self.selected.as_ref();
-        if ready.is_none() && changed {
-            self.retire(session)?;
-        } else if let Some(id) = ready
-            && needs_connection
-        {
-            if self.worker.is_some() {
+        if self.worker.is_some() {
+            if !available {
                 self.retire(session)?;
             }
-            if !session.requires_manual_read() {
-                self.reconnect = Some(Reconnect::Discovered(id));
-                return self.poll(session);
-            }
+        } else if available && !session.requires_manual_read() {
+            self.reconnect = true;
+            return self.poll(session);
         }
         Ok(None)
     }
@@ -228,7 +270,11 @@ mod tests {
         let attachments = Arc::new(AtomicUsize::new(0));
         let calls = Arc::clone(&attachments);
         let link = Connection::new(Box::new(move |expected| {
-            assert!(expected.is_none_or(|id| id == "receiver"));
+            assert_eq!(
+                expected,
+                Some("receiver"),
+                "only the selected receiver may open"
+            );
             calls.fetch_add(1, Ordering::SeqCst);
             let worker = Executor::spawn(FailedIdentity, PathBuf::new())
                 .map_err(|error| error.to_string())?;
@@ -257,15 +303,23 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_candidate_does_not_retry_failed_first_read_but_manual_read_does() {
+    fn offline_receiver_stays_pinned_with_wired_present_and_manual_read_retries_it() {
         let (mut link, mut session, attachments) = fixture();
-        let ready = Availability::Ready {
-            id: "receiver".into(),
+        let both = Availability::Choices {
+            wired: Endpoint {
+                id: "wired".into(),
+                label: "Wired USB",
+            },
+            receiver: Endpoint {
+                id: "receiver".into(),
+                label: "2.4 GHz receiver",
+            },
         };
-        let command = link.observe(&mut session, ready.clone()).unwrap().unwrap();
+        assert!(link.observe(&mut session, both.clone()).unwrap().is_none());
+        let command = link.choose(&mut session, "receiver").unwrap().unwrap();
         complete_failed_first_read(&mut link, &mut session, command);
         for _ in 0..3 {
-            assert!(link.observe(&mut session, ready.clone()).unwrap().is_none());
+            assert!(link.observe(&mut session, both.clone()).unwrap().is_none());
         }
         assert_eq!(attachments.load(Ordering::SeqCst), 1);
         let mut command = link.read(&mut session).unwrap();
@@ -283,9 +337,10 @@ mod tests {
     #[test]
     fn missing_then_ready_candidate_reconnects_after_failed_first_read() {
         let (mut link, mut session, attachments) = fixture();
-        let ready = Availability::Ready {
+        let ready = Availability::Ready(Endpoint {
             id: "receiver".into(),
-        };
+            label: "2.4 GHz receiver",
+        });
         let command = link.observe(&mut session, ready.clone()).unwrap().unwrap();
         complete_failed_first_read(&mut link, &mut session, command);
         assert!(

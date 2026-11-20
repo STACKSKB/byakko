@@ -42,7 +42,7 @@ pub(crate) struct InputDevice {
 unsafe impl Send for InputDevice {}
 
 impl InputDevice {
-    pub(crate) fn open(path: &CStr) -> Result<Self> {
+    pub(crate) fn open(path: &CStr, expected_pid: u16) -> Result<Self> {
         let path = wide_path(path)?;
         // SAFETY: zero-terminated path and documented flags. No write access.
         let handle = unsafe {
@@ -67,6 +67,7 @@ impl InputDevice {
         let caps = capabilities(handle)?;
         if attr.VendorID != 0x3151
             || !matches!(attr.ProductID, 0x4011 | 0x4015)
+            || attr.ProductID != expected_pid
             || caps.UsagePage != 0xffff
             || caps.Usage != 1
             || caps.InputReportByteLength != 4
@@ -187,10 +188,9 @@ mod tests {
     #[ignore = "requires the connected USB Nia87; read-only hardware evidence"]
     fn inspect_live_notification_collection() {
         let inventory = crate::hid::HidApi::new().unwrap();
-        for info in inventory
-            .device_list()
-            .filter(|info| info.vendor_id() == 0x3151)
-        {
+        for info in inventory.device_list().filter(|info| {
+            info.vendor_id() == 0x3151 && matches!(info.product_id(), 0x4011 | 0x4015)
+        }) {
             let device = super::super::open_handle(info.path(), 0).unwrap();
             let caps = capabilities(device.handle).unwrap();
             println!(
@@ -203,7 +203,7 @@ mod tests {
                 caps.NumberInputValueCaps
             );
             if info.usage_page() == 0xffff && info.usage() == 1 {
-                let mut listener = InputDevice::open(info.path()).unwrap();
+                let mut listener = InputDevice::open(info.path(), info.product_id()).unwrap();
                 println!("verified input shape: report ID 5, 8-bit fields, count 3");
                 println!(
                     "idle read: {:?}",

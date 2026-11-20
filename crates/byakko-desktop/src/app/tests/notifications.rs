@@ -23,7 +23,7 @@ impl Operation for RenderedText {
     }
 }
 
-fn rendered_text(app: &App) -> Vec<String> {
+pub(super) fn rendered_text(app: &App) -> Vec<String> {
     let mut element = app.view();
     let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
     let mut tree = Tree::new(&element);
@@ -39,7 +39,7 @@ fn rendered_text(app: &App) -> Vec<String> {
     texts.0.into_iter().map(|(text, _)| text).collect()
 }
 
-fn click_text(app: &App, label: &str) -> Vec<Message> {
+pub(super) fn click_text(app: &App, label: &str) -> Vec<Message> {
     let mut element = app.view();
     let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
     let mut tree = Tree::new(&element);
@@ -427,7 +427,7 @@ fn dirty_failed_settings_read_keeps_a_local_retry_action() {
 #[test]
 fn disconnected_and_unknown_macro_library_do_not_claim_stale_success() {
     let mut disconnected = DiscoveryApp::new(false);
-    disconnected.observe(Availability::Ready { id: "first".into() });
+    disconnected.observe(ready("first"));
     disconnected.app.notice = "Assignments saved and read back.".into();
     disconnected.observe(Availability::Missing);
     let texts = rendered_text(&disconnected.app);
