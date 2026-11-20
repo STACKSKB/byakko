@@ -32,7 +32,7 @@ use crate::core::renderer;
 use crate::core::{
     Background, Color, Font, Pixels, Point, Rectangle, Size, Transformation,
 };
-use crate::engine::Engine;
+use crate::engine::{ClipMask, Engine};
 use crate::graphics::Viewport;
 use crate::graphics::compositor;
 use crate::graphics::text::{Editor, Paragraph};
@@ -73,6 +73,7 @@ impl Renderer {
         background_color: Color,
     ) {
         let scale_factor = viewport.scale_factor();
+        let mut clip_mask = ClipMask::new(clip_mask);
 
         self.layers.flush();
 
@@ -132,7 +133,7 @@ impl Renderer {
                     continue;
                 };
 
-                engine::adjust_clip_mask(clip_mask, layer_bounds);
+                clip_mask.adjust(layer_bounds);
 
                 if !layer.quads.is_empty() {
                     let render_span = debug::render(debug::Primitive::Quad);
@@ -142,7 +143,7 @@ impl Renderer {
                             background,
                             Transformation::scale(scale_factor),
                             pixels,
-                            clip_mask,
+                            clip_mask.mask(),
                             layer_bounds,
                         );
                     }
@@ -160,7 +161,7 @@ impl Renderer {
                             continue;
                         };
 
-                        engine::adjust_clip_mask(clip_mask, group_bounds);
+                        clip_mask.adjust(group_bounds);
 
                         for primitive in group.as_slice() {
                             self.engine.draw_primitive(
@@ -168,12 +169,12 @@ impl Renderer {
                                 Transformation::scale(scale_factor)
                                     * group.transformation(),
                                 pixels,
-                                clip_mask,
+                                clip_mask.mask(),
                                 group_bounds,
                             );
                         }
 
-                        engine::adjust_clip_mask(clip_mask, layer_bounds);
+                        clip_mask.adjust(layer_bounds);
                     }
 
                     render_span.finish();
@@ -187,7 +188,7 @@ impl Renderer {
                             image,
                             Transformation::scale(scale_factor),
                             pixels,
-                            clip_mask,
+                            clip_mask.mask(),
                             layer_bounds,
                         );
                     }
@@ -205,7 +206,7 @@ impl Renderer {
                                 Transformation::scale(scale_factor)
                                     * group.transformation(),
                                 pixels,
-                                clip_mask,
+                                &mut clip_mask,
                                 layer_bounds,
                             );
                         }

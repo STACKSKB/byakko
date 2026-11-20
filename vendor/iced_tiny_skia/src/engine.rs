@@ -33,7 +33,7 @@ impl Engine {
         background: &Background,
         transformation: Transformation,
         pixels: &mut tiny_skia::PixmapMut<'_>,
-        clip_mask: &mut tiny_skia::Mask,
+        clip_mask: &tiny_skia::Mask,
         clip_bounds: Rectangle,
     ) {
         let physical_bounds = quad.bounds * transformation;
@@ -71,7 +71,7 @@ impl Engine {
         // Antialiasing and borders can touch pixels outside the geometric
         // quad. Keep full and partial redraws consistent at scroll clips.
         let clip_mask =
-            (!physical_bounds.expand(1.0).is_within(&clip_bounds)).then_some(clip_mask as &_);
+            (!physical_bounds.expand(1.0).is_within(&clip_bounds)).then_some(clip_mask);
         let transform = into_transform(transformation);
         let border_width = quad
             .border
@@ -258,7 +258,7 @@ impl Engine {
         text: &Text,
         transformation: Transformation,
         pixels: &mut tiny_skia::PixmapMut<'_>,
-        clip_mask: &mut tiny_skia::Mask,
+        clip_mask: &mut ClipMask<'_>,
         clip_bounds: Rectangle,
     ) {
         match text {
@@ -287,8 +287,8 @@ impl Engine {
                 let clip_mask = match physical_bounds.is_within(&clip_bounds) {
                     true => None,
                     false => {
-                        adjust_clip_mask(clip_mask, clip_bounds);
-                        Some(clip_mask as &_)
+                        clip_mask.adjust(clip_bounds);
+                        Some(clip_mask.mask())
                     }
                 };
 
@@ -325,8 +325,8 @@ impl Engine {
                 let clip_mask = match physical_bounds.is_within(&clip_bounds) {
                     true => None,
                     false => {
-                        adjust_clip_mask(clip_mask, clip_bounds);
-                        Some(clip_mask as &_)
+                        clip_mask.adjust(clip_bounds);
+                        Some(clip_mask.mask())
                     }
                 };
 
@@ -359,8 +359,8 @@ impl Engine {
                 else {
                     return;
                 };
-                adjust_clip_mask(clip_mask, clip_bounds);
-                let clip_mask = Some(clip_mask as &_);
+                clip_mask.adjust(clip_bounds);
+                let clip_mask = Some(clip_mask.mask());
 
                 self.text_pipeline.draw_cached(
                     content,
@@ -401,7 +401,7 @@ impl Engine {
                 }
 
                 let clip_mask = (!physical_bounds.is_within(&clip_bounds))
-                    .then_some(clip_mask as &_);
+                    .then_some(clip_mask.mask());
 
                 self.text_pipeline.draw_raw(
                     &buffer,
@@ -420,7 +420,7 @@ impl Engine {
         primitive: &Primitive,
         transformation: Transformation,
         pixels: &mut tiny_skia::PixmapMut<'_>,
-        clip_mask: &mut tiny_skia::Mask,
+        clip_mask: &tiny_skia::Mask,
         clip_bounds: Rectangle,
     ) {
         match primitive {
@@ -441,7 +441,7 @@ impl Engine {
                 }
 
                 let clip_mask = (!physical_bounds.is_within(&clip_bounds))
-                    .then_some(clip_mask as &_);
+                    .then_some(clip_mask);
 
                 pixels.fill_path(
                     path,
@@ -472,7 +472,7 @@ impl Engine {
                 }
 
                 let clip_mask = (!physical_bounds.is_within(&clip_bounds))
-                    .then_some(clip_mask as &_);
+                    .then_some(clip_mask);
 
                 pixels.stroke_path(
                     path,
@@ -490,7 +490,7 @@ impl Engine {
         image: &Image,
         _transformation: Transformation,
         _pixels: &mut tiny_skia::PixmapMut<'_>,
-        _clip_mask: &mut tiny_skia::Mask,
+        _clip_mask: &tiny_skia::Mask,
         _clip_bounds: Rectangle,
     ) {
         match image {
@@ -503,7 +503,7 @@ impl Engine {
                 }
 
                 let clip_mask = (!physical_bounds.is_within(&_clip_bounds))
-                    .then_some(_clip_mask as &_);
+                    .then_some(_clip_mask);
 
                 let center = physical_bounds.center();
                 let radians = f32::from(image.rotation);
@@ -533,7 +533,7 @@ impl Engine {
                 }
 
                 let clip_mask = (!physical_bounds.is_within(&_clip_bounds))
-                    .then_some(_clip_mask as &_);
+                    .then_some(_clip_mask);
 
                 let center = physical_bounds.center();
                 let radians = f32::from(svg.rotation);
@@ -844,9 +844,32 @@ fn rounded_box_sdf(
     (x.powf(2.0) + y.powf(2.0)).sqrt() - radius
 }
 
-pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
-    clip_mask.clear();
+/// Tracks every adjustment to the scratch mask for one `Renderer::draw`.
+pub(crate) struct ClipMask<'a> {
+    mask: &'a mut tiny_skia::Mask,
+    bounds: Option<Rectangle>,
+}
 
+impl<'a> ClipMask<'a> {
+    pub(crate) fn new(mask: &'a mut tiny_skia::Mask) -> Self {
+        Self { mask, bounds: None }
+    }
+
+    pub(crate) fn mask(&self) -> &tiny_skia::Mask {
+        self.mask
+    }
+
+    pub(crate) fn adjust(&mut self, bounds: Rectangle) {
+        // The incoming mask is arbitrary until the first adjustment.
+        if self.bounds != Some(bounds) {
+            adjust_clip_mask(self.mask, bounds);
+            self.bounds = Some(bounds);
+        }
+    }
+}
+
+fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
+    clip_mask.clear();
     let path = {
         let mut builder = tiny_skia::PathBuilder::new();
         builder.push_rect(
@@ -878,10 +901,87 @@ mod tests {
         text::{Alignment, Shaping},
     };
 
+    fn compare_clip_adjustments(size: (u32, u32), bounds: &[Rectangle]) {
+        let mut expected = tiny_skia::Mask::new(size.0, size.1).unwrap();
+        expected.data_mut().fill(113);
+        let mut supplied = expected.clone();
+        let mut actual = ClipMask::new(&mut supplied);
+        assert_eq!(actual.mask().data(), expected.data());
+
+        for &rectangle in bounds {
+            adjust_clip_mask(&mut expected, rectangle);
+            actual.adjust(rectangle);
+            assert_eq!(actual.mask().data(), expected.data(), "{rectangle:?}");
+        }
+    }
+
+    #[test]
+    fn clip_adjustments_match_full_clear_for_fractional_and_offset_bounds() {
+        let full = Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: 40.0,
+            height: 36.0,
+        };
+        let draw_on_left = Rectangle {
+            x: -2.25,
+            y: 0.5,
+            width: 15.0,
+            height: 6.25,
+        };
+        let draw_on_right = Rectangle {
+            x: 24.49,
+            y: 5.49,
+            width: 16.0,
+            height: 7.02,
+        };
+        let below_mask = Rectangle {
+            y: 40.0,
+            ..draw_on_right
+        };
+        let draws_through_bottom = Rectangle {
+            y: 33.5,
+            ..draw_on_right
+        };
+        compare_clip_adjustments(
+            (40, 36),
+            &[
+                draw_on_left,
+                draw_on_left,
+                draw_on_right,
+                full,
+                draws_through_bottom,
+                below_mask,
+                draw_on_right,
+                full,
+            ],
+        );
+    }
+
+    #[test]
+    fn clip_adjustments_match_full_clear_across_tiny_skia_tiles() {
+        let across_tiles = Rectangle {
+            x: 8185.25,
+            y: 0.51,
+            width: 15.0,
+            height: 4.01,
+        };
+        let elsewhere = Rectangle {
+            x: 1.2,
+            y: -2.5,
+            ..across_tiles
+        };
+        compare_clip_adjustments(
+            (8200, 10),
+            &[across_tiles, across_tiles, elsewhere, across_tiles],
+        );
+    }
+
     fn draw_menu_row(damage: Rectangle) -> tiny_skia::Pixmap {
         let mut pixels = tiny_skia::Pixmap::new(240, 80).unwrap();
         let mut mask = tiny_skia::Mask::new(240, 80).unwrap();
-        adjust_clip_mask(&mut mask, damage);
+        let mut clip_mask = ClipMask::new(&mut mask);
+        clip_mask.adjust(damage);
         let row = Text::Cached {
             content: "MMMMMMMM".into(),
             bounds: Rectangle {
@@ -904,7 +1004,7 @@ mod tests {
             &row,
             Transformation::IDENTITY,
             &mut pixels.as_mut(),
-            &mut mask,
+            &mut clip_mask,
             damage,
         );
         pixels

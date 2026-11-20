@@ -60,3 +60,8 @@ wired device and compares retained and fresh pixels through selection at 100%,
 and hover require byte equality in the keyboard region. The movement check
 allows the observed two-value channel rounding at the affected key edge. The
 vendor tests exercise moving shadows and repainting the shadow outside a quad.
+
+The clip-mask follow-up reuses consecutive identical clip rectangles within
+one draw. The first clip clears the caller-supplied mask and each change uses
+the original tiny-skia fill. The regression compares mask bytes with the
+full-clear path for repeated, offset, fractional, and tiled clips.
