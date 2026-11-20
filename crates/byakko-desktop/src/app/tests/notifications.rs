@@ -183,7 +183,7 @@ fn rendered_appearance_controls_preview_cancel_and_apply_without_device_reads() 
     assert!(appearance_escape(escape_key(true)).is_none());
     let _ = app.update(appearance_escape(escape_key(false)).unwrap());
     assert!(!app.appearance.open);
-    assert_eq!(app.style.theme, iced::Theme::Dark);
+    assert_eq!(app.style.theme, appearance::theme(&app.appearance.saved));
 
     let _ = app.update(Message::Appearance(appearance::Message::Open));
     let _ = app.update(Message::Appearance(appearance::Message::Mode(Mode::Light)));
@@ -205,7 +205,7 @@ fn failed_appearance_save_keeps_the_modal_and_draft_when_close_was_requested() {
     use byakko_devices::storage::appearance::Mode;
     let (mut app, _) = app(false);
     let _ = app.update(Message::Appearance(appearance::Message::Open));
-    let _ = app.update(Message::Appearance(appearance::Message::Mode(Mode::Light)));
+    let _ = app.update(Message::Appearance(appearance::Message::Mode(Mode::Dark)));
     let target = app.appearance.begin_apply().unwrap();
     let _ = app.update(Message::Close);
     assert_eq!(app.closing, Closing::Waiting);
@@ -213,7 +213,7 @@ fn failed_appearance_save_keeps_the_modal_and_draft_when_close_was_requested() {
     assert_eq!(app.closing, Closing::Open);
     assert!(app.appearance.open);
     assert_eq!(app.appearance.draft, target);
-    assert_eq!(app.appearance.saved.mode, Mode::Dark);
+    assert_eq!(app.appearance.saved.mode, Mode::Light);
     assert!(
         app.appearance
             .problem

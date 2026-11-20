@@ -21,7 +21,7 @@ test("each browser entry builds into one self-contained HTML file", async t => {
     assert.doesNotMatch(page, /<(?:script|img)\b[^>]*\bsrc=/i);
     assert.doesNotMatch(page, /new URL\(['"]byakko_web_bg\.wasm['"]/);
     assert.ok(page.includes(encodedWasm), `${html} does not contain the exact generated WASM bytes`);
-    assert.match(page, /data:image\/svg\+xml[,;]/);
+    assert.match(page, /data:image\/png;base64,/);
     assert.equal([...page.matchAll(/<\/script>/gi)].length, 2);
     const notices = page.match(/<script id="byakko-notices" type="application\/json">([^<]+)<\/script>/);
     assert.ok(notices, `${html} lacks embedded license notices`);

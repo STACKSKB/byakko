@@ -78,14 +78,14 @@ pub struct UiStyle {
 
 impl UiStyle {
     pub const DEFAULT: Self = Self {
-        initial_window: (1360.0, 800.0),
-        theme: Theme::Dark,
+        initial_window: (1440.0, 900.0),
+        theme: Theme::Light,
         spacing: Spacing {
             xs: 4,
             s: 8,
             m: 12,
             l: 20,
-            page_padding: 20,
+            page_padding: 0,
             panel_padding: 16,
             control_padding: 8,
         },
@@ -94,7 +94,7 @@ impl UiStyle {
             section_title: 16,
             page_title: 22,
         },
-        key_sidebar_breakpoint: 1240.0,
+        key_sidebar_breakpoint: 850.0,
         key_sidebar_width: 440.0,
         workspace_width: 1280.0,
         action_group_width: 130,

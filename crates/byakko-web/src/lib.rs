@@ -31,6 +31,23 @@ use byakko_protocol::nia87::{lighting, protocol, receiver};
 use serde_json::{Value, json};
 use wasm_bindgen::prelude::*;
 
+/// Static, physical-key previews. This pure export does not access a session or device.
+#[wasm_bindgen]
+pub fn picture_looks(red: u8, green: u8, blue: u8) -> String {
+    let brush = [red, green, blue];
+    let catalog: Vec<_> = byakko_protocol::nia87::looks::ALL
+        .iter()
+        .map(|look| {
+            json!({
+                "id": look.id(),
+                "name": look.name(),
+                "colors": look.colors(brush)
+            })
+        })
+        .collect();
+    Value::Array(catalog).to_string()
+}
+
 #[derive(Clone, Copy)]
 enum Read {
     Identity,

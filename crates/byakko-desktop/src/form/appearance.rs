@@ -41,13 +41,13 @@ impl Form {
             Ok(Some(preferences)) => match validate(&preferences) {
                 Ok(()) => (preferences, None),
                 Err(error) => (
-                    Preferences::default(),
+                    new_install_default(),
                     Some(format!("Saved appearance was invalid: {error}")),
                 ),
             },
-            Ok(None) => (Preferences::default(), None),
+            Ok(None) => (new_install_default(), None),
             Err(error) => (
-                Preferences::default(),
+                new_install_default(),
                 Some(format!("Could not load saved appearance: {error}")),
             ),
         };
@@ -174,6 +174,14 @@ impl Form {
             }
             Err(error) => self.problem = Some(error),
         }
+    }
+}
+
+fn new_install_default() -> Preferences {
+    Preferences {
+        mode: Mode::Light,
+        palette: Palette::StacksKB,
+        ..Preferences::default()
     }
 }
 
@@ -460,14 +468,16 @@ mod tests {
         form.update(Message::Open);
         assert!(form.update(Message::Palette(Palette::Slate)).is_some());
         assert_eq!(form.draft.palette, Palette::Slate);
+        let visible = editable_colours(&form.draft);
+        let selected_side = side(form.draft.mode);
         assert!(form.update(Message::Colour(0, "#1".into())).is_none());
         assert_eq!(form.draft.palette, Palette::Custom);
         assert_eq!(form.fields[0], "#1");
-        assert_eq!(form.draft.custom[1].surface, [0x27, 0x2e, 0x35]);
+        assert_eq!(form.draft.custom[selected_side].surface, visible.surface);
         assert!(form.begin_apply().is_err());
-        assert!(form.update(Message::Colour(0, "#FFFFFF".into())).is_none());
+        assert!(form.update(Message::Colour(0, "#000000".into())).is_none());
         assert!(form.problem.as_deref().unwrap().contains("contrast"));
-        assert!(form.update(Message::Colour(0, "#1D2228".into())).is_some());
+        assert!(form.update(Message::Colour(0, "#FFFFFF".into())).is_some());
         assert!(form.problem.is_none());
     }
 
@@ -480,12 +490,12 @@ mod tests {
         let preview = form.update(Message::Colour(0, original));
         assert!(preview.is_some(), "{:?}", form.problem);
         assert_eq!(form.draft.palette, Palette::Custom);
-        let editable = form.draft.custom[1];
+        let editable = form.draft.custom[0];
         assert_eq!(editable.canvas, visible.canvas);
         assert_eq!(editable.surface, visible.surface);
         assert_eq!(editable.text, visible.text);
-        assert_eq!(editable.muted, visible.text);
-        assert_eq!(editable.focus, visible.text);
+        assert_eq!(editable.muted, visible.muted);
+        assert_eq!(editable.focus, editable_colours(&form.saved).focus);
         assert_eq!(form.fields[6], fields_for(editable)[6]);
     }
 
@@ -508,26 +518,26 @@ mod tests {
     fn cancel_and_failed_save_preserve_the_right_values() {
         let mut form = Form::default();
         form.update(Message::Open);
-        let preview = form.update(Message::Mode(Mode::Light)).unwrap();
-        assert_eq!(preview.mode, Mode::Light);
+        let preview = form.update(Message::Mode(Mode::Dark)).unwrap();
+        assert_eq!(preview.mode, Mode::Dark);
         assert_eq!(form.update(Message::Cancel), Some(form.saved.clone()));
         assert!(!form.open);
         form.update(Message::Open);
-        form.update(Message::Mode(Mode::Light));
+        form.update(Message::Mode(Mode::Dark));
         let target = form.begin_apply().unwrap();
-        assert_eq!(target.mode, Mode::Light);
+        assert_eq!(target.mode, Mode::Dark);
         assert!(form.update(Message::Cancel).is_none());
-        assert!(form.update(Message::Mode(Mode::Dark)).is_none());
+        assert!(form.update(Message::Mode(Mode::Light)).is_none());
         assert!(form.open);
-        assert_eq!(form.draft.mode, Mode::Light);
+        assert_eq!(form.draft.mode, Mode::Dark);
         form.accept(Err("disk full".into()));
         assert!(form.open);
-        assert_eq!(form.draft.mode, Mode::Light);
-        assert_eq!(form.saved.mode, Mode::Dark);
+        assert_eq!(form.draft.mode, Mode::Dark);
+        assert_eq!(form.saved.mode, Mode::Light);
         assert!(form.problem.as_deref().unwrap().contains("disk full"));
         form.begin_apply().unwrap();
         form.accept(Ok(()));
-        assert_eq!(form.saved.mode, Mode::Light);
+        assert_eq!(form.saved.mode, Mode::Dark);
         assert!(!form.open);
     }
 
@@ -536,7 +546,7 @@ mod tests {
         let mut saved = Preferences::default();
         saved.custom[0].text = saved.custom[0].canvas;
         let form = Form::new(Ok(Some(saved)));
-        assert_eq!(form.saved, Preferences::default());
+        assert_eq!(form.saved, new_install_default());
         assert!(form.problem.is_some());
     }
 
@@ -548,6 +558,6 @@ mod tests {
         assert!(form.begin_apply().is_err());
         assert!(form.submitted.is_none());
         assert!(form.open);
-        assert_eq!(form.saved, Preferences::default());
+        assert_eq!(form.saved, new_install_default());
     }
 }

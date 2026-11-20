@@ -337,6 +337,25 @@ impl App {
                     }
                     Err(reason) => self.notice = reason,
                 },
+                Ok(Some(keymap::Intent::Preset(choice))) => {
+                    let preset = match choice {
+                        keymap::PresetChoice::Colemak => {
+                            byakko_core::editor::keymap_presets::TypingPreset::Colemak
+                        }
+                        keymap::PresetChoice::Dvorak => {
+                            byakko_core::editor::keymap_presets::TypingPreset::Dvorak
+                        }
+                    };
+                    let layer = self.keys.layer.clone();
+                    self.notice = self
+                        .session
+                        .stage_typing_preset(&layer, preset)
+                        .err()
+                        .unwrap_or_default();
+                    if self.notice.is_empty() {
+                        self.keys.sync_shortcut(self.session.keymap());
+                    }
+                }
                 Ok(Some(keymap::Intent::Scroll(scroll))) => {
                     let task = match scroll {
                         catalog::Scroll::Top => crate::widget::catalog::top(),
@@ -629,6 +648,72 @@ impl App {
 
     fn update_picture(&mut self, message: picture::Message) -> Task<Message> {
         let request = match message {
+            picture::Message::Preview(look) => {
+                let result = self
+                    .session
+                    .picture()
+                    .ok_or("Colors are unavailable".to_owned())
+                    .and_then(|editor| self.picture.start_preview(look, editor));
+                self.notice = result.err().unwrap_or_default();
+                return Task::none();
+            }
+            picture::Message::ReplacePainted(replace) => {
+                self.picture.set_replace_painted(replace);
+                return Task::none();
+            }
+            picture::Message::RevertPreview => {
+                self.picture.revert_preview();
+                self.notice.clear();
+                return Task::none();
+            }
+            picture::Message::ApplyPreview => {
+                if !matches!(self.session.connection(), Connection::Connected { .. }) {
+                    self.notice = "Connect before applying a look".into();
+                    return Task::none();
+                }
+                if self.session.busy() {
+                    self.notice = "Wait for the current device operation".into();
+                    return Task::none();
+                }
+                let target = self
+                    .session
+                    .picture()
+                    .ok_or("Colors are unavailable".to_owned())
+                    .and_then(|editor| self.picture.target(editor));
+                let target = match target {
+                    Ok(target) => target,
+                    Err(reason) => {
+                        self.notice = reason;
+                        return Task::none();
+                    }
+                };
+                let before = self
+                    .picture
+                    .before_target()
+                    .expect("preview target has a before-image");
+                if let Err(reason) = self.session.stage_picture_snapshot(&target) {
+                    self.notice = reason;
+                    return Task::none();
+                }
+                self.autosave.cancel(AutoFeature::Picture);
+                let request = self.session.save_picture();
+                if let Err(reason) = &request {
+                    let restore = self.session.stage_picture_snapshot(&before);
+                    if self.session.picture().is_some_and(|editor| editor.dirty()) {
+                        self.autosave
+                            .edited(AutoFeature::Picture, Instant::now(), &self.config);
+                    }
+                    self.notice = match restore {
+                        Ok(()) => reason.clone(),
+                        Err(restore) => {
+                            format!("{reason}; could not restore original paint: {restore}")
+                        }
+                    };
+                    return Task::none();
+                }
+                self.picture.mark_applying();
+                return self.submit(request);
+            }
             picture::Message::Read => {
                 self.autosave.cancel(AutoFeature::Picture);
                 self.session.read_picture()
@@ -637,6 +722,7 @@ impl App {
                 self.notice = self.session.revert_picture().err().unwrap_or_default();
                 if self.notice.is_empty() {
                     self.autosave.cancel(AutoFeature::Picture);
+                    self.picture.revert_preview();
                 }
                 return Task::none();
             }
@@ -655,7 +741,11 @@ impl App {
                         self.picture
                             .accepted(&key, self.session.picture().expect("accepted picture edit"));
                     }
-                    self.edited(AutoFeature::Picture, result);
+                    if self.picture.preview_look().is_none() {
+                        self.edited(AutoFeature::Picture, result);
+                    } else {
+                        self.notice = result.err().unwrap_or_default();
+                    }
                 }
                 return Task::none();
             }
@@ -778,21 +868,55 @@ impl App {
     fn update_macro(&mut self, message: macros::Message) -> Task<Message> {
         use macros::Message;
         let request = match message {
+            Message::Back => {
+                if self.session.recording() || self.recording.pending() {
+                    self.notice = "Stop recording before leaving this macro.".into();
+                } else {
+                    self.macros.open(macros::Screen::Library);
+                }
+                return Task::none();
+            }
             Message::Select(slot)
                 if self.session.macros().is_some_and(|editor| {
                     editor.slot() == slot && editor.status() == &Status::Ready
                 }) =>
             {
+                self.macros.open(macros::Screen::Edit);
                 return Task::none();
             }
-            Message::Select(slot) => self.session.select_macro(&slot).and_then(|()| {
-                self.new_macro = None;
-                self.session.read_macro()
-            }),
+            Message::Select(slot) => {
+                let request = self.session.select_macro(&slot).and_then(|()| {
+                    self.new_macro = None;
+                    self.session.read_macro()
+                });
+                if request.is_ok() {
+                    self.macros.open(macros::Screen::Edit);
+                }
+                request
+            }
+            Message::AssignExisting(slot)
+                if self.session.macros().is_some_and(|editor| {
+                    editor.slot() == slot && editor.status() == &Status::Ready
+                }) =>
+            {
+                self.macros.open(macros::Screen::Assign);
+                return Task::none();
+            }
+            Message::AssignExisting(slot) => {
+                let request = self.session.select_macro(&slot).and_then(|()| {
+                    self.new_macro = None;
+                    self.session.read_macro()
+                });
+                if request.is_ok() {
+                    self.macros.open(macros::Screen::Assign);
+                }
+                request
+            }
             Message::Add => self.session.macro_candidate().and_then(|slot| {
                 self.session.select_macro(&slot)?;
                 let command = self.session.read_macro()?;
                 self.new_macro = Some(slot);
+                self.macros.open(macros::Screen::Edit);
                 Ok(command)
             }),
             Message::Read => self.session.read_macro(),
@@ -801,6 +925,16 @@ impl App {
                 .session
                 .macros()
                 .ok_or_else(|| "Macros are not available".to_owned())
+                .and_then(|editor| {
+                    if editor
+                        .draft()
+                        .is_some_and(|program| !program.events.is_empty())
+                    {
+                        Ok(editor)
+                    } else {
+                        Err("Add or record an event before saving.".into())
+                    }
+                })
                 .and_then(|editor| self.macros.validate_repeat(editor))
                 .and_then(|()| self.session.save_macro()),
             Message::Assign(binding) => match self.keys.target() {
@@ -825,6 +959,15 @@ impl App {
                     Ok(()) => {
                         self.macros
                             .sync(self.session.macros().and_then(|editor| editor.draft()));
+                        if self.session.macros().is_some_and(|editor| {
+                            editor.baseline().is_some_and(|snapshot| {
+                                matches!(&snapshot.content,
+                                    byakko_core::model::macros::Content::Editable(program)
+                                        if program.events.is_empty())
+                            })
+                        }) {
+                            self.macros.open(macros::Screen::Library);
+                        }
                         self.notice.clear();
                     }
                     Err(reason) => self.notice = reason,
@@ -835,6 +978,7 @@ impl App {
                 if self.session.blocks_editing() {
                     return Task::none();
                 }
+                let reveal_composer = matches!(message, Message::Event(_) | Message::NewEvent);
                 let edit = self
                     .session
                     .macros()
@@ -848,7 +992,15 @@ impl App {
                         }
                         self.notice = result.err().unwrap_or_default();
                     }
-                    Ok(None) => self.notice.clear(),
+                    Ok(None) => {
+                        self.notice.clear();
+                        if reveal_composer {
+                            return iced::widget::operation::scroll_to(
+                                "macro-timeline",
+                                iced::widget::operation::AbsoluteOffset { x: 0.0, y: 0.0 },
+                            );
+                        }
+                    }
                     Err(reason) => self.notice = reason,
                 }
                 return Task::none();
@@ -1014,11 +1166,6 @@ impl App {
     }
 
     fn complete(&mut self, completion: Completion) -> Task<Message> {
-        let picture_context_before = self
-            .session
-            .picture()
-            .and_then(|editor| editor.baseline())
-            .map(|snapshot| snapshot.context_revision.clone());
         // Compare only around an explicit read; the editor remains the program owner.
         let macro_before = match &completion.payload {
             CompletionPayload::Macro {
@@ -1040,14 +1187,10 @@ impl App {
         let observing = self.observation.matches(&completion);
         let outcome = self.session.accept(completion);
         if outcome == Outcome::PictureLoaded
-            && picture_context_before.as_deref()
-                != self
-                    .session
-                    .picture()
-                    .and_then(|editor| editor.baseline())
-                    .map(|snapshot| snapshot.context_revision.as_slice())
+            && let Connection::Connected { generation } = self.session.connection()
+            && let Some(editor) = self.session.picture()
         {
-            self.picture.layer_loaded();
+            self.picture.observed_picture(editor, *generation);
         }
         if observing && !matches!(outcome, Outcome::Ignored) {
             match &outcome {
@@ -1085,6 +1228,9 @@ impl App {
             && let Some(feature) = feature
         {
             self.autosave.cancel(feature);
+            if feature == AutoFeature::Picture {
+                self.picture.apply_failed();
+            }
         }
         match outcome {
             Outcome::Ignored => return Task::none(),
@@ -1104,7 +1250,17 @@ impl App {
                 }
                 self.notice = "Key colors loaded.".into();
             }
-            Outcome::PictureSaved => self.notice = "Key colors applied.".into(),
+            Outcome::PictureSaved => {
+                if self.picture.applying_preview() {
+                    self.picture.apply_succeeded();
+                    self.notice = "Look applied.".into();
+                } else {
+                    if let Some(editor) = self.session.picture() {
+                        self.picture.ordinary_paint_saved(editor);
+                    }
+                    self.notice = "Key colors applied.".into();
+                }
+            }
             Outcome::SettingsLoaded => self.notice = "Settings loaded.".into(),
             Outcome::SettingsSaved => self.notice = "Setting saved and read back.".into(),
             Outcome::ArchiveCaptured => self.notice = "Diagnostic archive captured.".into(),
@@ -1144,6 +1300,7 @@ impl App {
                 return Task::none();
             }
             Outcome::AssignmentSucceeded { macro_saved } => {
+                self.macros.open(macros::Screen::Library);
                 if let Some((slot, binding)) = self.assignment_binding.take() {
                     self.files.form.bindings.insert(slot, binding);
                 }

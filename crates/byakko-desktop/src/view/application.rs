@@ -15,12 +15,25 @@ use crate::{
 };
 use byakko_core::{
     editor::Status,
+    projection::tester as tester_projection,
     session::{Connection, Session},
 };
 use iced::{
-    Element, Fill,
-    widget::{column, container, responsive, row, space, text},
+    Color, Element, Fill, Length,
+    widget::{column, container, responsive, row, scrollable, space, text},
 };
+
+#[derive(Clone, PartialEq)]
+struct KeyOption {
+    id: String,
+    label: String,
+}
+
+impl std::fmt::Display for KeyOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct View<'a> {
@@ -65,77 +78,43 @@ impl View<'_> {
 }
 
 pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
-    let idle = input.idle();
-    let mut navigation = row![].spacing(input.style.spacing.s);
-    for (label, page, available) in [
-        ("Keys", Page::Keys, true),
-        ("Macros", Page::Macros, input.session.macros().is_some()),
-        (
-            "Lighting",
-            Page::Lighting,
-            input.session.lighting().is_some() || input.session.picture().is_some(),
-        ),
-        (
-            "Settings",
-            Page::Settings,
-            input.session.settings().is_some(),
-        ),
-        (
-            "Diagnostic capture",
-            Page::Archive,
-            input.session.archive().is_some(),
-        ),
-        ("Keyboard tester", Page::Tester, true),
-    ] {
-        if available {
-            navigation = navigation.push(panels::selectable_button(
-                input.style,
-                label,
-                input.page == page || (page == Page::Lighting && input.page == Page::Picture),
-                input.editing_allowed().then_some(Message::Page(page)),
-            ));
-        }
-    }
-    if !matches!(input.session.connection(), Connection::Connected { .. })
-        || input.live_updates_unavailable
-        || input.session.requires_manual_read()
-        || matches!(input.session.keymap().status(), Status::Unverified { .. })
-    {
-        navigation = navigation
-            .push(button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)));
-    }
-    navigation = navigation.push(panels::selectable_button(
-        input.style,
-        "Appearance",
-        false,
-        input
-            .editing_allowed()
-            .then_some(Message::Appearance(appearance::Message::Open)),
-    ));
-    let base: Element<'a, Message> = container(
+    let base: Element<'a, Message> = responsive(move |size| {
+        let wide = size.width >= input.style.key_sidebar_breakpoint;
+        let brand = text("Byakko").size(22);
+        let navigation = scrollable(navigation(input))
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::new().width(4).scroller_width(4),
+            ))
+            .width(Fill)
+            .height(Length::Fixed(if wide { 44.0 } else { 38.0 }));
+        let header: Element<'a, Message> = if wide {
+            row![brand, navigation]
+                .spacing(24)
+                .align_y(iced::Alignment::Center)
+                .height(Length::Fixed(60.0))
+                .padding(iced::Padding::default().left(22).right(22))
+                .into()
+        } else {
+            column![brand, navigation]
+                .height(Length::Fixed(76.0))
+                .padding(iced::Padding::default().left(10).right(10))
+                .into()
+        };
         column![
-            text(&input.session.descriptor().device_name).size(input.style.type_scale.page_title),
-            navigation.wrap(),
-            responsive(move |size| workspace(
-                input,
-                size.width >= input.style.key_sidebar_breakpoint
-            )),
+            container(header).style(|_| container::Style {
+                background: Some(iced::Background::Color(Color::BLACK)),
+                text_color: Some(Color::WHITE),
+                ..Default::default()
+            }),
+            workspace(input, wide),
         ]
-        .spacing(input.style.spacing.m)
-        .height(Fill),
-    )
-    .max_width(input.style.workspace_width)
+        .height(Fill)
+        .into()
+    })
     .width(Fill)
     .height(Fill)
     .into();
-    let base = container(base)
-        .padding(input.style.spacing.page_padding)
-        .center_x(Fill)
-        .width(Fill)
-        .height(Fill)
-        .into();
     let blocked = input.appearance.open || input.closing == Closing::ConfirmDiscard;
-    // Keep the workspace's widget ancestry stable when a modal opens or closes.
     let base = crate::widget::tester_capture::capture(
         base,
         !blocked && input.page == Page::Tester && input.tester.active(),
@@ -180,108 +159,274 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         .into()
 }
 
+fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
+    let idle = input.idle();
+    let mut navigation = row![].spacing(2);
+    for (label, page, available) in [
+        ("Keys", Page::Keys, true),
+        ("Macros", Page::Macros, input.session.macros().is_some()),
+        (
+            "Lighting",
+            Page::Lighting,
+            input.session.lighting().is_some() || input.session.picture().is_some(),
+        ),
+        (
+            "Settings",
+            Page::Settings,
+            input.session.settings().is_some(),
+        ),
+        (
+            "Diagnostics",
+            Page::Archive,
+            input.session.archive().is_some(),
+        ),
+        ("Tester", Page::Tester, true),
+    ] {
+        if available {
+            navigation = navigation.push(nav_button(
+                label,
+                input.page == page || (page == Page::Lighting && input.page == Page::Picture),
+                input.editing_allowed().then_some(Message::Page(page)),
+            ));
+        }
+    }
+    if !matches!(input.session.connection(), Connection::Connected { .. })
+        || input.live_updates_unavailable
+        || input.session.requires_manual_read()
+        || matches!(input.session.keymap().status(), Status::Unverified { .. })
+    {
+        navigation = navigation
+            .push(button("Read / reconnect").on_press_maybe(idle.then_some(Message::Read)));
+    }
+    navigation = navigation.push(nav_button(
+        "Appearance",
+        false,
+        input
+            .editing_allowed()
+            .then_some(Message::Appearance(appearance::Message::Open)),
+    ));
+    navigation
+}
+
+fn nav_button(
+    label: &'static str,
+    active: bool,
+    message: Option<Message>,
+) -> Element<'static, Message> {
+    button(text(label).size(14).color(if active {
+        Color::WHITE
+    } else {
+        Color::from_rgb8(189, 189, 194)
+    }))
+    .padding([8, 12])
+    .on_press_maybe(message)
+    .style(move |_theme, _status| iced::widget::button::Style {
+        background: active.then_some(iced::Background::Color(Color::from_rgb8(55, 55, 60))),
+        text_color: if active {
+            Color::WHITE
+        } else {
+            Color::from_rgb8(189, 189, 194)
+        },
+        border: iced::Border {
+            color: if active {
+                Color::from_rgb8(109, 101, 169)
+            } else {
+                Color::TRANSPARENT
+            },
+            width: if active { 1.0 } else { 0.0 },
+            radius: 5.0.into(),
+        },
+        ..Default::default()
+    })
+    .into()
+}
+
 fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     let idle = input.idle();
-    if input.page == Page::Tester {
-        return view::tester::view(input.tester, input.style).map(Message::Tester);
-    }
-    if input.page == Page::Macros {
-        return macro_workspace(input, wide);
-    }
-    let board = board(input);
-    let mut details = column![status(input)].spacing(input.style.spacing.s);
-    if input.page == Page::Keys {
+    let detail: Element<'a, Message> = if input.page == Page::Macros {
+        macro_workspace(input)
+    } else if input.page == Page::Keys {
         let editable = input.editing_allowed()
             && input.session.keymap().status() == &Status::Ready
             && matches!(input.session.connection(), Connection::Connected { .. });
-        details = details.push(view::keymap::view(
+        let assignment = view::keymap::view(
             input.keys,
             input.session,
             input.files,
             editable,
             idle,
             input.style,
-        ));
-        let catalog = view::catalog::view(
-            &input.keys.catalog,
-            &input.session.descriptor().actions,
-            input.keys.selected_action(input.session.keymap()),
-            editable && input.keys.can_assign(input.session.keymap()),
-            idle,
-            input.style,
-        )
-        .map(Message::Keys);
-        if wide {
-            return row![
-                column![
-                    board,
-                    panels::vertical_scroll(input.style, details).height(Fill)
-                ]
-                .spacing(input.style.spacing.m)
-                .width(Fill)
-                .height(Fill),
-                container(catalog)
-                    .width(input.style.key_sidebar_width)
-                    .height(Fill),
-            ]
-            .spacing(input.style.spacing.l)
-            .height(Fill)
-            .into();
-        }
-        return column![
-            board,
-            row![
-                container(catalog).width(iced::Length::FillPortion(input.style.panes.detail)),
-                panels::vertical_scroll(input.style, details)
-                    .width(iced::Length::FillPortion(input.style.panes.sidebar)),
-            ]
-            .spacing(input.style.spacing.m)
-            .height(Fill)
-        ]
-        .spacing(input.style.spacing.m)
-        .height(Fill)
-        .into();
-    }
-    details = details.push(match input.page {
-        Page::Lighting | Page::Picture => lighting_workspace(input),
-        Page::Settings => match input.session.settings() {
-            Some(editor) => view::settings::view(
-                editor,
-                !input.files_busy
-                    && (!input.session.blocks_editing() || editor.submitted().is_some()),
-                idle && matches!(input.session.connection(), Connection::Connected { .. }),
-                input.style,
-            )
-            .map(Message::Settings),
-            None => text("Settings are unavailable for this keyboard.").into(),
-        },
-        Page::Archive => match input.session.archive() {
-            Some(capture) => view::archive::view(
-                input.files,
-                capture,
+        );
+        if input.keys.pane == keymap::Pane::Remap {
+            let catalog = view::catalog::view(
+                &input.keys.catalog,
+                &input.session.descriptor().actions,
+                input.keys.selected_action(input.session.keymap()),
+                editable && input.keys.can_assign(input.session.keymap()),
                 idle,
-                matches!(input.session.connection(), Connection::Connected { .. }),
                 input.style,
             )
-            .map(Message::Files),
-            None => text("Diagnostic capture is unavailable for this keyboard.").into(),
-        },
-        Page::Keys | Page::Macros | Page::Tester => unreachable!("handled workspace"),
-    });
-    let board = if wide {
+            .map(Message::Keys);
+            column![
+                container(panels::vertical_scroll(input.style, assignment))
+                    .height(Length::Fixed(if wide { 150.0 } else { 120.0 })),
+                catalog,
+            ]
+            .height(Fill)
+            .into()
+        } else {
+            panels::vertical_scroll(input.style, assignment)
+                .height(Fill)
+                .into()
+        }
+    } else if input.page == Page::Tester {
+        view::tester::view(input.tester, input.style).map(Message::Tester)
+    } else {
+        match input.page {
+            Page::Lighting | Page::Picture => lighting_workspace(input),
+            Page::Settings => match input.session.settings() {
+                Some(editor) => view::settings::view(
+                    editor,
+                    !input.files_busy
+                        && (!input.session.blocks_editing() || editor.submitted().is_some()),
+                    idle && matches!(input.session.connection(), Connection::Connected { .. }),
+                    input.style,
+                )
+                .map(Message::Settings),
+                None => text("Settings are unavailable for this keyboard.").into(),
+            },
+            Page::Archive => match input.session.archive() {
+                Some(capture) => view::archive::view(
+                    input.files,
+                    capture,
+                    idle,
+                    matches!(input.session.connection(), Connection::Connected { .. }),
+                    input.style,
+                )
+                .map(Message::Files),
+                None => text("Diagnostic capture is unavailable for this keyboard.").into(),
+            },
+            Page::Keys | Page::Macros | Page::Tester => unreachable!("handled workspace"),
+        }
+    };
+    let inspector = container(detail)
+        .padding(16)
+        .width(Fill)
+        .height(Fill)
+        .style(|theme| container::Style {
+            background: Some(iced::Background::Color(
+                theme.extended_palette().background.weak.color,
+            )),
+            ..Default::default()
+        });
+    if wide {
         row![
-            container(board).width(Fill),
-            space().width(input.style.key_sidebar_width)
+            container(stage(input, true))
+                .width(iced::Length::FillPortion(3))
+                .height(Fill),
+            inspector.width(iced::Length::FillPortion(2)),
         ]
-        .spacing(input.style.spacing.l)
+        .height(Fill)
         .into()
     } else {
-        board
-    };
-    column![board, details.height(Fill)]
-        .spacing(input.style.spacing.m)
+        column![
+            container(stage(input, false)).height(Length::Fixed(237.0)),
+            inspector,
+        ]
         .height(Fill)
         .into()
+    }
+}
+
+fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
+    responsive(move |size| {
+        let portrait = !wide && size.width <= 650.0;
+        let picker = || -> Element<'a, Message> {
+            if !matches!(input.page, Page::Keys | Page::Macros) {
+                return text("").into();
+            }
+            let choices: Vec<KeyOption> = input
+                .session
+                .descriptor()
+                .keys
+                .iter()
+                .filter(|key| key.visible)
+                .map(|key| KeyOption {
+                    id: key.id.clone(),
+                    label: key.label.clone(),
+                })
+                .collect();
+            let selected = choices
+                .iter()
+                .find(|choice| Some(&choice.id) == input.keys.selected.as_ref())
+                .cloned();
+            crate::widget::controls::pick_list(choices, selected, |choice: KeyOption| {
+                Message::Keys(keymap::Message::Key(choice.id))
+            })
+            .width(Length::Fixed(115.0))
+            .into()
+        };
+        let layers: Element<'a, Message> = if matches!(input.page, Page::Keys | Page::Macros) {
+            view::keymap::layers(
+                input.keys,
+                input.session,
+                input.editing_allowed(),
+                input.style,
+            )
+            .into()
+        } else {
+            text("").into()
+        };
+        let mut header = row![
+            text(&input.session.descriptor().device_name).size(if wide { 32 } else { 22 }),
+            space::horizontal(),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+        if !wide && !portrait {
+            header = header.push(picker());
+        }
+        header = header.push(layers);
+        let header = header
+            .padding(
+                iced::Padding::default()
+                    .left(if wide { 22 } else { 10 })
+                    .right(if wide { 22 } else { 10 }),
+            )
+            .height(Length::Fixed(if wide { 68.0 } else { 40.0 }));
+        let mut footer = row![status(input), space::horizontal()]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
+        if wide || portrait {
+            footer = footer.push(picker());
+        }
+        let footer = footer
+            .padding(
+                iced::Padding::default()
+                    .left(if wide { 22 } else { 10 })
+                    .right(if wide { 22 } else { 10 }),
+            )
+            .height(Length::Fixed(if wide {
+                52.0
+            } else if portrait {
+                47.0
+            } else {
+                23.0
+            }));
+        container(column![header, board(input), footer].height(Fill))
+            .height(Fill)
+            .width(Fill)
+            .style(|theme| container::Style {
+                background: Some(iced::Background::Color(
+                    theme.extended_palette().background.base.color,
+                )),
+                ..Default::default()
+            })
+            .into()
+    })
+    .height(Fill)
+    .width(Fill)
+    .into()
 }
 
 fn board<'a>(input: View<'a>) -> Element<'a, Message> {
@@ -305,6 +450,52 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
                 .map(str::to_owned)
         },
     );
+    if input.page == Page::Tester {
+        let positions = tester_projection::layout_for(input.tester.layout);
+        let usage_by_key: std::collections::BTreeMap<String, u16> = descriptor
+            .keys
+            .iter()
+            .filter(|key| key.visible)
+            .filter_map(|key| {
+                positions
+                    .iter()
+                    .find(|position| {
+                        (position.x - key.x).abs() < 0.01 && (position.y - key.y).abs() < 0.01
+                    })
+                    .and_then(|position| position.usage)
+                    .map(|usage| (key.id.clone(), usage))
+            })
+            .collect();
+        let colors = usage_by_key
+            .iter()
+            .filter_map(|(key, usage)| {
+                if input.tester.test.held().any(|held| held == *usage) {
+                    Some((key.clone(), [35, 112, 70]))
+                } else if input.tester.test.tested().contains(usage) {
+                    Some((key.clone(), [36, 79, 123]))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let selected = usage_by_key
+            .iter()
+            .find(|(_, usage)| Some(**usage) == input.tester.inspected)
+            .map(|(key, _)| key.clone());
+        return keyboard::colored_view_with_labels(
+            input.style,
+            descriptor.keys.iter().filter(|key| key.visible).collect(),
+            selected,
+            colors,
+            labels,
+            move |key| {
+                usage_by_key
+                    .get(&key.id)
+                    .copied()
+                    .map(|usage| Message::Tester(tester::Message::Inspect(usage)))
+            },
+        );
+    }
     if matches!(input.page, Page::Lighting | Page::Picture)
         && lighting_mode(input.session, input.lighting) == Some(lighting::Mode::PerKey)
         && let Some(editor) = input.session.picture()
@@ -338,7 +529,7 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
     )
 }
 
-fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
+fn macro_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
     let (Some(editor), Some(library)) = (input.session.macros(), input.session.macro_library())
     else {
         return text("Macros are unavailable for this keyboard.").into();
@@ -357,6 +548,34 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         })
         .map(|binding| binding.slot.clone())
         .collect();
+    let binding_actions: Vec<_> = editor
+        .capabilities()
+        .bindings
+        .iter()
+        .filter(|binding| binding.slot == editor.slot())
+        .map(|binding| &binding.action)
+        .collect();
+    let bound_keys = input
+        .session
+        .keymap()
+        .baseline()
+        .map(|snapshot| {
+            let binding_actions = &binding_actions;
+            snapshot
+                .bindings
+                .iter()
+                .flat_map(|(layer, keys)| {
+                    keys.iter().filter_map(move |(key, action)| {
+                        if binding_actions.contains(&action) {
+                            Some(format!("{layer} · {key}"))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let program = editor.draft();
     let phase = if input.recording_pending {
         view::recording::Phase::Waiting
@@ -366,6 +585,7 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         }
     } else {
         view::recording::Phase::Idle {
+            empty: program.is_none_or(|program| program.events.is_empty()),
             editable: idle
                 && editor.status() == &Status::Ready
                 && program.is_some_and(|program| {
@@ -376,17 +596,6 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
                 }),
         }
     };
-    let keyboard = column![
-        board(input),
-        view::keymap::layers(
-            input.keys,
-            input.session,
-            input.editing_allowed(),
-            input.style
-        ),
-        status(input),
-    ]
-    .spacing(input.style.spacing.s);
     view::macros::view(
         view::macros::View {
             form: input.macros,
@@ -402,11 +611,13 @@ fn macro_workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
                 .filter(|(layer, key)| input.session.descriptor().key_is_writable(layer, key)),
             bound_action: input.keys.selected_action(input.session.keymap()),
             bound_slots,
+            bound_keys,
+            assignment_ready: input.session.keymap().status() == &Status::Ready
+                && !input.session.keymap().dirty(),
+            recording: input.session.recording() || input.recording_pending,
             scanning: input.session.catalog_scanning(),
             style: input.style,
-            wide,
         },
-        keyboard.into(),
         view::recording::controls(input.recording_options, phase, input.style).map(Message::Record),
         program
             .filter(|_| input.session.recording())
@@ -547,7 +758,7 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
 /// diagnostics wrap and scroll here without moving the editor controls.
 fn status<'a>(input: View<'a>) -> Element<'a, Message> {
     panels::vertical_scroll(input.style, text(notice(input).unwrap_or_default()))
-        .height(input.style.status_height)
+        .height(Fill)
         .into()
 }
 

@@ -11,7 +11,7 @@ use iced::{
 };
 
 pub enum Phase {
-    Idle { editable: bool },
+    Idle { editable: bool, empty: bool },
     Waiting,
     Recording { events: usize },
 }
@@ -41,37 +41,45 @@ pub fn controls<'a>(
     style: &'a UiStyle,
 ) -> Element<'a, Message> {
     match phase {
-        Phase::Waiting => row![
-            text("Finishing the current library read before recording…"),
-            button("Cancel recording").on_press(Message::Stop),
-        ]
-        .spacing(style.spacing.m)
-        .into(),
-        Phase::Recording { events } => column![
-            row![
-                button("Stop recording").on_press(Message::Stop),
-                text(format!("Recording · {events} events")),
-            ]
-            .spacing(style.spacing.m),
-            text("Type or click in a blank area. Stop or leave this window to finish."),
-            text("Recorded events append to this macro. Review them before saving."),
+        Phase::Waiting => row![text("Preparing…"), button("Cancel").on_press(Message::Stop),]
+            .spacing(style.spacing.m)
+            .into(),
+        Phase::Recording { events } => row![
+            button("Stop recording").on_press(Message::Stop),
+            text(format!("{events} events")),
         ]
         .spacing(style.spacing.s)
         .into(),
-        Phase::Idle { editable } => row![
-            button("Record").on_press_maybe(editable.then_some(Message::Start)),
-            focus_control::toggle(
-                checkbox(options.fixed)
-                    .label("Fixed wait")
-                    .on_toggle_maybe(editable.then_some(Message::Fixed)),
-                Message::Fixed(!options.fixed),
-                editable,
-            ),
-            text_input("Wait (ms)", &options.delay)
-                .width(style.fields.compact)
-                .on_input_maybe((editable && options.fixed).then_some(Message::Delay)),
-        ]
-        .spacing(style.spacing.m)
-        .into(),
+        Phase::Idle { editable, empty } => {
+            let record = button("Record").on_press_maybe(editable.then_some(Message::Start));
+            let record = if empty {
+                record
+            } else {
+                record.style(iced::widget::button::secondary)
+            };
+            row![
+                record,
+                focus_control::toggle(
+                    checkbox(options.fixed)
+                        .label("Fixed timing")
+                        .style(|theme: &iced::Theme, status| {
+                            let mut style = checkbox::primary(theme, status);
+                            let palette = theme.extended_palette();
+                            style.border.color = palette.background.base.text;
+                            style.border.width = 1.0;
+                            style.text_color = Some(palette.background.base.text);
+                            style
+                        })
+                        .on_toggle_maybe(editable.then_some(Message::Fixed)),
+                    Message::Fixed(!options.fixed),
+                    editable,
+                ),
+                text_input("Wait (ms)", &options.delay)
+                    .width(style.fields.compact)
+                    .on_input_maybe((editable && options.fixed).then_some(Message::Delay)),
+            ]
+            .spacing(style.spacing.m)
+            .into()
+        }
     }
 }

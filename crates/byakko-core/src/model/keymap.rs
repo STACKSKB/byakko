@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 pub struct PhysicalKey {
     pub id: String,
     pub label: String,
+    /// Immutable USB position used by typing presets, when known.
+    #[serde(default)]
+    pub position: Option<u16>,
     pub x: f32,
     pub y: f32,
     pub width: f32,

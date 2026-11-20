@@ -9,6 +9,7 @@ pub mod keymap_policy;
 pub mod layout;
 pub mod lighting;
 pub mod lighting_adapter;
+pub mod looks;
 pub mod macro_adapter;
 pub mod macros;
 pub mod notifications;

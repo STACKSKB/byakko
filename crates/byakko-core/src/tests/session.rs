@@ -15,6 +15,7 @@ fn session() -> Session {
         keys: vec![PhysicalKey {
             id: "a".into(),
             label: "A".into(),
+            position: None,
             x: 0.0,
             y: 0.0,
             width: 1.0,

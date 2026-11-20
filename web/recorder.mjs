@@ -41,7 +41,7 @@ export function createRecorder({ doc, win, runtime, now, redraw }) {
       else await start(caps);
     }, !runtime.view.recording && (!editor.canEdit || !countValid)));
     const capture = node(doc, "div", runtime.view.recording ? "Recording keys and pointer buttons. Click here for pointer actions; Stop releases held inputs." : "Recording is local until you save.", "record-capture");
-    capture.id = "record-capture"; capture.tabIndex = 0;
+    capture.id = "record-capture"; capture.tabIndex = 0; capture.hidden = !runtime.view.recording;
     detail.append(recordRow, capture);
   }
   function onRecord(event, pressed) {

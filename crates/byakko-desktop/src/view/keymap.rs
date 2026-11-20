@@ -1,7 +1,11 @@
-//! Assignment controls sit below the persistent keyboard, with the catalog beside it.
+//! Selected key, edit mode and pending assignment review in the inspector.
 use crate::widget::focus_button::button;
 use crate::{
-    form::{application::Message, files, keymap, keymap::Form},
+    form::{
+        application::Message,
+        files, keymap,
+        keymap::{Form, Pane, PresetChoice},
+    },
     widget::{
         keyboard,
         panels::{self, UiStyle},
@@ -23,7 +27,41 @@ pub fn view<'a>(
 ) -> Element<'a, Message> {
     let descriptor = session.descriptor();
     let editor = session.keymap();
-    let mut toolbar = layers(form, session, editable, style);
+    let selected = form
+        .selected
+        .as_ref()
+        .and_then(|id| descriptor.keys.iter().find(|key| key.id == *id))
+        .map_or("Choose a key", |key| key.label.as_str());
+    let tabs = row![
+        panels::selectable_button(
+            style,
+            "Remap",
+            form.pane == Pane::Remap,
+            Some(Message::Keys(keymap::Message::Pane(Pane::Remap))),
+        ),
+        panels::selectable_button(
+            style,
+            "Shortcut",
+            form.pane == Pane::Shortcut,
+            descriptor
+                .shortcuts
+                .as_ref()
+                .map(|_| Message::Keys(keymap::Message::Pane(Pane::Shortcut))),
+        ),
+        panels::selectable_button(
+            style,
+            "Typing preset",
+            form.pane == Pane::TypingPreset,
+            (descriptor.backend_id == "nia87")
+                .then_some(Message::Keys(keymap::Message::Pane(Pane::TypingPreset))),
+        ),
+    ]
+    .spacing(style.spacing.xs);
+    let mut toolbar = row![
+        text(selected).size(style.type_scale.section_title),
+        text(format!(" · {}", form.layer)).size(style.type_scale.body),
+    ]
+    .spacing(style.spacing.xs);
     if editor.dirty() {
         toolbar = toolbar
             .push(
@@ -32,8 +70,10 @@ pub fn view<'a>(
             )
             .push(button("Revert").on_press_maybe(idle.then_some(Message::Revert)));
     }
-    let mut detail = column![toolbar].spacing(style.spacing.m);
-    if let Some(caps) = &descriptor.shortcuts {
+    let mut detail = column![toolbar, tabs].spacing(style.spacing.m);
+    if form.pane == Pane::Shortcut
+        && let Some(caps) = &descriptor.shortcuts
+    {
         detail = detail.push(
             super::shortcut::view(
                 &form.shortcut,
@@ -42,6 +82,36 @@ pub fn view<'a>(
                 style,
             )
             .map(|message| Message::Keys(keymap::Message::Shortcut(message))),
+        );
+    }
+    if form.pane == Pane::TypingPreset {
+        detail = detail.push(
+            column![
+                text("Typing layout"),
+                row![
+                    panels::selectable_button(
+                        style,
+                        "Colemak",
+                        form.preset == PresetChoice::Colemak,
+                        Some(Message::Keys(keymap::Message::ChoosePreset(
+                            PresetChoice::Colemak
+                        ))),
+                    ),
+                    panels::selectable_button(
+                        style,
+                        "Dvorak",
+                        form.preset == PresetChoice::Dvorak,
+                        Some(Message::Keys(keymap::Message::ChoosePreset(
+                            PresetChoice::Dvorak
+                        ))),
+                    ),
+                ]
+                .spacing(style.spacing.s),
+                button("Stage typing preset").on_press_maybe(
+                    editable.then_some(Message::Keys(keymap::Message::StagePreset)),
+                ),
+            ]
+            .spacing(style.spacing.s),
         );
     }
     let changes = editor.changes();

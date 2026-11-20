@@ -135,6 +135,7 @@ pub fn descriptor() -> Descriptor {
         .map(|slot| PhysicalKey {
             id: key_id(slot),
             label: format!("Reserved {slot}"),
+            position: None,
             x: 0.0,
             y: 0.0,
             width: 0.0,
@@ -148,6 +149,8 @@ pub fn descriptor() -> Descriptor {
             keys[slot] = PhysicalKey {
                 id: key_id(slot),
                 label: key.label.into(),
+                position: (key.usage != layout::FN_PLACEHOLDER_USAGE)
+                    .then_some(u16::from(key.usage)),
                 x: key.x,
                 y: key.y,
                 width: key.width,
@@ -339,6 +342,16 @@ pub fn draft_snapshot(expected: &State, changes: &[Change]) -> Result<Snapshot, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn typing_presets_cover_real_nia87_positions() {
+        use byakko_core::editor::keymap_presets::{TypingPreset, plan};
+        let descriptor = descriptor();
+        for preset in [TypingPreset::Colemak, TypingPreset::Dvorak] {
+            let changes = plan(&descriptor, "base", preset).unwrap();
+            assert_eq!(changes.len(), 35);
+            assert!(changes.iter().all(|change| change.layer == "base"));
+        }
+    }
     fn snapshot() -> Snapshot {
         let mut base = vec![[0, 0, 4, 0]; 128];
         base[126] = [255, 1, 2, 3];

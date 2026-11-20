@@ -1,7 +1,10 @@
 use super::*;
+mod looks;
+mod macros_workspace;
 mod navigation;
 mod notifications;
 mod picture_layers;
+mod workspace;
 use crate::controller::discovery::Availability;
 use crate::view::application::picture_is_displayed;
 use byakko_core::{
@@ -20,6 +23,15 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+
+fn paint_selected(app: &mut App, color: [u8; 3]) {
+    let selected = app.picture.selected.clone().expect("selected picture key");
+    let _ = app.update(Message::Picture(picture::Message::Mode(
+        picture::Mode::Paint,
+    )));
+    let _ = app.update(Message::Picture(picture::Message::Brush(color)));
+    let _ = app.update(Message::Picture(picture::Message::Paint(selected)));
+}
 
 struct ObservedDevice {
     memory: MemoryDevice,
@@ -1173,7 +1185,7 @@ fn idle_has_no_reads_and_repeated_lighting_events_are_coalesced() {
     assert_eq!(*calls.lock().unwrap(), ["read-lighting"]);
     assert_eq!(app.notice, "Key colors applied.");
     calls.lock().unwrap().clear();
-    let _ = app.update(Message::Picture(picture::Message::Color([23, 45, 67])));
+    paint_selected(&mut app, [23, 45, 67]);
     let draft = app.session.picture().unwrap().draft().cloned();
     observe_due(&mut app);
     assert!(!app.session.busy());
@@ -1597,9 +1609,9 @@ fn picture_colors_batch_and_only_real_selector_changes_require_a_new_read() {
     drain(&mut app);
     assert_eq!(*calls.lock().unwrap(), ["apply-lighting", "read-picture"]);
     let _ = app.update(Message::Picture(picture::Message::Select("Alpha".into())));
-    let _ = app.update(Message::Picture(picture::Message::Color([4, 5, 6])));
+    paint_selected(&mut app, [4, 5, 6]);
     let _ = app.update(Message::Picture(picture::Message::Select("Beta".into())));
-    let _ = app.update(Message::Picture(picture::Message::Color([7, 8, 9])));
+    paint_selected(&mut app, [7, 8, 9]);
     elapsed(&mut app);
     drain(&mut app);
     assert!(!app.session.picture().unwrap().dirty());
@@ -1694,8 +1706,16 @@ fn picture_navigation_finishes_queued_lighting_and_reuses_the_brush() {
     drain(&mut app);
     assert!(picture_is_displayed(&app.session));
     let _ = app.update(Message::Picture(picture::Message::Select("Alpha".into())));
-    let _ = app.update(Message::Picture(picture::Message::Color([12, 34, 56])));
+    paint_selected(&mut app, [12, 34, 56]);
     let _ = app.update(Message::Picture(picture::Message::Select("Beta".into())));
+    assert_eq!(
+        app.session.picture().unwrap().draft().unwrap()["Beta"],
+        [60, 70, 80]
+    );
+    let _ = app.update(Message::Picture(picture::Message::Mode(
+        picture::Mode::Paint,
+    )));
+    let _ = app.update(Message::Picture(picture::Message::Paint("Beta".into())));
     assert_eq!(
         app.session.picture().unwrap().draft().unwrap()["Beta"],
         [12, 34, 56]

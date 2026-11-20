@@ -89,7 +89,7 @@ export function createAppearance(doc, environment) {
   const preferenceKey = embedded ? "byakko-wordpress-appearance" : storageKey;
   let saved;
   try { saved = JSON.parse(environment.localStorage.getItem(preferenceKey)); } catch { /* Use defaults. */ }
-  let current = preference(saved, embedded ? {mode:"light",palette:"embed"} : undefined);
+  let current = preference(saved, embedded ? {mode:"light",palette:"embed"} : {mode:"light",palette:"stackskb"});
   const media = environment.matchMedia("(prefers-color-scheme: dark)");
   let editTheme = resolvedTheme(current.mode, media.matches);
   const dialog = doc.createElement("dialog");

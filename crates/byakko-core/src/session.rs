@@ -5,8 +5,13 @@ use crate::{
         FeatureResult, HostEvent, HostStart, HostTicket, Problem, Recovery,
     },
     editor::{
-        Editor, Status, keymap::KeymapRules, lighting::LightingRules, macros::MacroRules,
-        picture::PictureRules, settings::SettingsRules,
+        Editor, Status,
+        keymap::KeymapRules,
+        keymap_presets::{self, TypingPreset},
+        lighting::LightingRules,
+        macros::MacroRules,
+        picture::PictureRules,
+        settings::SettingsRules,
     },
     library::archive::{Capture, CaptureProblem},
     library::macros::Library,
@@ -496,6 +501,14 @@ impl Session {
     pub fn edit(&mut self, change: Change) -> Result<(), String> {
         self.editable_activity(&Feature::Keymap)?;
         self.keymap.edit(change)
+    }
+    pub fn stage_typing_preset(&mut self, layer: &str, preset: TypingPreset) -> Result<(), String> {
+        self.editable_activity(&Feature::Keymap)?;
+        if self.descriptor().backend_id != "nia87" || layer != "base" {
+            return Err("Typing presets require the Nia87 Base layer".into());
+        }
+        let changes = keymap_presets::plan(self.descriptor(), layer, preset)?;
+        self.keymap.edit_batch(changes)
     }
     pub fn revert(&mut self) -> Result<(), String> {
         self.idle()?;

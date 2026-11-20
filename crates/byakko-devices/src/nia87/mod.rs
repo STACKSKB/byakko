@@ -9,6 +9,7 @@ pub mod configuration_plan;
 pub mod device;
 mod host_adapter;
 pub mod lighting_adapter;
+pub use byakko_protocol::nia87::looks;
 pub mod macro_adapter;
 pub mod macro_file;
 pub mod notifications;

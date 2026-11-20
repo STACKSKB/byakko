@@ -29,11 +29,11 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   });
   let tab = "keymap", renderedTarget = null, layer = runtime.view.descriptor.layers[0]?.id, key = runtime.view.descriptor.keys[0]?.id;
   const recorder = createRecorder({doc, win, runtime, now, redraw: render});
-  const keymap = createKeymapForm({doc, runtime});
+  const keymap = createKeymapForm({doc, runtime, redraw: render});
   const settings = createSettingsForm({doc, runtime});
   const discard = createDiscardDialog({doc, win});
   const macros = createMacroForm({doc, win, runtime, storage, recorder, redraw: render, navigate, confirmDiscard: discard.confirm});
-  const lighting = createLightingForm({doc, win, runtime, redraw: render, navigate});
+  const lighting = createLightingForm({doc, win, codec, runtime, redraw: render, navigate, confirmDiscard: discard.confirm});
   const diagnostics = createDiagnosticsForm({doc, win, runtime});
   const backups = createBackups({doc, win, storage, runtime});
   const board = createKeyboard({doc, redraw: render,
@@ -44,7 +44,7 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   const header = node(doc, "header", undefined, "topbar");
   const brand = node(doc, "div", undefined, "brand");
   const mark = node(doc, "img", undefined, "brand-mark");
-  mark.src = "assets/byakko.svg"; mark.alt = "";
+  mark.src = "assets/byakko.png"; mark.alt = "";
   brand.append(mark, node(doc, "strong", "Byakko"), node(doc, "small", "Keyboard configurator"));
   const connection = node(doc, "div", undefined, "connection");
   let connectionParts = null;
@@ -57,9 +57,16 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   status.setAttribute("aria-live", "polite");
   const keyboard = node(doc, "div", undefined, "keyboard-area");
   const panel = node(doc, "section", undefined, "panel");
-  header.append(brand, connection);
+  const headerMore = node(doc, "details", undefined, "header-more");
+  headerMore.append(node(doc, "summary", "More"));
+  const moreMenu = node(doc, "div", undefined, "header-more-menu");
+  const moreAppearance = button(doc, "Appearance", () => { headerMore.open = false; appearance.button.click(); });
+  const moreBackups = button(doc, "View backups", () => { headerMore.open = false; sidebar.querySelector("[data-backups]")?.click(); });
+  moreMenu.append(moreAppearance, moreBackups);
+  headerMore.append(moreMenu);
+  header.append(brand, sidebar, connection, headerMore);
   main.append(status, keyboard, panel);
-  workspace.append(sidebar, main);
+  workspace.append(main);
   shell.append(header, workspace, discard.dialog, backups.dialog, diagnostics.dialog, appearance.dialog);
   root.append(shell);
 
@@ -69,6 +76,7 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
   }
   function navigate(selected) {
     if (selected !== "macros") void recorder.stop();
+    headerMore.open = false;
     tab = selected;
     if (selected === "settings") settingsAutoRead = true;
     render();
@@ -141,6 +149,8 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
       item.setAttribute("aria-current", tab === id ? "page" : "false");
     }
     sidebar.querySelector("[data-backups]").disabled = view.recording;
+    moreAppearance.disabled = view.recording;
+    moreBackups.disabled = view.recording;
   }
   function renderAttention(target, view) {
     const features = tab === "lighting" ? ["lighting", "picture"] : tab === "macros" ? ["macros", "keymap"] : [tab];
@@ -237,6 +247,8 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
     const pageScroll = doc.scrollingElement?.scrollTop;
     const openDetails = new Set([...panel.querySelectorAll("details[open] summary")].map(summary => summary.textContent));
     const listScroll = panel.querySelector(".slot-list")?.scrollTop ?? 0;
+    const panelScroll = panel.scrollTop;
+    const eventScroll = panel.querySelector(".event-list")?.scrollTop ?? 0;
     const nextKeyboard = node(doc, "div");
     const nextPanel = node(doc, "section");
     board.render(nextKeyboard, view, selection, macros.names, lighting);
@@ -258,6 +270,7 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
       .every(field => target[field] === renderedTarget[field]);
     const keptKeyboard = sameKeyboardTarget && preserveActiveControl(keyboard, nextKeyboard, active);
     const keptPanel = !keptKeyboard && sameTarget && preserveActiveControl(panel, nextPanel, active);
+    panel.className = `panel panel-${tab}`;
     renderConnection();
     renderSidebar(view);
     if (!keptKeyboard) keyboard.replaceChildren(...nextKeyboard.childNodes);
@@ -266,6 +279,8 @@ export function mount(root, {codec, hid, storage, now = () => performance.now(),
     keyboard.querySelector(".keyboard-scroll").scrollLeft = keyboardScroll;
     sidebar.scrollTop = sidebarScroll;
     if (panel.querySelector(".slot-list")) panel.querySelector(".slot-list").scrollTop = listScroll;
+    panel.scrollTop = panelScroll;
+    if (panel.querySelector(".event-list")) panel.querySelector(".event-list").scrollTop = eventScroll;
     if (runtime.host.phase === "Preparing") {
       for (const control of [...panel.querySelectorAll("button,input,select"), ...keyboard.querySelectorAll("button")]) {
         if (!control.dataset.hostStop) control.disabled = true;

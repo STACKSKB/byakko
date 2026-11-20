@@ -5,13 +5,16 @@ use std::collections::BTreeMap;
 
 const BACKEND_ID: &str = "nia87";
 
+pub(super) fn picture_positions() -> impl Iterator<Item = (usize, layout::PhysicalKey)> {
+    layout::nia87_keys().into_iter().filter_map(|key| {
+        let slot = board::slot_for_usage(key.usage)?;
+        (slot < 126).then_some((slot, key))
+    })
+}
+
 fn key_by_slot() -> BTreeMap<usize, String> {
-    layout::nia87_keys()
-        .into_iter()
-        .filter_map(|key| {
-            let slot = board::slot_for_usage(key.usage)?;
-            (slot < 126).then(|| (slot, adapter::key_id(slot)))
-        })
+    picture_positions()
+        .map(|(slot, _)| (slot, adapter::key_id(slot)))
         .collect()
 }
 

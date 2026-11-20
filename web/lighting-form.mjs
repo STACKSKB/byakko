@@ -2,9 +2,75 @@
 import { node, button, field, choice, number, actions, range, hex, rgb } from "./widgets.mjs";
 import { createHostForm } from "./host-form.mjs";
 
-export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
+export function createLightingForm({ doc, win, runtime, codec, redraw, navigate, confirmDiscard }) {
   const host = createHostForm({ doc, win, runtime, redraw, navigate });
-  let showHostLighting = false, paintColor = "#ffffff", paintReady = false;
+  let showHostLighting = false, paintColor = "#ffffff", paintMode = "Inspect";
+  const looks = { id: null, corrections: {}, replace: false, target: null, connection: null, notice: "", applying: false };
+  const paintedBySelector = new Map();
+  let paintedConnection = null, paintBlocked = false;
+  let cachedBrush = null, cachedCatalog = [];
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const picture = view => view.picture?.editor;
+  const pictureKeys = view => view.picture?.capabilities?.keys ?? [];
+  const pictureValues = view => picture(view)?.draft ?? null;
+  const baseValues = view => picture(view)?.baseline?.content?.Editable ?? null;
+  const selectorContext = view => JSON.stringify([view.connection.generation, picture(view)?.baseline?.backend_id,
+    picture(view)?.baseline?.context_revision, view.lighting?.editor?.draft?.option]);
+  function paintedKeys(view) {
+    const identity = runtime.identity();
+    if (!paintedConnection || paintedConnection.device !== identity.device || paintedConnection.generation !== identity.generation) {
+      paintedBySelector.clear(); paintedConnection = identity; paintBlocked = false;
+    }
+    const selector = selectorContext(view);
+    if (!paintedBySelector.has(selector)) paintedBySelector.set(selector, new Set());
+    return paintedBySelector.get(selector);
+  }
+  function catalog() {
+    if (cachedBrush === paintColor) return cachedCatalog;
+    try {
+      const entries = JSON.parse(codec?.picture_looks?.(...rgb(paintColor)) ?? "[]");
+      cachedCatalog = Array.isArray(entries) ? entries : [];
+    } catch { cachedCatalog = []; }
+    cachedBrush = paintColor;
+    return cachedCatalog;
+  }
+  function completeMap(entry, view) {
+    const keys = pictureKeys(view);
+    const colors = entry?.colors;
+    if (!colors || !keys.length || Object.keys(colors).length !== keys.length ||
+        keys.some(key => !Array.isArray(colors[key]) || colors[key].length !== 3 ||
+          colors[key].some(byte => !Number.isInteger(byte) || byte < 0 || byte > 255))) return null;
+    return colors;
+  }
+  function armed(view) {
+    const lighting = view.lighting?.editor?.draft;
+    const setting = view.lighting?.editor?.baseline?.content?.Editable;
+    return Boolean(view.connection.kind === "connected" && picture(view)?.canEdit && pictureValues(view) &&
+      baseValues(view) && lighting?.effect === view.picture?.capabilities?.lighting_effect &&
+      setting?.effect === lighting?.effect && setting?.option === lighting?.option &&
+      same(view.picture?.editor?.baseline?.context_revision, view.lighting?.editor?.baseline?.picture_context) &&
+      pictureKeys(view).every(key => Object.hasOwn(pictureValues(view), key)));
+  }
+  function stale(view) { return looks.target !== null && (looks.target !== selectorContext(view) || !runtime.isCurrent(looks.connection)); }
+  function pendingKeys(view) {
+    const base = baseValues(view), draft = pictureValues(view);
+    return new Set(pictureKeys(view).filter(key => base && draft && !same(base[key], draft[key])));
+  }
+  function previewMap(view) {
+    if (!looks.id || stale(view) || !armed(view)) return null;
+    const map = completeMap(catalog().find(entry => entry.id === looks.id), view);
+    if (!map) return null;
+    const result = Object.fromEntries(pictureKeys(view).map(key => [key, [...map[key]]]));
+    if (!looks.replace) for (const key of new Set([...paintedKeys(view), ...pendingKeys(view)])) {
+      if (pictureValues(view)?.[key]) result[key] = [...pictureValues(view)[key]];
+    }
+    for (const [key, color] of Object.entries(looks.corrections)) if (Object.hasOwn(result, key)) result[key] = [...color];
+    return result;
+  }
+  function previewColors(view) {
+    const map = previewMap(view);
+    return map ? Object.fromEntries(Object.entries(map).map(([key, value]) => [key, hex(value)])) : null;
+  }
 
   function keyboardState(view) {
     const lighting = view.lighting;
@@ -13,6 +79,7 @@ export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
       pictureMode: !showingHost && lighting?.editor.draft?.effect === view.picture?.capabilities?.lighting_effect,
       modeLabel: showingHost ? host.selectedMode(view)?.label :
         lighting?.capabilities.effects.find(effect => effect.id === lighting.editor.draft?.effect)?.label,
+      previewColors: !showingHost && !stale(view) ? previewColors(view) : null,
     };
   }
 
@@ -28,26 +95,150 @@ export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
       lighting.editor.draft ? `onboard:${lighting.editor.draft.effect}` : "";
     field(doc, heading, "Lighting mode", choice(doc, choices, selected, async value => {
       if (value.startsWith("host:")) {
-        showHostLighting = true; host.select(value.slice(5)); paintReady = false;
+        showHostLighting = true; host.select(value.slice(5)); paintMode = "Inspect";
         redraw();
       } else {
         const result = await runtime.edit("lighting", { Effect: value.slice(8) }, true);
-        if (result?.ok) { showHostLighting = false; paintReady = false; redraw(); }
+        if (result?.ok) { showHostLighting = false; paintMode = "Inspect"; redraw(); }
       }
     }, !lighting.editor.canSelectEffect || runtime.hostBusy));
   }
 
+  function selectLook(id) {
+    const view = runtime.view;
+    if (!armed(view)) { looks.notice = "Load per-key colors first."; redraw(); return; }
+    const entry = catalog().find(item => item.id === id);
+    if (!completeMap(entry, view)) { looks.notice = "Look unavailable for this keyboard."; redraw(); return; }
+    looks.id = id;
+    looks.target = selectorContext(view);
+    looks.connection = runtime.identity();
+    looks.corrections = {};
+    looks.notice = `${entry.name} preview. Keyboard unchanged.`;
+    redraw();
+  }
+
+  function discardLook() {
+    looks.id = null;
+    looks.corrections = {};
+    looks.replace = false;
+    looks.target = null;
+    looks.connection = null;
+    looks.notice = "Look preview discarded. Painted keys kept.";
+    redraw();
+  }
+
+  async function confirmDiscardLook() {
+    if (!looks.id) return;
+    const accepted = await (confirmDiscard?.({ title: "Discard look preview?", description: "Painted keys stay as they are." }) ?? Promise.resolve(true));
+    if (accepted) discardLook();
+  }
+
+  async function applyLook() {
+    const view = runtime.view;
+    if (!looks.id || looks.applying || stale(view) || !armed(view) || view.busy) return;
+    const colors = previewMap(view);
+    const baseline = picture(view)?.baseline;
+    if (!colors || !baseline) { looks.notice = "Look unavailable for this keyboard."; redraw(); return; }
+    looks.applying = true;
+    const before = pictureValues(view) ? structuredClone(pictureValues(view)) : null;
+    const target = runtime.identity();
+    looks.notice = "Applying look…";
+    redraw();
+    try {
+      const staged = await runtime.intent({ type: "stagePicture", snapshot: { ...baseline, content: { Editable: colors } } });
+      if (!staged?.ok) { looks.notice = "Look kept. Check per-key colors before retrying."; return; }
+      const saved = await runtime.intent({ type: "apply", feature: "picture" });
+      if (saved?.ok && saved.outcome?.kind === "pictureSaved") {
+        if (runtime.isCurrent(target) && selectorContext(runtime.view) === looks.target) {
+          const painted = paintedKeys(runtime.view);
+          if (looks.replace) painted.clear();
+          for (const key of Object.keys(looks.corrections)) painted.add(key);
+        }
+        looks.id = null; looks.corrections = {}; looks.replace = false; looks.target = null; looks.connection = null;
+        looks.notice = "Look sent. No readback.";
+      } else {
+        if (runtime.isCurrent(target) && before) {
+          const restored = await runtime.intent({ type: "stagePicture", snapshot: { ...baseline, content: { Editable: before } } });
+          paintBlocked = !restored?.ok;
+        }
+        looks.notice = "Look kept. Check per-key colors before retrying.";
+      }
+    } finally { looks.applying = false; redraw(); }
+  }
+
+  function thumbnail(entry, view) {
+    const keys = view.descriptor.keys.filter(item => item.visible && entry.colors?.[item.id]);
+    if (!keys.length) return node(doc, "span", undefined, "lux-thumb-fallback");
+    const svg = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("lux-map"); svg.setAttribute("aria-hidden", "true");
+    const left = Math.min(...keys.map(key => key.x)), top = Math.min(...keys.map(key => key.y));
+    const right = Math.max(...keys.map(key => key.x + key.width));
+    const bottom = Math.max(...keys.map(key => key.y + key.height));
+    svg.setAttribute("viewBox", `${left} ${top} ${right - left} ${bottom - top}`);
+    for (const key of keys) {
+      const rect = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", key.x + .05); rect.setAttribute("y", key.y + .05);
+      rect.setAttribute("width", Math.max(.1, key.width - .1));
+      rect.setAttribute("height", Math.max(.1, key.height - .1));
+      rect.setAttribute("rx", ".08"); rect.setAttribute("fill", hex(entry.colors[key.id]));
+      svg.append(rect);
+    }
+    return svg;
+  }
+
+  function renderLooks(parent, view) {
+    if (view.picture?.capabilities?.backend_id !== "nia87" || view.descriptor?.backend_id !== "nia87") return;
+    paintedKeys(view);
+    const box = node(doc, "section", undefined, "lux-gallery");
+    box.append(node(doc, "h3", "Looks"));
+    const entries = catalog();
+    const tiles = node(doc, "div", undefined, "lux-tiles");
+    for (const entry of entries) {
+      const tile = button(doc, "", () => selectLook(entry.id), !armed(view) || looks.applying, "lux-tile");
+      tile.dataset.look = entry.id;
+      tile.setAttribute("aria-pressed", String(looks.id === entry.id));
+      tile.append(thumbnail(entry, view), node(doc, "span", entry.name, "lux-name"));
+      tiles.append(tile);
+    }
+    box.append(tiles);
+    if (!entries.length) box.append(node(doc, "p", "Looks unavailable.", "muted"));
+    if (looks.id) {
+      const row = node(doc, "div", undefined, "lux-look-options");
+      const label = node(doc, "label", "Replace painted keys");
+      const replace = node(doc, "input"); replace.type = "checkbox"; replace.checked = looks.replace;
+      replace.disabled = looks.applying;
+      replace.addEventListener("change", () => { looks.replace = replace.checked; looks.notice = replace.checked ? "Painted keys will be replaced." : "Painted keys kept."; redraw(); });
+      label.prepend(replace); row.append(label);
+      box.append(row);
+    }
+    parent.append(box);
+  }
+
   function paintKey(key) {
     const view = runtime.view;
-    if (!keyboardState(view).pictureMode || !paintReady || !view.picture?.editor?.canEdit ||
+    if (!keyboardState(view).pictureMode || paintMode !== "Paint" || paintBlocked || !view.picture?.editor?.canEdit ||
         !view.picture.capabilities.keys.includes(key)) return false;
-    void runtime.edit("picture", { Color: { key, color: rgb(paintColor) } }, true);
+    if (looks.id) {
+      if (stale(view) || !armed(view) || looks.applying) return false;
+      looks.corrections[key] = rgb(paintColor);
+      looks.notice = "Look preview changed. Keyboard unchanged.";
+      redraw();
+    } else {
+      const target = runtime.identity(), selector = selectorContext(view);
+      void runtime.edit("picture", { Color: { key, color: rgb(paintColor) } }, true).then(result => {
+        if (result?.ok && runtime.isCurrent(target) && selectorContext(runtime.view) === selector) paintedKeys(runtime.view).add(key);
+      });
+    }
     return true;
   }
 
-  function render(panel, view, { key }) {
+  function render(panel, view) {
+    if (looks.connection && !runtime.isCurrent(looks.connection)) {
+      looks.id = null; looks.corrections = {}; looks.replace = false; looks.target = null;
+      looks.connection = null; looks.notice = "";
+    }
     const state = view.lighting;
-    panel.append(node(doc, "h2", "Lighting"), node(doc, "p", "Onboard effects, brightness and per-key RGB.", "muted"));
+    panel.append(node(doc, "h2", "Lighting"));
     if (!state) return;
     const editor = state.editor, draft = editor.draft, caps = state.capabilities;
     panel.append(actions(doc, editor, "lighting", input => runtime.intent(input), { auto: true }));
@@ -57,6 +248,7 @@ export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
       panel.append(node(doc, "p", content?.HostActive
         ? "A host lighting mode is stored on the keyboard. Select an onboard lighting mode above to replace it."
         : content?.Opaque?.reason ?? "Read lighting to edit it.", "muted"));
+      renderLooks(panel, view);
       return;
     }
     const effect = caps.effects.find(item => item.id === draft.effect);
@@ -84,23 +276,36 @@ export function createLightingForm({ doc, win, runtime, redraw, navigate }) {
       }
     }
     panel.append(card);
+    renderLooks(panel, view);
     const pictureEffect = view.picture?.capabilities?.lighting_effect;
     if (pictureEffect && draft.effect === pictureEffect) {
       const pictureEditor = view.picture.editor;
       const colors = node(doc, "div", undefined, "card");
       colors.append(node(doc, "h3", "Per-key colors"));
-      colors.append(node(doc, "p", "Load this layer, select a key on the keyboard, then choose its color.", "muted"));
+      colors.append(node(doc, "p", "Choose a brush, then paint keys.", "muted"));
       colors.append(button(doc, "Load selected layer", () => void runtime.intent({ type: "preparePicture" }), view.connection.kind !== "connected" || view.busy || editor.dirty));
-      const picked = pictureEditor.draft?.[key];
-      const picker = node(doc, "input"); picker.type = "color"; picker.value = paintReady ? paintColor : picked ? hex(picked) : paintColor;
-      picker.disabled = !pictureEditor.canEdit || !view.picture.capabilities.keys.includes(key);
+      const modes = node(doc, "div", undefined, "actions lux-paint-modes");
+      for (const mode of ["Inspect", "Paint"]) {
+        const control = button(doc, mode, () => { paintMode = mode; redraw(); }, false, paintMode === mode ? "primary" : "quiet");
+        control.setAttribute("aria-pressed", String(paintMode === mode));
+        modes.append(control);
+      }
+      colors.append(modes);
+      const picker = node(doc, "input"); picker.type = "color"; picker.value = paintColor;
+      picker.disabled = looks.applying || paintBlocked || !pictureEditor.canEdit;
       picker.addEventListener("input", () => { paintColor = picker.value; });
-      picker.addEventListener("change", () => { paintReady = true; void runtime.edit("picture", { Color: { key, color: rgb(picker.value) } }, true); });
-      field(doc, colors, `Paint color · ${view.descriptor.keys.find(item => item.id === key)?.label ?? "key"}`, picker);
-      if (paintReady) colors.append(button(doc, "Stop painting", () => { paintReady = false; redraw(); }));
-      colors.append(actions(doc, pictureEditor, "picture", input => runtime.intent(input), { auto: true }));
+      picker.addEventListener("change", () => { paintColor = picker.value; redraw(); });
+      field(doc, colors, "Brush color", picker);
+      if (!looks.id) colors.append(actions(doc, pictureEditor, "picture", input => runtime.intent(input), { auto: true }));
       panel.append(colors);
     }
+    if (looks.id) {
+      const row = node(doc, "div", undefined, "actions lux-actions");
+      row.append(button(doc, "Revert preview", () => void confirmDiscardLook(), looks.applying));
+      row.append(button(doc, "Apply look", () => void applyLook(), looks.applying || stale(view) || !armed(view) || view.busy, "primary"));
+      panel.append(row, node(doc, "p", stale(view) ? "Return to the original layer or discard this preview." :
+        (looks.notice || "Preview only. Keyboard unchanged."), "muted lux-status"));
+    } else if (looks.notice) panel.append(node(doc, "p", looks.notice, "muted lux-status"));
   }
 
   return { render, renderMode, keyboardState, paintKey, destroy: () => host.destroy(), stopHost: () => host.stop() };

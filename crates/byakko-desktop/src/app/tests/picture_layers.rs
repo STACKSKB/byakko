@@ -224,7 +224,7 @@ fn layer_switches_load_target_once_and_upload_only_selected_colors() {
         drain(&mut app);
         storage.lock().unwrap().calls.clear();
         let color = [layer, 80, 70];
-        let _ = app.update(Message::Picture(picture::Message::Color(color)));
+        paint_selected(&mut app, color);
         elapsed(&mut app);
         drain(&mut app);
         expected[usize::from(layer - 1)] = color;
@@ -265,7 +265,7 @@ fn layer_switches_load_target_once_and_upload_only_selected_colors() {
 fn dirty_layer_switch_is_rejected_and_retains_colors() {
     let (mut app, storage) = layered_app();
     let _ = app.update(Message::Picture(picture::Message::Select("Alpha".into())));
-    let _ = app.update(Message::Picture(picture::Message::Color([9, 8, 7])));
+    paint_selected(&mut app, [9, 8, 7]);
     select(&mut app, 2);
     assert_eq!(
         app.session
@@ -308,7 +308,7 @@ fn failed_selector_does_not_load_or_upload_under_the_wrong_layer_label() {
     select(&mut app, 2);
     elapsed(&mut app);
     drain(&mut app);
-    let _ = app.update(Message::Picture(picture::Message::Color([9, 8, 7])));
+    paint_selected(&mut app, [9, 8, 7]);
     elapsed(&mut app);
     drain(&mut app);
     assert_eq!(storage.lock().unwrap().calls, ["select-2"]);

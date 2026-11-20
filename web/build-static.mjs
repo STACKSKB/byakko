@@ -7,7 +7,7 @@ import { licenseInventory } from "./license-inventory.mjs";
 
 const webRoot = dirname(fileURLToPath(import.meta.url));
 const wasmDefault = "new URL('byakko_web_bg.wasm', import.meta.url)";
-const logoAssignment = 'mark.src = "assets/byakko.svg";';
+const logoAssignment = 'mark.src = "assets/byakko.png";';
 
 function replaceOnce(source, expected, replacement, label) {
   if (source.split(expected).length !== 2) {
@@ -32,7 +32,7 @@ function embeddedAssets(root) {
       bundle.onLoad({ filter: /[\\/]app\.mjs$/ }, async args => {
         if (resolve(args.path) !== app) return;
         const source = await readFile(args.path, "utf8");
-        const contents = 'import __byakko_logo from "./assets/byakko.svg";\n' +
+        const contents = 'import __byakko_logo from "./assets/byakko.png";\n' +
           replaceOnce(source, logoAssignment, "mark.src = __byakko_logo;", "browser logo assignment");
         return { contents, loader: "js", resolveDir: dirname(args.path) };
       });
@@ -97,14 +97,14 @@ export async function buildStatic({ root = webRoot, html = "index.html", output 
     platform: "browser",
     format: "esm",
     splitting: false,
-    loader: { ".wasm": "binary", ".svg": "dataurl" },
+    loader: { ".wasm": "binary", ".png": "dataurl" },
     plugins: [embeddedAssets(root)],
   }), ".js");
   const css = onlyOutput(await build({
     ...common,
     entryPoints: [style],
     outfile: "__byakko_bundle.css",
-    loader: { ".svg": "dataurl" },
+    loader: { ".png": "dataurl" },
   }), ".css");
   if (/@import\b/i.test(css)) throw new Error("Bundled CSS still imports another stylesheet");
   for (const url of css.matchAll(/url\(\s*([^)]+)\)/gi)) {

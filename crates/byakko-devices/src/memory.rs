@@ -665,6 +665,7 @@ fn demo_descriptor() -> Descriptor {
             .map(|(index, id)| PhysicalKey {
                 id: id.into(),
                 label: id.into(),
+                position: None,
                 x: index as f32,
                 y: 0.0,
                 width: 1.0,
@@ -1366,6 +1367,7 @@ mod tests {
                 .map(|(id, writable)| PhysicalKey {
                     id: id.into(),
                     label: id.into(),
+                    position: None,
                     x: 0.0,
                     y: 0.0,
                     width: 1.0,

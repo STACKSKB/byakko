@@ -2,6 +2,7 @@
 use crate::contract::{ApplyFailure, Problem};
 use serde::{Deserialize, Serialize};
 pub mod keymap;
+pub mod keymap_presets;
 pub mod lighting;
 pub mod macros;
 pub mod picture;

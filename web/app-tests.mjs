@@ -4,6 +4,7 @@ import * as codec from "./pkg/byakko_web.js";
 import { createDiscardDialog } from "./discard-dialog.mjs";
 import { mount } from "./app.mjs";
 import { TestDevice, TestStore } from "./test-device.mjs";
+import { galleryTests } from "./lighting-gallery-tests.mjs";
 await codec.default();
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -67,6 +68,7 @@ async function harness(run) {
     await until(() => !app.view.macros.discoveryBusy);
     await app.intent({type:"read", feature:"macro"});
     button(root, "Macros").click();
+    if (root.querySelector(".macro-library-screen")) button(root, "Edit").click();
   }
   const notify = () => notifications.dispatchEvent(Object.assign(new Event("inputreport"), {
     device:notifications, reportId:5, data:new DataView(Uint8Array.from([6,3,0]).buffer),
@@ -89,6 +91,7 @@ function beginImport(root, pending) {
 }
 
 const tests = [
+  ...galleryTests,
   ["appearance saves custom interface colours without device writes", async h => {
     const key = "byakko-appearance", previous = window.localStorage.getItem(key);
     try {
@@ -221,21 +224,26 @@ const tests = [
     await until(() => !h.app.view.observation.queued && !h.app.view.busy && !h.app.view.lighting.editor.dirty);
     assert(reads() > before, "Observation did not resume after editing");
   }],
-  ["foreground edits and autosave keep the active control and keyboard scroll", async h => {
+  ["foreground edits and autosave keep the active control and full keyboard", async h => {
     button(h.root, "Lighting").click();
     const input = fieldControl(h.root, "Brightness");
     const scroll = h.root.querySelector(".keyboard-scroll");
-    scroll.scrollLeft = 80;
+    const board = h.root.querySelector(".keyboard");
+    assert(scroll.scrollWidth <= scroll.clientWidth + 1, "Keyboard needs horizontal scrolling");
     let focusouts = 0; input.addEventListener("focusout", () => focusouts++);
-    input.focus(); change(input, "2");
+    input.focus({preventScroll:true});
+    const before = board.getBoundingClientRect();
+    change(input, "2");
     assert(input.isConnected && document.activeElement === input, "Foreground edit replaced the active control");
     await until(() => !h.app.view.lighting.editor.dirty && !h.app.view.busy);
     assert(input.isConnected && document.activeElement === input, "Autosave replaced the active control");
     assert(focusouts === 0, "Autosave blurred the active control");
-    assert(h.root.querySelector(".keyboard-scroll").scrollLeft === 80, "Autosave reset the keyboard scroll");
+    const after = h.root.querySelector(".keyboard").getBoundingClientRect();
+    assert(Math.abs(after.x - before.x) < 1 && Math.abs(after.y - before.y) < 1, "Autosave shifted the keyboard");
     document.getElementById("heading").focus(); await tick();
     assert(fieldControl(h.root, "Brightness").value === "2", "Flushed view lost the saved value");
-    assert(h.root.querySelector(".keyboard-scroll").scrollLeft === 80, "Flushed view reset the keyboard scroll");
+    const flushed = h.root.querySelector(".keyboard").getBoundingClientRect();
+    assert(Math.abs(flushed.x - before.x) < 1 && Math.abs(flushed.y - before.y) < 1, "Flushed view shifted the keyboard");
   }],
   ["lighting mode selection updates its dependent controls without losing focus", async h => {
     button(h.root, "Lighting").click();
@@ -265,6 +273,7 @@ const tests = [
     assert(h.root.querySelector(".panel .card.form-grid select"), "Read did not update dependent mode controls");
   }],
   ["macro composer redraw preserves its type control and open document details", async h => {
+    h.root.querySelector(".macro-composer").open = true;
     const documents = [...h.root.querySelectorAll("details")].find(item => item.querySelector("summary")?.textContent === "Import or export macro JSON");
     assert(documents, "Missing macro document details"); documents.open = true;
     const select = fieldControl(h.root, "Type");
@@ -370,6 +379,30 @@ const tests = [
     assert(h.device.calls.some(call => call.kind === "send" && call.report[0] === 0x13), "Remap did not reach the selected simulated device");
     assert(h.root.querySelector('button.key[aria-label="A · F13"]'), "Saved mapped legend missing");
   }],
+  ["shortcut tab stages one selected key before saving", async h => {
+    button(h.root, "Keymap").click();
+    h.root.querySelector('button.key[aria-label="A"]').click();
+    button(h.root, "Shortcut").click();
+    const modifier = h.root.querySelector('.modifier-list input[type="checkbox"]');
+    assert(modifier, "Shortcut modifiers missing");
+    modifier.checked = true; modifier.dispatchEvent(new Event("change", {bubbles:true}));
+    button(h.root, "Stage shortcut").click();
+    await until(() => h.app.view.keymap.dirty);
+    assert(h.app.view.keymap.draft.base["slot-038"]?.Shortcut ||
+      JSON.stringify(h.app.view.keymap.draft.base).includes('"Shortcut"'), "Shortcut did not stage in keymap draft");
+    assert(!h.device.calls.some(call => call.kind === "send" && call.report[0] === 0x13), "Staging wrote to the keyboard");
+  }],
+  ["typing preset stages Base letter keys before saving", async h => {
+    button(h.root, "Keymap").click();
+    button(h.root, "Presets").click();
+    const before = JSON.stringify(h.app.view.keymap.draft);
+    button(h.root, "Dvorak").click();
+    assert(JSON.stringify(h.app.view.keymap.draft) === before, "Choosing a preset changed the keymap");
+    button(h.root, "Stage Dvorak").click();
+    await until(() => h.app.view.keymap.dirty);
+    assert(JSON.stringify(h.app.view.keymap.draft) !== before, "Typing preset did not stage");
+    assert(!h.device.calls.some(call => call.kind === "send" && call.report[0] === 0x13), "Staging wrote to the keyboard");
+  }],
   ["all 23 lighting modes remain reachable from the real selector", async h => {
     button(h.root, "Lighting").click();
     const choices = [...fieldControl(h.root, "Lighting mode").options].map(option => option.value);
@@ -433,6 +466,7 @@ const tests = [
   ["a late import retains an unfinished focused numeric field", async h => {
     const contents = await documentFor(h.app), pending = deferred();
     beginImport(h.root, pending);
+    h.root.querySelector(".macro-composer").open = true;
     const usage = fieldControl(h.root, "USB key usage"); usage.focus(); usage.value = "19";
     usage.dispatchEvent(new Event("input", {bubbles:true}));
     pending.resolve(contents); await tick();
@@ -497,6 +531,7 @@ const tests = [
     await h.app.intent({type:"initializeMacro"});
     assert(h.root.querySelector(".editor-attention")?.textContent === "Macro discovery failed. Retry discovery.", "Unrelated notice erased catalog failure");
     h.device.beforeReceive = null;
+    button(h.root, "Library").click();
     button(h.root, "Retry discovery").click();
     await until(() => !h.app.view.macros.discoveryBusy && !h.app.view.macros.discoveryError);
     assert(!h.root.querySelector(".editor-attention"), "Retry left stale catalog failure visible");

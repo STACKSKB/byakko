@@ -12,8 +12,8 @@ use crate::{
 use byakko_core::projection::tester::{self, Legends, Size, Standard};
 use iced::widget::button as button_style;
 use iced::{
-    Color, Element, Fill,
-    widget::{column, container, pin, responsive, row, scrollable, space, stack, text},
+    Element, Fill,
+    widget::{column, container, responsive, row, space, text},
 };
 use std::fmt;
 
@@ -59,8 +59,7 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     ]
     .spacing(style.spacing.m)
     .align_y(iced::Alignment::Center);
-    let mut body =
-        column![controls(form, style), board(form, style), counters].spacing(style.spacing.s);
+    let mut body = column![controls(form, style), counters].spacing(style.spacing.s);
     if !form.notice.is_empty() {
         body = body.push(text(&form.notice).size(12));
     }
@@ -411,51 +410,4 @@ fn key_label(form: &Form, usage: u16) -> String {
         .into_iter()
         .find(|key| key.usage == Some(usage))
         .map_or_else(|| format!("HID {usage:02X}"), |key| key.label)
-}
-fn board<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
-    responsive(move |size| {
-        let keys = tester::layout_for(form.layout);
-        let (width, height) = tester::layout_bounds(&keys);
-        let unit = (size.width / width.max(1.0))
-            .min(size.height / height.max(1.0))
-            .clamp(style.board.min_unit, style.board.max_unit);
-        let held: std::collections::BTreeSet<_> = form.test.held().collect();
-        let base: Element<'_, Message> = space().width(width * unit).height(height * unit).into();
-        let board = keys.into_iter().fold(stack![base], |board, key| {
-            let is_held = key.usage.is_some_and(|usage| held.contains(&usage));
-            let tested = key
-                .usage
-                .is_some_and(|usage| form.test.tested().contains(&usage));
-            let width = key.width * unit - style.board.key_gap;
-            let height = key.height * unit - style.board.key_gap;
-            let key_button = button(
-                text(key.label.clone())
-                    .size(style.board.key_label_size)
-                    .center(),
-            )
-            .width(width)
-            .height(height)
-            .padding(0)
-            .on_press_maybe(key.usage.map(Message::Inspect))
-            .style(move |theme, status| {
-                let mut appearance = button_style::secondary(theme, status);
-                if is_held {
-                    appearance.background = Some(Color::from_rgb8(35, 112, 70).into());
-                    appearance.text_color = Color::WHITE;
-                } else if tested {
-                    appearance.background = Some(Color::from_rgb8(36, 79, 123).into());
-                    appearance.text_color = Color::WHITE;
-                }
-                appearance
-            });
-            board.push(pin(key_button).position([key.x * unit, key.y * unit]))
-        });
-        scrollable(board)
-            .direction(scrollable::Direction::Horizontal(
-                scrollable::Scrollbar::new(),
-            ))
-            .into()
-    })
-    .height(310)
-    .into()
 }

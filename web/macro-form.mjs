@@ -23,7 +23,7 @@ export function librarySummary(slots, occupancy) {
 export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, navigate, confirmDiscard }) {
   let eventIndex = null, eventType = "Key", eventUsage = 4, eventButton = 1;
   let eventDx = 0, eventDy = 0, eventDelay = 20, eventPressed = true, eventBackend = "", macroBinding = "counted";
-  let formRevision = 0, importVersion = 0;
+  let formRevision = 0, importVersion = 0, screen = "library";
   const touch = () => { formRevision++; };
   const products = new Map(), bindingDrafts = new Map();
   let namesState = { baseline: {}, drafts: new Map(), saves: new Map() };
@@ -67,8 +67,14 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
       if (runtime.isCurrent(target)) runtime.announce(`Local macro name was not saved: ${text(error)}`, true, true);
     }
   }
-  async function selectMacro(slot) {
-    if (slot === runtime.view.macros?.slot) return;
+  async function selectMacro(slot, destination = "edit") {
+    if (slot === runtime.view.macros?.slot) {
+      if (destination === "assign" && runtime.view.macros?.editor.dirty) {
+        if (!await confirmDiscard()) return;
+        await runtime.intent({ type: "revert", feature: "macro" });
+      }
+      screen = destination; redraw(); return;
+    }
     const target = runtime.identity(), previousSlot = runtime.view.macros?.slot;
     if (runtime.view.macros?.editor.dirty) {
       if (!await confirmDiscard() || !runtime.isCurrent(target) || runtime.view.macros?.slot !== previousSlot) return;
@@ -77,7 +83,11 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
     if (!runtime.isCurrent(target)) return;
     const selected = await runtime.intent({ type: "selectMacro", slot });
     eventIndex = null; touch();
-    if (selected.ok && runtime.isCurrent(target)) await runtime.intent({ type: "read", feature: "macro" });
+    if (selected.ok && runtime.isCurrent(target)) {
+      screen = destination;
+      await runtime.intent({ type: "read", feature: "macro" });
+      redraw();
+    }
   }
 
   async function newMacro() {
@@ -94,6 +104,7 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
       return;
     }
     await runtime.intent({ type: "initializeMacro" });
+    screen = "edit";
     navigate("macros");
   }
 
@@ -111,8 +122,10 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
   }
 
   function renderMacroForm(parent, editor, caps, countValid) {
+    const composer = node(doc, "details", undefined, "macro-composer");
+    composer.open = eventIndex !== null;
+    composer.append(node(doc, "summary", eventIndex === null ? "Add event" : `Edit event ${eventIndex + 1}`));
     const form = node(doc, "div", undefined, "card form-grid");
-    form.append(node(doc, "h3", eventIndex === null ? "Add event" : `Edit event ${eventIndex + 1}`));
     const types = [["Key", "Key"], ["Button", "Mouse button"], ["Move", "Pointer move"]];
     if (caps.backend_actions.length) types.push(["Backend", "Keyboard action"]);
     field(doc, form, "Type", choice(doc, types, eventType, value => { touch(); eventType = value; redraw(); }, !editor.canEdit));
@@ -140,24 +153,35 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
       if (result.ok) { eventIndex = null; redraw(); }
     }, !editor.canEdit || !countValid, "primary"));
     if (eventIndex !== null) form.append(button(doc, "Cancel editing", () => { eventIndex = null; redraw(); }));
-    parent.append(form);
+    composer.append(form);
+    parent.append(composer);
   }
 
   function render(panel, view, { layer, key }) {
     const state = view.macros;
-    panel.append(node(doc, "h2", "Macros"), node(doc, "p", "Save a sequence to a slot, then assign it to a key.", "muted"));
+    panel.append(node(doc, "h2", "Macros"));
     if (!state) return;
     const editor = state.editor, caps = state.capabilities;
     const layout = node(doc, "div", undefined, "macro-layout");
     layout.addEventListener("input", touch);
     const library = node(doc, "div", undefined, "macro-library");
     library.append(node(doc, "h3", "Library"));
-    library.append(button(doc, "New macro", () => void newMacro(), !view.keymap.draft || view.connection.kind !== "connected" || editor.dirty || view.recording));
+    library.append(button(doc, "New macro", () => void newMacro(), !view.keymap.draft || view.connection.kind !== "connected" || view.recording));
     const list = node(doc, "div", undefined, "slot-list");
     const { visible: visibleSlots, bound } = librarySlots(caps, state.occupancy, view.keymap.draft, state.slot);
     for (const slot of visibleSlots) {
       const label = nameFor(slot.id).trim() || slot.label;
-      list.append(button(doc, `${label} · ${state.occupancy[slot.id] ?? "Unknown"}${bound.has(slot.id) ? " · bound" : ""}`, () => void selectMacro(slot.id), view.recording, slot.id === state.slot ? "active" : ""));
+      const row = node(doc, "div", undefined, "macro-library-row");
+      const copy = node(doc, "div", undefined, "macro-library-copy");
+      copy.append(node(doc, "strong", label));
+      if (state.occupancy[slot.id] === "Unknown") copy.append(node(doc, "small", "Unread"));
+      else if (bound.has(slot.id)) copy.append(node(doc, "small", "Assigned"));
+      const controls = node(doc, "div", undefined, "macro-library-controls");
+      controls.append(button(doc, "Edit", () => void selectMacro(slot.id, "edit"), view.recording));
+      controls.append(button(doc, "Assign", () => void selectMacro(slot.id, "assign"),
+        view.recording || state.occupancy[slot.id] !== "Configured"));
+      row.append(copy, controls);
+      list.append(row);
     }
     library.append(list);
     if (state.discoveryBusy) library.append(node(doc, "p", "Discovering slot occupancy…", "muted"));
@@ -166,15 +190,25 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
     } else if (!state.discoveryBusy) {
       library.append(node(doc, "p", librarySummary(caps.slots, state.occupancy), "muted"));
     }
+    if (screen === "library") {
+      layout.classList.add("macro-library-screen");
+      layout.append(library); panel.append(layout); return;
+    }
+    const assignmentOnly = screen === "assign";
+    layout.classList.add("macro-editor-screen");
     const detail = node(doc, "div", undefined, "macro-detail");
-    detail.append(node(doc, "h3", `${nameFor(state.slot).trim() || caps.slots.find(item => item.id === state.slot)?.label || state.slot} · Editor`));
-    detail.append(actions(doc, editor, "macro", input => runtime.intent(input), { revert: async () => {
+    let targetDock = null;
+    const detailHead = node(doc, "div", undefined, "macro-detail-head");
+    detailHead.append(button(doc, "Library", () => { screen = "library"; redraw(); }, view.recording),
+      node(doc, "h3", assignmentOnly ? "Assign macro" : "Edit macro"));
+    detail.append(detailHead);
+    if (!assignmentOnly) detail.append(actions(doc, editor, "macro", input => runtime.intent(input), { revert: async () => {
       const target = runtime.identity(), slot = runtime.view.macros?.slot;
       if (runtime.view.macros?.editor.dirty && !await confirmDiscard()) return;
       if (!runtime.isCurrent(target) || runtime.view.macros?.slot !== slot) return;
       await runtime.intent({ type: "revert", feature: "macro" });
     } }));
-    if (editor.baseline) {
+    if (editor.baseline && !assignmentOnly) {
       const nameRow = node(doc, "div", undefined, "name-row");
       const nameInput = node(doc, "input");
       nameInput.type = "text";
@@ -189,18 +223,20 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
       detail.append(node(doc, "p", "Read this slot before editing. Unknown slots are not treated as empty.", "muted"));
       detail.append(button(doc, "Read selected slot", () => void runtime.intent({ type: "read", feature: "macro" }), !editor.canRead));
     } else {
-      const playback = node(doc, "div", undefined, "card");
-      playback.append(node(doc, "h3", "Playback"));
+      const playback = node(doc, "details", undefined, "macro-playback");
+      playback.append(node(doc, "summary", "Playback"));
       const countValid = editor.draft.repeat_count >= caps.editable_repeat_counts.start
         && editor.draft.repeat_count <= caps.editable_repeat_counts.end;
       const needsInitialization = !countValid && editor.draft.events.length === 0 && !editor.dirty && editor.status === "Ready";
+      if (needsInitialization) playback.open = true;
       if (needsInitialization) playback.append(button(doc, "Initialize empty macro", () => void runtime.intent({ type: "initializeMacro" }), !editor.canEdit, "primary"));
       field(doc, playback, "Repeat count", number(doc, editor.draft.repeat_count, caps.editable_repeat_counts.start, caps.editable_repeat_counts.end, value => void runtime.edit("macro", { Repeat: value }), !editor.canEdit));
-      recorder.renderControls(detail, caps, editor, countValid);
+      if (!assignmentOnly) recorder.renderControls(detail, caps, editor, countValid);
       const events = node(doc, "div", undefined, "event-list");
       editor.draft.events.forEach((event, index) => {
         const row = node(doc, "div", undefined, "event-row");
         row.append(node(doc, "span", `${index + 1}. ${eventLabel(event)} · ${event.delay_ms} ms`));
+        if (!assignmentOnly) {
         row.append(button(doc, "Edit", () => {
           touch(); eventIndex = index; eventDelay = event.delay_ms;
           eventType = Object.keys(event.action)[0];
@@ -213,19 +249,20 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
         row.append(button(doc, "↑", () => void runtime.edit("macro", { Move: { from: index, to: index - 1 } }), !editor.canEdit || index === 0));
         row.append(button(doc, "↓", () => void runtime.edit("macro", { Move: { from: index, to: index + 1 } }), !editor.canEdit || index === editor.draft.events.length - 1));
         row.append(button(doc, "Remove", () => void runtime.edit("macro", { Remove: { at: index } }), !editor.canEdit));
+        }
         events.append(row);
       });
       detail.append(events);
-      renderMacroForm(detail, editor, caps, countValid);
-      const assign = playback;
-      assign.append(node(doc, "h3", "Save and assign"), node(doc, "p", `Target: ${view.descriptor.keys.find(item => item.id === key)?.label ?? "key"} · ${view.descriptor.layers.find(item => item.id === layer)?.label ?? "layer"}`, "muted"));
+      if (!assignmentOnly) renderMacroForm(detail, editor, caps, countValid);
+      const assign = node(doc, "div", undefined, "macro-target");
+      assign.append(node(doc, "p", `Target: ${view.descriptor.keys.find(item => item.id === key)?.label ?? "key"} · ${view.descriptor.layers.find(item => item.id === layer)?.label ?? "layer"}`, "muted"));
       const bindings = caps.bindings.filter(item => item.slot === state.slot);
       const assigned = view.keymap.draft?.[layer]?.[key];
       const currentBinding = bindings.find(item => same(item.action, assigned))?.id;
       macroBinding = bindingDrafts.get(state.slot) ?? currentBinding ?? bindings[0]?.id;
       field(doc, assign, "Playback mode", choice(doc, bindings.map(item => [item.id, item.label]), macroBinding, value => { touch(); macroBinding = value; bindingDrafts.set(state.slot, value); }, !editor.canEdit));
       assign.append(button(doc, "Save and assign to selected key", () => void runtime.intent({ type: "saveAndAssignMacro", layer, key, binding: macroBinding }), editor.status !== "Ready" || !countValid || view.busy || !selectedKeyWritable({layer,key}), "primary"));
-      library.append(playback);
+      detail.append(playback);
       const documents = node(doc, "details", undefined, "card");
       documents.append(node(doc, "summary", "Import or export macro JSON"));
       const file = node(doc, "input"); file.type = "file"; file.accept = "application/json,.json";
@@ -263,10 +300,16 @@ export function createMacroForm({ doc, win, runtime, storage, recorder, redraw, 
         const result = await runtime.intent({ type: "exportMacroDocument", name: nameFor(state.slot), binding: bindingDrafts.get(state.slot) ?? null });
         if (result.ok) download(doc, win, `${state.slot}.json`, JSON.stringify(result.outcome.document, null, 2));
       }, view.recording));
-      detail.append(documents);
+      if (!assignmentOnly) detail.append(documents);
+      targetDock = assign;
     }
-    layout.append(detail, library);
+    layout.append(detail);
     panel.append(layout);
+    if (targetDock) {
+      const saveActions = detail.querySelector(".actions");
+      if (saveActions) targetDock.append(saveActions);
+      panel.append(targetDock);
+    }
   }
 
   return {

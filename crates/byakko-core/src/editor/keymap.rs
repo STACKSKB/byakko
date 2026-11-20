@@ -94,6 +94,20 @@ impl Feature for KeymapRules {
     }
 }
 impl Editor<KeymapRules> {
+    /// Validate the whole choice before changing any draft binding.
+    pub fn edit_batch(&mut self, changes: Vec<Change>) -> Result<(), String> {
+        self.ready()?;
+        validate_changes(self.rules.descriptor(), &changes)?;
+        for change in &changes {
+            validate_edit(self.rules.descriptor(), change)?;
+        }
+        let mut next = self.draft.clone();
+        for change in changes {
+            stage(&mut next, change)?;
+        }
+        self.draft = next;
+        Ok(())
+    }
     pub fn changes(&self) -> Vec<Change> {
         match (self.baseline(), self.draft()) {
             (Some(baseline), Some(draft)) => changes(baseline, draft),

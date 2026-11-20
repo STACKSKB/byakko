@@ -19,6 +19,7 @@ fn discrete_tablet_controls_use_the_same_draft_and_device_contract() {
             .map(|(index, id)| PhysicalKey {
                 id: (*id).into(),
                 label: (*id).into(),
+                position: None,
                 x: index as f32,
                 y: 0.0,
                 width: 1.0,

@@ -4,21 +4,11 @@ This reference guides the optional browser client's visual styling. It does not 
 
 ## Direction
 
-Use a warm, restrained workshop feel: an off-white application canvas, white work surfaces, clear ink, fine separators, and a muted indigo accent. The keyboard remains the visual anchor and should feel like a real tool being configured. Prefer compact system typography, direct labels, and a few well-spaced groups over decorative chrome.
-
-Suggested tokens:
-
-| Role | Color |
-| --- | --- |
-| Canvas | `#f4f3ef` |
-| Work surface | `#ffffff` |
-| Main text | `#272823` |
-| Secondary text | `#686962` |
-| Rule | `#d8d8d0` |
-| Keycap indigo | `#626991` |
-| Focus accent | `#565b8f` |
-
-Treat these as starting values, not a mandate to make every component monochrome. Keep accessible contrast and meaningful focus visible. Use compact controls around 32 px high on desktop and 40 px on touch layouts. Use whitespace and hairline rules to group related content. Reserve stronger fills for selected or primary actions.
+The standalone configurator opens with the StacksKB light palette, a black header,
+white controls and a neutral work surface. Saved appearance settings take precedence.
+The full physical keyboard occupies its own stage. Keep its size and position stable
+as the user changes features, selects a key or edits a draft. On compact screens
+place the independently scrolling editor below the keyboard and provide a key chooser.
 
 ## Appearance preferences
 
@@ -53,19 +43,23 @@ palette.
 
 The page owns scrolling. Size the iframe to its intrinsic content, remove app
 viewport-based minimum heights in embedded mode, and keep dialogs inside the
-visible outer-page region. Retain the deliberate horizontal keyboard scroll
-on narrow screens and bounded macro lists. Place the standalone link below the
+visible outer-page region. Fit the physical keyboard to narrow screens and keep macro lists bounded. Place the standalone link below the
 embed. WordPress appearance defaults to Light/Neutral and uses a separate
 storage key; explicit light/dark and alternate palette choices remain available.
 The Neutral palette option is shown only in WordPress.
 
 ## Keyboard illustration
 
-Use warm light keycaps, indigo functional groups, quiet outlines, and only mild
-depth in the keyboard illustration. Keep legends readable and show mapped key
-labels without hiding the physical legends.
+The stock Nia87 illustration shows a light case, pale alphanumeric keys and lavender
+modifier, function and navigation groups. Its colors are independent of the app theme.
+Display the verified model as the device name. The keyboard does not report its switch
+or keycap finish.
 
-Preserve the full Nia87 layout and make its available actions discoverable. Lighting mode selection must continue to expose all 23 modes. Keep connection, loading, dirty, conflict, and operation status easy to distinguish; do not make color the sole status signal.
+Keep physical legends visible while exposing assigned actions in the inspector. Lighting
+keeps all advertised firmware modes. On a loaded per-key layer, choosing a Look previews
+a static color map locally. Apply uses the existing picture transaction. A preview
+preserves hand-painted keys by default. Replace painted keys explicitly includes those
+positions. The gallery tiles show a color preview and the Look name.
 
 ## Layout principles
 

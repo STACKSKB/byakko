@@ -121,6 +121,11 @@ export function createRuntime({ codec, hid, storage, now, wait, prepareHost, win
       return { ok: false, error: notice, view };
     }
     const result = handle(JSON.parse(session.dispatch(JSON.stringify(input))), background);
+    if (result.ok && input.type === "stagePicture") {
+      // An explicit look Apply supersedes the previously scheduled single-key paint.
+      win.clearTimeout(timers.get("picture"));
+      timers.delete("picture");
+    }
     if (result.ok && !result.command) {
       const messages = {
         edit: ["lighting", "picture", "settings"].includes(input.feature)

@@ -2,7 +2,7 @@
 //! carries core-owned commands and completions without interpreting device bytes.
 use byakko_core::{
     contract::{Command, Completion, DeviceChange},
-    editor::{Editor, Feature, Status},
+    editor::{Editor, Feature, Status, keymap_presets::TypingPreset},
     library::archive::CaptureStatus,
     model::macros,
     session::{Connection, Outcome, Session},
@@ -231,6 +231,21 @@ impl BrowserSession {
                 "settings" => self.session.save_settings()?,
                 _ => return Err("Unknown feature".into()),
             },
+            "stagePicture" => {
+                self.session
+                    .stage_picture_snapshot(&parse_field(intent, "snapshot")?)?;
+                return Ok(ResultValue::done());
+            }
+            "stageTypingPreset" => {
+                let preset = match required_str(intent, "preset")? {
+                    "Colemak" => TypingPreset::Colemak,
+                    "Dvorak" => TypingPreset::Dvorak,
+                    _ => return Err("Unknown typing preset".into()),
+                };
+                self.session
+                    .stage_typing_preset(required_str(intent, "layer")?, preset)?;
+                return Ok(ResultValue::done());
+            }
             "selectMacro" => {
                 self.session.select_macro(required_str(intent, "slot")?)?;
                 return Ok(ResultValue::done());

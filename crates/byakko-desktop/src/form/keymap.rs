@@ -7,18 +7,37 @@ use byakko_core::{
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    Pane(Pane),
+    ChoosePreset(PresetChoice),
+    StagePreset,
     Layer(String),
     Key(String),
     Catalog(catalog::Message),
     Shortcut(shortcut::Message),
     Assign(usize),
 }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Pane {
+    #[default]
+    Remap,
+    Shortcut,
+    TypingPreset,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PresetChoice {
+    #[default]
+    Colemak,
+    Dvorak,
+}
 pub enum Intent {
     Edit(Change),
     Scroll(catalog::Scroll),
+    Preset(PresetChoice),
 }
 
 pub struct Form {
+    pub(crate) pane: Pane,
+    pub(crate) preset: PresetChoice,
     pub(crate) layer: String,
     pub(crate) selected: Option<String>,
     pub(crate) catalog: catalog::Form,
@@ -32,6 +51,8 @@ impl Form {
 
     pub fn new(descriptor: &Descriptor) -> Self {
         Self {
+            pane: Pane::Remap,
+            preset: PresetChoice::Colemak,
             layer: descriptor.layers[0].id.clone(),
             selected: None,
             catalog: catalog::Form::default(),
@@ -67,6 +88,9 @@ impl Form {
     ) -> Result<Option<Intent>, String> {
         let descriptor = editor.rules().descriptor();
         match message {
+            Message::Pane(pane) => self.pane = pane,
+            Message::ChoosePreset(preset) => self.preset = preset,
+            Message::StagePreset => return Ok(Some(Intent::Preset(self.preset))),
             Message::Layer(layer) => {
                 self.layer = layer;
                 self.sync_shortcut(editor);

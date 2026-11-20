@@ -13,8 +13,8 @@ pub enum Kind {
 impl std::fmt::Display for Kind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            Self::Key => "Keyboard key",
-            Self::Movement => "Pointer movement",
+            Self::Key => "Key",
+            Self::Movement => "Move pointer",
             Self::Button { label, .. } | Self::Backend { label, .. } => label,
         })
     }
@@ -42,8 +42,18 @@ pub enum Composer {
     New,
     Replace(usize),
 }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Screen {
+    #[default]
+    Library,
+    Edit,
+    Assign,
+}
 #[derive(Clone, Debug)]
 pub enum Message {
+    Back,
+    AssignExisting(String),
+    ToggleRepeat,
     Select(String),
     Add,
     Read,
@@ -68,6 +78,8 @@ pub enum Message {
 }
 #[derive(Default)]
 pub struct Form {
+    pub(crate) screen: Screen,
+    pub(crate) repeat_expanded: bool,
     pub(crate) repeat: String,
     pub(crate) kind: Option<Kind>,
     pub(crate) value: String,
@@ -79,6 +91,9 @@ pub struct Form {
     pub(crate) binding_choices: std::collections::BTreeMap<String, String>,
 }
 impl Form {
+    pub fn open(&mut self, screen: Screen) {
+        self.screen = screen;
+    }
     /// Preserve explicit playback intent per slot, then the selected key's mode.
     pub fn selected_binding<'a>(
         &self,
@@ -222,6 +237,9 @@ impl Form {
             Message::NewEvent => {
                 self.reset_event();
                 self.composer = Composer::New;
+                self.kind = kinds(editor.capabilities()).into_iter().next();
+                self.pressed = true;
+                self.delay = "0".into();
                 None
             }
             Message::ToggleComposer => {
@@ -230,6 +248,10 @@ impl Form {
                 } else {
                     self.reset_event();
                 }
+                None
+            }
+            Message::ToggleRepeat => {
+                self.repeat_expanded = !self.repeat_expanded;
                 None
             }
             Message::StageEvent => {
@@ -254,6 +276,8 @@ impl Form {
             Message::Move { from, to } => Some(Edit::Move { from, to }),
             Message::Clear => Some(Edit::Clear),
             Message::Select(_)
+            | Message::Back
+            | Message::AssignExisting(_)
             | Message::Add
             | Message::Read
             | Message::ReadCatalog

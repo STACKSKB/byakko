@@ -4,8 +4,9 @@ import { node, button } from "./widgets.mjs";
 export function createDiscardDialog({doc, win}) {
   const dialog = node(doc, "dialog", undefined, "discard-dialog");
   const controls = node(doc, "div", undefined, "actions");
-  dialog.append(node(doc, "h2", "Discard macro edits?"),
-    node(doc, "p", "The current macro draft has unsaved changes."), controls);
+  const titleNode = node(doc, "h2", "Discard macro edits?");
+  const descriptionNode = node(doc, "p", "The current macro draft has unsaved changes.");
+  dialog.append(titleNode, descriptionNode, controls);
   let pending = null;
   function finish(accepted) {
     const current = pending;
@@ -17,9 +18,11 @@ export function createDiscardDialog({doc, win}) {
   dialog.addEventListener("close", cancelled);
   return {
     dialog,
-    confirm() {
+    confirm({title = "Discard macro edits?", description = "The current macro draft has unsaved changes."} = {}) {
       if (pending) return pending.promise;
-      if (typeof dialog.showModal !== "function") return Promise.resolve(Boolean(win.confirm?.("Discard unsaved macro edits?")));
+      titleNode.textContent = title;
+      descriptionNode.textContent = description;
+      if (typeof dialog.showModal !== "function") return Promise.resolve(Boolean(win.confirm?.(title)));
       let resolve;
       const promise = new Promise(complete => { resolve = complete; });
       pending = {promise, resolve};
