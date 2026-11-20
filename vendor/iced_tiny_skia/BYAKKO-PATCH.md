@@ -44,3 +44,19 @@ replaying layers; a fractional damage region previously left 102 stale pixels
 in its pixel envelope. These focused cases pass at 100% and 125% scale. The
 full native page-transition comparison and live-window acceptance are separate
 checks; these tests alone do not claim every transition is pixel-identical.
+
+The 2026-11-20 follow-up limits quad shadows to the intersecting layer and
+damage rectangle. The previous shadow painter composited the entire shadow
+pixmap over the retained buffer when a key changed. Under the Nia87 keyboard
+case, that darkened keys outside the portion redrawn in the same pass. The
+renderer now samples only the clipped raster area and applies the active clip
+mask when blending it. When a shadowed quad moves, damage includes both the
+old and new shadow extents. A shadow can also be repainted where the quad body
+lies outside the damage rectangle.
+
+The headless desktop regression renders the real Keys workspace with a fake
+wired device and compares retained and fresh pixels through selection at 100%,
+125%, and 150% scale, plus tooltip hover, movement, and resize at 125%. Selection
+and hover require byte equality in the keyboard region. The movement check
+allows the observed two-value channel rounding at the affected key edge. The
+vendor tests exercise moving shadows and repainting the shadow outside a quad.

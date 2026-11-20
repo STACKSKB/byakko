@@ -4,6 +4,7 @@ mod macros_workspace;
 mod navigation;
 mod notifications;
 mod picture_layers;
+mod rendering;
 mod transport_choice;
 mod workspace;
 use crate::controller::discovery::{Availability, Endpoint};

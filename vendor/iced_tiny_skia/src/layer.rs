@@ -1,6 +1,7 @@
 use crate::Primitive;
 use crate::core::renderer::Quad;
 use crate::core::{self, Background, Color, Point, Rectangle, Svg, Transformation};
+use crate::engine::shadow_bounds;
 use crate::graphics::damage;
 use crate::graphics::layer;
 use crate::graphics::text::{Editor, Paragraph, Text};
@@ -213,7 +214,9 @@ impl Layer {
             &previous.quads,
             &current.quads,
             |(quad, _)| {
-                quad.bounds
+                let bounds =
+                    shadow_bounds(quad).map_or(quad.bounds, |shadow| quad.bounds.union(&shadow));
+                bounds
                     .expand(1.0)
                     .intersection(&current.bounds.expand(1.0))
                     .into_iter()
@@ -782,5 +785,93 @@ mod tests {
             }
             assert_eq!(differing_pixels, 0, "fractional damage at {scale}x");
         }
+    }
+
+    fn shadowed_quad(x: f32) -> crate::Renderer {
+        use crate::core::Renderer as _;
+
+        let mut renderer = crate::Renderer::new(Font::DEFAULT, Pixels(16.0));
+        renderer.fill_quad(
+            Quad {
+                bounds: Rectangle::new(Point::new(x, 24.5), Size::new(60.0, 38.0)),
+                shadow: core::Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+                    offset: core::Vector::new(7.0, 14.0),
+                    blur_radius: 5.0,
+                },
+                ..Default::default()
+            },
+            Color::WHITE,
+        );
+        renderer
+    }
+
+    #[test]
+    fn moving_quad_clears_the_old_shadow_footprint() {
+        let viewport = Viewport::with_physical_size(Size::new(250, 150), 1.25);
+        let full = Rectangle::with_size(viewport.logical_size());
+        let mut mask = tiny_skia::Mask::new(250, 150).unwrap();
+        let mut retained = tiny_skia::Pixmap::new(250, 150).unwrap();
+        let mut previous = shadowed_quad(20.5);
+        let mut current = shadowed_quad(104.5);
+        previous.draw(
+            &mut retained.as_mut(),
+            &mut mask,
+            &viewport,
+            &[full],
+            Color::WHITE,
+        );
+        let regions = graphics::damage::group(
+            Layer::damage(&previous.layers()[0], &current.layers()[0]),
+            full,
+        );
+        current.draw(
+            &mut retained.as_mut(),
+            &mut mask,
+            &viewport,
+            &regions,
+            Color::WHITE,
+        );
+        let mut fresh = tiny_skia::Pixmap::new(250, 150).unwrap();
+        current.draw(
+            &mut fresh.as_mut(),
+            &mut mask,
+            &viewport,
+            &[full],
+            Color::WHITE,
+        );
+        assert!(retained.data() == fresh.data());
+    }
+
+    #[test]
+    fn repainting_shadow_outside_quad_touches_only_damaged_pixels() {
+        let mut renderer = shadowed_quad(24.5);
+        let viewport = Viewport::with_physical_size(Size::new(250, 150), 1.25);
+        let full = Rectangle::with_size(viewport.logical_size());
+        // This fractional rectangle is within the shadow and below the quad.
+        let damage = Rectangle::new(Point::new(45.2, 66.3), Size::new(20.0, 5.0));
+        let mut mask = tiny_skia::Mask::new(250, 150).unwrap();
+        let mut fresh = tiny_skia::Pixmap::new(250, 150).unwrap();
+        renderer.draw(
+            &mut fresh.as_mut(),
+            &mut mask,
+            &viewport,
+            &[full],
+            Color::WHITE,
+        );
+        let mut retained = tiny_skia::Pixmap::new(250, 150).unwrap();
+        retained.fill(tiny_skia::Color::WHITE);
+        renderer.draw(
+            &mut retained.as_mut(),
+            &mut mask,
+            &viewport,
+            &[damage],
+            Color::WHITE,
+        );
+        let white = tiny_skia::Color::WHITE.to_color_u8().premultiply();
+        assert_ne!(fresh.pixel(60, 86).unwrap(), white);
+        assert_eq!(retained.pixel(60, 86), fresh.pixel(60, 86));
+        assert_ne!(fresh.pixel(50, 86).unwrap(), white);
+        assert_eq!(retained.pixel(50, 86).unwrap(), white);
     }
 }
