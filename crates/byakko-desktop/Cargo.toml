@@ -11,6 +11,9 @@ byakko-core = { path = "../byakko-core" }
 byakko-devices = { path = "../byakko-devices" }
 iced = { version = "=0.14.0", default-features = false, features = ["tiny-skia", "smol", "x11", "wayland", "advanced"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 iced_runtime = "=0.14.0"
 iced_tiny_skia = "=0.14.1"

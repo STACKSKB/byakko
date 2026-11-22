@@ -288,3 +288,21 @@ fn switch_discards_deferred_lighting_write_only_after_confirmation() {
     assert!(!app.session.lighting().unwrap().dirty());
     assert!(!calls.lock().unwrap().contains(&"apply-lighting"));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn permission_setup_retries_the_failed_selected_receiver() {
+    let mut h = DiscoveryApp::new(false);
+    h.observe(choices());
+    h.reject_attach.store(true, Ordering::SeqCst);
+    let _ = h.app.update(Message::ChooseTransport("receiver".into()));
+    drain(&mut h.app);
+    assert_eq!(h.app.notice, "Injected attach failure");
+    h.reject_attach.store(false, Ordering::SeqCst);
+    let _ = h
+        .app
+        .update(Message::KeyboardAccessFinished(Ok("Installed".into())));
+    drain(&mut h.app);
+    assert_eq!(h.app.link.selected(), Some("receiver"));
+    assert_eq!(h.app.session.keymap().status(), &Status::Ready);
+}

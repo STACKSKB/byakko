@@ -291,6 +291,7 @@ dependencies = [
  "iced_renderer",
  "iced_runtime",
  "iced_tiny_skia",
+ "libc",
  "tiny-skia",
 ]
 

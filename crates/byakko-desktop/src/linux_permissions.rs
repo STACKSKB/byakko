@@ -1,11 +1,13 @@
 //! Request active-seat access through the OS authentication agent.
-use std::{io::IsTerminal, path::Path, process::Command};
+use std::{path::Path, process::Command};
 
 const INSTALL: &str = include_str!("../../../packaging/linux/install-seat-rule.sh");
 const RULE: &str = include_str!("../../../packaging/linux/71-byakko-seat.rules");
 
 pub(crate) fn enable() -> Result<String, String> {
-    let terminal = std::io::stdin().is_terminal();
+    // A job launched with & may inherit a tty but cannot read its password prompt.
+    // SAFETY: these calls only query the foreground and current process groups.
+    let terminal = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) == libc::getpgrp() };
     let has_polkit = Path::new("/usr/bin/pkexec").is_file();
     let mut auth = if terminal && Path::new("/usr/bin/sudo").is_file() {
         Command::new("/usr/bin/sudo")
@@ -28,7 +30,7 @@ pub(crate) fn enable() -> Result<String, String> {
         .map_err(|e| format!("Could not start system authentication: {e}"))?;
     if status.success() {
         Ok(
-            "Keyboard access rule installed. Choose Find connections or reconnect the keyboard."
+            "Keyboard access rule installed. Use Read / reconnect if a read is still needed."
                 .into(),
         )
     } else if has_polkit && !terminal && status.code() == Some(126) {

@@ -150,9 +150,20 @@ impl App {
     fn reduce(&mut self, message: Message) -> Task<Message> {
         #[cfg(target_os = "linux")]
         if let Message::KeyboardAccessFinished(result) = message {
+            let retry = result.is_ok()
+                && self.can_choose_transport()
+                && self.transport_switch.is_none()
+                && !self.has_unsaved_changes()
+                && !self.autosave.pending()
+                && self.session.keymap().baseline().is_none()
+                && (self.link.selected().is_some()
+                    || matches!(self.link.presence(), crate::Availability::Ready(_)));
             self.keyboard_access = crate::form::application::KeyboardAccess::Finished(
                 result.unwrap_or_else(|error| format!("Keyboard access setup: {error}")),
             );
+            if retry {
+                return self.reduce(Message::Read);
+            }
             return Task::none();
         }
         if let Message::AppearanceSaved(result) = message {

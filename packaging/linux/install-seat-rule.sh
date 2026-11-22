@@ -18,5 +18,5 @@ udevadm control --reload-rules
 for node in /sys/class/hidraw/hidraw*; do
     test -f "$node/device/uevent" || continue
     grep -Eiq '^HID_ID=0003:00003151:000040(11|15)$' "$node/device/uevent" || continue
-    udevadm trigger --action=change "$node"
+    udevadm trigger --settle --action=change "$node"
 done

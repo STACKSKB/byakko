@@ -1,8 +1,9 @@
 # Linux source-checkout setup (pre-alpha)
 
 In the native desktop app, click **Set up keyboard access** in the connection controls.
-Approve the system prompt, then use **Find connections** or reconnect the keyboard.
-A graphical session uses polkit. If the desktop has no running polkit authentication
+Approve the system prompt. Byakko retries an initial read when the selected keyboard is idle.
+Use **Read / reconnect** to retry manually. **Find connections** refreshes the device list.
+A foreground terminal uses sudo. GUI launches, redirected standard input, and background terminal jobs use the graphical polkit agent. If the desktop has no running polkit authentication
 agent, launch Byakko as your ordinary user from a terminal and click the button
 there to authenticate through sudo. Run the configurator without `--demo` for this action.
 
