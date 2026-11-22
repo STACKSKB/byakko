@@ -50,6 +50,7 @@ pub enum Message {
 pub struct Form {
     pub test: Tester,
     pub layout: LayoutSelection,
+    pub keys: Vec<byakko_core::model::keymap::PhysicalKey>,
     pub sources: Vec<Source>,
     pub source: Source,
     pub notice: String,
@@ -68,6 +69,7 @@ impl Default for Form {
         Self {
             test,
             layout: LayoutSelection::default(),
+            keys: physical_keys(LayoutSelection::default()),
             sources: vec![Source::Window],
             source: Source::Window,
             notice: String::new(),
@@ -142,7 +144,10 @@ impl Form {
                     self.usb = Some(result);
                 }
             }
-            Message::Layout(layout) => self.layout = layout,
+            Message::Layout(layout) => {
+                self.layout = layout;
+                self.keys = physical_keys(layout);
+            }
             Message::Standard(standard) => {
                 if self.layout.standard != standard {
                     self.layout.standard = standard;
@@ -151,6 +156,7 @@ impl Form {
                     } else if self.layout.legends == Legends::Japanese {
                         self.layout.legends = Legends::Qwerty;
                     }
+                    self.keys = physical_keys(self.layout);
                 }
             }
             Message::Threshold(us) => self.test.set_chatter_threshold_us(us),
@@ -226,4 +232,22 @@ impl Form {
             Source::Device(_) => tester_input::TIMESTAMP_SOURCE,
         }
     }
+}
+
+fn physical_keys(layout: LayoutSelection) -> Vec<byakko_core::model::keymap::PhysicalKey> {
+    byakko_core::projection::tester::layout_for(layout)
+        .into_iter()
+        .enumerate()
+        .map(|(index, key)| byakko_core::model::keymap::PhysicalKey {
+            id: index.to_string(),
+            label: key.label,
+            position: key.usage,
+            x: key.x,
+            y: key.y,
+            width: key.width,
+            height: key.height,
+            visible: true,
+            writable: false,
+        })
+        .collect()
 }

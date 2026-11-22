@@ -15,7 +15,6 @@ use crate::{
 };
 use byakko_core::{
     editor::Status,
-    projection::tester as tester_projection,
     session::{Connection, Session},
 };
 use iced::{
@@ -516,6 +515,14 @@ fn workspace<'a>(input: View<'a>, wide: bool, size: iced::Size) -> Element<'a, M
 
 fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     responsive(move |size| {
+        let board_title = if input.page == Page::Tester {
+            format!(
+                "{} {}",
+                input.tester.layout.standard, input.tester.layout.size
+            )
+        } else {
+            input.session.descriptor().device_name.clone()
+        };
         let portrait = !wide && size.width <= 650.0;
         let spacious = wide && size.width >= 500.0;
         let picker = || -> Element<'a, Message> {
@@ -556,7 +563,7 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         };
         if size.width < 480.0 && !wide && size.height < 200.0 {
             let controls = row![
-                text(&input.session.descriptor().device_name).size(20),
+                text(board_title.clone()).size(20),
                 space::horizontal(),
                 layers,
                 picker(),
@@ -575,7 +582,7 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
             // two control rows above and below it leaves only a sliver for keys.
             let rail = column![
                 row![
-                    text(&input.session.descriptor().device_name).size(20),
+                    text(board_title.clone()).size(20),
                     space::horizontal(),
                     layers
                 ]
@@ -590,7 +597,7 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
             return row![rail, board(input)].width(Fill).height(Fill).into();
         }
         let mut header = row![
-            text(&input.session.descriptor().device_name).size(if spacious { 32 } else { 22 }),
+            text(board_title.clone()).size(if spacious { 32 } else { 22 }),
             space::horizontal(),
         ]
         .spacing(8)
@@ -642,6 +649,39 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
 }
 
 fn board<'a>(input: View<'a>) -> Element<'a, Message> {
+    if input.page == Page::Tester {
+        let form = input.tester;
+        let colors = form
+            .keys
+            .iter()
+            .filter_map(|key| {
+                let usage = key.position?;
+                let color = if form.test.held().any(|held| held == usage) {
+                    [35, 112, 70]
+                } else if form.test.tested().contains(&usage) {
+                    [36, 79, 123]
+                } else {
+                    return None;
+                };
+                Some((key.id.clone(), color))
+            })
+            .collect();
+        let selected = form
+            .inspected
+            .and_then(|usage| form.keys.iter().find(|key| key.position == Some(usage)))
+            .map(|key| key.id.clone());
+        return keyboard::colored_view_with_labels(
+            input.style,
+            form.keys.iter().collect(),
+            selected,
+            colors,
+            Default::default(),
+            |key| {
+                key.position
+                    .map(|usage| Message::Tester(tester::Message::Inspect(usage)))
+            },
+        );
+    }
     let descriptor = input.session.descriptor();
     let labels = keyboard::labels_for_layer(
         descriptor,
@@ -662,52 +702,6 @@ fn board<'a>(input: View<'a>) -> Element<'a, Message> {
                 .map(str::to_owned)
         },
     );
-    if input.page == Page::Tester {
-        let positions = tester_projection::layout_for(input.tester.layout);
-        let usage_by_key: std::collections::BTreeMap<String, u16> = descriptor
-            .keys
-            .iter()
-            .filter(|key| key.visible)
-            .filter_map(|key| {
-                positions
-                    .iter()
-                    .find(|position| {
-                        (position.x - key.x).abs() < 0.01 && (position.y - key.y).abs() < 0.01
-                    })
-                    .and_then(|position| position.usage)
-                    .map(|usage| (key.id.clone(), usage))
-            })
-            .collect();
-        let colors = usage_by_key
-            .iter()
-            .filter_map(|(key, usage)| {
-                if input.tester.test.held().any(|held| held == *usage) {
-                    Some((key.clone(), [35, 112, 70]))
-                } else if input.tester.test.tested().contains(usage) {
-                    Some((key.clone(), [36, 79, 123]))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        let selected = usage_by_key
-            .iter()
-            .find(|(_, usage)| Some(**usage) == input.tester.inspected)
-            .map(|(key, _)| key.clone());
-        return keyboard::colored_view_with_labels(
-            input.style,
-            descriptor.keys.iter().filter(|key| key.visible).collect(),
-            selected,
-            colors,
-            labels,
-            move |key| {
-                usage_by_key
-                    .get(&key.id)
-                    .copied()
-                    .map(|usage| Message::Tester(tester::Message::Inspect(usage)))
-            },
-        );
-    }
     if matches!(input.page, Page::Lighting | Page::Picture)
         && lighting_mode(input.session, input.lighting) == Some(lighting::Mode::PerKey)
         && let Some(editor) = input.session.picture()

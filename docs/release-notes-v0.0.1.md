@@ -1,5 +1,9 @@
 # Byakko v0.0.1 Alpha
 
+## Hotfix
+
+The desktop keyboard tester now displays the selected physical size, layout standard, and legends. Key highlights and inspection follow the displayed keys.
+
 The native Nia87 configurator includes wired USB and 2.4 GHz receiver selection, per-key lighting Looks, and adaptive desktop layouts. Linux users can set up configuration permissions from the gear menu. Receiver notifications require a separate opt-in because the interface also carries key and pointer reports.
 
 Run `byakko-desktop --demo` for the in-memory keyboard. See [source build](source-build.md) for native prerequisites and [Linux installation](linux-install.md) for hardware permissions. The public configurator supports diagnostic archive export. Hardware write recovery and cross-distribution compatibility remain subject to the limits in the README.
