@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 
 
-TARGETS = ("x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu")
+TARGETS = ("x86_64-pc-windows-msvc", "x86_64-pc-windows-gnullvm", "x86_64-unknown-linux-gnu")
 CHOICES = {
     "MIT": "MIT",
     "Apache-2.0": "Apache-2.0",
@@ -57,7 +57,7 @@ def parse_tree(text):
             raise ValueError(f"Unexpected cargo tree row: {line!r}")
         name, version = match.groups()
         expression = expression.removesuffix(" (*)").strip()
-        if name in {"byakko", "byakko-core", "byakko-devices", "byakko-desktop", "byakko-cli"}:
+        if name in {"byakko", "byakko-core", "byakko-protocol", "byakko-devices", "byakko-desktop", "byakko-cli"}:
             continue  # Byakko is GPL-3.0-or-later; this inventory covers dependencies.
         row = {"name": name, "version": version, "declared": expression,
                "selected": selection(name, expression)}

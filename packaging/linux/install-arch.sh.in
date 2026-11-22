@@ -1,0 +1,14 @@
+#!/bin/sh
+# Keep this script and its matching Arch package in the same directory.
+set -eu
+case "$(uname -sm)" in
+    'Linux x86_64') ;;
+    *) echo 'This package requires x86-64 Linux.' >&2; exit 1 ;;
+esac
+command -v pacman >/dev/null || { echo 'pacman is required.' >&2; exit 1; }
+cd -- "$(dirname -- "$0")"
+printf '%s  %s\n' '@SHA256@' '@PACKAGE@' | sha256sum -c -
+if [ "$(id -u)" -eq 0 ]; then
+    exec pacman -U "./@PACKAGE@"
+fi
+exec sudo pacman -U "./@PACKAGE@"

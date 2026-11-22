@@ -1,13 +1,13 @@
-# Byakko — PRE-ALPHA
+# Byakko — v0.0.1 Alpha
 
 A native Windows and Linux configurator for the **Menel Nia87 over USB**, built
 with Rust and Iced. It uses the keyboard's stock firmware and direct HID access;
 no vendor software, browser, or background service is needed.
 
-**This is experimental pre-alpha software.** Hardware validation is still in
+**This is experimental alpha software.** Hardware validation is still in
 progress, and recovery from every failed write is not guaranteed. The current
 application is on [`master`](https://github.com/STACKSKB/byakko/tree/master).
-Download portable builds from the [Releases page](https://github.com/STACKSKB/byakko/releases).
+See the [v0.0.1 alpha release notes](docs/release-notes-v0.0.1.md) for package and launch instructions.
 
 ## What it does
 
@@ -46,21 +46,16 @@ cargo run --release --locked -p byakko-desktop -- --demo
 Omit `--demo` to use a connected Nia87. Connect by USB and close other keyboard
 configurators before starting.
 
-**Linux requires the Byakko udev rule and permission helper.** Follow
-[Linux installation](docs/linux-install.md) to install
-`packaging/linux/70-byakko-nia87.rules` and `byakko-hidraw-access`, reload udev
-rules, and reconnect the keyboard. Run Byakko as your normal desktop user, not
-with `sudo`. The rule grants access to the configuration interface; simply
-building the executable does not grant device permissions.
+On Linux, open the gear menu and choose **Set up keyboard access**. The OS handles administrator authentication. Optional receiver live updates require separate consent. See [Linux installation](docs/linux-install.md) for permissions and alternatives.
 
 Key assignments and macros have explicit save controls. Lighting and settings
 changes save automatically after a short delay. Per-key RGB starts by selecting
 and loading a layer; apply pending colors before switching layers. Before-image
 backups and local macro names use the [normal-user data directory](docs/local-storage.md).
 
-## Pre-alpha limits
+## Alpha limits
 
-- Only stock-firmware Nia87 USB configuration is supported. Wireless receivers,
+- The native client supports the stock Nia87 over wired USB and its 2.4 GHz receiver.
   QMK/VIA, other keyboards and firmware flashing are outside this version.
 - Fn system keys and Fn+Esc (factory reset) are protected from reassignment.
 - Diagnostic archives can be captured and exported in the UI; restoring a full

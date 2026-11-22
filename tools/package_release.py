@@ -1,4 +1,4 @@
-"""Assemble portable pre-alpha archives from already-built native executables.
+"""Assemble portable release archives from already-built native executables.
 
 Uses the locked release dependency inventory and preserves all discovered notice
 texts, including supplemental upstream notices. Never overwrites an archive.
@@ -9,15 +9,17 @@ import gzip
 import hashlib
 import io
 import json
+import re
 import subprocess
 import tarfile
+import tomllib
 import zipfile
 from pathlib import Path
 
 from audit_release_sources import inventory, NOTICE_PREFIXES
 
 
-VERSION = "v0.1.0-pre-alpha.1"
+VERSION = "v" + tomllib.loads((Path(__file__).resolve().parents[1] / "Cargo.toml").read_text())["workspace"]["package"]["version"]
 ICED_SUPPLEMENT = {
     ("iced_core", "0.14.0"), ("iced_debug", "0.14.0"),
     ("iced_futures", "0.14.0"), ("iced_graphics", "0.14.0"),
@@ -65,6 +67,10 @@ def notice_bundle(root, audit):
 def assemble(root, build, platform, icon):
     audit = inventory(root)
     files = notice_bundle(root, audit)
+    sysroot = Path(run(root, "rustc", "--print", "sysroot"))
+    files["THIRD-PARTY/rust/COPYRIGHT-library.html"] = (
+        sysroot / "share/doc/rust/COPYRIGHT-library.html"
+    ).read_bytes()
     executables = ["byakko-desktop", "byakko-cli"]
     if platform == "linux":
         executables.append("byakko-hidraw-access")
@@ -82,10 +88,21 @@ def assemble(root, build, platform, icon):
     files["assets/README.md"] = (root / "packaging/icons/README.md").read_bytes()
     if platform == "linux":
         for name in ["docs/linux-install.md", "packaging/linux/70-byakko-nia87.rules",
-                     "packaging/linux/byakko.desktop"]:
+                     "packaging/linux/byakko.desktop", "packaging/linux/71-byakko-seat.rules",
+                     "packaging/linux/71-byakko-receiver-events.rules", "packaging/linux/install-seat-rule.sh"]:
             files[name] = (root / name).read_bytes()
     revision = run(root, "git", "rev-parse", "HEAD")
-    files["BUILD.json"] = (json.dumps({"version": VERSION, "revision": revision,
+    linux_info = {}
+    if platform == "linux":
+        versions = {
+            tuple(map(int, symbol.split(".")))
+            for name in executables
+            for symbol in re.findall(r"\bGLIBC_(\d+(?:\.\d+)+)\b",
+                                     run(root, "readelf", "--version-info", build / name))
+        }
+        linux_info = {"target": "x86_64-unknown-linux-gnu",
+                      "minimum_glibc": ".".join(map(str, max(versions)))}
+    files["BUILD.json"] = (json.dumps({"version": VERSION, "channel": "alpha", **linux_info, "revision": revision,
         "platform": platform, "rustc": run(root, "rustc", "--version"),
         "cargo_lock_sha256": hashlib.sha256((root / "Cargo.lock").read_bytes()).hexdigest(),
         "binaries": {name: hashlib.sha256(files[name]).hexdigest()

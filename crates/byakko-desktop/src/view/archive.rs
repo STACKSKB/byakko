@@ -26,7 +26,7 @@ pub fn view<'a>(
             text_input("New capture file path", &form.archive_path).on_input_maybe(idle.then_some(Message::ArchivePath)),
             button("Save captured file").on_press_maybe((idle && capture.captured().is_some()).then_some(Message::Begin(Operation::ExportArchive))),
         ].spacing(style.spacing.s),
-        text("Whole-configuration restore is unavailable in this pre-alpha."),
+        text("Whole-configuration restore is unavailable in this alpha."),
     ].spacing(style.spacing.m);
     if let Some(archive) = capture.captured() {
         content = content.push(text(format!(

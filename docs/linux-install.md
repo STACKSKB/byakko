@@ -1,4 +1,4 @@
-# Linux source-checkout setup (pre-alpha)
+# Linux source-checkout setup (alpha)
 
 In the native desktop app, open the gear menu at the top right and choose **Set up keyboard access**.
 Approve the system prompt. Byakko retries an initial read when the selected keyboard is idle.

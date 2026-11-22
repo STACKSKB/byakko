@@ -1,7 +1,7 @@
-# Build Byakko (PRE-ALPHA)
+# Build Byakko (v0.0.1 Alpha)
 
 These instructions build the native Iced desktop and independent CLI from the
-master branch. Portable pre-alpha packages are available through GitHub Releases.
+master branch. Portable packages are available through GitHub Releases.
 
 ## Prerequisites
 
@@ -79,6 +79,30 @@ cargo run --release --locked -p byakko-cli -- read
 Use `--help` for the complete command list. Snapshot apply commands write to the
 keyboard; a successful build is not evidence that a new platform's writes or
 recovery have been tested.
+
+### Portable x86-64 Linux release
+
+The v0.0.1 Linux binaries target glibc 2.28 on x86-64. To reproduce the
+release build on x86-64 Linux, run this from the checkout with rustup and
+Python 3 with venv available:
+
+```sh
+python3 -m venv target/portable-tools
+. target/portable-tools/bin/activate
+python -m pip install 'cargo-zigbuild==0.24.1' 'ziglang==0.14.1'
+export CARGO_TARGET_DIR="$PWD/target/portable"
+export ZIG_GLOBAL_CACHE_DIR="$PWD/target/zig-cache"
+target_triple=x86_64-unknown-linux-gnu.2.28
+cargo +1.98.0 zigbuild --release --locked --target "$target_triple" -p byakko-desktop -p byakko-cli
+cargo +1.98.0 zigbuild --release --locked --target "$target_triple" -p byakko --no-default-features --bin byakko-hidraw-access
+```
+
+The binaries land in `target/portable/x86_64-unknown-linux-gnu/release/`.
+For each executable, `readelf --version-info` lists the required glibc symbols
+and `readelf -d` lists its direct shared libraries. All three v0.0.1 binaries
+require symbols up to GLIBC_2.28. Debian 10's glibc 2.28 loader resolved their
+direct libraries and ran the CLI demo keymap read. Desktop display, input and
+audio features also depend on the runtime libraries described above.
 
 ## Local checks
 

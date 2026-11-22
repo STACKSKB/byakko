@@ -1,11 +1,14 @@
 [package]
 name = "byakko"
 default-run = "byakko"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 publish = false
 license = "GPL-3.0-or-later"
 description = "Native Nia87 configuration research tools"
+
+[workspace.package]
+version = "0.0.1"
 
 [workspace]
 members = ["crates/byakko-core", "crates/byakko-protocol", "crates/byakko-devices", "crates/byakko-desktop", "crates/byakko-cli", "crates/byakko-web"]
