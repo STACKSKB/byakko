@@ -101,15 +101,12 @@ while the onboard-change listener reports a permission error. Manual refresh
 remains available; installing this rule does not establish automatic onboard
 synchronization on Linux.
 
-The Windows input capability capture establishes the report shape, but not the
-complete Linux hidraw descriptor. Before extending the helper, capture that
-node's full `device/report_descriptor` from sysfs, its USB interface number and
-physical USB ancestor, and verify that it belongs to the selected keyboard.
-The Linux node may expose other reports on the same interface. Do not substitute
-the small synthetic parser test fixture for a complete captured descriptor, or
-grant access to every node matching the keyboard VID/PID. No live Linux input
-node was available during the 2026-09-27 packaging review, so this permission
-and physical listener acceptance gate remains open.
+On the observed Linux Nia87 receiver (3151:4011), USB interface 1 carries
+notification report ID 5 alongside keyboard, mouse, consumer and system
+input reports. A hidraw ACL applies to that entire interface. Granting the
+desktop user access would expose these other reports to processes running
+as that user. The setup rule grants configuration access on interface 2.
+Use **Read / reconnect** to load changes made using the physical keyboard.
 
 The helper prints `nia87-config` only on a match. `uaccess` grants access through
 the active local desktop seat; an SSH/RDP/headless session may not receive that

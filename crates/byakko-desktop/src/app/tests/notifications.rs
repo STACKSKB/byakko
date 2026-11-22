@@ -23,20 +23,66 @@ impl Operation for RenderedText {
     }
 }
 
-pub(super) fn rendered_text(app: &App) -> Vec<String> {
+fn rendered_bounds(app: &App, width: f32) -> RenderedText {
     let mut element = app.view();
     let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
     let mut tree = Tree::new(&element);
     let node = element.as_widget_mut().layout(
         &mut tree,
         &renderer,
-        &layout::Limits::new(Size::ZERO, Size::new(1360.0, 900.0)),
+        &layout::Limits::new(Size::ZERO, Size::new(width, 900.0)),
     );
     let mut texts = RenderedText::default();
     element
         .as_widget_mut()
         .operate(&mut tree, Layout::new(&node), &renderer, &mut texts);
-    texts.0.into_iter().map(|(text, _)| text).collect()
+    texts
+}
+
+pub(super) fn rendered_text(app: &App) -> Vec<String> {
+    rendered_bounds(app, 1360.0)
+        .0
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect()
+}
+
+#[test]
+fn reconnect_and_appearance_stay_visible_at_opposite_sides_of_the_header() {
+    let (app, _) = app(false);
+    for width in [360.0, 768.0, 1360.0] {
+        let texts = rendered_bounds(&app, width);
+        let bounds = |label| texts.0.iter().find(|(text, _)| text == label).unwrap().1;
+        let read = bounds("Read / reconnect");
+        let appearance = bounds("Appearance");
+        assert!(read.x >= 0.0 && read.x < width / 2.0, "{width} {read:?}");
+        assert!(
+            read.x + read.width < appearance.x,
+            "{width} {read:?} {appearance:?}"
+        );
+        assert!(
+            appearance.x + appearance.width <= width,
+            "{width} {appearance:?}"
+        );
+        assert!(
+            width - (appearance.x + appearance.width) < 45.0,
+            "{width} {appearance:?}"
+        );
+        assert!((appearance.y - read.y).abs() < 1.0);
+        let keys = bounds("Keys");
+        if width >= app.style.key_sidebar_breakpoint {
+            assert!(
+                (keys.center_y() - read.center_y()).abs() < 1.0,
+                "{keys:?} {read:?}"
+            );
+        } else {
+            assert!(keys.y >= read.y + read.height);
+        }
+    }
+    assert!(matches!(
+        click_text(&app, "Read / reconnect").as_slice(),
+        [Message::Read]
+    ));
 }
 
 pub(super) fn click_text(app: &App, label: &str) -> Vec<Message> {
@@ -416,9 +462,10 @@ fn dirty_failed_settings_read_keeps_a_local_retry_action() {
         "{texts:?}"
     );
     assert!(
-        texts.iter().all(|text| text != "Read / reconnect"),
+        texts.iter().any(|text| text == "Read / reconnect"),
         "{texts:?}"
     );
+    assert!(click_text(&app, "Read / reconnect").is_empty());
     assert!(matches!(
         click_text(&app, "Reload & retry").as_slice(),
         [Message::Settings(settings::Message::Read)]

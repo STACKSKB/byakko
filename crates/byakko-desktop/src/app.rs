@@ -233,7 +233,7 @@ impl App {
                 Err(reason) => {
                     self.observation.unavailable = true;
                     self.notice = format!(
-                        "Live keyboard updates stopped: {reason}. Use Read / reconnect to refresh."
+                        "Live updates unavailable: {reason}. Use Read / reconnect for a manual refresh."
                     );
                 }
             }
@@ -1735,7 +1735,7 @@ impl App {
                 page: self.page,
                 closing: self.closing,
                 notice: &self.notice,
-                live_updates_unavailable: self.observation.unavailable,
+                has_unsaved_changes: self.has_unsaved_changes(),
                 style: &self.style,
             }),
             !self.session.recording() && !self.recording.pending(),

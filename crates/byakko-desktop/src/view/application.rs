@@ -63,7 +63,7 @@ pub struct View<'a> {
     pub page: Page,
     pub closing: Closing,
     pub notice: &'a str,
-    pub live_updates_unavailable: bool,
+    pub has_unsaved_changes: bool,
     pub style: &'a UiStyle,
 }
 impl View<'_> {
@@ -93,20 +93,42 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
             .direction(scrollable::Direction::Horizontal(
                 scrollable::Scrollbar::new().width(4).scroller_width(4),
             ))
-            .width(Fill)
-            .height(Length::Fixed(if wide { 44.0 } else { 38.0 }));
+            .width(Fill);
+        let awaiting_choice = input.selected_transport.is_none()
+            && matches!(input.presence, Availability::Choices { .. });
+        let reconnect = nav_button(
+            "Read / reconnect",
+            true,
+            (input.idle()
+                && !input.has_unsaved_changes
+                && !input.transport_opening
+                && !awaiting_choice)
+                .then_some(Message::Read),
+        );
+        let appearance = nav_button(
+            "Appearance",
+            false,
+            input
+                .editing_allowed()
+                .then_some(Message::Appearance(appearance::Message::Open)),
+        );
         let header: Element<'a, Message> = if wide {
-            row![brand, navigation]
+            row![brand, reconnect, navigation, appearance]
                 .spacing(24)
                 .align_y(iced::Alignment::Center)
                 .height(Length::Fixed(60.0))
                 .padding(iced::Padding::default().left(22).right(22))
                 .into()
         } else {
-            column![brand, navigation]
-                .height(Length::Fixed(76.0))
-                .padding(iced::Padding::default().left(10).right(10))
-                .into()
+            column![
+                row![brand, reconnect, space::horizontal(), appearance]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+                navigation
+            ]
+            .height(Length::Fixed(76.0))
+            .padding(iced::Padding::default().left(10).right(10))
+            .into()
         };
         let mut content = column![container(header).style(|_| container::Style {
             background: Some(iced::Background::Color(Color::BLACK)),
@@ -184,7 +206,6 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
 }
 
 fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
-    let idle = input.idle();
     let mut navigation = row![].spacing(2);
     for (label, page, available) in [
         ("Keys", Page::Keys, true),
@@ -214,26 +235,6 @@ fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
             ));
         }
     }
-    let awaiting_choice = input.selected_transport.is_none()
-        && matches!(input.presence, Availability::Choices { .. });
-    if !awaiting_choice
-        && (!matches!(input.session.connection(), Connection::Connected { .. })
-            || input.live_updates_unavailable
-            || input.session.requires_manual_read()
-            || matches!(input.session.keymap().status(), Status::Unverified { .. }))
-    {
-        navigation = navigation.push(
-            button("Read / reconnect")
-                .on_press_maybe((idle && !input.transport_opening).then_some(Message::Read)),
-        );
-    }
-    navigation = navigation.push(nav_button(
-        "Appearance",
-        false,
-        input
-            .editing_allowed()
-            .then_some(Message::Appearance(appearance::Message::Open)),
-    ));
     navigation
 }
 
@@ -300,32 +301,33 @@ fn nav_button(
     active: bool,
     message: Option<Message>,
 ) -> Element<'static, Message> {
-    button(text(label).size(14).color(if active {
-        Color::WHITE
-    } else {
-        Color::from_rgb8(189, 189, 194)
-    }))
-    .padding([8, 12])
-    .on_press_maybe(message)
-    .style(move |_theme, _status| iced::widget::button::Style {
-        background: active.then_some(iced::Background::Color(Color::from_rgb8(55, 55, 60))),
-        text_color: if active {
-            Color::WHITE
-        } else {
-            Color::from_rgb8(189, 189, 194)
-        },
-        border: iced::Border {
-            color: if active {
-                Color::from_rgb8(109, 101, 169)
-            } else {
-                Color::TRANSPARENT
-            },
-            width: if active { 1.0 } else { 0.0 },
-            radius: 5.0.into(),
-        },
-        ..Default::default()
-    })
-    .into()
+    use iced::widget::button::Status;
+    button(text(label).size(14))
+        .padding([8, 12])
+        .on_press_maybe(message)
+        .style(move |_theme, status| {
+            let enabled = status != Status::Disabled;
+            let highlighted =
+                enabled && (active || matches!(status, Status::Hovered | Status::Pressed));
+            iced::widget::button::Style {
+                background: highlighted
+                    .then_some(iced::Background::Color(Color::from_rgb8(55, 55, 60))),
+                text_color: if !enabled {
+                    Color::from_rgb8(136, 136, 141)
+                } else if highlighted {
+                    Color::WHITE
+                } else {
+                    Color::from_rgb8(189, 189, 194)
+                },
+                border: iced::Border {
+                    color: Color::from_rgb8(109, 101, 169),
+                    width: if highlighted { 1.0 } else { 0.0 },
+                    radius: 5.0.into(),
+                },
+                ..Default::default()
+            }
+        })
+        .into()
 }
 
 fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {

@@ -56,7 +56,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let target = nia87::device::Target::from_candidate(candidate)
                         .map_err(|error| error.to_string())?;
                     let mut listener = nia87::notifications::Listener::open(&candidate.identity())
-                        .map_err(|error| error.to_string());
+                        .map_err(|error| {
+                            #[cfg(target_os = "linux")]
+                            if error
+                                .downcast_ref::<std::io::Error>()
+                                .is_some_and(|e| e.kind() == std::io::ErrorKind::PermissionDenied)
+                            {
+                                return "Linux restricts the notification interface".to_owned();
+                            }
+                            error.to_string()
+                        });
                     let adapter = BoundNia87Adapter::new(target);
                     let worker = Executor::spawn(adapter, backups.clone())
                         .and_then(|worker| {
