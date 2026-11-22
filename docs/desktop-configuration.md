@@ -2,7 +2,7 @@
 
 With one Nia87 configuration connection present, Byakko reads it automatically.
 With both connections present, choose **Wired USB** or **2.4 GHz receiver**.
-Use **Find connections** if you plug in a second connection while editing.
+Open the gear menu and choose **Find connections** if you plug in a second connection while editing.
 **Read / reconnect** retries the selected endpoint. If the receiver is present
 but the keyboard is asleep or out of range, wake it and retry, or explicitly
 choose the wired connection.
@@ -12,7 +12,7 @@ edits because the endpoints can belong to different keyboards. If more than
 one wired endpoint or more than one receiver is found, disconnect the extra
 device before choosing a connection.
 
-Choose **Appearance** in the top navigation to set a light or dark theme, select
+Choose **Appearance** in the top-right gear menu to set a light or dark theme, select
 Default, Slate, Forest, StacksKB or Custom, and edit application colours. Valid
 colours preview immediately; **Cancel** or Escape restores the saved appearance.
 **Apply** saves it for future launches. Custom text and focus colours must remain

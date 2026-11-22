@@ -55,6 +55,7 @@ struct App {
     #[cfg(target_os = "linux")]
     keyboard_access: crate::form::application::KeyboardAccess,
     closing: Closing,
+    menu_open: bool,
     notice: String,
     style: UiStyle,
 }
@@ -133,6 +134,7 @@ impl App {
             #[cfg(target_os = "linux")]
             keyboard_access: Default::default(),
             closing: Closing::Open,
+            menu_open: false,
             notice: String::new(),
             style: UiStyle::DEFAULT,
         }
@@ -166,6 +168,13 @@ impl App {
             }
             return Task::none();
         }
+        if matches!(message, Message::DismissMenu | Message::Close) {
+            self.menu_open = false;
+            #[cfg(target_os = "linux")]
+            if self.keyboard_access == crate::form::application::KeyboardAccess::ConfirmReceiver {
+                self.keyboard_access = crate::form::application::KeyboardAccess::Idle;
+            }
+        }
         if let Message::AppearanceSaved(result) = message {
             let failed = result.is_err();
             self.appearance.accept(result);
@@ -189,6 +198,7 @@ impl App {
                 return Task::none();
             }
             if matches!(message, appearance::Message::Open) {
+                self.menu_open = false;
                 self.tester.pause();
                 self.keys.catalog.input = catalog::InputMode::Browse;
             }
@@ -296,6 +306,12 @@ impl App {
             return Task::none();
         }
         match message {
+            Message::ToggleMenu => {
+                self.menu_open = !self.menu_open;
+                self.tester.pause();
+                self.keys.catalog.input = catalog::InputMode::Browse;
+            }
+            Message::DismissMenu => {}
             Message::Appearance(_) | Message::AppearanceSaved(_) => unreachable!(),
             #[cfg(target_os = "linux")]
             Message::ReviewReceiverAccess => {
@@ -480,6 +496,7 @@ impl App {
             Message::Poll(_) => return self.poll(),
             Message::Scan => return self.scan(),
             Message::RefreshTransports if self.can_choose_transport() => {
+                self.menu_open = false;
                 self.link.request_scan();
                 return self.scan();
             }
@@ -1631,6 +1648,11 @@ impl App {
                     modal_escape(event).map(|_| Message::CancelTransportSwitch)
                 }),
             );
+        } else if self.menu_open {
+            subscriptions.push(
+                iced::keyboard::listen()
+                    .filter_map(|event| modal_escape(event).map(|_| Message::DismissMenu)),
+            );
         } else if self.appearance.open && self.appearance.submitted.is_none() {
             subscriptions.push(iced::keyboard::listen().filter_map(appearance_escape));
         }
@@ -1727,6 +1749,7 @@ impl App {
             view::application::view(view::application::View {
                 session: &self.session,
                 appearance: &self.appearance,
+                menu_open: self.menu_open,
                 presence: self.link.presence(),
                 selected_transport: self.link.selected(),
                 monitor_transports: self.link.monitoring(),

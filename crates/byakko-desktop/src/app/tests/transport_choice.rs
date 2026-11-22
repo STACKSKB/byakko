@@ -143,6 +143,9 @@ fn manual_inventory_refresh_finds_an_alternative_without_reattaching() {
     let generation = h.app.session.connection().clone();
 
     *h.presence.lock().unwrap() = choices();
+    for m in click_text(&h.app, "⚙") {
+        let _ = h.app.update(m);
+    }
     let messages = click_text(&h.app, "Find connections");
     assert!(matches!(messages.as_slice(), [Message::RefreshTransports]));
     for message in messages {

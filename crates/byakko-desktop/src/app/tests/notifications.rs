@@ -48,13 +48,13 @@ pub(super) fn rendered_text(app: &App) -> Vec<String> {
 }
 
 #[test]
-fn reconnect_and_appearance_stay_visible_at_opposite_sides_of_the_header() {
+fn reconnect_and_menu_stay_visible_at_opposite_sides_of_the_header() {
     let (app, _) = app(false);
     for width in [360.0, 768.0, 1360.0] {
         let texts = rendered_bounds(&app, width);
         let bounds = |label| texts.0.iter().find(|(text, _)| text == label).unwrap().1;
         let read = bounds("Read / reconnect");
-        let appearance = bounds("Appearance");
+        let appearance = bounds("⚙");
         assert!(read.x >= 0.0 && read.x < width / 2.0, "{width} {read:?}");
         assert!(
             read.x + read.width < appearance.x,
@@ -86,6 +86,17 @@ fn reconnect_and_appearance_stay_visible_at_opposite_sides_of_the_header() {
 }
 
 pub(super) fn click_text(app: &App, label: &str) -> Vec<Message> {
+    let texts = rendered_bounds(app, 1360.0);
+    let bounds = texts
+        .0
+        .iter()
+        .find(|(text, _)| text == label)
+        .unwrap_or_else(|| panic!("{label:?} absent from rendered view"))
+        .1;
+    click_at(app, bounds.center())
+}
+
+fn click_at(app: &App, point: Point) -> Vec<Message> {
     let mut element = app.view();
     let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
     let mut tree = Tree::new(&element);
@@ -95,20 +106,7 @@ pub(super) fn click_text(app: &App, label: &str) -> Vec<Message> {
         &renderer,
         &layout::Limits::new(Size::ZERO, viewport.size()),
     );
-    let mut texts = RenderedText::default();
-    element
-        .as_widget_mut()
-        .operate(&mut tree, Layout::new(&node), &renderer, &mut texts);
-    let bounds = texts
-        .0
-        .iter()
-        .find(|(text, _)| text == label)
-        .unwrap_or_else(|| panic!("{label:?} absent from rendered view"))
-        .1;
-    let cursor = mouse::Cursor::Available(Point::new(
-        bounds.x + bounds.width / 2.0,
-        bounds.y + bounds.height / 2.0,
-    ));
+    let cursor = mouse::Cursor::Available(point);
     let mut messages = Vec::new();
     for event in [
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
@@ -126,6 +124,35 @@ pub(super) fn click_text(app: &App, label: &str) -> Vec<Message> {
         );
     }
     messages
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn receiver_permission_review_dismisses_without_granting_access() {
+    use crate::form::application::KeyboardAccess;
+    let (mut app, _) = app(false);
+    app.config.data_directory = Some("unused".into());
+    for label in ["⚙", "Receiver live updates…"] {
+        let messages = click_text(&app, label);
+        assert_eq!(messages.len(), 1);
+        let _ = app.update(messages.into_iter().next().unwrap());
+    }
+    assert_eq!(app.keyboard_access, KeyboardAccess::ConfirmReceiver);
+    assert!(
+        rendered_text(&app)
+            .iter()
+            .any(|text| text.contains("key and pointer reports"))
+    );
+    let messages = click_at(&app, Point::new(15.0, 450.0));
+    assert!(matches!(messages.as_slice(), [Message::DismissMenu]));
+    let _ = app.update(Message::DismissMenu);
+    assert!(!app.menu_open);
+    assert_eq!(app.keyboard_access, KeyboardAccess::Idle);
+    assert!(
+        !rendered_text(&app)
+            .iter()
+            .any(|text| text == "Set up keyboard access")
+    );
 }
 
 fn escape_key(repeat: bool) -> keyboard::Event {
@@ -209,6 +236,10 @@ fn rendered_appearance_controls_preview_cancel_and_apply_without_device_reads() 
     let draft = app.session.keymap().draft().cloned();
     let before = reads.load(Ordering::SeqCst);
     app.tester.update(crate::form::tester::Message::Start);
+    assert!(!rendered_text(&app).iter().any(|t| t == "Appearance"));
+    for m in click_text(&app, "⚙") {
+        let _ = app.update(m);
+    }
     let messages = click_text(&app, "Appearance");
     assert_eq!(messages.len(), 1);
     let _ = app.update(messages.into_iter().next().unwrap());
@@ -508,4 +539,19 @@ fn disconnected_and_unknown_macro_library_do_not_claim_stale_success() {
             .all(|text| text != "Read macro" && !text.starts_with("Macro: Read / reconnect")),
         "{texts:?}"
     );
+}
+
+#[test]
+fn receiver_warning_uses_one_footer_line_at_desktop_width() {
+    let (mut app, _) = app(false);
+    let _ = app.update(Message::Read);
+    settle(&mut app);
+    app.notice = "Live updates unavailable: Linux restricts the notification interface. Use Read / reconnect for a manual refresh.".into();
+    let texts = rendered_bounds(&app, 1440.0);
+    let (_, bounds) = texts
+        .0
+        .iter()
+        .find(|(s, _)| s == &app.notice)
+        .expect("receiver warning in footer");
+    assert!(bounds.width > 480.0 && bounds.height <= 21.0, "{bounds:?}");
 }

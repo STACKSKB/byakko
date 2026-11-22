@@ -39,6 +39,7 @@ impl std::fmt::Display for KeyOption {
 pub struct View<'a> {
     pub session: &'a Session,
     pub appearance: &'a appearance::Form,
+    pub menu_open: bool,
     pub presence: &'a Availability,
     pub selected_transport: Option<&'a str>,
     pub monitor_transports: bool,
@@ -105,15 +106,17 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
                 && !awaiting_choice)
                 .then_some(Message::Read),
         );
-        let appearance = nav_button(
-            "Appearance",
-            false,
-            input
-                .editing_allowed()
-                .then_some(Message::Appearance(appearance::Message::Open)),
+        let gear = iced::widget::tooltip(
+            nav_button(
+                "⚙",
+                input.menu_open,
+                input.editing_allowed().then_some(Message::ToggleMenu),
+            ),
+            "Application menu",
+            iced::widget::tooltip::Position::Bottom,
         );
         let header: Element<'a, Message> = if wide {
-            row![brand, reconnect, navigation, appearance]
+            row![brand, reconnect, navigation, gear]
                 .spacing(24)
                 .align_y(iced::Alignment::Center)
                 .height(Length::Fixed(60.0))
@@ -121,7 +124,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
                 .into()
         } else {
             column![
-                row![brand, reconnect, space::horizontal(), appearance]
+                row![brand, reconnect, space::horizontal(), gear]
                     .spacing(4)
                     .align_y(iced::Alignment::Center),
                 navigation
@@ -135,8 +138,10 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
             text_color: Some(Color::WHITE),
             ..Default::default()
         })];
-        if input.monitor_transports {
-            content = content.push(transport_controls(input));
+        if input.monitor_transports
+            && let Some(controls) = transport_controls(input)
+        {
+            content = content.push(controls);
         }
         content.push(workspace(input, wide)).height(Fill).into()
     })
@@ -144,7 +149,8 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
     .height(Fill)
     .into();
     let confirm_close = input.closing == Closing::ConfirmDiscard;
-    let blocked = input.appearance.open || confirm_close || input.confirm_transport_switch;
+    let blocked =
+        input.menu_open || input.appearance.open || confirm_close || input.confirm_transport_switch;
     let base = crate::widget::tester_capture::capture(
         base,
         !blocked && input.page == Page::Tester && input.tester.active(),
@@ -162,6 +168,14 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
                 .center_y(Fill),
             )
             .into();
+    }
+    if input.menu_open && !confirm_close && !input.confirm_transport_switch {
+        let backdrop = iced::widget::mouse_area(space::Space::new().width(Fill).height(Fill))
+            .on_press(Message::DismissMenu);
+        let menu = container(iced::widget::opaque(application_menu(input)))
+            .align_right(Fill)
+            .padding(iced::Padding::default().top(42).right(10));
+        return layers.push(backdrop).push(menu).into();
     }
     let (title, detail, keep, discard, label) = if confirm_close {
         (
@@ -238,63 +252,80 @@ fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
     navigation
 }
 
-fn transport_controls(input: View<'_>) -> Element<'_, Message> {
+fn transport_controls(input: View<'_>) -> Option<Element<'_, Message>> {
     let controls = row![].spacing(8).align_y(iced::Alignment::Center);
     let controls = match input.presence {
-        Availability::Ready(endpoint) if input.selected_transport.is_some() => {
+        Availability::Ready(endpoint)
+            if input.selected_transport.is_some_and(|id| id != endpoint.id) =>
+        {
             controls.push(transport_control(input, endpoint))
         }
         Availability::Choices { wired, receiver } => controls
             .push(transport_control(input, wired))
             .push(transport_control(input, receiver)),
-        _ => controls,
+        _ if input.transport_scan_pending => controls,
+        _ => return None,
     };
     let controls = if input.transport_scan_pending {
         controls.push(text("Checking connections…"))
     } else {
-        controls.push(
-            button("Find connections").on_press_maybe(
-                input
-                    .can_choose_transport
+        controls
+    };
+    Some(container(controls.wrap()).padding([4, 10]).into())
+}
+
+fn application_menu(input: View<'_>) -> Element<'_, Message> {
+    let mut items = column![
+        button("Appearance")
+            .width(Fill)
+            .on_press(Message::Appearance(appearance::Message::Open))
+    ]
+    .spacing(5);
+    if input.monitor_transports {
+        items = items.push(
+            button("Find connections").width(Fill).on_press_maybe(
+                (input.can_choose_transport && !input.transport_scan_pending)
                     .then_some(Message::RefreshTransports),
             ),
-        )
-    };
+        );
+    }
     #[cfg(target_os = "linux")]
     if let Some(access) = input.keyboard_access {
         use crate::form::application::KeyboardAccess;
-        let controls = controls.push(
-            button("Set up keyboard access").on_press_maybe(
-                (*access != KeyboardAccess::Pending && input.editing_allowed())
-                    .then_some(Message::EnableKeyboardAccess),
-            ),
-        );
         if *access == KeyboardAccess::ConfirmReceiver {
-            return container(column![
-                text("Allow receiver live updates? Linux also gives programs running as your active desktop user access to key and pointer reports on this receiver interface. The permission persists after reconnecting.").size(14),
-                row![button("Allow receiver access").on_press(Message::AllowReceiverAccess),
-                     button("Cancel").on_press(Message::CancelReceiverAccess)].spacing(8)
-            ].spacing(4)).padding([4, 10]).into();
-        }
-        let controls = controls.push(
-            button("Receiver live updates…").on_press_maybe(
-                (*access != KeyboardAccess::Pending && input.editing_allowed())
-                    .then_some(Message::ReviewReceiverAccess),
-            ),
-        );
-        let hint = match access {
-            KeyboardAccess::ConfirmReceiver => unreachable!(),
-            KeyboardAccess::Idle => {
-                "Allow this desktop session to configure the Nia87. Linux may ask for administrator approval."
+            items = column![
+                text("Allow receiver live updates?").size(17),
+                text("Linux also gives programs running as your active desktop user access to key and pointer reports on this receiver interface. The permission persists after reconnecting.").size(14),
+                button("Allow receiver access").on_press(Message::AllowReceiverAccess),
+                button("Cancel").on_press(Message::CancelReceiverAccess),
+            ].spacing(8);
+        } else {
+            let enabled = *access != KeyboardAccess::Pending && input.editing_allowed();
+            items = items
+                .push(
+                    button("Set up keyboard access")
+                        .width(Fill)
+                        .on_press_maybe(enabled.then_some(Message::EnableKeyboardAccess)),
+                )
+                .push(
+                    button("Receiver live updates…")
+                        .width(Fill)
+                        .on_press_maybe(enabled.then_some(Message::ReviewReceiverAccess)),
+                );
+            match access {
+                KeyboardAccess::Pending => {
+                    items = items.push(text("Waiting for Linux permission setup…").size(13))
+                }
+                KeyboardAccess::Finished(message) => items = items.push(text(message).size(13)),
+                _ => {}
             }
-            KeyboardAccess::Pending => "Waiting for Linux permission setup…",
-            KeyboardAccess::Finished(message) => message.as_str(),
-        };
-        return container(column![controls.wrap(), text(hint).size(13)].spacing(3))
-            .padding([4, 10])
-            .into();
+        }
     }
-    container(controls).padding([4, 10]).into()
+    container(items)
+        .padding(10)
+        .max_width(300)
+        .style(container::bordered_box)
+        .into()
 }
 
 fn transport_control<'a>(input: View<'a>, endpoint: &Endpoint) -> Element<'a, Message> {
@@ -502,7 +533,7 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
                     .right(if wide { 22 } else { 10 }),
             )
             .height(Length::Fixed(if wide { 68.0 } else { 40.0 }));
-        let mut footer = row![status(input), space::horizontal()]
+        let mut footer = row![status(input)]
             .spacing(8)
             .align_y(iced::Alignment::Center);
         if wide || portrait {
@@ -862,12 +893,28 @@ fn lighting_workspace<'a>(input: View<'a>) -> Element<'a, Message> {
         .into()
 }
 
-/// Reserve a stable status area, including when there is no message. Long
-/// diagnostics wrap and scroll here without moving the editor controls.
+/// Use the available footer width for a single line. The tooltip preserves
+/// the full diagnostic on small windows.
 fn status<'a>(input: View<'a>) -> Element<'a, Message> {
-    panels::vertical_scroll(input.style, text(notice(input).unwrap_or_default()))
-        .height(Fill)
-        .into()
+    let Some(message) = notice(input) else {
+        return space::horizontal().into();
+    };
+    let line = container(
+        text(message.split_whitespace().collect::<Vec<_>>().join(" "))
+            .size(14)
+            .wrapping(text::Wrapping::None),
+    )
+    .center_y(Fill)
+    .width(Fill)
+    .clip(true);
+    iced::widget::tooltip(
+        line,
+        container(text(message).size(14)).max_width(420),
+        iced::widget::tooltip::Position::Top,
+    )
+    .style(container::bordered_box)
+    .padding(6)
+    .into()
 }
 
 pub(crate) fn notice(input: View<'_>) -> Option<String> {

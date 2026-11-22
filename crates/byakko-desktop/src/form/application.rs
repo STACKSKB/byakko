@@ -25,6 +25,8 @@ pub enum Message {
     Revert,
     Poll(Instant),
     Scan,
+    ToggleMenu,
+    DismissMenu,
     RefreshTransports,
     #[cfg(target_os = "linux")]
     EnableKeyboardAccess,

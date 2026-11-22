@@ -1,6 +1,6 @@
 # Linux source-checkout setup (pre-alpha)
 
-In the native desktop app, click **Set up keyboard access** in the connection controls.
+In the native desktop app, open the gear menu at the top right and choose **Set up keyboard access**.
 Approve the system prompt. Byakko retries an initial read when the selected keyboard is idle.
 Use **Read / reconnect** to retry manually. **Find connections** refreshes the device list.
 A foreground terminal uses sudo. GUI launches, redirected standard input, and background terminal jobs use the graphical polkit agent. If the desktop has no running polkit authentication
@@ -12,7 +12,7 @@ change event for attached matching configuration nodes. It requires udev,
 active-seat uaccess support and GNU core utilities including sha256sum. Both wired
 USB (3151:4015) and receiver (3151:4011) configuration interfaces qualify.
 The default setup leaves the notification and typing interfaces unchanged.
-For automatic updates on the observed 3151:4011 receiver, choose **Receiver live updates…**,
+For automatic updates on the observed 3151:4011 receiver, open the gear menu and choose **Receiver live updates…**,
 review the input access it grants, then choose **Allow receiver access**. The additional
 rule matches USB interface 1 and its exact observed report descriptor. It grants the
 active seat user hidraw access to the whole interface, including keyboard and pointer

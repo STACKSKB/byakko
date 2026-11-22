@@ -308,7 +308,7 @@ fn inactive_header_labels_draw_light_glyphs_on_black() {
             "Settings",
             "Diagnostics",
             "Tester",
-            "Appearance",
+            "⚙",
         ] {
             let rect = texts.0.iter().find(|(name, _)| name == label).unwrap().1;
             let mut light = 0;
