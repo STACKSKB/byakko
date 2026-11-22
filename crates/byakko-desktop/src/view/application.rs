@@ -98,7 +98,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         let awaiting_choice = input.selected_transport.is_none()
             && matches!(input.presence, Availability::Choices { .. });
         let reconnect = nav_button(
-            "Read / reconnect",
+            text("Read / reconnect").size(14),
             true,
             (input.idle()
                 && !input.has_unsaved_changes
@@ -106,14 +106,10 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
                 && !awaiting_choice)
                 .then_some(Message::Read),
         );
-        let gear = iced::widget::tooltip(
-            nav_button(
-                "⚙",
-                input.menu_open,
-                input.editing_allowed().then_some(Message::ToggleMenu),
-            ),
-            "Application menu",
-            iced::widget::tooltip::Position::Bottom,
+        let gear = nav_button(
+            text("⚙").size(26),
+            input.menu_open,
+            input.editing_allowed().then_some(Message::ToggleMenu),
         );
         let header: Element<'a, Message> = if wide {
             row![brand, reconnect, navigation, gear]
@@ -253,7 +249,7 @@ fn navigation<'a>(input: View<'a>) -> iced::widget::Row<'a, Message> {
     ] {
         if available {
             navigation = navigation.push(nav_button(
-                label,
+                text(label).size(14),
                 input.page == page || (page == Page::Lighting && input.page == Page::Picture),
                 input.editing_allowed().then_some(Message::Page(page)),
             ));
@@ -352,13 +348,13 @@ fn transport_control<'a>(input: View<'a>, endpoint: &Endpoint) -> Element<'a, Me
 }
 
 fn nav_button(
-    label: &'static str,
+    label: iced::widget::Text<'static>,
     active: bool,
     message: Option<Message>,
 ) -> Element<'static, Message> {
     use iced::widget::button::Status;
-    button(text(label).size(14))
-        .padding([8, 12])
+    button(label.height(34).align_y(iced::Alignment::Center))
+        .padding([0, 12])
         .on_press_maybe(message)
         .style(move |_theme, status| {
             let enabled = status != Status::Disabled;
