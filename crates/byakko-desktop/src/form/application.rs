@@ -26,6 +26,10 @@ pub enum Message {
     Poll(Instant),
     Scan,
     RefreshTransports,
+    #[cfg(target_os = "linux")]
+    EnableKeyboardAccess,
+    #[cfg(target_os = "linux")]
+    KeyboardAccessFinished(Result<String, String>),
     ChooseTransport(String),
     ConfirmTransportSwitch,
     CancelTransportSwitch,
@@ -34,6 +38,15 @@ pub enum Message {
     Close,
     Discard,
     KeepEditing,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Default, Debug, PartialEq)]
+pub enum KeyboardAccess {
+    #[default]
+    Idle,
+    Pending,
+    Finished(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

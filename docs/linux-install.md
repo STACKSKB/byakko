@@ -1,5 +1,22 @@
 # Linux source-checkout setup (pre-alpha)
 
+In the native desktop app, click **Set up keyboard access** in the connection controls.
+Approve the system prompt, then use **Find connections** or reconnect the keyboard.
+A graphical session uses polkit. If the desktop has no running polkit authentication
+agent, launch Byakko as your ordinary user from a terminal and click the button
+there to authenticate through sudo. Run the configurator without `--demo` for this action.
+
+This installs `/etc/udev/rules.d/71-byakko-seat.rules` and two reference
+descriptors under `/etc/udev/byakko/`, reloads udev rules, and requests a
+change event for attached matching configuration nodes. It requires udev,
+active-seat uaccess support and GNU core utilities including cmp. Both wired
+USB (3151:4015) and receiver (3151:4011) configuration interfaces qualify.
+The notification and typing interfaces receive no additional access.
+To remove this setup, remove the named rule and the config-a and config-b
+files in that directory as administrator, reload udev rules, and reconnect.
+
+### Manual installation for wired USB
+
 Byakko uses native hidraw access. The application runs as your desktop user;
 installing the device permission rule requires administrator access once.
 No background driver service, browser authorization, or JavaScript is involved.

@@ -52,6 +52,8 @@ struct App {
     page: Page,
     link: Link,
     transport_switch: Option<String>,
+    #[cfg(target_os = "linux")]
+    keyboard_access: crate::form::application::KeyboardAccess,
     closing: Closing,
     notice: String,
     style: UiStyle,
@@ -128,6 +130,8 @@ impl App {
             session,
             link: Link::new(attach),
             transport_switch: None,
+            #[cfg(target_os = "linux")]
+            keyboard_access: Default::default(),
             closing: Closing::Open,
             notice: String::new(),
             style: UiStyle::DEFAULT,
@@ -144,6 +148,13 @@ impl App {
     }
 
     fn reduce(&mut self, message: Message) -> Task<Message> {
+        #[cfg(target_os = "linux")]
+        if let Message::KeyboardAccessFinished(result) = message {
+            self.keyboard_access = crate::form::application::KeyboardAccess::Finished(
+                result.unwrap_or_else(|error| format!("Keyboard access setup: {error}")),
+            );
+            return Task::none();
+        }
         if let Message::AppearanceSaved(result) = message {
             let failed = result.is_err();
             self.appearance.accept(result);
@@ -275,6 +286,30 @@ impl App {
         }
         match message {
             Message::Appearance(_) | Message::AppearanceSaved(_) => unreachable!(),
+            #[cfg(target_os = "linux")]
+            Message::EnableKeyboardAccess => {
+                use crate::form::application::KeyboardAccess;
+                if self.config.data_directory.is_none()
+                    || self.keyboard_access == KeyboardAccess::Pending
+                {
+                    return Task::none();
+                }
+                self.keyboard_access = KeyboardAccess::Pending;
+                let (sender, receiver) = iced::futures::channel::oneshot::channel();
+                std::thread::spawn(move || {
+                    let _ = sender.send(crate::linux_permissions::enable());
+                });
+                return Task::perform(
+                    async move {
+                        receiver
+                            .await
+                            .unwrap_or_else(|_| Err("The setup worker stopped.".into()))
+                    },
+                    Message::KeyboardAccessFinished,
+                );
+            }
+            #[cfg(target_os = "linux")]
+            Message::KeyboardAccessFinished(_) => unreachable!(),
             Message::Host(message) => return self.update_host(message),
             Message::Files(message) => return self.update_files(message),
             Message::FileComplete(completion) => return self.complete_file(completion),
@@ -1666,6 +1701,12 @@ impl App {
                 monitor_transports: self.link.monitoring(),
                 transport_scan_pending: self.link.scan_requested(),
                 transport_opening: self.link.attaching(),
+                #[cfg(target_os = "linux")]
+                keyboard_access: self
+                    .config
+                    .data_directory
+                    .as_ref()
+                    .map(|_| &self.keyboard_access),
                 can_choose_transport: self.can_choose_transport(),
                 confirm_transport_switch: self.transport_switch.is_some(),
                 keys: &self.keys,

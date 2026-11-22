@@ -4,6 +4,8 @@ pub mod config;
 mod controller;
 mod form;
 mod input;
+#[cfg(target_os = "linux")]
+mod linux_permissions;
 mod view;
 pub mod widget;
 

@@ -1,0 +1,9 @@
+# Byakko Nia87 configuration collection. Applied before seat ACL processing.
+ACTION!="add|change", GOTO="byakko_seat_end"
+SUBSYSTEM!="hidraw", GOTO="byakko_seat_end"
+ATTRS{idVendor}=="3151", ATTRS{idProduct}=="4011|4015", GOTO="byakko_seat_config"
+GOTO="byakko_seat_end"
+LABEL="byakko_seat_config"
+PROGRAM=="/usr/bin/cmp /sys/class/hidraw/%k/device/report_descriptor /etc/udev/byakko/config-a", TAG+="uaccess"
+PROGRAM=="/usr/bin/cmp /sys/class/hidraw/%k/device/report_descriptor /etc/udev/byakko/config-b", TAG+="uaccess"
+LABEL="byakko_seat_end"

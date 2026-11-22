@@ -2413,3 +2413,21 @@ fn device_work_cancels_key_capture_instead_of_rearming_it_after_completion() {
     assert!(!app.session.keymap().dirty());
 }
 mod tester;
+
+#[cfg(target_os = "linux")]
+#[test]
+fn keyboard_access_is_disabled_in_demo_and_reports_cancel_during_modal() {
+    use crate::form::application::KeyboardAccess;
+    let (mut app, _) = app(false);
+    let _ = app.update(Message::EnableKeyboardAccess);
+    assert_eq!(app.keyboard_access, KeyboardAccess::Idle);
+
+    app.keyboard_access = KeyboardAccess::Pending;
+    app.transport_switch = Some("receiver".into());
+    let _ = app.update(Message::KeyboardAccessFinished(Err("Cancelled".into())));
+    assert_eq!(
+        app.keyboard_access,
+        KeyboardAccess::Finished("Keyboard access setup: Cancelled".into())
+    );
+    assert_eq!(app.transport_switch.as_deref(), Some("receiver"));
+}

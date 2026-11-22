@@ -44,6 +44,8 @@ pub struct View<'a> {
     pub monitor_transports: bool,
     pub transport_scan_pending: bool,
     pub transport_opening: bool,
+    #[cfg(target_os = "linux")]
+    pub keyboard_access: Option<&'a crate::form::application::KeyboardAccess>,
     pub can_choose_transport: bool,
     pub confirm_transport_switch: bool,
     pub keys: &'a keymap::Form,
@@ -257,6 +259,26 @@ fn transport_controls(input: View<'_>) -> Element<'_, Message> {
             ),
         )
     };
+    #[cfg(target_os = "linux")]
+    if let Some(access) = input.keyboard_access {
+        use crate::form::application::KeyboardAccess;
+        let controls = controls.push(
+            button("Set up keyboard access").on_press_maybe(
+                (*access != KeyboardAccess::Pending && input.editing_allowed())
+                    .then_some(Message::EnableKeyboardAccess),
+            ),
+        );
+        let hint = match access {
+            KeyboardAccess::Idle => {
+                "Allow this desktop session to configure the Nia87. Linux may ask for administrator approval."
+            }
+            KeyboardAccess::Pending => "Waiting for Linux permission setup…",
+            KeyboardAccess::Finished(message) => message.as_str(),
+        };
+        return container(column![controls, text(hint).size(13)].spacing(3))
+            .padding([4, 10])
+            .into();
+    }
     container(controls).padding([4, 10]).into()
 }
 
