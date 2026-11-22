@@ -206,7 +206,12 @@ fn board_view<'a, Message: Clone + 'a>(
                 .unwrap_or(physical.face);
             let ink = super::controls::readable(physical.ink, face);
             let skirt = mix(face, Color::BLACK, 0.19);
-            let label_size = if label.chars().count() > 3 && key.width <= 1.0 {
+            let label_size = if unit < 23.0 {
+                // Use a single line inside the narrow face. Full physical names
+                // and assigned actions remain available through the tooltip.
+                let chars = label.chars().count().max(1) as f32;
+                ((width - 4.0) / (chars * 0.75)).clamp(5.0, 8.0)
+            } else if label.chars().count() > 3 && key.width <= 1.0 {
                 if unit < 30.0 { 6.0 } else { 8.0 }
             } else if unit < 28.0 {
                 7.0
@@ -241,6 +246,7 @@ fn board_view<'a, Message: Clone + 'a>(
                     },
                     ..Default::default()
                 })
+                .clip(unit < 23.0)
                 .id(iced::widget::Id::from(format!("cap-{}", key.id))),
             )
             .width(width)
@@ -407,6 +413,23 @@ fn physical_cap(label: &str) -> PhysicalCap {
 }
 
 fn physical_legend(label: &str, unit: f32) -> String {
+    if unit < 23.0 {
+        if label.chars().count() == 1 {
+            return label.to_uppercase();
+        }
+        let compact = match label {
+            "Home" => Some("HM"),
+            "End" => Some("EN"),
+            "Insert" => Some("IN"),
+            "Delete" => Some("DL"),
+            "PgUp" => Some("P↑"),
+            "PgDn" => Some("P↓"),
+            _ => None,
+        };
+        if let Some(compact) = compact {
+            return compact.into();
+        }
+    }
     if unit < 38.0 {
         let compact = match label {
             "Backspace" => Some("BKSP"),

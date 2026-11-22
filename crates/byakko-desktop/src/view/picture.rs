@@ -152,7 +152,7 @@ pub fn view<'a>(
                     .push(swatch::<Message>(shown, 18.0, 18.0));
             }
         }
-        content = content.push(selection);
+        content = content.push(selection.wrap());
     } else {
         content = content.push(text("Select a key"));
     }
@@ -172,7 +172,8 @@ pub fn view<'a>(
                 editable.then_some(Message::Mode(Mode::Paint))
             ),
         ]
-        .spacing(style.spacing.s),
+        .spacing(style.spacing.s)
+        .wrap(),
     );
     if let Some(rgb) = form.color(editor) {
         content = content.push(color_picker::view(
@@ -188,19 +189,22 @@ pub fn view<'a>(
 
     if editor.capabilities().backend_id == "nia87" {
         content = content.push(text("Looks").size(style.type_scale.section_title));
-        for pair in ALL.chunks(2) {
-            let mut tiles = row![].spacing(style.spacing.s).width(Fill);
-            for look in pair {
-                tiles = tiles.push(look_tile(
-                    *look,
-                    form.color(editor).unwrap_or([255, 32, 96]),
-                    form.preview_look() == Some(*look),
-                    can_preview,
-                    style,
-                ));
-            }
-            content = content.push(tiles);
-        }
+        let brush = form.color(editor).unwrap_or([255, 32, 96]);
+        let tiles = ALL.iter().map(|look| {
+            look_tile(
+                *look,
+                brush,
+                form.preview_look() == Some(*look),
+                can_preview,
+                style,
+            )
+        });
+        content = content.push(
+            iced::widget::grid(tiles)
+                .fluid(328)
+                .height(Length::Shrink)
+                .spacing(style.spacing.s),
+        );
         if form.painted_count() > 0 {
             content = content.push(
                 checkbox(form.replacing_painted())
@@ -220,7 +224,8 @@ pub fn view<'a>(
                             .then_some(Message::ApplyPreview)
                     ),
                 ]
-                .spacing(style.spacing.s),
+                .spacing(style.spacing.s)
+                .wrap(),
             );
             content = content.push(text(if applying {
                 "Applying look…".to_owned()

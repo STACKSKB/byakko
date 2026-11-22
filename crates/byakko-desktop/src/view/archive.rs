@@ -3,12 +3,12 @@ use crate::widget::controls::text_input;
 use crate::widget::focus_button::button;
 use crate::{
     form::files::{Form, Message, Operation},
-    widget::panels::UiStyle,
+    widget::panels::{self, UiStyle},
 };
 use byakko_core::library::archive::{Capture, CaptureProblem, CaptureStatus};
 use iced::{
     Element,
-    widget::{column, row, text},
+    widget::{column, text},
 };
 
 pub fn view<'a>(
@@ -22,7 +22,7 @@ pub fn view<'a>(
         text("Diagnostic capture").size(style.type_scale.section_title),
         text("Capture the keyboard's stored configuration for diagnostics. Staged edits are not included."),
         button("Capture current").on_press_maybe((idle && connected).then_some(Message::Capture)),
-        row![
+        column![
             text_input("New capture file path", &form.archive_path).on_input_maybe(idle.then_some(Message::ArchivePath)),
             button("Save captured file").on_press_maybe((idle && capture.captured().is_some()).then_some(Message::Begin(Operation::ExportArchive))),
         ].spacing(style.spacing.s),
@@ -42,5 +42,7 @@ pub fn view<'a>(
             "The latest capture failed: {reason}. Any earlier capture is retained."
         )));
     }
-    content.into()
+    panels::vertical_scroll(style, content)
+        .height(iced::Fill)
+        .into()
 }

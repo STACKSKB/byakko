@@ -264,38 +264,40 @@ fn compact_nine_event_timeline_scrolls_under_visible_save_action() {
         app.session.macros().unwrap().draft().unwrap().events.len(),
         9
     );
-    let mut element = app.view();
-    let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
-    let mut tree = Tree::new(&element);
-    let viewport = Rectangle::with_size(Size::new(960.0, 540.0));
-    let node = element.as_widget_mut().layout(
-        &mut tree,
-        &renderer,
-        &layout::Limits::new(Size::ZERO, viewport.size()),
-    );
-    let mut observed = TimelineBounds::default();
-    element
-        .as_widget_mut()
-        .operate(&mut tree, Layout::new(&node), &renderer, &mut observed);
-    let scroll = observed
-        .viewport
-        .expect("macro timeline is independently scrollable");
-    let content = observed
-        .content
-        .expect("macro timeline contains the event list");
-    let save = observed.save.expect("save action remains rendered");
-    assert!(
-        content.height > scroll.height,
-        "long sequence must scroll: {observed:?}"
-    );
-    assert!(
-        scroll.height > 200.0,
-        "timeline needs usable height: {observed:?}"
-    );
-    assert!(
-        save.y >= 0.0 && save.y + save.height <= 540.0,
-        "save must remain in view: {observed:?}"
-    );
+    for (width, height, min_scroll_height) in [(960.0, 540.0, 200.0), (576.0, 420.0, 72.0)] {
+        let mut element = app.view();
+        let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
+        let mut tree = Tree::new(&element);
+        let viewport = Rectangle::with_size(Size::new(width, height));
+        let node = element.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, viewport.size()),
+        );
+        let mut observed = TimelineBounds::default();
+        element
+            .as_widget_mut()
+            .operate(&mut tree, Layout::new(&node), &renderer, &mut observed);
+        let scroll = observed
+            .viewport
+            .expect("macro timeline is independently scrollable");
+        let content = observed
+            .content
+            .expect("macro timeline contains the event list");
+        let save = observed.save.expect("save action remains rendered");
+        assert!(
+            content.height > scroll.height,
+            "long sequence must scroll: {observed:?}"
+        );
+        assert!(
+            scroll.height >= min_scroll_height,
+            "timeline needs usable height: {observed:?}"
+        );
+        assert!(
+            save.y >= 0.0 && save.y + save.height <= height,
+            "save must remain in view: {observed:?}"
+        );
+    }
 }
 
 #[test]
@@ -310,4 +312,38 @@ fn recording_view_offers_stop_and_no_save_action() {
             .any(|message| matches!(message, Message::Record(recording::Message::Stop)))
     );
     assert!(click_text(&app, "Save macro").is_empty());
+}
+
+#[test]
+fn event_composer_and_file_actions_keep_readable_labels_at_narrow_widths() {
+    let (mut app, _) = ready_to_record();
+    let _ = app.update(Message::Page(Page::Macros));
+    let _ = app.update(Message::Macros(macros::Message::NewEvent));
+    let _ = app.update(Message::Files(files::Message::Toggle));
+    for width in [320.0, 390.0, 850.0, 960.0, 1360.0] {
+        let texts = super::notifications::rendered_bounds(&app, width);
+        for label in [
+            "Down / active",
+            "Wait after (ms)",
+            "Fixed timing",
+            "Cancel",
+            "Import draft",
+            "Export new file",
+        ] {
+            let bounds = texts
+                .0
+                .iter()
+                .find(|(value, _)| value == label)
+                .unwrap_or_else(|| panic!("{label} missing at {width}px"))
+                .1;
+            assert!(
+                bounds.width > 25.0 && bounds.height <= 24.0,
+                "{label} at {width}px: {bounds:?}"
+            );
+            assert!(
+                bounds.x >= 0.0 && bounds.x + bounds.width <= width + 1.0,
+                "{label} at {width}px: {bounds:?}"
+            );
+        }
+    }
 }

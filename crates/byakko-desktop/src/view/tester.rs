@@ -54,11 +54,11 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             form.test.total_repeats()
         ))
         .size(12),
-        space::horizontal(),
         text(last).size(12),
     ]
     .spacing(style.spacing.m)
-    .align_y(iced::Alignment::Center);
+    .align_y(iced::Alignment::Center)
+    .wrap();
     let mut body = column![controls(form, style), counters].spacing(style.spacing.s);
     if !form.notice.is_empty() {
         body = body.push(text(&form.notice).size(12));
@@ -187,7 +187,7 @@ fn controls<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             .spacing(style.spacing.s)
             .align_y(iced::Alignment::Center)
             .into()
-        } else {
+        } else if size.width >= 580.0 {
             column![
                 row![input_label, source, refresh, start, reset, status]
                     .spacing(style.spacing.s)
@@ -195,6 +195,22 @@ fn controls<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
                 row![layout_label, standard, board_size, legends]
                     .spacing(style.spacing.s)
                     .align_y(iced::Alignment::Center),
+            ]
+            .spacing(style.spacing.s)
+            .into()
+        } else {
+            column![
+                row![input_label, source]
+                    .spacing(style.spacing.s)
+                    .align_y(iced::Alignment::Center),
+                row![refresh, start, reset, status]
+                    .spacing(style.spacing.s)
+                    .align_y(iced::Alignment::Center)
+                    .wrap(),
+                row![layout_label, standard, board_size, legends]
+                    .spacing(style.spacing.s)
+                    .align_y(iced::Alignment::Center)
+                    .wrap(),
             ]
             .spacing(style.spacing.s)
             .into()
@@ -253,27 +269,31 @@ fn chatter<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             form.test.candidate_count()
         ))
         .size(style.type_scale.section_title),
-        space::horizontal(),
-        text("Threshold").size(12),
-        focus_control::select(
-            pick_list([5_u64, 10, 20, 30, 50], Some(threshold), |ms| {
-                Message::Threshold(ms * 1_000)
-            })
-            .on_open(Message::Pause)
-            .text_size(12),
-            [5_u64, 10, 20, 30, 50]
-                .into_iter()
-                .map(|ms| Message::Threshold(ms * 1_000))
-                .collect(),
-            [5_u64, 10, 20, 30, 50]
-                .iter()
-                .position(|choice| *choice == threshold),
-            true,
-        ),
-        text("ms").size(12),
+        row![
+            text("Threshold").size(12),
+            focus_control::select(
+                pick_list([5_u64, 10, 20, 30, 50], Some(threshold), |ms| {
+                    Message::Threshold(ms * 1_000)
+                })
+                .on_open(Message::Pause)
+                .text_size(12),
+                [5_u64, 10, 20, 30, 50]
+                    .into_iter()
+                    .map(|ms| Message::Threshold(ms * 1_000))
+                    .collect(),
+                [5_u64, 10, 20, 30, 50]
+                    .iter()
+                    .position(|choice| *choice == threshold),
+                true,
+            ),
+            text("ms").size(12)
+        ]
+        .spacing(style.spacing.xs)
+        .align_y(iced::Alignment::Center),
     ]
     .spacing(style.spacing.s)
-    .align_y(iced::Alignment::Center);
+    .align_y(iced::Alignment::Center)
+    .wrap();
     let entries: Element<'_, Message> = if form.test.recent_candidates().is_empty() {
         text("No candidates").size(12).into()
     } else {

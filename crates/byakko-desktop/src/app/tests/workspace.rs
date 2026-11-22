@@ -131,12 +131,17 @@ struct Bounds {
     caps: BTreeMap<String, Rectangle>,
     text: Vec<String>,
     timeline: Option<(Rectangle, Rectangle, f32)>,
+    inspector: Option<Rectangle>,
+    action_list: Option<Rectangle>,
 }
 impl Operation for Bounds {
     fn traverse(&mut self, visit: &mut dyn FnMut(&mut dyn Operation)) {
         visit(self);
     }
     fn container(&mut self, id: Option<&Id>, rect: Rectangle) {
+        if id == Some(&Id::new("workspace-inspector")) {
+            self.inspector = Some(rect);
+        }
         if let Some(key) = id.and_then(|id| self.cap_ids.get(id)) {
             assert!(
                 self.caps.insert(key.clone(), rect).is_none(),
@@ -152,6 +157,9 @@ impl Operation for Bounds {
         translation: iced::Vector,
         _: &mut dyn iced::advanced::widget::operation::Scrollable,
     ) {
+        if id == Some(&Id::new("action-catalog")) {
+            self.action_list = Some(bounds);
+        }
         if id == Some(&Id::new("macro-timeline")) {
             self.timeline = Some((bounds, content, translation.y));
         }
@@ -197,6 +205,37 @@ fn frame(app: &App, width: u32, height: u32, name: &str) -> BTreeMap<String, Rec
         .as_widget_mut()
         .operate(&mut tree, layout, &painter, &mut probe);
     assert_eq!(probe.caps.len(), 87, "{width}x{height} {name}");
+    let inspector = probe.inspector.expect("visible feature inspector");
+    if size.width >= app.style.key_sidebar_breakpoint {
+        assert!(
+            inspector.width >= 511.0,
+            "{width}x{height} inspector: {inspector:?}"
+        );
+    } else {
+        assert!(inspector.width >= size.width - 1.0);
+        assert!(
+            inspector.height >= (size.height - 76.0) * 0.56,
+            "{width}x{height} inspector: {inspector:?}"
+        );
+    }
+    if name == "keys" {
+        let list = probe.action_list.expect("action list viewport");
+        assert!(
+            list.width >= 120.0 && list.height >= 40.0,
+            "{width}x{height} action list: {list:?}"
+        );
+    }
+    let board_bounds = probe
+        .caps
+        .values()
+        .copied()
+        .reduce(|a, b| a.union(&b))
+        .unwrap();
+    let min_board_width = 225.0;
+    assert!(
+        board_bounds.width >= min_board_width,
+        "{width}x{height} board: {board_bounds:?}"
+    );
     for (key, r) in &probe.caps {
         assert!(
             r.width > 0.0
@@ -278,7 +317,17 @@ fn frame(app: &App, width: u32, height: u32, name: &str) -> BTreeMap<String, Rec
 
 #[test]
 fn nia87_stage_stays_fixed_across_workflows() {
-    for (w, h) in [(1440, 900), (1040, 676), (960, 540), (800, 600), (390, 844)] {
+    for (w, h) in [
+        (1440, 900),
+        (1040, 676),
+        (960, 540),
+        (850, 500),
+        (800, 480),
+        (576, 420),
+        (800, 600),
+        (360, 480),
+        (390, 844),
+    ] {
         let mut app = fixture();
         let base = frame(&app, w, h, "keys");
         let target = app
@@ -325,3 +374,5 @@ fn nia87_stage_stays_fixed_across_workflows() {
         }
     }
 }
+
+mod visual_audit;

@@ -47,7 +47,7 @@ pub fn view<'a>(
             })
             .on_press_maybe(idle.then_some(Message::Read)),
         );
-        content = content.push(actions);
+        content = content.push(actions.wrap());
     }
     if let Some(values) = editor.draft() {
         let mut grid = column![].spacing(style.spacing.xs).width(Fill);
@@ -59,11 +59,12 @@ pub fn view<'a>(
             grid = grid.push(
                 container(
                     row![
-                        text(&field.label).width(style.fields.regular),
+                        text(&field.label).width(184),
                         control(style, field, value, can_edit)
                     ]
                     .spacing(style.spacing.s)
-                    .align_y(Alignment::Center),
+                    .align_y(Alignment::Center)
+                    .wrap(),
                 )
                 .padding(style.spacing.xs as u16)
                 .width(Fill),
@@ -122,7 +123,7 @@ fn control<'a>(
             } else {
                 format!("{current} {unit}")
             };
-            let mut controls = row![text(shown).width(style.fields.compact)]
+            let mut controls = row![text(shown).width(82)]
                 .spacing(style.spacing.s)
                 .align_y(Alignment::Center);
             if editable {
@@ -146,7 +147,7 @@ fn control<'a>(
                     })
                 })
                 .step(u32::from(*step))
-                .width(style.fields.regular);
+                .width(180);
                 controls = controls.push(focus_control::number(
                     slider,
                     position,
@@ -166,7 +167,7 @@ fn control<'a>(
                     },
                 ));
             }
-            controls.into()
+            controls.wrap().into()
         }
         _ => text("Setting value does not match its capability").into(),
     }

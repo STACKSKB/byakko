@@ -60,7 +60,8 @@ pub fn view<'a>(
                 }
             }),
         ]
-        .spacing(style.spacing.s),
+        .spacing(style.spacing.s)
+        .wrap(),
     ]
     .spacing(style.spacing.s);
 
@@ -135,7 +136,8 @@ fn screen<'a>(form: &'a Form, editable: bool, style: &'a UiStyle) -> Element<'a,
                 button("Sample point")
                     .on_press(Message::Sampling(ScreenSampling::Point { x: 500, y: 500 })),
             ]
-            .spacing(style.spacing.s),
+            .spacing(style.spacing.s)
+            .wrap(),
         );
     } else {
         controls = controls.push(text(

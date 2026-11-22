@@ -99,6 +99,20 @@ fn rendered_tester_controls_emit_real_app_messages_and_layouts_fit() {
             byakko_core::projection::tester::Size::Tkl,
         ),
         (
+            "tester-portrait",
+            360,
+            900,
+            byakko_core::projection::tester::Standard::Ansi,
+            byakko_core::projection::tester::Size::Tkl,
+        ),
+        (
+            "tester-small-inspector",
+            1050,
+            740,
+            byakko_core::projection::tester::Standard::Ansi,
+            byakko_core::projection::tester::Size::Tkl,
+        ),
+        (
             "tester-compact-jis",
             1360,
             800,

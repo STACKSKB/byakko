@@ -50,7 +50,7 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
         pick_list(modes, Some(ModeChoice(form.draft.mode)), |choice| {
             Message::Mode(choice.0)
         })
-        .width(300),
+        .width(Fill),
         modes.iter().map(|choice| Message::Mode(choice.0)).collect(),
         modes.iter().position(|choice| choice.0 == form.draft.mode),
         !busy,
@@ -61,7 +61,7 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
             Some(PaletteChoice(form.draft.palette)),
             |choice| Message::Palette(choice.0),
         )
-        .width(300),
+        .width(Fill),
         palettes
             .iter()
             .map(|choice| Message::Palette(choice.0))
@@ -118,16 +118,15 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     }
     let actions = row![
         button("Reset colours").on_press_maybe((!busy).then_some(Message::Reset)),
-        space::horizontal(),
         button("Cancel").on_press_maybe((!busy).then_some(Message::Cancel)),
         button(if busy { "Saving…" } else { "Apply" })
             .on_press_maybe((!busy).then_some(Message::Apply)),
     ]
     .spacing(style.spacing.s)
     .align_y(Alignment::Center)
-    .height(40);
+    .wrap();
 
-    container(
+    let dialog = container(
         column![
             crate::widget::panels::vertical_scroll(style, body)
                 .width(Fill)
@@ -138,9 +137,9 @@ pub fn view<'a>(form: &'a Form, style: &'a UiStyle) -> Element<'a, Message> {
     )
     .width(480)
     .max_height(600)
-    .padding(style.spacing.page_padding)
-    .style(container::bordered_box)
-    .into()
+    .padding(style.spacing.panel_padding)
+    .style(crate::widget::panels::floating_surface);
+    container(dialog).padding(style.spacing.s as u16).into()
 }
 
 #[cfg(test)]
@@ -170,61 +169,69 @@ mod tests {
     fn dialog_stays_bounded_and_exposes_theme_palette_and_colour_fields() {
         let mut form = Form::default();
         form.update(Message::Open);
-        let mut element = view(&form, &UiStyle::DEFAULT);
-        let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
-        let mut tree = Tree::new(&element);
-        let node = element.as_widget_mut().layout(
-            &mut tree,
-            &renderer,
-            &layout::Limits::new(Size::ZERO, Size::new(480.0, 320.0)),
-        );
-        let bounds = Layout::new(&node).bounds();
-        assert!(
-            bounds.width <= 480.0 && bounds.height <= 320.0,
-            "{bounds:?}"
-        );
-        let mut labels = Labels::default();
-        element
-            .as_widget_mut()
-            .operate(&mut tree, Layout::new(&node), &renderer, &mut labels);
-        for expected in ["Appearance", "Theme", "Colour palette", "Canvas", "Focus"] {
-            assert!(
-                labels.0.iter().any(|(value, _)| value == expected),
-                "{expected}: {:?}",
-                labels.0
-            );
-        }
-        let apply = labels
-            .0
-            .iter()
-            .find(|(value, _)| value == "Apply")
-            .unwrap()
-            .1;
-        assert!(
-            apply.y >= 0.0 && apply.y + apply.height <= 320.0,
-            "{apply:?}"
-        );
-        let cursor = mouse::Cursor::Available(Point::new(
-            apply.x + apply.width / 2.0,
-            apply.y + apply.height / 2.0,
-        ));
-        let viewport = Rectangle::with_size(Size::new(480.0, 320.0));
-        let mut messages = Vec::new();
-        for event in [
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
-        ] {
-            element.as_widget_mut().update(
+        for width in [320.0, 480.0] {
+            let mut element = view(&form, &UiStyle::DEFAULT);
+            let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
+            let mut tree = Tree::new(&element);
+            let node = element.as_widget_mut().layout(
                 &mut tree,
-                &event,
-                Layout::new(&node),
-                cursor,
                 &renderer,
-                &mut iced::advanced::clipboard::Null,
-                &mut iced::advanced::Shell::new(&mut messages),
-                &viewport,
+                &layout::Limits::new(Size::ZERO, Size::new(width, 320.0)),
             );
+            let bounds = Layout::new(&node).bounds();
+            assert!(
+                bounds.width <= width && bounds.height <= 320.0,
+                "{bounds:?}"
+            );
+            let mut labels = Labels::default();
+            element
+                .as_widget_mut()
+                .operate(&mut tree, Layout::new(&node), &renderer, &mut labels);
+            for expected in ["Appearance", "Theme", "Colour palette", "Canvas", "Focus"] {
+                assert!(
+                    labels.0.iter().any(|(value, _)| value == expected),
+                    "{expected}: {:?}",
+                    labels.0
+                );
+            }
+            for (label, rect) in &labels.0 {
+                assert!(
+                    rect.x >= 0.0 && rect.x + rect.width <= width,
+                    "{label}: {rect:?} at {width}"
+                );
+            }
+            let apply = labels
+                .0
+                .iter()
+                .find(|(value, _)| value == "Apply")
+                .unwrap()
+                .1;
+            assert!(
+                apply.y >= 0.0 && apply.y + apply.height <= 320.0,
+                "{apply:?}"
+            );
+            let cursor = mouse::Cursor::Available(Point::new(
+                apply.x + apply.width / 2.0,
+                apply.y + apply.height / 2.0,
+            ));
+            let viewport = Rectangle::with_size(Size::new(width, 320.0));
+            let mut messages = Vec::new();
+            for event in [
+                Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+            ] {
+                element.as_widget_mut().update(
+                    &mut tree,
+                    &event,
+                    Layout::new(&node),
+                    cursor,
+                    &renderer,
+                    &mut iced::advanced::clipboard::Null,
+                    &mut iced::advanced::Shell::new(&mut messages),
+                    &viewport,
+                );
+            }
+            assert!(matches!(messages.as_slice(), [Message::Apply]));
         }
-        assert!(matches!(messages.as_slice(), [Message::Apply]));
     }
 }

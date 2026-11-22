@@ -56,7 +56,8 @@ pub fn view<'a>(
                 .then_some(Message::Keys(keymap::Message::Pane(Pane::TypingPreset))),
         ),
     ]
-    .spacing(style.spacing.xs);
+    .spacing(style.spacing.xs)
+    .wrap();
     let mut toolbar = row![
         text(selected).size(style.type_scale.section_title),
         text(format!(" · {}", form.layer)).size(style.type_scale.body),
@@ -70,7 +71,7 @@ pub fn view<'a>(
             )
             .push(button("Revert").on_press_maybe(idle.then_some(Message::Revert)));
     }
-    let mut detail = column![toolbar, tabs].spacing(style.spacing.m);
+    let mut detail = column![toolbar.wrap(), tabs].spacing(style.spacing.m);
     if form.pane == Pane::Shortcut
         && let Some(caps) = &descriptor.shortcuts
     {

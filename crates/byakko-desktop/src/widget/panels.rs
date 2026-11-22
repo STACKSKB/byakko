@@ -4,6 +4,13 @@ use super::focus_button;
 use iced::widget::{button, column, container, scrollable, text};
 use iced::{Background, Color, Element, Fill, Length, Theme};
 
+/// Keep floating menus and dialogs distinct from the workspace in monochrome palettes.
+pub fn floating_surface(theme: &Theme) -> container::Style {
+    let mut panel = container::bordered_box(theme);
+    panel.border.color = theme.palette().text.scale_alpha(0.45);
+    panel
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Spacing {
     pub xs: u32,

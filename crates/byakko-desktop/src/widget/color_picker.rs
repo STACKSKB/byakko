@@ -67,7 +67,8 @@ pub(crate) fn view<Message: Clone + 'static>(
             .width(style.fields.compact),
         ]
         .spacing(style.spacing.s)
-        .width(Length::Shrink),
+        .width(Length::Shrink)
+        .wrap(),
     )
     .on_move(move |_| on_interaction(Interaction::Moved))
     .into()

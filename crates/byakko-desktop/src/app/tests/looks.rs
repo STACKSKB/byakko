@@ -209,3 +209,51 @@ fn failed_look_write_keeps_preview_and_does_not_auto_retry() {
         ["read-picture", "apply-picture"]
     );
 }
+
+#[test]
+fn looks_gallery_reflows_without_splitting_names_or_losing_tiles() {
+    use super::notifications::RenderedText;
+    use iced::advanced::{Layout, layout::Limits, widget::Tree};
+    let (app, _) = looks_app();
+    let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(16.0));
+    for width in [280.0, 354.0, 540.0, 880.0] {
+        let mut gallery = crate::view::picture::view(
+            &app.picture,
+            app.session.descriptor(),
+            app.session.picture().unwrap(),
+            true,
+            true,
+            &app.style,
+        );
+        let mut tree = Tree::new(&gallery);
+        let node = gallery.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &Limits::new(iced::Size::ZERO, iced::Size::new(width, 2000.0)),
+        );
+        let mut texts = RenderedText::default();
+        gallery
+            .as_widget_mut()
+            .operate(&mut tree, Layout::new(&node), &renderer, &mut texts);
+        let tiles: Vec<_> = byakko_devices::nia87::looks::ALL
+            .iter()
+            .map(|look| {
+                let (_, bounds) = texts
+                    .0
+                    .iter()
+                    .find(|(label, _)| label == look.name())
+                    .expect("advertised Look present in layout");
+                assert!(
+                    bounds.height < 24.0 && bounds.x + bounds.width <= width,
+                    "{width}: {look:?}: {bounds:?}"
+                );
+                bounds
+            })
+            .collect();
+        if width == 280.0 {
+            assert!(tiles[1].y >= tiles[0].y + tiles[0].height);
+        } else {
+            assert_eq!(tiles[0].y, tiles[1].y);
+        }
+    }
+}

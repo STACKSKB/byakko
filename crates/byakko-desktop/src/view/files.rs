@@ -23,7 +23,7 @@ pub fn name_controls<'a>(
         text("Name"),
         text_input("Macro name", form.name(editor.slot()))
             .on_input_maybe(editable.then_some(Message::Name))
-            .width(iced::Fill)
+            .width(style.fields.regular)
     ]
     .spacing(style.spacing.s);
     if names_available && form.labels_dirty() {
@@ -31,7 +31,7 @@ pub fn name_controls<'a>(
             (idle && form.labels_dirty()).then_some(Message::Begin(Operation::SaveLabels)),
         ));
     }
-    names.into()
+    names.align_y(iced::Alignment::Center).wrap().into()
 }
 
 pub fn macros<'a>(
@@ -53,9 +53,9 @@ pub fn macros<'a>(
     }
     column![
         toggle,
+        text_input("Path to macro JSON", &form.macro_path)
+            .on_input_maybe(idle.then_some(Message::MacroPath)),
         row![
-            text_input("Path to macro JSON", &form.macro_path)
-                .on_input_maybe(idle.then_some(Message::MacroPath)),
             button("Import draft").on_press_maybe(
                 (editable && editor.status() == &Status::Ready)
                     .then_some(Message::Begin(Operation::ImportMacro))
@@ -63,7 +63,8 @@ pub fn macros<'a>(
             button("Export new file")
                 .on_press_maybe(editable.then_some(Message::Begin(Operation::ExportMacro))),
         ]
-        .spacing(style.spacing.s),
+        .spacing(style.spacing.s)
+        .wrap(),
         text("Import replaces the selected draft. Export creates a new file. Names are local."),
     ]
     .spacing(style.spacing.s)

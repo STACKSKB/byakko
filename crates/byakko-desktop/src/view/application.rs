@@ -117,7 +117,7 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         );
         let header: Element<'a, Message> = if wide {
             row![brand, reconnect, navigation, gear]
-                .spacing(24)
+                .spacing(if size.width < 1050.0 { 8 } else { 24 })
                 .align_y(iced::Alignment::Center)
                 .height(Length::Fixed(60.0))
                 .padding(iced::Padding::default().left(22).right(22))
@@ -143,7 +143,14 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
         {
             content = content.push(controls);
         }
-        content.push(workspace(input, wide)).height(Fill).into()
+        content
+            .push(
+                responsive(move |available| workspace(input, wide, available))
+                    .width(Fill)
+                    .height(Fill),
+            )
+            .height(Fill)
+            .into()
     })
     .width(Fill)
     .height(Fill)
@@ -204,15 +211,18 @@ pub fn view<'a>(input: View<'a>) -> Element<'a, Message> {
                 button("Keep editing").on_press(keep),
                 button(label).on_press(discard)
             ]
-            .spacing(input.style.spacing.m),
+            .spacing(input.style.spacing.m)
+            .wrap(),
         ]
         .spacing(input.style.spacing.l),
     )
-    .padding(input.style.spacing.page_padding)
-    .style(container::bordered_box);
+    .max_width(480)
+    .padding(input.style.spacing.panel_padding)
+    .style(panels::floating_surface);
     layers
         .push(
             container(iced::widget::opaque(dialog))
+                .padding(input.style.spacing.s as u16)
                 .center_x(Fill)
                 .center_y(Fill),
         )
@@ -324,7 +334,7 @@ fn application_menu(input: View<'_>) -> Element<'_, Message> {
     container(items)
         .padding(10)
         .max_width(300)
-        .style(container::bordered_box)
+        .style(panels::floating_surface)
         .into()
 }
 
@@ -380,7 +390,20 @@ fn nav_button(
         .into()
 }
 
-fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
+fn workspace<'a>(input: View<'a>, wide: bool, size: iced::Size) -> Element<'a, Message> {
+    // In stacked layouts the board gives up vertical space first. Keep the
+    // inspector scroll areas usable when a short window also has a transport chooser.
+    let compact_stage_height = if size.width < 480.0 {
+        (size.height * 0.40).clamp(174.0, 237.0)
+    } else {
+        (size.height * 0.32).clamp(114.0, 237.0)
+    };
+    let inspector_height = if wide {
+        size.height
+    } else {
+        size.height - compact_stage_height
+    };
+
     let idle = input.idle();
     let detail: Element<'a, Message> = if input.page == Page::Macros {
         macro_workspace(input)
@@ -397,6 +420,7 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
             input.style,
         );
         if input.keys.pane == keymap::Pane::Remap {
+            let whole_pane_scroll = inspector_height < 340.0;
             let catalog = view::catalog::view(
                 &input.keys.catalog,
                 &input.session.descriptor().actions,
@@ -404,15 +428,33 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
                 editable && input.keys.can_assign(input.session.keymap()),
                 idle,
                 input.style,
+                whole_pane_scroll,
             )
             .map(Message::Keys);
-            column![
-                container(panels::vertical_scroll(input.style, assignment))
-                    .height(Length::Fixed(if wide { 150.0 } else { 120.0 })),
-                catalog,
-            ]
-            .height(Fill)
-            .into()
+            if whole_pane_scroll {
+                panels::vertical_scroll(
+                    input.style,
+                    column![assignment, catalog].spacing(input.style.spacing.m),
+                )
+                .id("action-catalog")
+                .on_scroll(|_| {
+                    Message::Keys(keymap::Message::Catalog(
+                        crate::form::catalog::Message::Scrolled,
+                    ))
+                })
+                .height(Fill)
+                .into()
+            } else {
+                column![
+                    container(
+                        panels::vertical_scroll(input.style, assignment).height(Length::Shrink)
+                    )
+                    .max_height((inspector_height * 0.3).clamp(64.0, 150.0)),
+                    catalog,
+                ]
+                .height(Fill)
+                .into()
+            }
         } else {
             panels::vertical_scroll(input.style, assignment)
                 .height(Fill)
@@ -449,7 +491,8 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         }
     };
     let inspector = container(detail)
-        .padding(16)
+        .id("workspace-inspector")
+        .padding(if wide { 16 } else { 8 })
         .width(Fill)
         .height(Fill)
         .style(|theme| container::Style {
@@ -460,16 +503,14 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         });
     if wide {
         row![
-            container(stage(input, true))
-                .width(iced::Length::FillPortion(3))
-                .height(Fill),
-            inspector.width(iced::Length::FillPortion(2)),
+            container(stage(input, true)).width(Fill).height(Fill),
+            inspector.width(Length::Fixed((size.width * 0.44).round().max(512.0))),
         ]
         .height(Fill)
         .into()
     } else {
         column![
-            container(stage(input, false)).height(Length::Fixed(237.0)),
+            container(stage(input, false)).height(Length::Fixed(compact_stage_height)),
             inspector,
         ]
         .height(Fill)
@@ -480,6 +521,7 @@ fn workspace<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
 fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
     responsive(move |size| {
         let portrait = !wide && size.width <= 650.0;
+        let spacious = wide && size.width >= 500.0;
         let picker = || -> Element<'a, Message> {
             if !matches!(input.page, Page::Keys | Page::Macros) {
                 return text("").into();
@@ -516,8 +558,43 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         } else {
             text("").into()
         };
+        if size.width < 480.0 && !wide && size.height < 200.0 {
+            let controls = row![
+                text(&input.session.descriptor().device_name).size(20),
+                space::horizontal(),
+                layers,
+                picker(),
+            ]
+            .height(34)
+            .align_y(iced::Alignment::Center)
+            .spacing(4);
+            return column![controls, board(input), container(status(input)).height(20)]
+                .padding([2, 6])
+                .width(Fill)
+                .height(Fill)
+                .into();
+        }
+        if !wide && size.height < 200.0 {
+            // On a short window, put controls beside the board. Stacking
+            // two control rows above and below it leaves only a sliver for keys.
+            let rail = column![
+                row![
+                    text(&input.session.descriptor().device_name).size(20),
+                    space::horizontal(),
+                    layers
+                ]
+                .align_y(iced::Alignment::Center),
+                picker(),
+                status(input),
+            ]
+            .spacing(4)
+            .padding(4)
+            .width(174)
+            .height(Fill);
+            return row![rail, board(input)].width(Fill).height(Fill).into();
+        }
         let mut header = row![
-            text(&input.session.descriptor().device_name).size(if wide { 32 } else { 22 }),
+            text(&input.session.descriptor().device_name).size(if spacious { 32 } else { 22 }),
             space::horizontal(),
         ]
         .spacing(8)
@@ -529,10 +606,10 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         let header = header
             .padding(
                 iced::Padding::default()
-                    .left(if wide { 22 } else { 10 })
-                    .right(if wide { 22 } else { 10 }),
+                    .left(if spacious { 22 } else { 10 })
+                    .right(if spacious { 22 } else { 10 }),
             )
-            .height(Length::Fixed(if wide { 68.0 } else { 40.0 }));
+            .height(Length::Fixed(if spacious { 68.0 } else { 40.0 }));
         let mut footer = row![status(input)]
             .spacing(8)
             .align_y(iced::Alignment::Center);
@@ -542,8 +619,8 @@ fn stage<'a>(input: View<'a>, wide: bool) -> Element<'a, Message> {
         let footer = footer
             .padding(
                 iced::Padding::default()
-                    .left(if wide { 22 } else { 10 })
-                    .right(if wide { 22 } else { 10 }),
+                    .left(if spacious { 22 } else { 10 })
+                    .right(if spacious { 22 } else { 10 }),
             )
             .height(Length::Fixed(if wide {
                 52.0

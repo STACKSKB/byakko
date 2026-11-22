@@ -418,14 +418,20 @@ pub fn view<'a, M: Clone + 'a>(
                 .spacing(style.spacing.s)
                 .into()
             };
-            column![
+            // Keep the complete editor reachable even when wrapped fields leave
+            // little vertical space. Only the save/cancel actions stay pinned.
+            let editor_body = column![
                 top,
-                panels::vertical_scroll(style, timeline)
-                    .id("macro-timeline")
-                    .height(Fill),
+                timeline,
                 container(target_area)
                     .padding(style.spacing.s as u16)
                     .width(Fill),
+            ]
+            .spacing(style.spacing.s);
+            column![
+                panels::vertical_scroll(style, editor_body)
+                    .id("macro-timeline")
+                    .height(Fill),
                 container(footer)
                     .padding(style.spacing.s as u16)
                     .width(Fill),
@@ -572,7 +578,7 @@ fn composer<'a>(
             Composer::Replace(index) => format!("Edit event {}", index + 1),
             _ => "New event".into(),
         }),
-        fields,
+        fields.wrap(),
         row![
             text("Wait after (ms)"),
             text_input("Wait", &form.delay)
@@ -588,7 +594,8 @@ fn composer<'a>(
                 .on_press_maybe(editable.then_some(Message::ToggleComposer))
                 .style(iced::widget::button::secondary),
         ]
-        .spacing(style.spacing.s),
+        .spacing(style.spacing.s)
+        .wrap(),
     ]
     .spacing(style.spacing.s);
     if let Some(Kind::Movement) = &form.kind
