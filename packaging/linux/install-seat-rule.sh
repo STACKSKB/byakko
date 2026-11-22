@@ -13,6 +13,12 @@ trap 'rm -f "$stage"' EXIT
 printf '%s\n' "$1" > "$stage"
 chmod 644 "$stage"
 mv -fT "$stage" "$rules/71-byakko-seat.rules"
+if test -n "${2:-}"; then
+    stage=$(mktemp "$rules/.byakko-events.XXXXXXXX")
+    printf '%s\n' "$2" > "$stage"
+    chmod 644 "$stage"
+    mv -fT "$stage" "$rules/71-byakko-receiver-events.rules"
+fi
 udevadm control --reload-rules
 # The reloaded rule checks each candidate's descriptor before granting access.
 for node in /sys/class/hidraw/hidraw*; do

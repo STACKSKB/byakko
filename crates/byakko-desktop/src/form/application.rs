@@ -29,6 +29,12 @@ pub enum Message {
     #[cfg(target_os = "linux")]
     EnableKeyboardAccess,
     #[cfg(target_os = "linux")]
+    ReviewReceiverAccess,
+    #[cfg(target_os = "linux")]
+    CancelReceiverAccess,
+    #[cfg(target_os = "linux")]
+    AllowReceiverAccess,
+    #[cfg(target_os = "linux")]
     KeyboardAccessFinished(Result<String, String>),
     ChooseTransport(String),
     ConfirmTransportSwitch,
@@ -45,6 +51,7 @@ pub enum Message {
 pub enum KeyboardAccess {
     #[default]
     Idle,
+    ConfirmReceiver,
     Pending,
     Finished(String),
 }

@@ -1,0 +1,8 @@
+# Optional active-seat access to the Nia87 receiver's mixed input interface.
+ACTION!="add|change", GOTO="byakko_receiver_events_end"
+SUBSYSTEM!="hidraw", GOTO="byakko_receiver_events_end"
+ATTRS{idVendor}=="3151", ATTRS{idProduct}=="4011", GOTO="byakko_receiver_events_interface"
+GOTO="byakko_receiver_events_end"
+LABEL="byakko_receiver_events_interface"
+ATTRS{bInterfaceNumber}=="01", PROGRAM=="/usr/bin/sha256sum /sys/class/hidraw/%k/device/report_descriptor", RESULT=="3cc697106805cc7be08443be8dae9f4eda2069d7b5c8352e03abdea7e5a98c74 *", TAG+="uaccess"
+LABEL="byakko_receiver_events_end"

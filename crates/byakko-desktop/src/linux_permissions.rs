@@ -4,7 +4,9 @@ use std::{path::Path, process::Command};
 const INSTALL: &str = include_str!("../../../packaging/linux/install-seat-rule.sh");
 const RULE: &str = include_str!("../../../packaging/linux/71-byakko-seat.rules");
 
-pub(crate) fn enable() -> Result<String, String> {
+const EVENTS: &str = include_str!("../../../packaging/linux/71-byakko-receiver-events.rules");
+
+pub(crate) fn enable(events: bool) -> Result<String, String> {
     // A job launched with & may inherit a tty but cannot read its password prompt.
     // SAFETY: these calls only query the foreground and current process groups.
     let terminal = unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) == libc::getpgrp() };
@@ -25,10 +27,13 @@ pub(crate) fn enable() -> Result<String, String> {
             INSTALL,
             "byakko-keyboard-access",
             RULE.trim_end(),
+            if events { EVENTS.trim_end() } else { "" },
         ])
         .status()
         .map_err(|e| format!("Could not start system authentication: {e}"))?;
-    if status.success() {
+    if status.success() && events {
+        Ok("Receiver live-update rule installed. Use Read / reconnect to restart the listener if needed.".into())
+    } else if status.success() {
         Ok(
             "Keyboard access rule installed. Use Read / reconnect if a read is still needed."
                 .into(),

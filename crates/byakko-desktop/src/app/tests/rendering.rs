@@ -293,3 +293,38 @@ fn hover_and_preview_motion_keep_retained_keys_in_sync_at_fractional_scale() {
         case
     );
 }
+
+#[test]
+fn inactive_header_labels_draw_light_glyphs_on_black() {
+    let mut app = keys_workspace();
+    for theme in [iced::Theme::Light, iced::Theme::Dark] {
+        app.style.theme = theme;
+        let mut preview = Preview::new(Size::new(1360, 900), 1.0);
+        preview.frame(&app, mouse::Cursor::Unavailable, "header", 0);
+        let texts = super::notifications::rendered_bounds(&app, 1360.0);
+        for label in [
+            "Macros",
+            "Lighting",
+            "Settings",
+            "Diagnostics",
+            "Tester",
+            "Appearance",
+        ] {
+            let rect = texts.0.iter().find(|(name, _)| name == label).unwrap().1;
+            let mut light = 0;
+            for y in rect.y.ceil() as u32..(rect.y + rect.height).floor() as u32 {
+                for x in rect.x.ceil() as u32..(rect.x + rect.width).floor() as u32 {
+                    let pixel = preview.retained.pixel(x, y).unwrap();
+                    if pixel.red().min(pixel.green()).min(pixel.blue()) > 100 {
+                        light += 1;
+                    }
+                }
+            }
+            assert!(
+                light > 10,
+                "{label} rendered {light} light pixels in {rect:?} on {:?}",
+                app.style.theme
+            );
+        }
+    }
+}

@@ -269,14 +269,28 @@ fn transport_controls(input: View<'_>) -> Element<'_, Message> {
                     .then_some(Message::EnableKeyboardAccess),
             ),
         );
+        if *access == KeyboardAccess::ConfirmReceiver {
+            return container(column![
+                text("Allow receiver live updates? Linux also gives programs running as your active desktop user access to key and pointer reports on this receiver interface. The permission persists after reconnecting.").size(14),
+                row![button("Allow receiver access").on_press(Message::AllowReceiverAccess),
+                     button("Cancel").on_press(Message::CancelReceiverAccess)].spacing(8)
+            ].spacing(4)).padding([4, 10]).into();
+        }
+        let controls = controls.push(
+            button("Receiver live updates…").on_press_maybe(
+                (*access != KeyboardAccess::Pending && input.editing_allowed())
+                    .then_some(Message::ReviewReceiverAccess),
+            ),
+        );
         let hint = match access {
+            KeyboardAccess::ConfirmReceiver => unreachable!(),
             KeyboardAccess::Idle => {
                 "Allow this desktop session to configure the Nia87. Linux may ask for administrator approval."
             }
             KeyboardAccess::Pending => "Waiting for Linux permission setup…",
             KeyboardAccess::Finished(message) => message.as_str(),
         };
-        return container(column![controls, text(hint).size(13)].spacing(3))
+        return container(column![controls.wrap(), text(hint).size(13)].spacing(3))
             .padding([4, 10])
             .into();
     }
@@ -310,8 +324,13 @@ fn nav_button(
             let highlighted =
                 enabled && (active || matches!(status, Status::Hovered | Status::Pressed));
             iced::widget::button::Style {
-                background: highlighted
-                    .then_some(iced::Background::Color(Color::from_rgb8(55, 55, 60))),
+                // Contrast is computed against the button surface. The header
+                // is black even when the rest of the application uses a light theme.
+                background: Some(iced::Background::Color(if highlighted {
+                    Color::from_rgb8(55, 55, 60)
+                } else {
+                    Color::BLACK
+                })),
                 text_color: if !enabled {
                     Color::from_rgb8(136, 136, 141)
                 } else if highlighted {

@@ -11,7 +11,14 @@ This installs `/etc/udev/rules.d/71-byakko-seat.rules`, reloads udev rules, and 
 change event for attached matching configuration nodes. It requires udev,
 active-seat uaccess support and GNU core utilities including sha256sum. Both wired
 USB (3151:4015) and receiver (3151:4011) configuration interfaces qualify.
-The notification and typing interfaces receive no additional access.
+The default setup leaves the notification and typing interfaces unchanged.
+For automatic updates on the observed 3151:4011 receiver, choose **Receiver live updates…**,
+review the input access it grants, then choose **Allow receiver access**. The additional
+rule matches USB interface 1 and its exact observed report descriptor. It grants the
+active seat user hidraw access to the whole interface, including keyboard and pointer
+reports. Byakko consumes the vendor notification report. To revoke this opt-in, remove
+`/etc/udev/rules.d/71-byakko-receiver-events.rules`, reload udev rules and unplug and
+replug the receiver. The default configuration rule can remain installed.
 To remove this setup, remove the named rule as administrator, reload udev rules, and reconnect.
 
 ### Manual installation for wired USB

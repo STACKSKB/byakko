@@ -155,7 +155,7 @@ impl App {
                 && self.transport_switch.is_none()
                 && !self.has_unsaved_changes()
                 && !self.autosave.pending()
-                && self.session.keymap().baseline().is_none()
+                && (self.session.keymap().baseline().is_none() || self.observation.unavailable)
                 && (self.link.selected().is_some()
                     || matches!(self.link.presence(), crate::Availability::Ready(_)));
             self.keyboard_access = crate::form::application::KeyboardAccess::Finished(
@@ -298,9 +298,29 @@ impl App {
         match message {
             Message::Appearance(_) | Message::AppearanceSaved(_) => unreachable!(),
             #[cfg(target_os = "linux")]
-            Message::EnableKeyboardAccess => {
+            Message::ReviewReceiverAccess => {
                 use crate::form::application::KeyboardAccess;
-                if self.config.data_directory.is_none()
+                if self.config.data_directory.is_some()
+                    && self.keyboard_access != KeyboardAccess::Pending
+                {
+                    self.keyboard_access = KeyboardAccess::ConfirmReceiver;
+                }
+                return Task::none();
+            }
+            #[cfg(target_os = "linux")]
+            Message::CancelReceiverAccess => {
+                use crate::form::application::KeyboardAccess;
+                if self.keyboard_access == KeyboardAccess::ConfirmReceiver {
+                    self.keyboard_access = KeyboardAccess::Idle;
+                }
+                return Task::none();
+            }
+            #[cfg(target_os = "linux")]
+            Message::EnableKeyboardAccess | Message::AllowReceiverAccess => {
+                use crate::form::application::KeyboardAccess;
+                let events = matches!(message, Message::AllowReceiverAccess);
+                if (events && self.keyboard_access != KeyboardAccess::ConfirmReceiver)
+                    || self.config.data_directory.is_none()
                     || self.keyboard_access == KeyboardAccess::Pending
                 {
                     return Task::none();
@@ -308,7 +328,7 @@ impl App {
                 self.keyboard_access = KeyboardAccess::Pending;
                 let (sender, receiver) = iced::futures::channel::oneshot::channel();
                 std::thread::spawn(move || {
-                    let _ = sender.send(crate::linux_permissions::enable());
+                    let _ = sender.send(crate::linux_permissions::enable(events));
                 });
                 return Task::perform(
                     async move {

@@ -11,7 +11,7 @@ use iced::{
 };
 
 #[derive(Default)]
-struct RenderedText(Vec<(String, Rectangle)>);
+pub(super) struct RenderedText(pub(super) Vec<(String, Rectangle)>);
 
 impl Operation for RenderedText {
     fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
@@ -23,7 +23,7 @@ impl Operation for RenderedText {
     }
 }
 
-fn rendered_bounds(app: &App, width: f32) -> RenderedText {
+pub(super) fn rendered_bounds(app: &App, width: f32) -> RenderedText {
     let mut element = app.view();
     let renderer = iced::Renderer::new(iced::Font::DEFAULT, iced::Pixels(14.0));
     let mut tree = Tree::new(&element);

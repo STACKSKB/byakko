@@ -2431,3 +2431,17 @@ fn keyboard_access_is_disabled_in_demo_and_reports_cancel_during_modal() {
     );
     assert_eq!(app.transport_switch.as_deref(), Some("receiver"));
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn receiver_access_requires_a_separate_confirmation() {
+    use crate::form::application::KeyboardAccess;
+    let (mut app, _) = app(false);
+    app.config.data_directory = Some(std::path::PathBuf::from("/unused"));
+    let _ = app.update(Message::AllowReceiverAccess);
+    assert_eq!(app.keyboard_access, KeyboardAccess::Idle);
+    let _ = app.update(Message::ReviewReceiverAccess);
+    assert_eq!(app.keyboard_access, KeyboardAccess::ConfirmReceiver);
+    let _ = app.update(Message::CancelReceiverAccess);
+    assert_eq!(app.keyboard_access, KeyboardAccess::Idle);
+}
